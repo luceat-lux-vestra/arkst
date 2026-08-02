@@ -1,0 +1,15 @@
+[default]
+extend-exclude = ["*.lock", "target/*"]
+
+[files]
+# Extend to include more file types
+extend-ignore-re = [
+    "LICENSE",
+    "NOTICE",
+]
+
+[default.extend-words]
+Scribium = "Scribium"
+Quarkdown = "Quarkdown"
+Typst = "Typst"
+Markdown = "Markdown"

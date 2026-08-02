@@ -1,0 +1,52 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Generated build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Generated Typst output
+*.pdf
+*.html
+*.svg
+*.png
+*.epub
+
+# Typst package cache
+typst-packages/
+
+# Generated fixtures (not committed)
+fixtures/generated/
+
+# Environment / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Copilot / AI working files
+.notes/
+scratch/
+
+# Temporary files
+tmp/
+temp/

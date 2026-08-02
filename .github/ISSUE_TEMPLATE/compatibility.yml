@@ -1,0 +1,41 @@
+name: Compatibility Issue
+description: Report a Quarkdown compatibility difference
+labels: ["type: compatibility"]
+body:
+  - type: input
+    id: source-language
+    attributes:
+      label: Source language / version
+      placeholder: "Quarkdown 0.9.0"
+  - type: input
+    id: spec-source
+    attributes:
+      label: Specification source
+      description: URL or citation of the public specification
+  - type: textarea
+    id: input
+    attributes:
+      label: Minimal input
+      render: markdown
+  - type: textarea
+    id: expected-output
+    attributes:
+      label: Reference output
+      description: Output from the reference implementation
+      render: text
+  - type: textarea
+    id: actual-output
+    attributes:
+      label: Scribium output
+      render: text
+  - type: textarea
+    id: divergence
+    attributes:
+      label: Suspected semantic difference
+  - type: checkboxes
+    id: provenance
+    attributes:
+      label: Provenance confirmation
+      options:
+        - label: I have not copied Quarkdown source code or tests
+        - label: This observation is from public documentation or black-box testing

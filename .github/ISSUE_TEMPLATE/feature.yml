@@ -1,0 +1,42 @@
+name: Feature Request
+description: Suggest an idea for Scribium
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What problem does this feature solve?
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: How should this feature work?
+  - type: textarea
+    id: syntax
+    attributes:
+      label: Syntax example
+      description: If applicable, show example syntax
+      render: markdown
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: backward
+    attributes:
+      label: Backward compatibility
+      options:
+        - label: This change is backward compatible
+  - type: dropdown
+    id: security
+    attributes:
+      label: Security impact
+      options:
+        - None
+        - Needs review
+        - High concern
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and affected crates

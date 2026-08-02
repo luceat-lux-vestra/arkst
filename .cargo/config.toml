@@ -1,0 +1,15 @@
+# Cargo config for Scribium
+[target.aarch64-apple-darwin]
+rustflags = []
+
+[target.x86_64-apple-darwin]
+rustflags = []
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = []
+
+[target.x86_64-pc-windows-msvc]
+rustflags = []
+
+[env]
+RUST_LOG = "info"

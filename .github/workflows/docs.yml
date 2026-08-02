@@ -1,0 +1,22 @@
+name: Docs Checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "**/*.md"
+
+jobs:
+  spelling:
+    name: spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@master
+        with:
+          config: typos.toml

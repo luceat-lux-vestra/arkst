@@ -1,0 +1,27 @@
+# Normalize line endings to LF
+* text=auto eol=lf
+
+# Rust
+*.rs text diff=rust
+
+# Markdown
+*.md text diff=markdown
+
+# Typst
+*.typ text
+
+# TOML/YAML/JSON
+*.toml text
+*.yaml text
+*.yml text
+*.json text
+
+# Shell scripts
+*.sh text eol=lf
+
+# Binary fixtures
+*.pdf binary
+*.png binary
+*.jpg binary
+*.svg -diff
+*.woff2 binary

@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report a bug to help us improve Scribium
+labels: ["type: bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Scribium version
+      description: Output of `scribium --version`
+      placeholder: "0.0.1"
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Your operating system and version
+      placeholder: "macOS 15.0, Ubuntu 24.04, Windows 11"
+  - type: input
+    id: typst-version
+    attributes:
+      label: Typst version
+      description: Output of `typst --version` (if using subprocess backend)
+      placeholder: "0.15.0"
+  - type: textarea
+    id: source
+    attributes:
+      label: Minimal source
+      description: "Minimal .qd, .md, or .scrib file that reproduces the issue"
+      render: markdown
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic output
+      render: text
+  - type: checkboxes
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      options:
+        - label: Can reproduce with the provided source
+        - label: Occurs consistently
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
