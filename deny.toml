@@ -37,7 +37,7 @@ ignore = true
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "allow"
 highlight = "all"
 deny = []
 skip = []
