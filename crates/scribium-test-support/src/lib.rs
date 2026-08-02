@@ -8,9 +8,7 @@
 
 /// Load a fixture file by name from `fixtures/{category}/`.
 pub fn load_fixture(category: &str, name: &str) -> String {
-    let path = std::path::Path::new("fixtures")
-        .join(category)
-        .join(name);
+    let path = std::path::Path::new("fixtures").join(category).join(name);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot load fixture {:?}: {}", path, e))
 }

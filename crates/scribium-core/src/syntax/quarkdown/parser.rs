@@ -17,10 +17,7 @@ pub enum Directive {
         span: ByteSpan,
     },
     /// A variable reference: @name
-    Variable {
-        name: String,
-        span: ByteSpan,
-    },
+    Variable { name: String, span: ByteSpan },
     /// A conditional: @if(cond)[then] or @if(cond)[then][else]
     Conditional {
         condition: Box<Directive>,

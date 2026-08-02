@@ -46,6 +46,10 @@ pub struct SourceSpan {
 
 impl SourceSpan {
     pub fn new(source_id: u32, start: usize, end: usize) -> Self {
-        Self { source_id, start, end }
+        Self {
+            source_id,
+            start,
+            end,
+        }
     }
 }

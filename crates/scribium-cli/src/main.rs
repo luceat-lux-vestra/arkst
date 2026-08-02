@@ -11,7 +11,11 @@ mod commands;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "scribium", version, about = "Scribium — Quarkdown-compatible compiler and toolchain")]
+#[command(
+    name = "scribium",
+    version,
+    about = "Scribium — Quarkdown-compatible compiler and toolchain"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

@@ -2,8 +2,8 @@ use std::fs;
 
 /// Execute the `build` command: compile input to output format(s).
 pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
-    let source = fs::read_to_string(input)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
+    let source =
+        fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
 
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
@@ -27,8 +27,8 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
 /// Execute the `check` command: validate input without producing output.
 pub fn check(input: &str) -> anyhow::Result<()> {
-    let source = fs::read_to_string(input)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
+    let source =
+        fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
 
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
@@ -49,8 +49,8 @@ pub fn check(input: &str) -> anyhow::Result<()> {
 
 /// Execute the `inspect` command: show intermediate representation(s).
 pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
-    let source = fs::read_to_string(input)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
+    let source =
+        fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
 
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,

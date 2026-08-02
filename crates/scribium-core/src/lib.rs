@@ -36,7 +36,6 @@ pub enum Error {
     Internal(String),
 }
 
-
 /// Compile a Scribium source string through the full pipeline.
 ///
 /// Returns a `CompileResult` with the generated Typst code and diagnostics.
@@ -66,7 +65,12 @@ pub struct CompileResult {
 mod tests {
     #[test]
     fn it_compiles_empty_document() {
-        let result = super::compile("", &super::CompileOptions { compatibility_profile: None });
+        let result = super::compile(
+            "",
+            &super::CompileOptions {
+                compatibility_profile: None,
+            },
+        );
         assert_eq!(result.typst_code, "");
     }
 }
