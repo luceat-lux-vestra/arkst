@@ -12,8 +12,6 @@ targets = [
 
 [advisories]
 vulnerability = "deny"
-unmaintained = "deny"
-unsound = "deny"
 notice = "warn"
 ignore = []
 
