@@ -1,8 +1,7 @@
-[default]
+[files]
 extend-exclude = ["*.lock", "target/*"]
 
-[files]
-# Extend to include more file types
+[default]
 extend-ignore-re = [
     "LICENSE",
     "NOTICE",
