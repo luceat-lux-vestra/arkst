@@ -5,4 +5,5 @@
 pub mod ast;
 pub mod parser;
 
+pub use ast::{Block, Document, Inline, ListItem, Value};
 pub use parser::parse;

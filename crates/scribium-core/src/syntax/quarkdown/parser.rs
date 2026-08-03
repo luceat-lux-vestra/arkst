@@ -4,6 +4,7 @@
 // Currently a placeholder that parses `@`-prefixed function calls.
 
 use crate::source::{ByteSpan, SourceId};
+use crate::syntax::markdown::ast::Value;
 
 /// A parsed Quarkdown directive.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,15 +28,6 @@ pub enum Directive {
     },
     /// A raw value (string, number, boolean)
     Value(Value),
-}
-
-/// A literal value in a directive.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Identifier(String),
 }
 
 /// Parse a directive from a `@`-prefixed source string.

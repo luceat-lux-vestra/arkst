@@ -7,8 +7,17 @@ use crate::source::ByteSpan;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub nodes: Vec<Block>,
+    /// Parsed YAML front matter, if present (typically `---`-delimited).
+    pub front_matter: Option<FrontMatter>,
     /// Number of lines in the source document.
     pub line_count: usize,
+}
+
+/// YAML front matter block at the start of a document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrontMatter {
+    pub fields: Vec<(String, String)>,
+    pub span: ByteSpan,
 }
 
 /// Block-level AST nodes.
@@ -43,6 +52,19 @@ pub enum Block {
     /// Blank line / vertical space.
     /// Preserved for round-trip accuracy even though it carries no semantic meaning.
     BlankLine { span: ByteSpan },
+    /// A Quarkdown-compatible directive call (`@name`, `@name(args)`, `@name[body]`).
+    DirectiveCall {
+        name: String,
+        positional_args: Vec<Value>,
+        named_args: Vec<(String, Value)>,
+        body: Option<Box<Block>>,
+        span: ByteSpan,
+    },
+    /// Metadata block (YAML front matter embedded inline).
+    Metadata {
+        fields: Vec<(String, String)>,
+        span: ByteSpan,
+    },
 }
 
 /// An item in an unordered list.
@@ -67,8 +89,25 @@ pub enum Inline {
         content: Vec<Inline>,
         span: ByteSpan,
     },
+    /// A Quarkdown-compatible inline directive call (`@name`, `@name(args)`, `@name[body]`).
+    DirectiveCall {
+        name: String,
+        positional_args: Vec<Value>,
+        named_args: Vec<(String, Value)>,
+        body: Option<Vec<Inline>>,
+        span: ByteSpan,
+    },
     /// Hard line break (trailing two spaces + newline, or backslash at end of line).
     HardBreak { span: ByteSpan },
     /// Soft line break (adjacent lines without a blank line).
     SoftBreak { span: ByteSpan },
+}
+
+/// A literal value in a directive or expression context.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Identifier(String),
 }

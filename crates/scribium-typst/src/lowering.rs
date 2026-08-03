@@ -15,7 +15,10 @@ pub fn lower_to_typst(doc: &IrDocument) -> String {
 mod tests {
     #[test]
     fn lower_empty_document() {
-        let doc = scribium_core::ir::IrDocument {};
+        let doc = scribium_core::ir::IrDocument {
+            nodes: vec![],
+            metadata: Default::default(),
+        };
         let result = super::lower_to_typst(&doc);
         assert_eq!(result, "");
     }

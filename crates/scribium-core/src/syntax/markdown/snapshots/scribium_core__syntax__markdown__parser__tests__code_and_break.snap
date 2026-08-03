@@ -1,6 +1,5 @@
 ---
 source: crates/scribium-core/src/syntax/markdown/parser.rs
-assertion_line: 1181
 expression: "parse(\"```rust\\nlet x = 1;\\n```\\n\\nEnd  \\nof line.\\n\")"
 ---
 Document {
@@ -44,5 +43,6 @@ Document {
             },
         },
     ],
+    front_matter: None,
     line_count: 7,
 }

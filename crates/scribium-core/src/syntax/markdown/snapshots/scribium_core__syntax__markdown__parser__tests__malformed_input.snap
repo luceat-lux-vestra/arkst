@@ -1,6 +1,5 @@
 ---
 source: crates/scribium-core/src/syntax/markdown/parser.rs
-assertion_line: 1189
 expression: "parse(\"*open\\n**still open\\n\\n```\\nunclosed\")"
 ---
 Document {
@@ -56,5 +55,6 @@ Document {
             },
         },
     ],
+    front_matter: None,
     line_count: 5,
 }

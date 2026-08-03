@@ -35,7 +35,11 @@ pub fn parse(source: &str) -> Document {
     let mut cursor = 0;
     let nodes = parse_blocks(source, &lines, &mut cursor, 0);
     let line_count = source.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1;
-    Document { nodes, line_count }
+    Document {
+        nodes,
+        front_matter: None,
+        line_count,
+    }
 }
 
 /// A logical source line with byte offsets into the original source.
