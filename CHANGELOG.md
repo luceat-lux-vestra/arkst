@@ -18,3 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub templates for issues and pull requests.
 - CI workflow with fmt, clippy, test, and dependency checks.
 - M0 Foundation milestone — clean-room policy, naming research, parser/backend spikes.
+- Minimal CommonMark-compatible Markdown parser (`syntax::markdown`) with
+  byte-level source spans: ATX headings, paragraphs, emphasis/strong,
+  unordered lists with nesting, fenced code blocks, thematic breaks, and
+  hard/soft line breaks. No panics on malformed input.

@@ -4,3 +4,5 @@
 /// Spans are preserved for all parsed nodes.
 pub mod ast;
 pub mod parser;
+
+pub use parser::parse;

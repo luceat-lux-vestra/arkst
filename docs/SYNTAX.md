@@ -11,24 +11,33 @@
 - Indentation: not semantically significant except in fenced code / verbatim
 - Whitespace: spaces and tabs; no NBSP or zero-width chars in identifiers
 - Comments: `// line comment` (Planned) or within Markdown HTML comment syntax
+## Markdown Baseline (Partial)
 
-## Markdown Baseline (Planned)
+Scribium targets a CommonMark/GFM-compatible subset. The M1 parser implements
+the subset below; the exact baseline will be determined by parser spike
+results (ADR 0006).
 
-Scribium targets a CommonMark/GFM-compatible subset. The exact baseline will
-be determined by parser spike results (ADR 0006).
+Implemented (M1):
 
-Supported (M1+):
-- ATX headings (`# ` through `###### `)
-- Paragraphs (contiguous non-blank lines)
+- ATX headings (`# ` through `###### `), trailing `#` closures stripped
+- Paragraphs (contiguous non-blank lines) with soft/hard line breaks
 - Emphasis (`*italic*` or `_italic_`)
 - Strong (`**bold**` or `__bold__`)
-- Unordered lists (`- `, `* `, `+ `)
+- Unordered lists (`- `, `* `, `+ `) with nested lists and indented items
 - Fenced code blocks (triple backtick with optional language)
-- Horizontal rules (`---`, `***`, `___`)
-- Hard line break (trailing two spaces + newline)
+- Horizontal rules (`---`, `***`, `___`; three or more identical markers)
+- Hard line break (trailing two spaces + newline, or backslash + newline)
+
+Known M1 divergences (deterministic, documented in the parser module):
+
+- Delimiter runs of 3+ identical characters (`***x***`) are literal text
+- Setext headings are not parsed (`text` + `---` becomes a paragraph
+  followed by a horizontal rule)
+- Indentation inside code blocks nested in list items is normalized
+- Blank lines produce no AST nodes (round-trip support is deferred)
 
 Planned (M2+):
-- Ordered lists, nested lists, task lists
+- Ordered lists, task lists
 - Links (`[text](url)`)
 - Images (`![alt](url)`)
 - Blockquotes (`> `)
