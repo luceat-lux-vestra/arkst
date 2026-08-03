@@ -6,16 +6,22 @@ Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 
 **Objective:** Establish legal boundaries, technology choices, and repository structure.
 
-| Item                    | Status       |
-|-------------------------|--------------|
-| Repository bootstrap    | In progress  |
-| LICENSE/NOTICE          | In progress  |
-| Product documentation   | In progress  |
-| Name due diligence      | Not started  |
-| Typst integration spike | Not started  |
-| Markdown parser spike   | Not started  |
-| ADR 0001–0010           | Not started  |
-| GitHub templates/CI     | Not started  |
+| Item                           | Status       |
+|--------------------------------|--------------|
+| Repository bootstrap           | In progress  |
+| LICENSE/NOTICE                 | In progress  |
+| Product documentation          | In progress  |
+| Name due diligence             | Not started  |
+| Typst integration spike        | Not started  |
+| Markdown parser spike          | Not started  |
+| ADR 0001–0010                  | Not started  |
+| GitHub templates/CI            | Not started  |
+| WASM build in CI               | Not started  |
+| VirtualProject abstraction     | Not started  |
+
+**Architecture constraint:** `scribium-core` + `scribium-typst` (lowering)
+MUST compile for `wasm32-unknown-unknown`. CI verifies this from M0.
+Core uses `VirtualProject` for all I/O — no filesystem access.
 
 **Dependencies:** None
 
@@ -43,9 +49,12 @@ v0.1.0 release.
 
 **Objective:** Expanded compatibility subset, matrix, conformance suite.
 
-## M6 — Library API, LSP, WASM
+## M6 — Library API, LSP, WASM Bindings
 
-**Objective:** Embedding, editor integration, WASM feasibility.
+**Objective:** Embedding, editor integration, `scribium-wasm` bindings crate.
+
+WASM compilation is an M0 architecture constraint (core + lowering).
+M6 delivers the `scribium-wasm` bindings crate and WASM CI coverage.
 
 ## M7 — Hardening
 
@@ -55,7 +64,7 @@ v0.1.0 release.
 
 ## Explicitly Deferred Work
 
-- WASM support (deferred to M6, feasibility decision first)
+- Browser-side Typst compilation (scribium-typst-web, gate behind feasibility)
 - LSP server (deferred to M6, core API must stabilize first)
 - Package registry (not planned)
 - Web editor / SaaS (not planned)

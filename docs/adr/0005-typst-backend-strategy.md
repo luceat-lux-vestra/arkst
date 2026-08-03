@@ -56,6 +56,49 @@ before v0.1. Both backends do not need to be permanently maintained.
 - Typst CLI output format is not a stable API
 - Mitigation: document the parsed format, test against known versions
 
+## WASM Impact
+
+### Frontend-only WASM (guaranteed)
+
+The Scribium frontend (parse → evaluate → lower to Typst source) compiles
+to WASM and runs in the browser. The generated `.typ` source is returned to
+the host for external compilation.
+
+```
+.qd → Scribium WASM → generated .typ → server/native Typst → PDF
+```
+
+This is the guaranteed path and requires only `scribium-core` + `scribium-typst`
+(lowering) on `wasm32-unknown-unknown`.
+
+### Full browser compile (separate goal)
+
+```
+.qd → Scribium WASM → Typst WASM backend → PDF/SVG/HTML
+```
+
+Technically feasible (Typst is also Rust) but requires:
+- Font loading and management
+- Virtual filesystem
+- Package resolution
+- Asset loading (images, etc.)
+- Memory budget and bundle size management
+
+This is gated behind a separate `scribium-typst-web` crate and M7+ feasibility
+verification. It does not block WASM frontend delivery.
+
+### Backend Trait Adaptation
+
+`TypstBackend` trait is split:
+
+| Implementation | Crate | Target |
+|---|---|---|
+| `SubprocessBackend` | `scribium-typst` (or future `scribium-typst-native`) | CLI |
+| `InProcessBackend` | `scribium-typst` (future) | CLI, server |
+| `WebBackend` | `scribium-typst-web` (M7+) | Browser WASM |
+
+The trait itself stays in `scribium-typst` for all targets.
+
 ## References
 
 - `crates/scribium-typst/src/backend.rs`

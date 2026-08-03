@@ -10,8 +10,8 @@ vulnerabilities (report to Typst GmbH).
 
 | #  | Threat                      | Asset                | Attacker          | Boundary       | Mitigation                          | Residual Risk |
 |----|-----------------------------|----------------------|-------------------|----------------|-------------------------------------|---------------|
-| T1 | Path traversal via include  | Filesystem           | Malicious doc     | Include/read   | Path canonicalization, root scope   | Low           |
-| T2 | Symlink escape              | Filesystem           | Malicious doc     | Include/read   | Symlink canonicalization check      | Low           |
+| T1 | Path traversal via include  | Filesystem           | Malicious doc     | Include/read   | VirtualPath (no OS path leaks); canonicalization + root scope   | Low           |
+| T2 | Symlink escape              | Filesystem           | Malicious doc     | Include/read   | VirtualPath (logical paths only); canonicalization check        | Low           |
 | T3 | Unrestricted include        | Filesystem           | Malicious doc     | Include/read   | Max depth, root scope               | Low           |
 | T4 | Malicious image or font     | Process              | Malicious doc     | Asset loading  | Typst compiler handles              | Low (inherited) |
 | T5 | Decompression bomb          | Memory               | Malicious doc     | Asset loading  | Max file size, format validation    | Medium        |
@@ -35,10 +35,23 @@ vulnerabilities (report to Typst GmbH).
 network:          denied
 shell:            denied
 environment:      denied
-filesystem:       project-root scoped
-symlink escape:   denied
+filesystem:       project-root scoped, virtual-path embedded
+symlink escape:   denied (VirtualPath never resolves OS symlinks)
 absolute include: denied by default
 ```
+
+## VirtualPath Security Boundary
+
+Core uses `VirtualPath` (logical path strings) exclusively. The native CLI
+adapter translates VirtualPath → `PathBuf` at the boundary, applying:
+
+- Root-scoping (no path leaves project root)
+- Canonicalization (no `..` segments)
+- Symlink resolution (which VirtualPath itself does not model)
+
+A WASM frontend does not perform this translation at all — there is no
+filesystem to traverse. This eliminates the T1/T2 attack surface entirely
+for browser targets.
 
 ## Configurable Resource Limits
 
