@@ -1,6 +1,5 @@
 ---
 source: crates/scribium-core/src/syntax/markdown/parser.rs
-assertion_line: 1173
 expression: "parse(\"# Title\\n\\nIntro *em* and **strong**.\\n\\n- one\\n- two\\n\")"
 ---
 Document {
@@ -135,5 +134,6 @@ Document {
             },
         },
     ],
+    front_matter: None,
     line_count: 7,
 }

@@ -37,7 +37,7 @@ impl LineColumn {
 }
 
 /// A span referencing a source file by ID, with byte-range start/end positions.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceSpan {
     pub source_id: u32,
     pub start: usize,
