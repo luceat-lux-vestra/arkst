@@ -66,11 +66,80 @@ handles only profile selection, divergence tracking, and diagnostics).
 ## Future crate additions (gated by demonstrated need)
 
 ```
-scribium-lsp      (M6)
-scribium-wasm     (M6+)
+scribium-wasm           (M6+)  ← thin WASM bindings for scribium-core
+scribium-typst-native   (M6+)  ← subprocess backend (split from scribium-typst)
+scribium-typst-web      (M7+)  ← full browser Typst compile (feasibility-gated)
+scribium-lsp            (M6+)  ← LSP server
 scribium-frontend-quarkdown  (if multi-frontend split is needed)
 scribium-backend-typst       (if multi-backend split is needed)
 ```
+
+## Platform Independence
+
+`scribium-core` MUST compile for `wasm32-unknown-unknown`. CI verifies this on every push.
+
+### Forbidden in core
+
+- `std::fs` — no filesystem access
+- `std::process` — no process execution
+- `std::env` — no environment variable access
+- `TcpStream` — no network access
+- System clock dependency
+- Global mutable state
+- `std::path::PathBuf` in public API — use `VirtualPath(String)`
+
+### VirtualProject: I/O-Free Core
+
+```rust
+pub struct VirtualProject {
+    pub entry: VirtualPath,
+    pub sources: SourceStore,
+    pub assets: AssetStore,
+}
+
+pub fn compile(project: &VirtualProject) -> CompileResult;
+```
+
+Native CLI reads files from disk and builds `VirtualProject`. WASM frontend
+builds it from in-memory sources. Core never touches the filesystem.
+
+### Synchronous Core, Async Host
+
+Core compilation is synchronous. Host loads files asynchronously before calling core.
+Incremental resolution:
+
+```rust
+pub enum CompileStatus {
+    Complete(CompileOutput),
+    NeedsSources(Vec<VirtualPath>),
+}
+```
+
+### Virtual Paths
+
+Internal paths are logical, not OS-specific:
+
+```rust
+pub struct VirtualPath(String);
+```
+
+Examples: `chapter/intro.qd`, `assets/logo.svg`. Native CLI maps them to
+`PathBuf` at the adapter layer.
+
+### WASM Worker Architecture
+
+```text
+Editor UI
+    │ postMessage
+    ▼
+Web Worker
+    ├── scribium-wasm (thin JS bindings)
+    └── scribium-core + scribium-typst (lowering only)
+```
+
+Full Typst compilation in the browser is a separate goal (see ADR-0005).
+The frontend-only WASM target produces generated Typst source for server-side
+or native Typst compilation.
 
 ## References
 

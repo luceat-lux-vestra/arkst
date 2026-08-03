@@ -111,13 +111,67 @@ Typst Backend (trait)
 
 ## Crate Boundaries
 
-| Crate               | Responsibility                                          |
-|---------------------|---------------------------------------------------------|
-| scribium-core       | Source abstraction, parsing, semantic analysis,         |
-|                     | evaluator, built-ins, IR, source map, compatibility     |
-| scribium-typst      | Typst lowering, TypstBackend trait, backend adapters    |
-| scribium-cli        | CLI dispatch, config, filesystem, output formatting     |
-| scribium-test-support | Fixture loading, golden test utilities, temp projects |
+| Crate               | Responsibility                                          | WASM? |
+|---------------------|---------------------------------------------------------|-------|
+| scribium-core       | Source abstraction, parsing, semantic analysis,         | Yes   |
+|                     | evaluator, built-ins, IR, source map, compatibility     |       |
+| scribium-typst      | Typst lowering, TypstBackend trait, backend adapters    | Yes ¹ |
+| scribium-cli        | CLI dispatch, config, filesystem, output formatting     | No    |
+| scribium-test-support | Fixture loading, golden test utilities, temp projects | No    |
+
+¹ Lowering layer only (not subprocess backend).
+
+## Platform Independence
+
+`scribium-core` and `scribium-typst` (lowering only) MUST compile for
+`wasm32-unknown-unknown`. CI enforces this on every push.
+
+### Forbidden in core crates
+
+- `std::fs`, `std::process`, `std::env` — OS-specific APIs never used
+- `TcpStream` — no network access
+- System clock dependency
+- Global mutable state
+- `std::path::PathBuf` in public API — use `VirtualPath` instead
+
+### VirtualProject: I/O-Free Core
+
+```rust
+pub struct VirtualProject {
+    pub entry: VirtualPath,
+    pub sources: SourceStore,
+    pub assets: AssetStore,
+}
+
+pub fn compile(project: &VirtualProject) -> CompileResult;
+```
+
+- CLI builds `VirtualProject` from disk
+- WASM builds `VirtualProject` from in-memory sources
+- Core never touches filesystem
+
+### Virtual Paths
+
+Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
+The native CLI adapter converts `VirtualPath ↔ PathBuf` at the boundary.
+
+### Synchronous Core, Async Host
+
+Core compilation is synchronous. Host loads dependencies asynchronously.
+
+```rust
+pub enum CompileStatus {
+    Complete(CompileOutput),
+    NeedsSources(Vec<VirtualPath>),
+}
+```
+
+### WASM Editions
+
+| Edition | Scope | Status |
+|---------|-------|--------|
+| Frontend WASM | Parse → evaluate → lower to Typst source | Guaranteed |
+| Full browser compile | + Typst compiler in WASM → PDF | M7+ feasibility gate |
 
 ## Source Span Model
 
