@@ -1,7 +1,22 @@
 name: Feature Request
 description: Suggest an idea for Scribium
-labels: ["type: feature"]
+labels: ["type:feature"]
 body:
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      description: Which milestone does this feature belong to?
+      options:
+        - M0 Foundation
+        - M1 Vertical Slice
+        - M2 Core Language
+        - M3 Programmable Documents
+        - M4 Developer Experience
+        - M5 Quarkdown Compatibility
+        - M6 Library, LSP and WASM
+        - M7 Hardening
+        - Backlog
   - type: textarea
     id: problem
     attributes:

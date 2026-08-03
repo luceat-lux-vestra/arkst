@@ -1,6 +1,6 @@
 name: Compatibility Issue
 description: Report a Quarkdown compatibility difference
-labels: ["type: compatibility"]
+labels: ["type:compatibility"]
 body:
   - type: input
     id: source-language

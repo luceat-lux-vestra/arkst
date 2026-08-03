@@ -1,13 +1,13 @@
 name: Bug Report
 description: Report a bug to help us improve Scribium
-labels: ["type: bug"]
+labels: ["type:bug"]
 body:
   - type: input
     id: version
     attributes:
       label: Scribium version
       description: Output of `scribium --version`
-      placeholder: "0.0.1"
+      placeholder: "0.1.0-dev"
   - type: input
     id: os
     attributes:
