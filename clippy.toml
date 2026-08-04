@@ -1,4 +1,1 @@
-# Scribium Clippy configuration
-# https://doc.rust-lang.org/clippy/configuration.html
-
-msrv = "1.85.0"
+msrv = "1.92.0"

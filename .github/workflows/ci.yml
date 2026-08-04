@@ -63,3 +63,13 @@ jobs:
         with:
           command: check
           arguments: --all-features
+
+  msrv:
+    name: msrv (1.92.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --all-features
+      - run: cargo test --workspace --all-features
