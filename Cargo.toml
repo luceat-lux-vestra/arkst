@@ -26,15 +26,15 @@ scribium-typst = { path = "crates/scribium-typst" }
 scribium-cli = { path = "crates/scribium-cli" }
 scribium-test-support = { path = "crates/scribium-test-support" }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-anyhow = "1"
-thiserror = "2"
-clap = { version = "4", features = ["derive"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-insta = "1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.3"
+anyhow = "1.0.104"
+thiserror = "2.0.19"
+clap = { version = "4.6.4", features = ["derive"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+insta = "1.48.0"
 
 [profile.release]
 opt-level = 2

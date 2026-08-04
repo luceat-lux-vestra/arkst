@@ -8,16 +8,16 @@ Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 
 | Item                           | Status       |
 |--------------------------------|--------------|
-| Repository bootstrap           | In progress  |
-| LICENSE/NOTICE                 | In progress  |
-| Product documentation          | In progress  |
-| Name due diligence             | Not started  |
-| Typst integration spike        | Not started  |
-| Markdown parser spike          | Not started  |
-| ADR 0001–0010                  | Not started  |
-| GitHub templates/CI            | Not started  |
-| WASM build in CI               | Not started  |
-| VirtualProject abstraction     | Not started  |
+| Repository bootstrap           | Completed    |
+| LICENSE/NOTICE                 | Completed    |
+| Product documentation          | Completed    |
+| Name due diligence             | Completed    |
+| Typst integration spike        | Completed    |
+| Markdown parser spike          | Completed    |
+| ADR 0001–0010                  | Completed    |
+| GitHub templates/CI            | Completed    |
+| WASM build in CI               | Completed    |
+| VirtualProject abstraction     | Completed    |
 
 **Architecture constraint:** `scribium-core` + `scribium-typst` (lowering)
 MUST compile for `wasm32-unknown-unknown`. CI verifies this from M0.

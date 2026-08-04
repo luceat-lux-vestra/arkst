@@ -132,16 +132,29 @@ Typst Backend (trait)
 - `TcpStream` — no network access
 - System clock dependency
 - Global mutable state
-- `std::path::PathBuf` in public API — use `VirtualPath` instead
+- `std::path::PathBuf` in public API — use `VirtualPathBuf` instead
 
 ### VirtualProject: I/O-Free Core
 
 ```rust
 pub struct VirtualProject {
-    pub entry: VirtualPath,
-    pub sources: SourceStore,
-    pub assets: AssetStore,
+    entry: VirtualPathBuf,
+    sources: SourceStore,
+    assets: AssetStore,
+    metadata: ProjectMetadata,
 }
+
+// Constructed only through the fluent builder:
+VirtualProjectBuilder::new()
+    .entry("main.qd")?
+    .add_source("chapter/intro.qd", "...")?
+    .add_asset("fonts/main.otf", data)
+    .build()?;
+
+project.entry();
+project.sources();
+project.assets();
+project.metadata();
 
 pub fn compile(project: &VirtualProject) -> CompileResult;
 ```
@@ -153,7 +166,7 @@ pub fn compile(project: &VirtualProject) -> CompileResult;
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
-The native CLI adapter converts `VirtualPath ↔ PathBuf` at the boundary.
+The native CLI adapter converts `VirtualPathBuf` ↔ `PathBuf` at the boundary.
 
 ### Synchronous Core, Async Host
 
@@ -162,7 +175,7 @@ Core compilation is synchronous. Host loads dependencies asynchronously.
 ```rust
 pub enum CompileStatus {
     Complete(CompileOutput),
-    NeedsSources(Vec<VirtualPath>),
+    NeedsSources(Vec<VirtualPathBuf>),
 }
 ```
 

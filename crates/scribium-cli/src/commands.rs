@@ -1,14 +1,29 @@
 use std::fs;
 
-/// Execute the `build` command: compile input to output format(s).
-pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
+use scribium_core::VirtualProjectBuilder;
+
+/// Reads a single input file and compiles it as a one-source VirtualProject.
+fn compile_file(input: &str) -> anyhow::Result<scribium_core::CompileResult> {
     let source =
         fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
+
+    let project = VirtualProjectBuilder::new()
+        .entry(input)
+        .map_err(|e| anyhow::anyhow!("invalid entry path {}: {}", input, e))?
+        .add_source(input, &source)
+        .map_err(|e| anyhow::anyhow!("invalid source path {}: {}", input, e))?
+        .build()
+        .map_err(|e| anyhow::anyhow!("cannot build project for {}: {}", input, e))?;
 
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
     };
-    let result = scribium_core::compile(&source, &options);
+    Ok(scribium_core::compile(&project, &options))
+}
+
+/// Execute the `build` command: compile input to output format(s).
+pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
+    let result = compile_file(input)?;
 
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
@@ -28,13 +43,7 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
 /// Execute the `check` command: validate input without producing output.
 pub fn check(input: &str) -> anyhow::Result<()> {
-    let source =
-        fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
-
-    let options = scribium_core::CompileOptions {
-        compatibility_profile: None,
-    };
-    let result = scribium_core::compile(&source, &options);
+    let result = compile_file(input)?;
 
     let error_count = result.diagnostics.len();
     for diag in &result.diagnostics {
@@ -50,13 +59,7 @@ pub fn check(input: &str) -> anyhow::Result<()> {
 
 /// Execute the `inspect` command: show intermediate representation(s).
 pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
-    let source =
-        fs::read_to_string(input).map_err(|e| anyhow::anyhow!("cannot read {}: {}", input, e))?;
-
-    let options = scribium_core::CompileOptions {
-        compatibility_profile: None,
-    };
-    let result = scribium_core::compile(&source, &options);
+    let result = compile_file(input)?;
 
     match emit {
         "typst" => {
