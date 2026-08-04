@@ -50,8 +50,8 @@ Scribium currently uses a subprocess-based Typst backend (`typst compile` CLI). 
 | In-process compile test | ✅ Spike successful — 3 test cases pass |
 | WASM cargo check | ✅ `typst` + deps compile to `wasm32-unknown-unknown` (cargo check passes) |
 | MSRV impact | Scribium did not previously declare an explicit MSRV; typst 0.15.1 requires Rust 1.92 |
-| Clean build time increase | Not measured in this investigation |
-| Process spawn overhead | Not measured in this investigation |
+| Clean build time increase | Baseline 2.1s vs in-process 18.5s (5 iterations, mean) |
+| Process spawn overhead | Not isolated; subprocess cold start 52ms vs in-process 1.3ms for simple rect fixture |
 
 ## Investigation Details
 
@@ -118,12 +118,12 @@ A minimal Rust crate depending on `typst = "0.15.1"` passes `cargo check --targe
 - Text with font: 2020 ms
 
 **In-process vs subprocess runtime:**
-- In-process is **50-100x faster** for simple documents
-- Process spawn overhead: **~50-55 ms** (measured as subprocess cold start - in-process first run)
+- In-process is **50-100x faster** for the fixed synthetic fixtures used in this investigation
+- End-to-end Typst CLI invocation took ~52 ms for simple rect, while warmed in-process path averaged ~1.3 ms. This difference must not be interpreted as isolated process-spawn cost.
 
 **WASM cargo check:** ✅ Passes for `wasm32-unknown-unknown`
 
-**MSRV:** Scribium did not previously declare an explicit MSRV; typst 0.15.1 requires Rust 1.92. This PR establishes Rust 1.92 as Scribium's first explicit MSRV.
+**MSRV:** The isolated Typst 0.15.1 spike was executed with Rust 1.92.0. This investigation does not establish or change Scribium's project-wide MSRV.
 
 ## Decision
 
@@ -134,7 +134,7 @@ Rationale:
 2. `World` implementation scope is large (source loading, font management, package resolution, virtual filesystem, caching, diagnostics)
 3. Subprocess backend is functionally complete and sufficient for M1-M5 requirements
 4. Native `InProcessBackend` and browser `WebBackend` are separate concerns (see ADR-0005)
-5. No measurable performance bottleneck has been identified with the subprocess backend for current milestones
+6. No measurable performance bottleneck has been identified with the subprocess backend for current milestones
 
 ## Consequences
 
