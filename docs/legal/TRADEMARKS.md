@@ -5,8 +5,20 @@ This document records trademark-related information for Scribium.
 ## Project Name Status
 
 - **Working name:** Scribium
-- **Status:** Pre-release, not yet registered or searched
-- **Action required:** Complete naming due diligence before first public release
+- **Status:** **Proceeding with "Scribium"**
+- **Action required:** None — GitHub handle and domain names are not required for this project
+
+## Due Diligence Results (2026-08-04)
+
+| Channel | Availability | Notes |
+|---------|--------------|-------|
+| crates.io | Likely available | No crate named "scribium" found |
+| npm | Available | No package named "scribium" |
+| GitHub @scribium | Taken | Not required for project |
+| scribium.dev | Taken | Not required for project |
+| scribium.org | Taken | Not required for project |
+| scribium.com | Taken | Not required for project |
+| USPTO trademark | Not searched | Optional — only if future trademark filing needed |
 
 ## Disclaimer
 
