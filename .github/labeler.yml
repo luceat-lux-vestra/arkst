@@ -1,0 +1,71 @@
+# Scribium labeler — automatic PR area labels based on changed files
+# https://github.com/actions/labeler
+
+changed-files-labels-limit: 10
+max-files-changed: 100
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "deny.toml"
+          - "rust-toolchain.toml"
+          - "rustfmt.toml"
+          - "typos.toml"
+
+area:core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-core/**"
+
+area:typst:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-typst/**"
+
+area:cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-cli/**"
+
+area:parser:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-core/src/syntax/**"
+
+area:ir:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-core/src/ir.rs"
+
+area:diagnostics:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-core/src/diagnostics.rs"
+          - "crates/scribium-core/src/compatibility/diagnostics.rs"
+
+area:compatibility:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-core/src/compatibility/**"
+          - "docs/compatibility/**"
+
+area:legal:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "LICENSE"
+          - "NOTICE"
+          - "docs/legal/**"
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/Cargo.toml"
+          - "Cargo.lock"
+          - "deny.toml"
