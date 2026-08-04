@@ -1,9 +1,0 @@
-/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/icu_collator-eb605534ae8c379d.d: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/comparison.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/elements.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/options.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/provider.rs
-
-/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/libicu_collator-eb605534ae8c379d.rmeta: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/comparison.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/elements.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/options.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/provider.rs
-
-/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/lib.rs:
-/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/comparison.rs:
-/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/elements.rs:
-/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/options.rs:
-/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collator-2.2.1/src/provider.rs:
