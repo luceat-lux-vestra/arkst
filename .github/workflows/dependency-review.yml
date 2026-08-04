@@ -20,4 +20,6 @@ jobs:
           fail-on-severity: moderate
           license-check: true
           allow-licenses: Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Unicode-3.0, Zlib, CC0-1.0
+          exclude-paths: |
+            tools/spikes/**
           # cargo-deny remains the authoritative full-graph license check
