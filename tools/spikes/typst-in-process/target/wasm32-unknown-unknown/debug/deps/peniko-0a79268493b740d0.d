@@ -1,0 +1,11 @@
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/peniko-0a79268493b740d0.d: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/blend.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/brush.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/gradient.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/image.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/style.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/impl_bytemuck.rs
+
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/libpeniko-0a79268493b740d0.rmeta: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/blend.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/brush.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/gradient.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/image.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/style.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/impl_bytemuck.rs
+
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/lib.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/blend.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/brush.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/gradient.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/image.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/style.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/peniko-0.6.1/src/impl_bytemuck.rs:

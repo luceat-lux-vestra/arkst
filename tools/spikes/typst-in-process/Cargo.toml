@@ -1,0 +1,12 @@
+[package]
+name = "typst-in-process"
+version = "0.1.0"
+edition = "2021"
+description = "Investigation spike for in-process Typst compilation"
+
+[dependencies]
+typst = "0.15.1"
+typst-layout = "0.15.1"
+
+[target.wasm32-unknown-unknown]
+dependencies = {}

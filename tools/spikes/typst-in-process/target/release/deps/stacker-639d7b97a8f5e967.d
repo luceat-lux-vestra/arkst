@@ -1,0 +1,10 @@
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/release/deps/stacker-639d7b97a8f5e967.d: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/mod.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/macos.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/mmap_stack_restore_guard.rs
+
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/release/deps/libstacker-639d7b97a8f5e967.rlib: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/mod.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/macos.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/mmap_stack_restore_guard.rs
+
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/release/deps/libstacker-639d7b97a8f5e967.rmeta: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/mod.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/macos.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/mmap_stack_restore_guard.rs
+
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/lib.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/mod.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/backends/macos.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/mmap_stack_restore_guard.rs:

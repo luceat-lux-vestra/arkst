@@ -1,0 +1,11 @@
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/typst_svg-3f74d1050cf0c298.d: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/image.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/paint.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/path.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/shape.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/text.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/write.rs
+
+/Users/algorist/Repositories/scribium/tools/spikes/typst-in-process/target/wasm32-unknown-unknown/debug/deps/libtypst_svg-3f74d1050cf0c298.rmeta: /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/lib.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/image.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/paint.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/path.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/shape.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/text.rs /Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/write.rs
+
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/lib.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/image.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/paint.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/path.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/shape.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/text.rs:
+/Users/algorist/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typst-svg-0.15.1/src/write.rs:

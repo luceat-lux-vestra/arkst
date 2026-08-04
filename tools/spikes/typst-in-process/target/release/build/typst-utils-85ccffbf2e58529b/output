@@ -1,0 +1,3 @@
+cargo:rerun-if-env-changed=TYPST_VERSION
+cargo:rerun-if-env-changed=TYPST_COMMIT_SHA
+cargo:rustc-env=TYPST_VERSION=0.15.1
