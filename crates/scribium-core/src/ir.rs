@@ -26,25 +26,23 @@ pub struct IrMetadata {
     pub raw: Vec<(String, String)>,
 }
 
-/// An evaluated IR node — ready for Typst code generation.
+/// A block-level IR node — ready for Typst code generation.
 ///
 /// Unlike AST nodes, IR nodes carry no unresolved references, no directive syntax,
-/// and no parser-specific structure. Every inline sequence is flattened to a string
-/// or a known Typst-compatible construct.
+/// and no parser-specific structure.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrNode {
-    /// A heading with evaluated content.
+    /// A heading with evaluated inline content.
     Heading {
         level: usize,
-        content: String,
+        content: Vec<IrInline>,
         span: SourceSpan,
     },
-    /// A paragraph of evaluated inline text.
-    Paragraph { content: String, span: SourceSpan },
-    /// Emphasized (italic) inline text.
-    Emphasis { content: String, span: SourceSpan },
-    /// Strong (bold) inline text.
-    Strong { content: String, span: SourceSpan },
+    /// A paragraph containing zero or more evaluated inline fragments.
+    Paragraph {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
     /// Unordered list with one or more items.
     UnorderedList {
         items: Vec<IrListItem>,
@@ -74,6 +72,31 @@ pub enum IrNode {
     Math {
         source: String,
         display: bool,
+        span: SourceSpan,
+    },
+}
+
+/// An inline fragment within a block-level IR node.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum IrInline {
+    /// Plain text content.
+    Text { content: String, span: SourceSpan },
+    /// Emphasized (italic) inline fragment.
+    Emphasis {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// Strong (bold) inline fragment.
+    Strong {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
+    /// An inline directive call (@strong[text], @raw).
+    DirectiveCall {
+        name: String,
+        positional_args: Vec<IrValue>,
+        named_args: Vec<(String, IrValue)>,
+        body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
 }

@@ -9,6 +9,7 @@
 /// - Source map construction and querying
 /// - Structured diagnostics with stable codes
 /// - Compatibility profile selection and divergence tracking
+pub mod ast_to_ir;
 pub mod builtins;
 pub mod compatibility;
 pub mod diagnostics;
@@ -39,11 +40,12 @@ pub enum Error {
 /// Compile a Scribium source string through the full pipeline.
 ///
 /// Returns a `CompileResult` with the generated Typst code and diagnostics.
-pub fn compile(source: &str, options: &CompileOptions) -> CompileResult {
-    let _ = source;
-    let _ = options;
+pub fn compile(source: &str, _options: &CompileOptions) -> CompileResult {
+    let source_id = source::fresh_source_id();
+    let doc = syntax::markdown::parse(source);
+    let ir = ast_to_ir::ast_to_ir(&doc, source_id);
     CompileResult {
-        typst_code: String::new(),
+        ir,
         diagnostics: vec![],
     }
 }
@@ -57,7 +59,7 @@ pub struct CompileOptions {
 /// Result of compilation through the frontend.
 #[derive(Debug, Clone)]
 pub struct CompileResult {
-    pub typst_code: String,
+    pub ir: ir::IrDocument,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -71,6 +73,6 @@ mod tests {
                 compatibility_profile: None,
             },
         );
-        assert_eq!(result.typst_code, "");
+        assert!(result.ir.nodes.is_empty());
     }
 }

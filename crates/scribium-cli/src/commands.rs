@@ -15,8 +15,9 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     }
 
     if formats.contains(&"typst".to_string()) {
+        let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
         let out_path = format!("{}.typ", input);
-        fs::write(&out_path, &result.typst_code)
+        fs::write(&out_path, &typst_code)
             .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path, e))?;
         eprintln!("Wrote generated Typst to {}", out_path);
     }
@@ -58,8 +59,16 @@ pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
     let result = scribium_core::compile(&source, &options);
 
     match emit {
-        "typst" => println!("{}", result.typst_code),
-        "ast" | "semantic" | "ir" | "source-map" => {
+        "typst" => {
+            let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+            println!("{}", typst_code);
+        }
+        "ir" => {
+            let json =
+                serde_json::to_string_pretty(&result.ir).map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("{}", json);
+        }
+        "ast" | "semantic" | "source-map" => {
             println!("[{} emit not yet implemented]", emit);
         }
         _ => anyhow::bail!("unknown emit target: {}", emit),
