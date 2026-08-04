@@ -1,0 +1,3 @@
+@heading(level: 1)[Directive Test]
+
+Single-line body: @strong[bold] and @emph[italic].

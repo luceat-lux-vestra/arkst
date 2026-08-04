@@ -82,6 +82,7 @@ impl SourceLine<'_> {
             || fence_length(self.text).is_some()
             || is_thematic_break(self.text)
             || is_list_marker(self.text).is_some()
+            || is_directive_line(self.text)
     }
 }
 
@@ -158,12 +159,88 @@ fn parse_blocks(
                 continue;
             }
         }
+        if is_directive_line(line.text) {
+            blocks.push(parse_directive_block(source, lines, cursor));
+            continue;
+        }
         blocks.push(parse_paragraph(source, lines, cursor));
     }
     blocks
 }
 
-/// Parse a block of consecutive paragraph lines into inline nodes.
+/// Parse a block-level `@` directive line.
+///
+/// Consumes only the directive line itself. Multi-line bodies are an M1+ extension.
+fn parse_directive_block(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -> Block {
+    let line = &lines[*cursor];
+    *cursor += 1;
+    let line_source = &source[line.text_start..line.content_end()];
+
+    if let Some((directive, _consumed)) = crate::syntax::quarkdown::parser::parse_directive_at(
+        line_source,
+        0,
+        crate::source::SourceId(0),
+    ) {
+        match directive {
+            crate::syntax::quarkdown::Directive::Call {
+                name,
+                positional_args,
+                named_args,
+                body,
+                ..
+            } => {
+                let body_block = body.and_then(|b| match *b {
+                    crate::syntax::quarkdown::Directive::Value(
+                        crate::syntax::markdown::ast::Value::String(s),
+                    ) => {
+                        // Parse body content as inline nodes
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(Box::new(Block::Paragraph {
+                                content: parse_inlines(&s, 0, s.len(), 0),
+                                span: ByteSpan::new(line.text_start, line.end),
+                            }))
+                        }
+                    }
+                    crate::syntax::quarkdown::Directive::Call { .. } => {
+                        // Nested directive: wrap in a DirectiveCall block
+                        Some(Box::new(Block::DirectiveCall {
+                            name: String::new(), // placeholder
+                            positional_args: vec![],
+                            named_args: vec![],
+                            body: None,
+                            span: ByteSpan::new(line.text_start, line.end),
+                        }))
+                    }
+                    _ => None,
+                });
+
+                return Block::DirectiveCall {
+                    name,
+                    positional_args,
+                    named_args,
+                    body: body_block,
+                    span: ByteSpan::new(line.text_start, line.end),
+                };
+            }
+            crate::syntax::quarkdown::Directive::Variable { name, .. } => {
+                // A bare @name at block level becomes a directive call with no args
+                return Block::DirectiveCall {
+                    name,
+                    positional_args: vec![],
+                    named_args: vec![],
+                    body: None,
+                    span: ByteSpan::new(line.text_start, line.end),
+                };
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback: parse as paragraph
+    parse_paragraph(source, lines, cursor)
+}
 fn parse_paragraph(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -> Block {
     let first = &lines[*cursor];
     loop {
@@ -427,6 +504,16 @@ fn is_list_marker(text: &str) -> Option<u8> {
     }
 }
 
+/// Whether the text starts a `@`-prefixed directive (block-level).
+fn is_directive_line(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.first() != Some(&b'@') {
+        return false;
+    }
+    // Must have a name character after @
+    bytes.len() > 1 && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_')
+}
+
 /// Whether the line starts a list item with the given marker.
 fn is_item_start(text: &str, marker: u8) -> bool {
     let bytes = text.as_bytes();
@@ -468,6 +555,7 @@ impl<'a> InlineParser<'a> {
                     });
                     self.pos += 2;
                 }
+                b'@' => self.parse_directive_inline(&mut inlines),
                 _ => self.parse_text(&mut inlines),
             }
         }
@@ -493,6 +581,73 @@ impl<'a> InlineParser<'a> {
             while self.pos < self.end && matches!(self.bytes()[self.pos], b' ' | b'\t') {
                 self.pos += 1;
             }
+        }
+    }
+
+    /// Parse an inline `@` directive (e.g. `@strong[text]`, `@fn()`).
+    fn parse_directive_inline(&mut self, inlines: &mut Vec<Inline>) {
+        let start = self.pos;
+        let remaining = &self.source[self.pos..self.end];
+        if let Some((directive, consumed)) = crate::syntax::quarkdown::parser::parse_directive_at(
+            remaining,
+            0,
+            crate::source::SourceId(0),
+        ) {
+            let end_pos = self.pos + consumed;
+            match directive {
+                crate::syntax::quarkdown::Directive::Call {
+                    name,
+                    positional_args,
+                    named_args,
+                    body,
+                    ..
+                } => {
+                    let body_inlines = body.and_then(|b| match *b {
+                        crate::syntax::quarkdown::Directive::Value(
+                            crate::syntax::markdown::ast::Value::String(s),
+                        ) => {
+                            if s.is_empty() {
+                                None
+                            } else {
+                                Some(parse_inlines(&s, 0, s.len(), self.depth + 1))
+                            }
+                        }
+                        _ => None,
+                    });
+
+                    inlines.push(Inline::DirectiveCall {
+                        name,
+                        positional_args,
+                        named_args,
+                        body: body_inlines,
+                        span: ByteSpan::new(start, end_pos),
+                    });
+                    self.pos = end_pos;
+                }
+                crate::syntax::quarkdown::Directive::Variable { name, .. } => {
+                    inlines.push(Inline::DirectiveCall {
+                        name,
+                        positional_args: vec![],
+                        named_args: vec![],
+                        body: None,
+                        span: ByteSpan::new(start, end_pos),
+                    });
+                    self.pos = end_pos;
+                }
+                _ => {
+                    inlines.push(Inline::Text {
+                        content: self.source[start..end_pos].to_string(),
+                        span: ByteSpan::new(start, end_pos),
+                    });
+                    self.pos = end_pos;
+                }
+            }
+        } else {
+            inlines.push(Inline::Text {
+                content: "@".to_string(),
+                span: ByteSpan::new(start, start + 1),
+            });
+            self.pos += 1;
         }
     }
 
@@ -632,7 +787,7 @@ impl<'a> InlineParser<'a> {
                 self.pos += 1;
                 continue;
             }
-            if b == b'*' || b == b'_' || b == b'\n' {
+            if b == b'*' || b == b'_' || b == b'\n' || b == b'@' {
                 break;
             }
             if b == b'\\' && self.pos + 1 < self.end && bytes[self.pos + 1] == b'\n' {
