@@ -1,0 +1,9 @@
+[package]
+name = "typst-subprocess"
+version = "0.1.0"
+edition = "2021"
+description = "Subprocess-based Typst compilation for comparison"
+
+[[bin]]
+name = "subprocess"
+path = "src/main.rs"
