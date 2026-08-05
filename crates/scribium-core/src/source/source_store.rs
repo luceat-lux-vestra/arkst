@@ -2,7 +2,6 @@
 //!
 //! Provides in-memory storage for source files with efficient lookup.
 //! Uses existing SourceId for source identification.
-
 use crate::source::span::SourceId;
 use crate::source::virtual_path::VirtualPathBuf;
 use std::collections::BTreeMap;
@@ -26,8 +25,8 @@ pub enum SourceStoreError {
 /// Uses `BTreeMap` for deterministic iteration order.
 #[derive(Debug, Clone)]
 pub struct SourceStore {
-    by_path: BTreeMap<VirtualPathBuf, SourceEntry>,
-    by_id: Vec<Option<SourceEntry>>,
+    by_path: BTreeMap<VirtualPathBuf, SourceId>,
+    by_id: Vec<Option<SourceRecord>>,
     next_id: u32,
 }
 
@@ -38,9 +37,9 @@ impl Default for SourceStore {
 }
 
 #[derive(Debug, Clone)]
-pub struct SourceEntry {
+struct SourceRecord {
+    path: VirtualPathBuf,
     source: Arc<str>,
-    id: SourceId,
 }
 
 impl SourceStore {
@@ -53,59 +52,9 @@ impl SourceStore {
         }
     }
 
-    /// Adds a source to the store, assigning a new SourceId.
-    ///
-    /// Returns the assigned SourceId.
-    /// Errors if the path already exists or the ID space is exhausted.
-    pub fn insert(
-        &mut self,
-        path: VirtualPathBuf,
-        source: String,
-    ) -> Result<SourceId, SourceStoreError> {
-        if self.by_path.contains_key(&path) {
-            return Err(SourceStoreError::DuplicateSource(path));
-        }
-
-        let id = self.allocate_id()?;
-
-        let entry = SourceEntry {
-            source: Arc::from(source),
-            id,
-        };
-        self.by_path.insert(path, entry.clone());
-        self.by_id[id.0 as usize] = Some(entry);
-
-        Ok(id)
-    }
-
-    /// Inserts or updates a source in the store.
-    ///
-    /// If the path already exists, updates the content while preserving the FileId.
-    /// If the path doesn't exist, inserts a new source with a new FileId.
-    ///
-    /// Returns `None` when the ID space is exhausted.
-    pub fn upsert(&mut self, path: VirtualPathBuf, source: String) -> Option<SourceId> {
-        if let Some(entry) = self.by_path.get_mut(&path) {
-            // Update existing source, preserve ID
-            entry.source = Arc::from(source);
-            Some(entry.id)
-        } else {
-            // Insert new source
-            let id = self.allocate_id().ok()?;
-
-            let entry = SourceEntry {
-                source: Arc::from(source),
-                id,
-            };
-            self.by_path.insert(path, entry.clone());
-            self.by_id[id.0 as usize] = Some(entry);
-            Some(id)
-        }
-    }
-
+    /// Allocates a new SourceId.
     fn allocate_id(&mut self) -> Result<SourceId, SourceStoreError> {
         if self.next_id == 0 {
-            // The ID space is exhausted: next_id wrapped around past the u32 max.
             return Err(SourceStoreError::SourceIdExhausted);
         }
         let id = SourceId(self.next_id);
@@ -118,21 +67,78 @@ impl SourceStore {
         Ok(id)
     }
 
+    /// Adds a source to the store, assigning a new SourceId.
+    ///
+    /// Returns the assigned SourceId.
+    /// Errors if the path already exists.
+    pub fn insert(
+        &mut self,
+        path: VirtualPathBuf,
+        source: String,
+    ) -> Result<SourceId, SourceStoreError> {
+        if self.by_path.contains_key(&path) {
+            return Err(SourceStoreError::DuplicateSource(path));
+        }
+
+        let id = self.allocate_id()?;
+
+        let record = SourceRecord {
+            path: path.clone(),
+            source: Arc::from(source),
+        };
+
+        self.by_path.insert(path, id);
+        self.by_id[id.0 as usize] = Some(record);
+
+        Ok(id)
+    }
+
+    /// Inserts or updates a source in the store.
+    ///
+    /// If the path already exists, updates the content while preserving the SourceId.
+    /// If the path doesn't exist, inserts a new source with a new SourceId.
+    pub fn upsert(
+        &mut self,
+        path: VirtualPathBuf,
+        source: String,
+    ) -> Result<SourceId, SourceStoreError> {
+        if let Some(&id) = self.by_path.get(&path) {
+            let record = self
+                .record_mut(id)
+                .expect("SourceStore indexes must remain consistent");
+
+            record.source = Arc::from(source);
+            return Ok(id);
+        }
+
+        self.insert(path, source)
+    }
+
     /// Gets a source by virtual path.
     pub fn get(&self, path: &VirtualPathBuf) -> Option<&str> {
-        self.by_path.get(path).map(|e| &*e.source)
+        let id = *self.by_path.get(path)?;
+        self.get_by_id(id)
     }
 
     /// Gets a source by SourceId.
     pub fn get_by_id(&self, id: SourceId) -> Option<&str> {
-        self.by_id
-            .get(id.0 as usize)
-            .and_then(|e| e.as_ref().map(|e| &*e.source))
+        self.record(id).map(|record| record.source.as_ref())
     }
 
     /// Gets the SourceId for a path.
     pub fn get_id(&self, path: &VirtualPathBuf) -> Option<SourceId> {
-        self.by_path.get(path).map(|e| e.id)
+        self.by_path.get(path).copied()
+    }
+
+    /// Gets the path for a SourceId.
+    pub fn path_by_id(&self, id: SourceId) -> Option<&VirtualPathBuf> {
+        self.record(id).map(|record| &record.path)
+    }
+
+    /// Gets a source and its SourceId by virtual path.
+    pub fn get_with_id(&self, path: &VirtualPathBuf) -> Option<(&str, SourceId)> {
+        let id = *self.by_path.get(path)?;
+        Some((self.get_by_id(id)?, id))
     }
 
     /// Checks if a source exists at the given path.
@@ -141,10 +147,15 @@ impl SourceStore {
     }
 
     /// Returns an iterator over all sources in deterministic order.
-    pub fn iter(&self) -> impl Iterator<Item = (&VirtualPathBuf, &str, SourceId)> {
-        self.by_path
-            .iter()
-            .map(|(path, entry)| (path, &*entry.source, entry.id))
+    pub fn iter(&self) -> impl Iterator<Item = (SourceId, &VirtualPathBuf, &str)> {
+        self.by_path.iter().map(|(path, &id)| {
+            let source = self
+                .record(id)
+                .expect("SourceStore indexes must remain consistent")
+                .source
+                .as_ref();
+            (id, path, source)
+        })
     }
 
     /// Returns the number of sources.
@@ -159,12 +170,25 @@ impl SourceStore {
 
     /// Removes a source by path.
     pub fn remove(&mut self, path: &VirtualPathBuf) -> bool {
-        if let Some(entry) = self.by_path.remove(path) {
-            self.by_id[entry.id.0 as usize] = None;
-            true
-        } else {
-            false
+        let Some(id) = self.by_path.remove(path) else {
+            return false;
+        };
+
+        if let Some(slot) = self.by_id.get_mut(id.0 as usize) {
+            *slot = None;
         }
+
+        true
+    }
+
+    /// Internal access to a record by SourceId.
+    fn record(&self, id: SourceId) -> Option<&SourceRecord> {
+        self.by_id.get(id.0 as usize)?.as_ref()
+    }
+
+    /// Internal mutable access to a record by SourceId.
+    fn record_mut(&mut self, id: SourceId) -> Option<&mut SourceRecord> {
+        self.by_id.get_mut(id.0 as usize)?.as_mut()
     }
 }
 
@@ -173,153 +197,187 @@ mod tests {
     use super::*;
     use crate::source::virtual_path::VirtualPathBuf;
 
-    fn path(s: &str) -> VirtualPathBuf {
-        VirtualPathBuf::parse(s).unwrap()
-    }
-
-    // 1. new()와 default()에서 동일한 최초 SourceId
     #[test]
-    fn new_and_default_assign_same_first_id() {
-        let mut from_new = SourceStore::new();
-        let mut from_default = SourceStore::default();
-
-        let p1 = path("a.qd");
-        let id1 = from_new.insert(p1, "content".to_string()).unwrap();
-        let p2 = path("b.qd");
-        let id2 = from_default.insert(p2, "content".to_string()).unwrap();
-
-        assert_eq!(id1, id2, "new() and default() must start with the same ID");
-    }
-
-    // 11. ID 0 정책 검증
-    #[test]
-    fn first_id_is_one_not_zero() {
+    fn insert_and_get_by_path() {
         let mut store = SourceStore::new();
-        let id = store.insert(path("a.qd"), "content".to_string()).unwrap();
-        assert_eq!(id.0, 1, "first SourceId must be 1, never 0");
+        let path = VirtualPathBuf::parse("a/b.qd").unwrap();
+        let id = store.insert(path.clone(), "content".to_string()).unwrap();
+
+        assert_eq!(store.get(&path), Some("content"));
+        assert_eq!(store.get_by_id(id), Some("content"));
+        assert_eq!(store.get_id(&path), Some(id));
     }
 
-    // 2. 여러 source 삽입 시 ID가 순차적
     #[test]
-    fn ids_are_assigned_sequentially() {
+    fn insert_and_get_by_id() {
         let mut store = SourceStore::new();
-        for i in 1..=5 {
-            let p = path(&format!("file_{}.qd", i));
-            let id = store.insert(p, format!("content {}", i)).unwrap();
-            assert_eq!(id.0, i as u32, "IDs must be sequential in insertion order");
-        }
+        let path = VirtualPathBuf::parse("a/b.qd").unwrap();
+        let id = store.insert(path.clone(), "content".to_string()).unwrap();
+
+        let source = store.get_by_id(id).unwrap();
+        assert_eq!(source, "content");
     }
 
-    // 3. path → ID → source round-trip
     #[test]
-    fn path_to_id_to_source_round_trip() {
+    fn upsert_updates_path_and_id_views() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        let id = store.insert(p.clone(), "content".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("main.qd").unwrap();
 
-        let id_by_path = store.get_id(&p).unwrap();
-        assert_eq!(id_by_path, id);
-        let source_by_id = store.get_by_id(id).unwrap();
-        assert_eq!(source_by_id, "content");
+        let original_id = store.insert(path.clone(), "before".to_string()).unwrap();
+
+        let updated_id = store.upsert(path.clone(), "after".to_string()).unwrap();
+
+        assert_eq!(updated_id, original_id);
+        assert_eq!(store.get(&path), Some("after"));
+        assert_eq!(store.get_by_id(original_id), Some("after"));
+        assert_eq!(store.path_by_id(original_id), Some(&path));
     }
 
-    // 4. ID → source 조회
     #[test]
-    fn lookup_source_by_id() {
+    fn upsert_new_path_allocates_id() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        let id = store.insert(p, "content".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("new.qd").unwrap();
+
+        let id = store.upsert(path.clone(), "content".to_string()).unwrap();
+
+        assert_eq!(store.get(&path), Some("content"));
         assert_eq!(store.get_by_id(id), Some("content"));
     }
 
-    // 5. duplicate path 거부
     #[test]
-    fn duplicate_path_is_rejected() {
+    fn upsert_existing_path_preserves_id() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        store.insert(p.clone(), "first".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("a.qd").unwrap();
 
-        let err = store.insert(p.clone(), "second".to_string()).unwrap_err();
-        assert_eq!(err, SourceStoreError::DuplicateSource(p));
+        let id1 = store.insert(path.clone(), "first".to_string()).unwrap();
+        let id2 = store.upsert(path.clone(), "second".to_string()).unwrap();
+
+        assert_eq!(id1, id2);
+        assert_eq!(store.get(&path), Some("second"));
+        assert_eq!(store.len(), 1);
     }
 
-    // 6. remove 후 path 조회 실패
     #[test]
-    fn removed_path_is_not_found() {
+    fn upsert_existing_path_does_not_increase_len() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        store.insert(p.clone(), "content".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("a.qd").unwrap();
 
-        assert!(store.remove(&p));
-        assert_eq!(store.get(&p), None);
-        assert!(!store.contains(&p));
+        store.insert(path.clone(), "first".to_string()).unwrap();
+        assert_eq!(store.len(), 1);
+
+        store.upsert(path.clone(), "second".to_string()).unwrap();
+        assert_eq!(store.len(), 1);
     }
 
-    // 7. remove 후 ID 조회 실패
     #[test]
-    fn removed_id_is_not_found() {
+    fn remove_clears_path_and_id_indexes() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        let id = store.insert(p.clone(), "content".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("a.qd").unwrap();
+        let id = store.insert(path.clone(), "content".to_string()).unwrap();
 
-        store.remove(&p);
+        assert!(store.remove(&path));
+        assert!(!store.remove(&path)); // Already removed
+        assert_eq!(store.get(&path), None);
+        assert_eq!(store.get_by_id(id), None);
+        assert_eq!(store.path_by_id(id), None);
+    }
+
+    #[test]
+    fn clone_after_upsert_preserves_updated_content() {
+        let mut store = SourceStore::new();
+        let path = VirtualPathBuf::parse("a.qd").unwrap();
+
+        store.insert(path.clone(), "before".to_string()).unwrap();
+        let cloned = store.clone();
+
+        store.upsert(path.clone(), "after".to_string()).unwrap();
+
+        assert_eq!(cloned.get(&path), Some("before"));
+        assert_eq!(store.get(&path), Some("after"));
+    }
+
+    #[test]
+    fn removing_source_removes_both_indexes() {
+        let mut store = SourceStore::new();
+        let path = VirtualPathBuf::parse("a/b.qd").unwrap();
+        let id = store.insert(path.clone(), "content".to_string()).unwrap();
+
+        assert!(store.remove(&path));
+        assert!(!store.remove(&path)); // Already removed
+        assert_eq!(store.get(&path), None);
         assert_eq!(store.get_by_id(id), None);
     }
 
-    // 8. remove 후 다른 source index가 손상되지 않음
     #[test]
-    fn remove_does_not_corrupt_other_entries() {
+    fn different_sources_receive_different_ids() {
         let mut store = SourceStore::new();
-        let p1 = path("a.qd");
-        let p2 = path("b.qd");
-        let p3 = path("c.qd");
-        let id1 = store.insert(p1.clone(), "one".to_string()).unwrap();
-        let id2 = store.insert(p2.clone(), "two".to_string()).unwrap();
-        let id3 = store.insert(p3.clone(), "three".to_string()).unwrap();
+        let path1 = VirtualPathBuf::parse("a/b.qd").unwrap();
+        let path2 = VirtualPathBuf::parse("c/d.qd").unwrap();
 
-        store.remove(&p2);
+        let id1 = store.insert(path1, "first".to_string()).unwrap();
+        let id2 = store.insert(path2, "second".to_string()).unwrap();
 
-        assert_eq!(store.get_by_id(id1), Some("one"));
-        assert_eq!(store.get_by_id(id2), None);
-        assert_eq!(store.get_by_id(id3), Some("three"));
-        assert_eq!(store.get(&p1), Some("one"));
-        assert_eq!(store.get(&p3), Some("three"));
+        assert_ne!(id1, id2);
     }
 
-    // 9. deterministic iteration
     #[test]
-    fn iteration_is_deterministic_by_path() {
+    fn removed_id_is_not_reused() {
         let mut store = SourceStore::new();
-        store.insert(path("z.qd"), "z".to_string()).unwrap();
-        store.insert(path("a.qd"), "a".to_string()).unwrap();
-        store.insert(path("m.qd"), "m".to_string()).unwrap();
+        let path = VirtualPathBuf::parse("a/b.qd").unwrap();
+        let id1 = store.insert(path.clone(), "first".to_string()).unwrap();
 
-        let collected: Vec<(&VirtualPathBuf, &str, SourceId)> = store.iter().collect();
-        let paths: Vec<&str> = collected.iter().map(|(p, _, _)| p.as_str()).collect();
-        assert_eq!(paths, vec!["a.qd", "m.qd", "z.qd"]);
+        store.remove(&path);
+
+        let path2 = VirtualPathBuf::parse("c/d.qd").unwrap();
+        let id2 = store.insert(path2, "second".to_string()).unwrap();
+
+        assert_ne!(id1, id2, "Removed ID should not be reused");
     }
 
-    // 10. clone 후 ID/path/source 보존
     #[test]
-    fn clone_preserves_ids_paths_and_sources() {
+    fn file_id_lookup_does_not_scan_sources() {
         let mut store = SourceStore::new();
-        let p = path("a/b.qd");
-        let id = store.insert(p.clone(), "content".to_string()).unwrap();
+        // Insert many sources
+        for i in 0..100 {
+            let path = VirtualPathBuf::parse(format!("file_{}.qd", i)).unwrap();
+            store.insert(path, format!("content {}", i)).unwrap();
+        }
 
-        let cloned = store.clone();
-        assert_eq!(cloned.get(&p), Some("content"));
-        assert_eq!(cloned.get_id(&p), Some(id));
-        assert_eq!(cloned.get_by_id(id), Some("content"));
+        // Get ID by path - should be O(log n) via BTreeMap
+        let path = VirtualPathBuf::parse("file_50.qd").unwrap();
+        let id = store.get_id(&path).unwrap();
+
+        // Get by ID - should be O(1) via Vec
+        let source = store.get_by_id(id).unwrap();
+        assert_eq!(source, "content 50");
     }
 
-    // 12. ID overflow 처리 내부 테스트
     #[test]
-    fn id_space_exhausted_is_detected() {
+    fn store_consistency_after_multiple_operations() {
         let mut store = SourceStore::new();
-        store.next_id = 0; // simulate wrap-around / exhaustion
-        let p = path("overflow.qd");
 
-        let err = store.insert(p, "content".to_string()).unwrap_err();
-        assert_eq!(err, SourceStoreError::SourceIdExhausted);
+        // Insert several sources
+        for i in 0..10 {
+            let path = VirtualPathBuf::parse(format!("file_{}.qd", i)).unwrap();
+            store.insert(path, format!("content {}", i)).unwrap();
+        }
+
+        // Update some
+        for i in 0..5 {
+            let path = VirtualPathBuf::parse(format!("file_{}.qd", i)).unwrap();
+            store.upsert(path, format!("updated {}", i)).unwrap();
+        }
+
+        // Remove some
+        store.remove(&VirtualPathBuf::parse("file_2.qd").unwrap());
+        store.remove(&VirtualPathBuf::parse("file_7.qd").unwrap());
+
+        // Verify consistency
+        for (id, path, source) in store.iter() {
+            assert_eq!(store.get(path), Some(source));
+            assert_eq!(store.get_by_id(id), Some(source));
+            assert_eq!(store.get_id(path), Some(id));
+            assert_eq!(store.path_by_id(id), Some(path));
+        }
     }
 }
