@@ -2,6 +2,7 @@ use anyhow::Context;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use scribium_core::diagnostics::Severity;
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
 
@@ -111,7 +112,12 @@ pub fn check(input: &str) -> anyhow::Result<()> {
     let loaded = load_single_file_project(input)?;
     let result = compile_project(&loaded.project)?;
 
-    let error_count = result.diagnostics.len();
+    let error_count = result
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(&d.severity, Severity::Error))
+        .count();
+
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
     }
