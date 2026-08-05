@@ -9,9 +9,12 @@ use scribium_core::VirtualProjectBuilder;
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {
     project: scribium_core::VirtualProject,
+    /// The path as requested by the user (logical path for output naming)
+    requested_entry: PathBuf,
+    /// The canonicalized, resolved path (for file reading)
+    #[allow(dead_code)]
     physical_entry: PathBuf,
 }
-
 /// Converts an OS-relative path to a VirtualPathBuf.
 fn os_relative_path_to_virtual(path: &Path) -> anyhow::Result<VirtualPathBuf> {
     let mut components = Vec::new();
@@ -34,9 +37,11 @@ fn os_relative_path_to_virtual(path: &Path) -> anyhow::Result<VirtualPathBuf> {
 
     VirtualPathBuf::parse(components.join("/")).map_err(Into::into)
 }
-
 /// Loads a single file as a VirtualProject.
 fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
+    // Store the user-requested path for output naming
+    let requested_entry = input.to_path_buf();
+
     let physical_entry = input
         .canonicalize()
         .with_context(|| format!("cannot resolve {}", input.display()))?;
@@ -70,6 +75,7 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
 
     Ok(LoadedProject {
         project,
+        requested_entry,
         physical_entry,
     })
 }
@@ -96,7 +102,7 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
     if formats.iter().any(|f| f == "typst") {
         let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-        let out_path = loaded.physical_entry.with_extension("qd.typ");
+        let out_path = loaded.requested_entry.with_extension("qd.typ");
         fs::write(&out_path, &typst_code)
             .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
         eprintln!("Wrote generated Typst to {}", out_path.display());
@@ -150,6 +156,59 @@ pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
         }
         _ => anyhow::bail!("unknown emit target: {}", emit),
     }
-
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    use tempfile::tempdir;
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_input_preserves_logical_output_path() {
+        let dir = tempdir().unwrap();
+        let link_dir = dir.path().join("link_dir");
+        let external_dir = dir.path().join("external");
+        fs::create_dir(&link_dir).unwrap();
+        fs::create_dir(&external_dir).unwrap();
+
+        // Create real file
+        let real_file = external_dir.join("real.qd");
+        fs::write(&real_file, "---\ntitle: Symlink Test\n---\n\n# Hello\n").unwrap();
+
+        // Create symlink
+        let link_file = link_dir.join("link.qd");
+        symlink(&real_file, &link_file).unwrap();
+
+        // Build through CLI using the symlink path
+        let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
+        assert!(result.is_ok());
+
+        // Output should be at link_dir/link.qd.typ (logical path)
+        let expected_output = link_file.with_extension("qd.typ");
+        assert!(
+            expected_output.exists(),
+            "output file should exist at logical path: {:?}",
+            expected_output
+        );
+
+        // Verify content
+        let content = fs::read_to_string(&expected_output).unwrap();
+        assert!(
+            content.contains("Title: Symlink Test"),
+            "content was: {}",
+            content
+        );
+        assert!(content.contains("= Hello"), "content was: {}", content);
+        // Ensure no output at external/real.qd.typ
+        let unexpected_output = real_file.with_extension("qd.typ");
+        assert!(
+            !unexpected_output.exists(),
+            "output should not be at resolved path: {:?}",
+            unexpected_output
+        );
+    }
 }

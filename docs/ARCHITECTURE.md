@@ -163,12 +163,18 @@ pub fn compile(
 ) -> CompileResult;
 ```
 
+- CLI builds `VirtualProject` from disk
+- WASM builds `VirtualProject` from in-memory sources
+- Core never touches filesystem
+- SourceId assignment is deterministic (sources sorted by path before insertion)
+- Front matter YAML at document start is parsed and merged with project metadata
+
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
-The native CLI adapter resolves OS paths and maps them into project-relative
-`VirtualPathBuf` values.
-
+The native CLI adapter resolves OS paths (canonicalization, symlink resolution)
+and maps them into project-relative `VirtualPathBuf` values.
+Symlink handling is a CLI adapter responsibility; the core only sees virtual paths.
 
 ### Synchronous Core, Async Host
 

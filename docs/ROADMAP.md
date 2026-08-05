@@ -17,7 +17,7 @@ Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 | ADR 0001–0010                  | Completed    |
 | GitHub templates/CI            | Completed    |
 | WASM build in CI               | Completed    |
-| VirtualProject abstraction     | In progress    |
+| VirtualProject abstraction     | Completed    |
 
 **Architecture constraint:** `scribium-core` + `scribium-typst` (lowering)
 MUST compile for `wasm32-unknown-unknown`. CI verifies this from M0.

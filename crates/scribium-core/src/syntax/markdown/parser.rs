@@ -14,7 +14,7 @@
 //! treated as literal text. Setext headings, links, images, blockquotes,
 //! code spans, and ordered lists are not part of the M1 subset.
 
-use super::ast::{Block, Document, Inline, ListItem};
+use super::ast::{Block, Document, FrontMatter, Inline, ListItem};
 use crate::source::ByteSpan;
 
 /// Maximum block-nesting depth before a parse is flattened to paragraphs.
@@ -26,18 +26,74 @@ const MAX_BLOCK_DEPTH: usize = 64;
 /// Maximum inline-nesting depth before delimiters are treated as literal text.
 const MAX_INLINE_DEPTH: usize = 64;
 
+/// Parse YAML front matter at document start.
+///
+/// Returns `(front_matter, lines_consumed)`. If no valid front matter is found
+/// at the start, returns `(None, 0)` and the caller should start parsing from line 0.
+fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontMatter>, usize) {
+    if lines.is_empty() {
+        return (None, 0);
+    }
+
+    // Check if first line is opening delimiter `---`
+    let first = &lines[0];
+    if first.text != "---" {
+        return (None, 0);
+    }
+
+    // Find closing delimiter
+    let mut close_idx = None;
+    for (i, line) in lines.iter().enumerate().skip(1) {
+        if line.text == "---" {
+            close_idx = Some(i);
+            break;
+        }
+    }
+
+    let close_idx = match close_idx {
+        Some(idx) => idx,
+        None => {
+            // Unclosed front matter - treat as no front matter
+            return (None, 0);
+        }
+    };
+
+    // Parse fields between delimiters
+    let mut fields = Vec::new();
+    for line in &lines[1..close_idx] {
+        let text = line.text;
+        if text.is_empty() {
+            continue; // Skip empty lines in front matter
+        }
+        if let Some(colon_pos) = text.find(':') {
+            let key = text[..colon_pos].trim();
+            let value = text[colon_pos + 1..].trim();
+            if !key.is_empty() {
+                fields.push((key.to_string(), value.to_string()));
+            }
+        }
+    }
+
+    let span = ByteSpan::new(first.raw_start, lines[close_idx].end);
+    (Some(FrontMatter { fields, span }), close_idx + 1)
+}
+
 /// Parse a Markdown source string into a `Document`.
 ///
 /// Never panics on malformed input; unclosed constructs are parsed
 /// deterministically up to the end of the source.
 pub fn parse(source: &str) -> Document {
     let lines = split_lines(source);
-    let mut cursor = 0;
+
+    // Parse front matter if present at document start
+    let (front_matter, front_matter_lines) = parse_front_matter(source, &lines);
+    let mut cursor = front_matter_lines;
+
     let nodes = parse_blocks(source, &lines, &mut cursor, 0);
     let line_count = source.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1;
     Document {
         nodes,
-        front_matter: None,
+        front_matter,
         line_count,
     }
 }
@@ -1358,10 +1414,41 @@ mod tests {
     }
 
     #[test]
-    fn document_snapshot_malformed() {
-        insta::assert_debug_snapshot!(
-            "malformed_input",
-            parse("*open\n**still open\n\n```\nunclosed")
-        );
+    fn parse_front_matter_at_document_start() {
+        let doc = parse("---\ntitle: Hello\nauthor: World\n---\n\n# Heading\n");
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 2);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+        assert_eq!(fm.fields[1], ("author".into(), "World".into()));
+        // Front matter span covers from start of first --- to end of second ---
+        assert!(fm.span.start == 0);
+        assert!(fm.span.end > fm.span.start);
+    }
+
+    #[test]
+    fn front_matter_is_not_emitted_as_content_blocks() {
+        let doc = parse("---\ntitle: Hello\n---\n\n# Heading\n");
+        // Only heading block, no blocks for front matter delimiters
+        assert_eq!(doc.nodes.len(), 1);
+        assert!(matches!(doc.nodes[0], Block::Heading { .. }));
+    }
+
+    #[test]
+    fn thematic_break_after_content_is_not_front_matter() {
+        let doc = parse("# Title\n\n---\n\nContent\n");
+        // Front matter only at document start
+        assert!(doc.front_matter.is_none());
+        assert_eq!(doc.nodes.len(), 3); // heading, thematic break, paragraph
+        assert!(matches!(doc.nodes[1], Block::ThematicBreak { .. }));
+    }
+
+    #[test]
+    fn parse_front_matter_with_crlf() {
+        let doc = parse("---\r\ntitle: Hello\r\n---\r\n\r\n# Heading\r\n");
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
     }
 }

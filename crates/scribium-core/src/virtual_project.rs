@@ -73,34 +73,55 @@ impl VirtualProject {
 /// Unknown/custom keys are stored only in `raw`.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectMetadata {
-    pub title: Option<String>,
-    pub author: Option<String>,
-    pub date: Option<String>,
-    pub raw: Vec<(String, String)>,
+    title: Option<String>,
+    author: Option<String>,
+    date: Option<String>,
+    raw: Vec<(String, String)>,
 }
 
 impl ProjectMetadata {
+    /// Gets the title.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Gets the author.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
+    }
+
+    /// Gets the date.
+    pub fn date(&self) -> Option<&str> {
+        self.date.as_deref()
+    }
+
+    /// Gets the custom fields.
+    pub fn fields(&self) -> &[(String, String)] {
+        &self.raw
+    }
+
     /// Sets the title.
-    pub fn title(mut self, title: impl Into<String>) -> Self {
+    pub fn set_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
     /// Sets the author.
-    pub fn author(mut self, author: impl Into<String>) -> Self {
+    pub fn set_author(mut self, author: impl Into<String>) -> Self {
         self.author = Some(author.into());
         self
     }
 
     /// Sets the date.
-    pub fn date(mut self, date: impl Into<String>) -> Self {
+    pub fn set_date(mut self, date: impl Into<String>) -> Self {
         self.date = Some(date.into());
         self
     }
+
     /// Adds a custom metadata field (last-wins for duplicates).
     /// Known keys (title, author, date) are stored only in their typed fields,
     /// not in raw.
-    pub fn field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn set_field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         let key = key.into();
         let value = value.into();
 
@@ -176,25 +197,25 @@ impl VirtualProjectBuilder {
 
     /// Sets the title metadata.
     pub fn title(mut self, title: impl Into<String>) -> Self {
-        self.metadata = self.metadata.title(title);
+        self.metadata = self.metadata.set_title(title);
         self
     }
 
     /// Sets the author metadata.
     pub fn author(mut self, author: impl Into<String>) -> Self {
-        self.metadata = self.metadata.author(author);
+        self.metadata = self.metadata.set_author(author);
         self
     }
 
     /// Sets the date metadata.
     pub fn date(mut self, date: impl Into<String>) -> Self {
-        self.metadata = self.metadata.date(date);
+        self.metadata = self.metadata.set_date(date);
         self
     }
 
     /// Adds a custom metadata field (last-wins for duplicates).
     pub fn field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.metadata = self.metadata.field(key, value);
+        self.metadata = self.metadata.set_field(key, value);
         self
     }
 
@@ -202,22 +223,30 @@ impl VirtualProjectBuilder {
     pub fn build(self) -> Result<VirtualProject, BuildError> {
         let entry = self.entry.ok_or(BuildError::MissingEntry)?;
 
-        let mut sources = SourceStore::new();
-        for (path, content) in self.sources {
-            sources.insert(path, content).map_err(|e| match e {
+        // Sort sources by canonical path to ensure deterministic SourceId assignment
+        let mut sources = self.sources;
+        sources.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+
+        let mut source_store = SourceStore::new();
+        for (path, content) in sources {
+            source_store.insert(path, content).map_err(|e| match e {
                 SourceStoreError::DuplicateSource(p) => BuildError::DuplicateSource(p),
                 SourceStoreError::SourceIdExhausted => BuildError::SourceIdExhausted,
             })?;
         }
 
         // Validate entry exists in sources
-        if !sources.contains(&entry) {
+        if !source_store.contains(&entry) {
             return Err(BuildError::EntryNotFound(entry));
         }
 
-        let mut assets = AssetStore::new();
-        for (path, data) in self.assets {
-            assets
+        // Sort assets by canonical path for deterministic iteration
+        let mut assets = self.assets;
+        assets.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+
+        let mut asset_store = AssetStore::new();
+        for (path, data) in assets {
+            asset_store
                 .insert(path, std::sync::Arc::from(data.into_boxed_slice()))
                 .map_err(|e| match e {
                     AssetStoreError::DuplicateAsset(p) => BuildError::DuplicateAsset(p),
@@ -226,8 +255,8 @@ impl VirtualProjectBuilder {
 
         Ok(VirtualProject::from_builder(
             entry,
-            sources,
-            assets,
+            source_store,
+            asset_store,
             self.metadata,
         ))
     }

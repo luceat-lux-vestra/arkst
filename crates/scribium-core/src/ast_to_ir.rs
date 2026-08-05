@@ -27,10 +27,10 @@ pub fn ast_to_ir(
         .collect();
 
     // Start with project metadata as defaults
-    let mut title = project_metadata.title.clone();
-    let mut author = project_metadata.author.clone();
-    let mut date = project_metadata.date.clone();
-    let mut raw = project_metadata.raw.clone();
+    let mut title = project_metadata.title().map(|s| s.to_string());
+    let mut author = project_metadata.author().map(|s| s.to_string());
+    let mut date = project_metadata.date().map(|s| s.to_string());
+    let mut raw = project_metadata.fields().to_vec();
 
     // Override with front matter if present
     if let Some(ref fm) = doc.front_matter {
