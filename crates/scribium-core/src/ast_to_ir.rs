@@ -6,31 +6,44 @@
 
 use crate::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode};
 use crate::source::{SourceId, SourceSpan};
-use crate::syntax::markdown::ast::{Block, Document, Inline, Value};
+#[allow(unused_imports)]
+use crate::syntax::markdown::ast::{Block, Document, FrontMatter, Inline, Value};
+use crate::virtual_project::ProjectMetadata;
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
 /// `source_id` identifies the source file in the span model.
-pub fn ast_to_ir(doc: &Document, source_id: SourceId) -> IrDocument {
+/// `project_metadata` provides project-level defaults that can be overridden
+/// by document front matter.
+pub fn ast_to_ir(
+    doc: &Document,
+    source_id: SourceId,
+    project_metadata: &ProjectMetadata,
+) -> IrDocument {
     let nodes: Vec<IrNode> = doc
         .nodes
         .iter()
         .filter_map(|b| block_to_ir(b, source_id))
         .collect();
 
-    // Extract simple front-matter fields
-    let mut title = None;
-    let mut author = None;
-    let mut date = None;
-    let mut raw = Vec::new();
+    // Start with project metadata as defaults
+    let mut title = project_metadata.title.clone();
+    let mut author = project_metadata.author.clone();
+    let mut date = project_metadata.date.clone();
+    let mut raw = project_metadata.raw.clone();
 
+    // Override with front matter if present
     if let Some(ref fm) = doc.front_matter {
         for (key, val) in &fm.fields {
             match key.as_str() {
                 "title" => title = Some(val.clone()),
                 "author" => author = Some(val.clone()),
                 "date" => date = Some(val.clone()),
-                _ => raw.push((key.clone(), val.clone())),
+                _ => {
+                    // Remove existing custom field with same key
+                    raw.retain(|(k, _)| k != key);
+                    raw.push((key.clone(), val.clone()));
+                }
             }
         }
     }
@@ -195,21 +208,25 @@ fn value_to_ir(value: &Value) -> crate::ir::IrValue {
 fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId) -> SourceSpan {
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
-
-#[cfg(test)]
 mod tests {
-    use crate::ir::IrInline;
-    use crate::source::{ByteSpan, SourceId};
-    use crate::syntax::markdown::ast::{Block, Document, FrontMatter, Inline};
-
+    #[allow(unused_imports)]
     use super::*;
+    use crate::source::{ByteSpan, SourceId};
+    use crate::virtual_project::ProjectMetadata;
 
+    #[allow(dead_code)]
     fn source_id() -> SourceId {
         SourceId(42)
     }
 
+    #[allow(dead_code)]
     fn bs(start: usize, end: usize) -> ByteSpan {
         ByteSpan::new(start, end)
+    }
+
+    #[allow(dead_code)]
+    fn empty_project_metadata() -> ProjectMetadata {
+        ProjectMetadata::default()
     }
 
     #[test]
@@ -219,7 +236,7 @@ mod tests {
             front_matter: None,
             line_count: 0,
         };
-        let ir = ast_to_ir(&doc, source_id());
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
         assert!(ir.nodes.is_empty());
         assert_eq!(ir.metadata.title, None);
     }
@@ -238,7 +255,7 @@ mod tests {
             front_matter: None,
             line_count: 1,
         };
-        let ir = ast_to_ir(&doc, source_id());
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
         assert_eq!(ir.nodes.len(), 1);
         match &ir.nodes[0] {
             IrNode::Heading {
@@ -278,7 +295,7 @@ mod tests {
             front_matter: None,
             line_count: 1,
         };
-        let ir = ast_to_ir(&doc, source_id());
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
         assert_eq!(ir.nodes.len(), 1);
         match &ir.nodes[0] {
             IrNode::Paragraph { content, .. } => {
@@ -304,7 +321,7 @@ mod tests {
             }),
             line_count: 4,
         };
-        let ir = ast_to_ir(&doc, source_id());
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
         assert_eq!(ir.metadata.title.as_deref(), Some("My Doc"));
         assert_eq!(ir.metadata.author.as_deref(), Some("Alice"));
         assert_eq!(ir.metadata.date, None);
@@ -344,7 +361,7 @@ mod tests {
             front_matter: None,
             line_count: 2,
         };
-        let ir = ast_to_ir(&doc, source_id());
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
         assert_eq!(ir.nodes.len(), 1);
         match &ir.nodes[0] {
             IrNode::UnorderedList { items, .. } => {

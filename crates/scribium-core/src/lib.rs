@@ -65,7 +65,7 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
     };
 
     let doc = syntax::markdown::parse(source);
-    let ir = ast_to_ir::ast_to_ir(&doc, source_id);
+    let ir = ast_to_ir::ast_to_ir(&doc, source_id, project.metadata());
     CompileResult {
         ir,
         diagnostics: vec![],

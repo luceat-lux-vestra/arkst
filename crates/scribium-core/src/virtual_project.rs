@@ -97,22 +97,22 @@ impl ProjectMetadata {
         self.date = Some(date.into());
         self
     }
-
     /// Adds a custom metadata field (last-wins for duplicates).
+    /// Known keys (title, author, date) are stored only in their typed fields,
+    /// not in raw.
     pub fn field(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         let key = key.into();
         let value = value.into();
 
-        // Remove any existing entry with the same key
-        self.raw.retain(|(k, _)| k != &key);
-        self.raw.push((key.clone(), value.clone()));
-
-        // Sync typed fields for special keys
         match key.as_str() {
             "title" => self.title = Some(value),
             "author" => self.author = Some(value),
             "date" => self.date = Some(value),
-            _ => {}
+            _ => {
+                // Remove any existing entry with the same key
+                self.raw.retain(|(k, _)| k != &key);
+                self.raw.push((key, value));
+            }
         }
 
         self
@@ -321,8 +321,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(project.metadata().title, Some("New".to_string()));
-        assert_eq!(project.metadata().raw.len(), 1);
-        assert_eq!(project.metadata().raw[0].1, "New");
+        // Known keys (title, author, date) are not stored in raw
+        assert_eq!(project.metadata().raw.len(), 0);
     }
 
     #[test]
