@@ -9,8 +9,6 @@ use scribium_core::VirtualProjectBuilder;
 struct LoadedProject {
     project: scribium_core::VirtualProject,
     physical_entry: PathBuf,
-    #[allow(dead_code)]
-    project_root: PathBuf,
 }
 
 /// Converts an OS-relative path to a VirtualPathBuf.
@@ -72,31 +70,30 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     Ok(LoadedProject {
         project,
         physical_entry,
-        project_root,
     })
 }
 
-/// Reads a single input file and compiles it as a one-source VirtualProject.
-fn compile_file(input: &Path) -> anyhow::Result<scribium_core::CompileResult> {
-    let loaded = load_single_file_project(input)?;
-
+/// Compiles a pre-loaded VirtualProject.
+fn compile_project(
+    project: &scribium_core::VirtualProject,
+) -> anyhow::Result<scribium_core::CompileResult> {
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
     };
-    Ok(scribium_core::compile(&loaded.project, &options))
+    Ok(scribium_core::compile(project, &options))
 }
 
 /// Execute the `build` command: compile input to output format(s).
 pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     let input = Path::new(input);
     let loaded = load_single_file_project(input)?;
-    let result = compile_file(&loaded.physical_entry)?;
+    let result = compile_project(&loaded.project)?;
 
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
     }
 
-    if formats.contains(&"typst".to_string()) {
+    if formats.iter().any(|f| f == "typst") {
         let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
         let out_path = loaded.physical_entry.with_extension("qd.typ");
         fs::write(&out_path, &typst_code)
@@ -110,7 +107,9 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
 /// Execute the `check` command: validate input without producing output.
 pub fn check(input: &str) -> anyhow::Result<()> {
-    let result = compile_file(Path::new(input))?;
+    let input = Path::new(input);
+    let loaded = load_single_file_project(input)?;
+    let result = compile_project(&loaded.project)?;
 
     let error_count = result.diagnostics.len();
     for diag in &result.diagnostics {
@@ -126,7 +125,9 @@ pub fn check(input: &str) -> anyhow::Result<()> {
 
 /// Execute the `inspect` command: show intermediate representation(s).
 pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
-    let result = compile_file(Path::new(input))?;
+    let input = Path::new(input);
+    let loaded = load_single_file_project(input)?;
+    let result = compile_project(&loaded.project)?;
 
     match emit {
         "typst" => {

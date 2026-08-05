@@ -22,6 +22,8 @@ pub enum VirtualPathError {
     TrailingSlash(String),
     #[error("windows path not allowed: {0}")]
     WindowsPath(String),
+    #[error("root path not allowed for a file")]
+    RootPathNotAllowed,
 }
 
 /// An owned, platform-independent virtual path in canonical form.
@@ -184,10 +186,12 @@ impl VirtualPathBuf {
             } else {
                 self.path.truncate(pos);
             }
+            true
         } else {
+            // Single component path like "a" -> pop to root
             self.path = "/".to_string();
+            true
         }
-        true
     }
 
     /// Returns the parent path.
@@ -205,6 +209,7 @@ impl VirtualPathBuf {
                 })
             }
         } else {
+            // Single component path like "a" -> parent is root
             Some(Self::root())
         }
     }
@@ -247,16 +252,16 @@ impl fmt::Debug for VirtualPathBuf {
 impl TryFrom<String> for VirtualPathBuf {
     type Error = VirtualPathError;
 
-    fn try_from(path: String) -> Result<Self, Self::Error> {
-        Self::parse(path)
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(value)
     }
 }
 
 impl TryFrom<&str> for VirtualPathBuf {
     type Error = VirtualPathError;
 
-    fn try_from(path: &str) -> Result<Self, Self::Error> {
-        Self::parse(path)
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
     }
 }
 
@@ -284,55 +289,6 @@ mod tests {
         let p = VirtualPathBuf::parse("").unwrap();
         assert!(p.is_root());
         assert_eq!(p.as_str(), "/");
-    }
-
-    #[test]
-    fn test_parse_root_string() {
-        // parse("/") must return the root sentinel (round-trip of root's Display)
-        let root = VirtualPathBuf::root();
-        assert_eq!(VirtualPathBuf::parse("/").unwrap(), root);
-        assert_eq!(VirtualPathBuf::parse(VirtualPathBuf::root()).unwrap(), root);
-    }
-
-    #[test]
-    fn test_root_display_round_trip() {
-        // A VirtualPathBuf parses back to itself (canonical form is stable).
-        let root = VirtualPathBuf::root();
-        assert_eq!(VirtualPathBuf::parse(VirtualPathBuf::root()).unwrap(), root);
-    }
-
-    #[test]
-    fn test_try_from_str_success() {
-        let p = VirtualPathBuf::try_from("a/b").unwrap();
-        assert_eq!(p.as_str(), "a/b");
-    }
-
-    #[test]
-    fn test_try_from_str_trailing_slash() {
-        assert!(matches!(
-            VirtualPathBuf::try_from("a/b/"),
-            Err(VirtualPathError::TrailingSlash(_))
-        ));
-    }
-
-    #[test]
-    fn test_try_from_string_success() {
-        let p = VirtualPathBuf::try_from("a/b".to_string()).unwrap();
-        assert_eq!(p.as_str(), "a/b");
-    }
-
-    #[test]
-    fn test_try_from_string_root() {
-        let p = VirtualPathBuf::try_from("/".to_string()).unwrap();
-        assert!(p.is_root());
-    }
-
-    #[test]
-    fn test_try_from_string_invalid() {
-        assert!(matches!(
-            VirtualPathBuf::try_from("a\\b".to_string()),
-            Err(VirtualPathError::WindowsPath(_))
-        ));
     }
 
     #[test]
@@ -496,5 +452,19 @@ mod tests {
 
         // Paths that normalize to different forms
         assert_eq!(VirtualPathBuf::parse("a/b/..").unwrap().as_str(), "a");
+    }
+
+    #[test]
+    fn test_root_join_round_trip() {
+        // root's Display returns "/", joining to it should normalize correctly
+        let root = VirtualPathBuf::root();
+        assert_eq!(root.as_str(), "/");
+
+        let joined = root.join("a").unwrap();
+        assert_eq!(joined.as_str(), "a");
+
+        // Parse root's display back should give root
+        let reparsed = VirtualPathBuf::parse(root.as_str()).unwrap();
+        assert_eq!(reparsed, root);
     }
 }

@@ -78,7 +78,7 @@ impl LoweringContext {
                 self.push(' ');
                 self.lower_inlines(content);
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -86,7 +86,7 @@ impl LoweringContext {
                 let before = self.output.len();
                 self.lower_inlines(content);
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -99,7 +99,7 @@ impl LoweringContext {
                     }
                     self.push('\n');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -119,7 +119,7 @@ impl LoweringContext {
                     self.push('\n');
                 }
                 self.push_str("```\n");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -129,7 +129,7 @@ impl LoweringContext {
                 if !source.ends_with('\n') {
                     self.push('\n');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -170,14 +170,14 @@ impl LoweringContext {
                     self.push(']');
                 }
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrNode::ThematicBreak { span } => {
                 let before = self.output.len();
                 self.push_str("---\n");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -196,7 +196,7 @@ impl LoweringContext {
                     self.push_str(source);
                     self.push('$');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -214,7 +214,7 @@ impl LoweringContext {
             IrInline::Text { content, span } => {
                 let before = self.output.len();
                 self.push_str(content);
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -223,7 +223,7 @@ impl LoweringContext {
                 self.push('*');
                 self.lower_inlines(content);
                 self.push('*');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -232,7 +232,7 @@ impl LoweringContext {
                 self.push_str("*");
                 self.lower_inlines(content);
                 self.push_str("*");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -272,7 +272,7 @@ impl LoweringContext {
                     self.lower_inlines(body_inlines);
                     self.push(']');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -322,7 +322,7 @@ mod tests {
     use scribium_core::source::SourceSpan;
 
     fn empty_span() -> SourceSpan {
-        SourceSpan::new(0, 0, 0)
+        SourceSpan::new(scribium_core::SourceId(0), 0, 0)
     }
 
     fn text(text: &str) -> IrInline {

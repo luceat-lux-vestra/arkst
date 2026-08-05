@@ -147,6 +147,7 @@ pub struct VirtualProject {
 // Constructed only through the fluent builder:
 VirtualProjectBuilder::new()
     .entry("main.qd")?
+    .add_source("main.qd", "...")?
     .add_source("chapter/intro.qd", "...")?
     .add_asset("fonts/main.otf", data)
     .build()?;
@@ -156,17 +157,18 @@ project.sources();
 project.assets();
 project.metadata();
 
-pub fn compile(project: &VirtualProject) -> CompileResult;
+pub fn compile(
+    project: &VirtualProject,
+    options: &CompileOptions,
+) -> CompileResult;
 ```
-
-- CLI builds `VirtualProject` from disk
-- WASM builds `VirtualProject` from in-memory sources
-- Core never touches filesystem
 
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
-The native CLI adapter converts `VirtualPathBuf` ↔ `PathBuf` at the boundary.
+The native CLI adapter resolves OS paths and maps them into project-relative
+`VirtualPathBuf` values.
+
 
 ### Synchronous Core, Async Host
 

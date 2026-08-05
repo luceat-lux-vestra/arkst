@@ -177,7 +177,7 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
             // Breaks become whitespace in the text flow for M1
             Some(IrInline::Text {
                 content: "\n".to_string(),
-                span: SourceSpan::new(source_id.0, 0, 0),
+                span: SourceSpan::new(source_id, 0, 0),
             })
         }
     }
@@ -193,7 +193,7 @@ fn value_to_ir(value: &Value) -> crate::ir::IrValue {
 }
 
 fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId) -> SourceSpan {
-    SourceSpan::new(source_id.0, byte_span.start, byte_span.end)
+    SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
 
 #[cfg(test)]
@@ -248,7 +248,7 @@ mod tests {
             } => {
                 assert_eq!(*level, 1);
                 assert_eq!(content.len(), 1);
-                assert_eq!(span.source_id, 42);
+                assert_eq!(span.source_id, SourceId(42));
                 assert_eq!(span.start, 0);
                 assert_eq!(span.end, 7);
             }

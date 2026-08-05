@@ -23,6 +23,9 @@ pub enum SourceStoreError {
 ///
 /// Maps `VirtualPathBuf` to source strings with associated `SourceId`.
 /// Uses `BTreeMap` for deterministic iteration order.
+/// - Lookup by `SourceId`: O(1) via `Vec`
+/// - Lookup by virtual path: O(log n) via `BTreeMap`
+/// - Iteration: deterministic path-ordered via `BTreeMap`
 #[derive(Debug, Clone)]
 pub struct SourceStore {
     by_path: BTreeMap<VirtualPathBuf, SourceId>,
