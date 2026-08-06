@@ -162,13 +162,13 @@ pub fn compile(
     options: &CompileOptions,
 ) -> CompileResult;
 ```
-
 - CLI builds `VirtualProject` from disk
 - WASM builds `VirtualProject` from in-memory sources
 - Core never touches filesystem
 - SourceId assignment is deterministic (sources sorted by path before insertion)
 - Front matter YAML at document start is parsed and merged with project metadata
-
+- Malformed front matter blocks (indented delimiters, lines without colons, empty keys) are rejected and treated as regular Markdown
+- Typst default output path replaces file extension with `.typ`
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
