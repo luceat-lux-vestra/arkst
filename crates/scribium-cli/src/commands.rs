@@ -273,38 +273,103 @@ fn resolve_output_path(out_path: &Path) -> anyhow::Result<PathBuf> {
     Ok(canonical_parent.join(name))
 }
 
-/// Resolves the effective path of `path` following OS pathname resolution
-/// order, without creating anything.
-///
-/// Components are processed left to right:
-///
-/// 1. Relative paths start from `base`; absolute paths from their root (and
-///    prefix on Windows).
-/// 2. Whenever the path accumulated so far exists, it is canonicalized, so
-///    a symlink is resolved as soon as it is reached.
-/// 3. A `..` that follows a symlink therefore moves to the symlink target's
-///    parent, never the lexical parent.
-/// 4. Components of a not-yet-existing suffix are tracked in memory; a later
-///    `..` cancels them, and no directory is ever created for them.
-/// 5. A `..` that would escape above the root or a Windows prefix cannot
-///    name a real file; `None` is returned and the caller falls back to the
-///    canonicalized checks.
-///
-/// The result is the path a write would land on when the suffix exists, or
-/// the canonical existing prefix plus the unresolved suffix otherwise. It is
-/// not authoritative: the canonicalized same-file check immediately before
-/// the write remains the final guard.
-fn resolve_effective_output_without_creation(path: &Path, base: &Path) -> Option<PathBuf> {
-    let mut components = path.components();
-    let mut resolved = PathBuf::new();
-    if path.is_absolute() {
-        resolved.push(components.next()?);
-        if let Some(next) = components.next() {
-            resolved.push(next);
+/// Why an output path could not be pre-resolved into an effective form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputPathResolutionError {
+    /// Windows drive-relative path (`C:dir\file.typ`): its meaning depends
+    /// on the per-drive current-directory state, which is not supported for
+    /// CLI output paths.
+    DriveRelativePath,
+    /// The working directory could not be canonicalized, so relative output
+    /// paths cannot be anchored.
+    WorkingDirectoryUnavailable,
+}
+
+impl std::fmt::Display for OutputPathResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DriveRelativePath => write!(
+                f,
+                "drive-relative output paths are not supported; use 'C:\\...' or a path relative to the current directory"
+            ),
+            Self::WorkingDirectoryUnavailable => write!(
+                f,
+                "cannot resolve the output path: the current directory could not be determined"
+            ),
         }
-    } else {
-        resolved = base.canonicalize().ok()?;
     }
+}
+
+impl std::error::Error for OutputPathResolutionError {}
+
+/// Returns the drive prefix (`C:`) of an absolute Windows path, if any.
+#[cfg(windows)]
+fn path_drive_prefix(path: &Path) -> Option<std::ffi::OsString> {
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => Some(prefix.as_os_str().to_os_string()),
+        _ => None,
+    }
+}
+
+/// Resolves the effective output path the filesystem would land on, without
+/// creating anything.
+///
+/// Components are walked left to right: whenever the path-so-far exists it
+/// is canonicalized, so symlinks resolve "as reached" and a `..` after a
+/// symlink moves to the symlink target's parent. Non-existent suffixes are
+/// kept on an in-memory stack — `..` canceling a non-existent component
+/// never creates directories, and `..` above the filesystem root stays at
+/// the root. Path kinds are classified explicitly:
+///
+/// * fully absolute (`C:\dir\file.typ`, UNC, verbatim) — anchored at their
+///   own prefix and root;
+/// * root-relative on Windows (`\dir\file.typ`) — anchored at the current
+///   drive's root (the working directory's prefix);
+/// * drive-relative (`C:dir\file.typ`) — unsupported, returned as an error;
+/// * ordinary relative paths — anchored at the canonicalized working
+///   directory.
+///
+/// Returns `Ok(Some(path))` when the effective path could be computed,
+/// `Ok(None)` for a pathological path that cannot be compared (the caller
+/// then relies on the canonicalized checks), and `Err` when a supported
+/// path kind could not be resolved or the path kind is unsupported. The
+/// result is not authoritative: the canonicalized same-file check
+/// immediately before the write remains the final guard.
+fn resolve_effective_output_without_creation(
+    path: &Path,
+    base: &Path,
+) -> Result<Option<PathBuf>, OutputPathResolutionError> {
+    let mut components = path.components().peekable();
+    let mut resolved = PathBuf::new();
+
+    match components.peek() {
+        Some(Component::Prefix(prefix)) => {
+            resolved.push(prefix.as_os_str());
+            match components.next().and_then(|_| components.next()) {
+                Some(Component::RootDir) => resolved.push(std::path::MAIN_SEPARATOR_STR),
+                _ => return Err(OutputPathResolutionError::DriveRelativePath),
+            }
+        }
+        Some(Component::RootDir) => {
+            components.next();
+            #[cfg(windows)]
+            {
+                let prefix = path_drive_prefix(base)
+                    .ok_or(OutputPathResolutionError::WorkingDirectoryUnavailable)?;
+                resolved.push(prefix);
+            }
+            resolved.push(std::path::MAIN_SEPARATOR_STR);
+        }
+        Some(Component::CurDir)
+        | Some(Component::Normal(_))
+        | Some(Component::ParentDir)
+        | None => {
+            resolved = base
+                .canonicalize()
+                .map_err(|_| OutputPathResolutionError::WorkingDirectoryUnavailable)?;
+        }
+    }
+
     let mut pending: Vec<std::ffi::OsString> = Vec::new();
     for component in components {
         match component {
@@ -319,13 +384,13 @@ fn resolve_effective_output_without_creation(path: &Path, base: &Path) -> Option
             }
             Component::ParentDir => {
                 if pending.pop().is_none() && !resolved.pop() {
-                    return None;
+                    // `..` above the filesystem root stays at the root.
                 }
             }
-            Component::Prefix(_) | Component::RootDir => return None,
+            Component::Prefix(_) | Component::RootDir => return Ok(None),
         }
     }
-    Some(pending_suffix(&resolved, &pending))
+    Ok(Some(pending_suffix(&resolved, &pending)))
 }
 
 fn pending_suffix(resolved: &Path, pending: &[std::ffi::OsString]) -> PathBuf {
@@ -348,8 +413,12 @@ fn pending_suffix(resolved: &Path, pending: &[std::ffi::OsString]) -> PathBuf {
 /// same-file check immediately before the write remains the final guard.
 fn reject_lexically_colliding_output(input: &Path, out_path: &Path) -> anyhow::Result<()> {
     let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(effective) = resolve_effective_output_without_creation(out_path, &base) else {
-        return Ok(());
+    let effective = match resolve_effective_output_without_creation(out_path, &base) {
+        Ok(Some(effective)) => effective,
+        // Pathological path that cannot be compared; the canonicalized
+        // same-file check before the write still protects the input.
+        Ok(None) => return Ok(()),
+        Err(error) => return Err(anyhow::Error::new(error)),
     };
 
     // The input always exists (it was canonicalized while loading), so its
@@ -1822,5 +1891,153 @@ mod tests {
             error
         );
         assert_eq!(fs::read(&input).unwrap(), before);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn root_relative_output_colliding_with_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // Build a root-relative output path (no drive prefix) from the
+        // tempdir's components, inserting a missing intermediate directory
+        // and a `..`: `\Users\...\.tmpXXXXX\new\..\document.qd`.
+        let components: Vec<_> = input.components().skip(2).collect();
+        let mut output = PathBuf::from("\\");
+        for (i, component) in components.iter().enumerate() {
+            if i + 1 == components.len() {
+                output.push("new");
+                output.push("..");
+            }
+            match component {
+                Component::Normal(name) => output.push(name),
+                _ => panic!("tempdir path must be a plain drive-absolute path"),
+            }
+        }
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        assert!(
+            !dir.path().join("new").exists(),
+            "intermediate directory must not be created"
+        );
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn root_relative_output_to_distinct_file_is_written() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // `\Users\...\.tmpXXXXX\out.typ` — root-relative, no drive prefix.
+        let mut output = PathBuf::from("\\");
+        for component in input.components().skip(2) {
+            match component {
+                Component::Normal(name) => output.push(name),
+                _ => panic!("tempdir path must be a plain drive-absolute path"),
+            }
+        }
+        output.pop();
+        output.push("out.typ");
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        if let Err(error) = &result {
+            panic!("build failed: {}", error);
+        }
+        let written = fs::read(dir.path().join("out.typ")).unwrap();
+        let text = String::from_utf8(written).unwrap();
+        assert!(text.contains("Hello"), "output content was: {:?}", text);
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn drive_relative_output_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // `C:out\document.typ` — drive-relative, depends on the per-drive
+        // current-directory state, and must be rejected explicitly.
+        let prefix = match input.components().next() {
+            Some(Component::Prefix(prefix)) => prefix.as_os_str().to_os_string(),
+            _ => panic!("tempdir path must have a drive prefix"),
+        };
+        let mut output = PathBuf::from(prefix);
+        output.push("out");
+        output.push("document.typ");
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("drive-relative output paths are not supported"),
+            "error was: {}",
+            error
+        );
+        assert!(
+            error.contains("'C:\\...'"),
+            "error should suggest an absolute path: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| n == &std::ffi::OsString::from("document.qd")),
+            "no directory or temporary file may be created: {:?}",
+            names
+        );
     }
 }

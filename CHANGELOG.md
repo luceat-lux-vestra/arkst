@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so distinct targets behind a symlink are accepted and only real aliases
   are rejected. The canonicalized same-file check remains the authoritative
   guard for symlink and hard-link aliases.
+- Windows output path kinds are now classified explicitly: root-relative
+  paths (`\out\main.typ`) are resolved from the current drive's root
+  (previously they silently skipped the pre-write collision check), and
+  drive-relative paths (`C:out\main.typ`) are rejected with a clear error
+  suggesting an absolute or ordinary relative path, since they depend on
+  the per-drive current-directory state. Resolution failures are reported
+  instead of being silently ignored.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 
