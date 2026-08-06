@@ -46,24 +46,25 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
         .canonicalize()
         .with_context(|| format!("cannot resolve {}", input.display()))?;
 
-    let project_root = physical_entry
+    // Project root is based on requested path (to handle symlinks correctly)
+    let project_root = requested_entry
         .parent()
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "input has no parent directory: {}",
-                physical_entry.display()
+                requested_entry.display()
             )
         })?
         .to_path_buf();
 
-    let relative_entry = physical_entry.strip_prefix(&project_root).map_err(|_| {
+    // Compute logical virtual entry from requested path (not canonicalized)
+    let requested_relative = requested_entry.strip_prefix(&project_root).map_err(|_| {
         anyhow::anyhow!(
             "input is outside project root: {}",
-            physical_entry.display()
+            requested_entry.display()
         )
     })?;
-
-    let virtual_entry = os_relative_path_to_virtual(relative_entry)?;
+    let virtual_entry = os_relative_path_to_virtual(requested_relative)?;
 
     let source = fs::read_to_string(&physical_entry)
         .with_context(|| format!("cannot read {}", physical_entry.display()))?;
@@ -163,12 +164,12 @@ pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::symlink;
     use tempfile::tempdir;
 
     #[test]
     #[cfg(unix)]
     fn symlink_input_preserves_logical_output_path() {
+        use std::os::unix::fs::symlink;
         let dir = tempdir().unwrap();
         let link_dir = dir.path().join("link_dir");
         let external_dir = dir.path().join("external");
@@ -182,10 +183,25 @@ mod tests {
         // Create symlink
         let link_file = link_dir.join("link.qd");
         symlink(&real_file, &link_file).unwrap();
-
         // Build through CLI using the symlink path
         let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        // Verify VirtualProject entry is logical path
+        let loaded = load_single_file_project(&link_file).unwrap();
+        assert_eq!(loaded.project.entry().as_str(), "link.qd");
+
+        // Verify source store entry
+        let entry = loaded.project.entry();
+        let source_id = loaded
+            .project
+            .sources()
+            .get_id(entry)
+            .expect("entry source must exist");
+
+        assert_eq!(
+            loaded.project.sources().path_by_id(source_id).unwrap(),
+            entry
+        );
 
         // Output should be at link_dir/link.qd.typ (logical path)
         let expected_output = link_file.with_extension("qd.typ");
