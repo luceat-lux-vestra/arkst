@@ -1893,17 +1893,35 @@ mod tests {
         assert_eq!(fs::read(&input).unwrap(), before);
     }
 
+    /// Removes a directory tree when dropped, even if an assertion panics.
+    #[cfg(windows)]
+    struct TestOutputDir(PathBuf);
+
+    #[cfg(windows)]
+    impl Drop for TestOutputDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     #[cfg(windows)]
     fn root_relative_output_colliding_with_input_is_rejected() {
-        let dir = tempdir().unwrap();
-        let input = dir.path().join("document.qd");
+        // Root-relative paths anchor at the current directory's drive, so the
+        // input must live on that same drive. The temp dir may be on another
+        // drive on CI (the workspace is on `D:` while `%TEMP%` is on `C:`),
+        // so create a working directory under the crate's current directory.
+        let cwd = std::env::current_dir().unwrap();
+        let dir = cwd.join(".root-relative-collision-test");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = TestOutputDir(dir.clone());
+        let input = dir.join("document.qd");
         fs::write(&input, "original source\n").unwrap();
         let before = fs::read(&input).unwrap();
 
         // Build a root-relative output path (no drive prefix) from the
-        // tempdir's components, inserting a missing intermediate directory
-        // and a `..`: `\Users\...\.tmpXXXXX\new\..\document.qd`.
+        // working directory's components, inserting a missing intermediate
+        // directory and a `..`: `\A\scribium\scribium\<dir>\new\..\document.qd`.
         let components: Vec<_> = input.components().skip(2).collect();
         let mut output = PathBuf::from("\\");
         for (i, component) in components.iter().enumerate() {
@@ -1913,7 +1931,7 @@ mod tests {
             }
             match component {
                 Component::Normal(name) => output.push(name),
-                _ => panic!("tempdir path must be a plain drive-absolute path"),
+                _ => panic!("cwd path must be a plain drive-absolute path"),
             }
         }
 
@@ -1935,10 +1953,10 @@ mod tests {
             "input bytes must not change"
         );
         assert!(
-            !dir.path().join("new").exists(),
+            !dir.join("new").exists(),
             "intermediate directory must not be created"
         );
-        let names: Vec<_> = fs::read_dir(dir.path())
+        let names: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
@@ -1954,17 +1972,20 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn root_relative_output_to_distinct_file_is_written() {
-        let dir = tempdir().unwrap();
-        let input = dir.path().join("document.qd");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = cwd.join(".root-relative-distinct-test");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = TestOutputDir(dir.clone());
+        let input = dir.join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         let before = fs::read(&input).unwrap();
 
-        // `\Users\...\.tmpXXXXX\out.typ` — root-relative, no drive prefix.
+        // `\A\scribium\scribium\<dir>\out.typ` — root-relative, no drive prefix.
         let mut output = PathBuf::from("\\");
         for component in input.components().skip(2) {
             match component {
                 Component::Normal(name) => output.push(name),
-                _ => panic!("tempdir path must be a plain drive-absolute path"),
+                _ => panic!("cwd path must be a plain drive-absolute path"),
             }
         }
         output.pop();
@@ -1978,7 +1999,7 @@ mod tests {
         if let Err(error) = &result {
             panic!("build failed: {}", error);
         }
-        let written = fs::read(dir.path().join("out.typ")).unwrap();
+        let written = fs::read(dir.join("out.typ")).unwrap();
         let text = String::from_utf8(written).unwrap();
         assert!(text.contains("Hello"), "output content was: {:?}", text);
         assert_eq!(
