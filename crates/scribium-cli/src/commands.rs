@@ -914,21 +914,32 @@ mod tests {
             error
         );
 
-        // The resolver may create `new` before rejecting, but the input must
-        // survive byte-for-byte.
+        // The resolver may create `new` before rejecting (on Unix, where the
+        // parent must exist to be canonicalized), but the input must survive
+        // byte-for-byte, and no temporary files may be left behind.
         assert_eq!(
             fs::read(&input).unwrap(),
             before,
             "input bytes must not change"
         );
-        // No stray temporary files: only the input and the created `new` dir.
         let names: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(names.len(), 2, "leftover files: {:?}", names);
-        assert!(names.contains(&"document.qd".into()));
-        assert!(names.contains(&"new".into()));
+        assert!(
+            names
+                .iter()
+                .all(|n| matches!(n.to_str(), Some("document.qd" | "new"))),
+            "unexpected leftover entries: {:?}",
+            names
+        );
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
     }
 
     #[test]
@@ -966,14 +977,27 @@ mod tests {
             before,
             "input bytes must not change"
         );
-        // Only the input and the created `a` directory remain.
+        // `a` is created on Unix (where the parent must exist to be
+        // canonicalized) but not on Windows; either way no temporary files
+        // may be left behind.
         let names: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(names.len(), 2, "leftover files: {:?}", names);
-        assert!(names.contains(&"document.qd".into()));
-        assert!(names.contains(&"a".into()));
+        assert!(
+            names
+                .iter()
+                .all(|n| matches!(n.to_str(), Some("document.qd" | "a"))),
+            "unexpected leftover entries: {:?}",
+            names
+        );
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
     }
 
     #[test]
