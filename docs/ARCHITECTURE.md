@@ -187,14 +187,29 @@ pub fn compile(
   rejected; non-existent outputs are compared by canonicalized parent plus
   normalized file name. The check is repeated immediately before writing.
 - Missing output parent directories are created (`create_dir_all`) before
-  writing. Output is written atomically: a temporary file in the output
-  directory receives the full content, is flushed and synced, then renamed
-  over the output path; on failure the temporary file is removed and any
-  previous output is left untouched. On Unix the replacement is `rename(2)`
-  (a symlink at the output path is replaced, not followed); on Windows it
-  uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`, whose symlink
-  replacement semantics differ — the output is verified not to alias the
-  input source file before writing on both platforms.
+  writing; the output path is then resolved against the real (canonicalized)
+  parent and the same-file check runs against that resolved path immediately
+  before the write, so `.`/`..` components and symlinks in the output path
+  are interpreted after directory creation. Output is written atomically: a
+  uniquely named temporary file in the output directory receives the full
+  content, is flushed and synced, then renamed over the output path; on an
+  error return the temporary file is removed and any previous output is left
+  untouched. On Unix the replacement is `rename(2)` (a symlink at the output
+  path is replaced, not followed); on Windows it uses `MoveFileExW` with
+  `MOVEFILE_REPLACE_EXISTING`, whose symlink replacement semantics differ —
+  the output is verified not to alias the input source file before writing
+  on both platforms.
+- Atomicity scope: the rename guarantees readers never observe partial
+  content, but this is *not* a crash-durability guarantee — the output
+  directory is not fsynced, so power loss may not preserve the newest file,
+  and an abrupt process kill can leave a temporary file behind (normal
+  error-return paths remove it).
+- Permissions (Unix): the temporary file is created with `fs::File::create`,
+  so new outputs get the standard `0666 & !umask` mode (same as
+  `std::fs::write`). When an output file already exists, its permission bits
+  are copied to the replacement first, so re-running a build never silently
+  changes an existing output mode (e.g. from `0640` to a temp file's `0600`).
+  Windows has no Unix mode semantics and is left untouched.
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).

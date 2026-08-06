@@ -44,12 +44,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hard and soft line breaks previously reached the IR with a synthesized
   `0..0` source span; they now carry the actual break position (byte
   offsets), matching the span policy of every other inline node.
-- Output is written atomically: the content goes to a temporary file in the
-  output directory, is flushed and synced, and is then renamed over the
-  output path. A failed build no longer leaves a partial output file or a
-  stray temporary file, and an existing output is replaced without ever
-  being truncated in place. (On Unix the rename is `rename(2)`; on Windows
-  it uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`.)
+- Output is written atomically: the content goes to a uniquely named
+  temporary file in the output directory, is flushed and synced, and is then
+  renamed over the output path. A failed build no longer leaves a partial
+  output file or a stray temporary file on its error-return path, and an
+  existing output is replaced without ever being truncated in place. (On
+  Unix the rename is `rename(2)`; on Windows it uses `MoveFileExW` with
+  `MOVEFILE_REPLACE_EXISTING`.) This is an atomic-replace guarantee, not a
+  crash-durability guarantee: the output directory is not fsynced, so power
+  loss may not preserve the newest file, and an abrupt kill (SIGKILL, power
+  loss) can leave a temporary file behind.
+- `build --output` whose parent directories do not exist could still resolve
+  to the input file *after* the directories were created — e.g.
+  `new/../document.qd` with `new` missing — and overwrite it. Parent
+  directories are now created first, the effective output path is resolved
+  from the real (canonicalized) parent, and the same-file check runs against
+  that resolved path immediately before the atomic write. The input is
+  never modified, even for `.`/`..`-containing output paths.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 
@@ -61,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extension are rejected.
 - `build --output` now creates missing output parent directories (single- or
   multi-level) instead of failing when they do not exist.
+- Unix output permissions: replacing an existing output keeps its permission
+  bits (no silent change from e.g. `0640` to the temp file's `0600`), and
+  new outputs are created with `0666 & !umask` — the same default mode
+  `std::fs::write` produces. The output temporary file is now created
+  directly (`fs::File::create` + `rename`) instead of via a permission-locked
+  helper crate. Windows behavior is unchanged.
 - Source ID allocation in `SourceStore` no longer wraps: `u32::MAX` is never
   assigned, and exhaustion is reported as `SourceStoreError::SourceIdExhausted`
   before any store mutation.

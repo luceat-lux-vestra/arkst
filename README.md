@@ -54,11 +54,18 @@ scribium build report.md
 > without an extension are rejected). A `.typ` input is rejected until Typst
 > passthrough is implemented. The build refuses to overwrite the input file:
 > an explicit `--output` that resolves to the input — including via
-> `.`/`..`, symlinks, or hard links — is rejected. Missing output
+> `.`/`..` components (even when the build creates the intermediate
+> directories itself), symlinks, or hard links — is rejected. Missing output
 > directories (e.g. `out/` for `--output out/main.typ`) are created
 > automatically. Output is written atomically: the content goes to a
-> temporary file in the output directory and is renamed into place, so a
-> failed build never leaves a partial output file. PDF/HTML/SVG/PNG
+> temporary file in the output directory and is renamed into place, so
+> readers never observe a partially written output and an erroring build
+> leaves no partial file (temporary files are cleaned up on error-return
+> paths; an abrupt crash or forced kill may leave one). This is not a
+> crash-durability guarantee — the output directory is not fsynced, so
+> power loss may not preserve the newest file. On Unix, replacing an
+> existing output keeps its permission bits, and new outputs use the
+> standard `0666 & !umask` mode (same as `fs::write`). PDF/HTML/SVG/PNG
 > backends are not implemented yet; requesting them fails with a clear
 > error.
 

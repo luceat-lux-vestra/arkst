@@ -2,7 +2,6 @@ use anyhow::Context;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use tempfile::NamedTempFile;
 
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
@@ -189,6 +188,8 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
         Some(path) => path.to_path_buf(),
         None => default_typst_output_path(&loaded.requested_entry),
     };
+    // Fail fast on the requested path; the authoritative check runs against
+    // the resolved path immediately before the write.
     ensure_distinct_output(&loaded.requested_entry, &out_path)?;
 
     let result = compile_project(&loaded.project)?;
@@ -200,13 +201,20 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
     // Fail on error diagnostics before writing output
     ensure_no_errors(&result.diagnostics)?;
 
-    // Re-verify immediately before writing: the output path may have appeared
-    // or been replaced since the initial check (TOCTOU window).
-    ensure_distinct_output(&loaded.requested_entry, &out_path)?;
+    // Create missing output parent directories, then resolve the effective
+    // output path against the real (canonicalized) parent. `.`/`..` and
+    // symlinks inside the output path are interpreted after directory
+    // creation, so no later step can change what the path means.
+    let resolved_out_path = resolve_output_path(&out_path)?;
+    // Re-verify immediately before writing: the resolved output may alias the
+    // input even when the requested path could not be checked earlier (e.g.
+    // a parent directory that did not exist yet), or may have appeared since
+    // the initial check (TOCTOU window).
+    ensure_distinct_output(&loaded.requested_entry, &resolved_out_path)?;
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    write_output_atomically(&out_path, typst_code.as_bytes())?;
-    eprintln!("Wrote generated Typst to {}", out_path.display());
+    write_output_atomically(&resolved_out_path, typst_code.as_bytes())?;
+    eprintln!("Wrote generated Typst to {}", resolved_out_path.display());
 
     // TODO: invoke Typst backend for pdf/html/svg/png
     Ok(())
@@ -232,44 +240,134 @@ fn create_output_dirs(out_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Writes `content` to `out_path` without leaving partial output behind.
+/// Resolves the effective output path for `out_path`.
 ///
-/// The content is written to a temporary file inside the output directory,
-/// flushed and synced, then renamed over the output path. On failure the
-/// temporary file is removed and any previous output is left untouched.
-/// Output parent directories are created first.
-///
-/// Platform note: on Unix the replacement is `rename(2)`, which atomically
-/// replaces the destination entry (a symlink at the output path is replaced,
-/// not followed). On Windows the replace uses `MoveFileExW` with
-/// `MOVEFILE_REPLACE_EXISTING`; replacement semantics can differ for
-/// symlinks, but the output was already verified not to alias the input
-/// source file before this function is called.
-fn write_output_atomically(out_path: &Path, content: &[u8]) -> anyhow::Result<()> {
+/// Missing parent directories are created first, then the real parent
+/// directory is canonicalized and recombined with the original file name.
+/// `.`/`..` components and symlinks inside the output path are therefore
+/// interpreted against the actual filesystem state after directory
+/// creation; the result is the path the same-file check and the final
+/// write both operate on. The caller is responsible for verifying that the
+/// resolved path does not alias the input before writing.
+fn resolve_output_path(out_path: &Path) -> anyhow::Result<PathBuf> {
     create_output_dirs(out_path)?;
 
     let parent = out_path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    let canonical_parent = parent
+        .canonicalize()
+        .with_context(|| format!("cannot resolve output directory '{}'", parent.display()))?;
+    let name = out_path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("output path has no file name: '{}'", out_path.display()))?;
 
-    let mut tmp = NamedTempFile::new_in(parent).map_err(|e| {
-        anyhow::anyhow!(
-            "cannot create temporary file in {}: {}",
-            parent.display(),
+    Ok(canonical_parent.join(name))
+}
+
+/// Returns a unique temporary file path next to `out_path`.
+///
+/// The name combines the output file name, the process id, and the current
+/// time in nanoseconds, making collisions practically impossible even for
+/// concurrent builds. The leading dot keeps the file hidden from plain
+/// directory listings.
+fn unique_temp_path(parent: &Path, out_path: &Path) -> PathBuf {
+    let name = out_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    parent.join(format!(".scribium.{}.{:x}.tmp", name, nonce))
+}
+
+/// Copies the permission bits of an existing output file to the replacement
+/// temporary file.
+///
+/// Without this, replacing an existing output would silently change its mode
+/// from e.g. `0640` to the temporary file's `0600`. When no output exists yet
+/// the temporary file keeps its creation mode (`0666 & !umask`, see
+/// [`write_output_atomically`]). Unix only; Windows has no Unix mode
+/// semantics.
+#[cfg(unix)]
+fn preserve_existing_output_mode(out_path: &Path, tmp_path: &Path) -> std::io::Result<()> {
+    match fs::metadata(out_path) {
+        Ok(meta) => fs::set_permissions(tmp_path, meta.permissions()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes `content` to `out_path` without leaving partial output behind.
+///
+/// The content is written to a uniquely named temporary file inside the
+/// output directory, flushed and synced, then renamed over `out_path`. On
+/// any error return the temporary file is removed and any previous output
+/// is left untouched; an existing output is replaced without ever being
+/// truncated in place. The output parent directory must already exist —
+/// call [`resolve_output_path`] first.
+///
+/// Permissions (Unix): the temporary file is created with
+/// [`fs::File::create`], which applies the same default mode as
+/// `std::fs::write` (`0666 & !umask`). When an output file already exists,
+/// its permission bits are applied to the replacement first, so re-running
+/// a build never silently changes an existing output mode (e.g. from `0640`
+/// to the temporary file's `0600`).
+///
+/// Scope: the rename guarantees that concurrent readers never observe
+/// partial content (`rename(2)` on Unix, `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING` on Windows, whose symlink replacement
+/// semantics differ). This is *not* a crash-durability guarantee: the
+/// output directory is not fsynced, so power loss may not preserve the
+/// newest file, and a hard process kill (SIGKILL, power loss) can leave the
+/// temporary file behind — normal error-return paths clean it up.
+fn write_output_atomically(out_path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    let parent = out_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    let tmp_path = unique_temp_path(parent, out_path);
+    let mut tmp = match fs::File::create(&tmp_path) {
+        Ok(file) => file,
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(anyhow::anyhow!(
+                "cannot create temporary file in {}: {}",
+                parent.display(),
+                e
+            ));
+        }
+    };
+
+    let prepared = (|| -> std::io::Result<()> {
+        tmp.write_all(content)?;
+        tmp.flush()?;
+        tmp.sync_all()?;
+        #[cfg(unix)]
+        preserve_existing_output_mode(out_path, &tmp_path)?;
+        Ok(())
+    })();
+    if let Err(e) = prepared {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(anyhow::anyhow!(
+            "cannot write {}: {}",
+            out_path.display(),
             e
-        )
-    })?;
-    tmp.write_all(content)
-        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
-    tmp.flush()
-        .map_err(|e| anyhow::anyhow!("cannot flush {}: {}", out_path.display(), e))?;
-    tmp.as_file()
-        .sync_all()
-        .map_err(|e| anyhow::anyhow!("cannot sync {}: {}", out_path.display(), e))?;
+        ));
+    }
 
-    tmp.persist(out_path)
-        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e.error))?;
+    if let Err(e) = fs::rename(&tmp_path, out_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(anyhow::anyhow!(
+            "cannot write {}: {}",
+            out_path.display(),
+            e
+        ));
+    }
     Ok(())
 }
 
@@ -791,6 +889,113 @@ mod tests {
     }
 
     #[test]
+    fn dotdot_output_through_missing_dir_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // The `new` parent does not exist, so the path only resolves to the
+        // input after the build creates the directory.
+        let missing = dir.path().join("new");
+        assert!(!missing.exists());
+        let output = missing.join("..").join("document.qd");
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+
+        // The resolver may create `new` before rejecting, but the input must
+        // survive byte-for-byte.
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        // No stray temporary files: only the input and the created `new` dir.
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "leftover files: {:?}", names);
+        assert!(names.contains(&"document.qd".into()));
+        assert!(names.contains(&"new".into()));
+    }
+
+    #[test]
+    fn dotdot_output_through_missing_multilevel_dirs_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // Neither `a` nor `b` exists; only after the build creates them does
+        // `a/b/../..` unwind back to the input's directory.
+        let output = dir
+            .path()
+            .join("a")
+            .join("b")
+            .join("..")
+            .join("..")
+            .join("document.qd");
+        assert!(!dir.path().join("a").exists());
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        // Only the input and the created `a` directory remain.
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "leftover files: {:?}", names);
+        assert!(names.contains(&"document.qd".into()));
+        assert!(names.contains(&"a".into()));
+    }
+
+    #[test]
+    fn nested_output_through_missing_dirs_is_written() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let output = dir.path().join("dist").join("nested").join("document.typ");
+        assert!(!output.exists());
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert!(output.exists(), "expected output {:?} to exist", output);
+        let content = fs::read_to_string(&output).unwrap();
+        assert!(content.contains("Hello"), "content was: {}", content);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn output_symlink_to_input_is_rejected() {
         use std::os::unix::fs::symlink;
@@ -1012,6 +1217,93 @@ mod tests {
         assert!(result.is_err());
         assert!(!out.exists());
         assert!(!blocker.is_dir());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn existing_output_mode_is_preserved_on_replacement() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let output = dir.path().join("out.typ");
+        fs::write(&output, "stale\n").unwrap();
+        fs::set_permissions(&output, fs::Permissions::from_mode(0o640)).unwrap();
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+
+        let mode = fs::metadata(&output).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            mode, 0o640,
+            "replacing an existing output must keep its permission mode"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn new_output_file_matches_fs_write_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        // Reference: the mode `std::fs::write` produces in this directory
+        // under the current umask (`0666 & !umask`).
+        let reference = dir.path().join("reference.txt");
+        fs::write(&reference, "x\n").unwrap();
+
+        let output = dir.path().join("out.typ");
+        assert!(!output.exists());
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+
+        let out_mode = fs::metadata(&output).unwrap().permissions().mode() & 0o7777;
+        let ref_mode = fs::metadata(&reference).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            out_mode, ref_mode,
+            "a new output must be created with the same mode as fs::write"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn successful_build_leaves_no_temp_artifacts_in_output_dir() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        // Build to a fresh directory, then reject: no `.scribium.*.tmp`
+        // files may be left in the output directory.
+        let missing = dir.path().join("gen");
+        let output = missing.join("nested").join("document.typ");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+
+        for entry in fs::read_dir(&missing).unwrap() {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            assert!(
+                !name.starts_with(".scribium."),
+                "temporary file leaked: {}",
+                name
+            );
+        }
     }
 
     #[test]
