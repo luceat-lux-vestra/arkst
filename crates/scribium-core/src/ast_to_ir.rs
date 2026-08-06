@@ -6,8 +6,7 @@
 
 use crate::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode};
 use crate::source::{SourceId, SourceSpan};
-#[allow(unused_imports)]
-use crate::syntax::markdown::ast::{Block, Document, FrontMatter, Inline, Value};
+use crate::syntax::markdown::ast::{Block, Document, Inline, Value};
 use crate::virtual_project::ProjectMetadata;
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
@@ -212,11 +211,11 @@ fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId)
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
 mod tests {
-    #[allow(unused_imports)]
     use super::*;
     use crate::source::{ByteSpan, SourceId};
     #[allow(unused_imports)]
     use crate::syntax::markdown::ast::FrontMatter;
+
     #[allow(dead_code)]
     fn source_id() -> SourceId {
         SourceId(42)
