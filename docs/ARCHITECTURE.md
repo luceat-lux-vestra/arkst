@@ -190,9 +190,17 @@ pub fn compile(
   writing; the output path is then resolved against the real (canonicalized)
   parent and the same-file check runs against that resolved path immediately
   before the write, so `.`/`..` components and symlinks in the output path
-  are interpreted after directory creation. Output is written atomically: a
-  uniquely named temporary file in the output directory receives the full
-  content, is flushed and synced, then renamed over the output path; on an
+  are interpreted after directory creation. Output paths that lexically
+  resolve to the input (e.g. `new/../document.qd` or `a/b/../../document.qd`,
+  even when the intermediate directories do not exist yet) are rejected
+  *before* any directory is created, so a rejected build leaves no empty
+  directories behind; the canonicalized same-file check below remains the
+  authoritative guard for symlink and hard-link aliases. Output is written
+  atomically: the content goes to a uniquely named temporary file in the
+  output directory — created exclusively with `create_new(true)`, retrying
+  up to 32 candidate names (each includes the PID and an in-process counter)
+  when a candidate is already taken, and touching only files this call
+  created — is flushed and synced, then renamed over the output path; on an
   error return the temporary file is removed and any previous output is left
   untouched. On Unix the replacement is `rename(2)` (a symlink at the output
   path is replaced, not followed); on Windows it uses `MoveFileExW` with
@@ -204,8 +212,8 @@ pub fn compile(
   directory is not fsynced, so power loss may not preserve the newest file,
   and an abrupt process kill can leave a temporary file behind (normal
   error-return paths remove it).
-- Permissions (Unix): the temporary file is created with `fs::File::create`,
-  so new outputs get the standard `0666 & !umask` mode (same as
+- Permissions (Unix): the temporary file is created with `OpenOptions` plus
+  `create_new(true)`, which applies the standard `0666 & !umask` mode (same as
   `std::fs::write`). When an output file already exists, its permission bits
   are copied to the replacement first, so re-running a build never silently
   changes an existing output mode (e.g. from `0640` to a temp file's `0600`).

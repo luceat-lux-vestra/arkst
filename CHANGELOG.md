@@ -46,14 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offsets), matching the span policy of every other inline node.
 - Output is written atomically: the content goes to a uniquely named
   temporary file in the output directory, is flushed and synced, and is then
-  renamed over the output path. A failed build no longer leaves a partial
-  output file or a stray temporary file on its error-return path, and an
-  existing output is replaced without ever being truncated in place. (On
-  Unix the rename is `rename(2)`; on Windows it uses `MoveFileExW` with
-  `MOVEFILE_REPLACE_EXISTING`.) This is an atomic-replace guarantee, not a
-  crash-durability guarantee: the output directory is not fsynced, so power
-  loss may not preserve the newest file, and an abrupt kill (SIGKILL, power
-  loss) can leave a temporary file behind.
+  renamed over the output path. The temporary file is created exclusively
+  with `create_new(true)` — candidate names include the PID and an
+  in-process counter, and up to 32 candidates are retried when one is
+  already taken, so the write never clobbers an existing file. A failed
+  build no longer leaves a partial output file or a stray temporary file on
+  its error-return path, and an existing output is replaced without ever
+  being truncated in place. (On Unix the rename is `rename(2)`; on Windows
+  it uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`.) This is an
+  atomic-replace guarantee, not a crash-durability guarantee: the output
+  directory is not fsynced, so power loss may not preserve the newest file,
+  and an abrupt kill (SIGKILL, power loss) can leave a temporary file behind.
 - `build --output` whose parent directories do not exist could still resolve
   to the input file *after* the directories were created — e.g.
   `new/../document.qd` with `new` missing — and overwrite it. Parent
@@ -61,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the real (canonicalized) parent, and the same-file check runs against
   that resolved path immediately before the atomic write. The input is
   never modified, even for `.`/`..`-containing output paths.
+- Output paths that lexically resolve to the input (e.g. `new/../document.qd`
+  or `a/b/../../document.qd` with the intermediate directories missing) are
+  now rejected *before* any directory is created, so a rejected build no
+  longer leaves empty `new`/`a`/`a/b` directories behind; the canonicalized
+  same-file check remains the authoritative guard for symlink and hard-link
+  aliases.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 

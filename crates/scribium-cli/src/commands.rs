@@ -2,6 +2,7 @@ use anyhow::Context;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
@@ -191,6 +192,12 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
     // Fail fast on the requested path; the authoritative check runs against
     // the resolved path immediately before the write.
     ensure_distinct_output(&loaded.requested_entry, &out_path)?;
+    // Early, filesystem-light rejection: when the requested output path
+    // lexically resolves to the same file as the input, fail before any
+    // output directory is created so a rejected build leaves nothing
+    // behind. The canonicalization and same-file identity checks against
+    // the resolved path below remain authoritative.
+    reject_lexically_colliding_output(&loaded.requested_entry, &out_path)?;
 
     let result = compile_project(&loaded.project)?;
 
@@ -266,22 +273,164 @@ fn resolve_output_path(out_path: &Path) -> anyhow::Result<PathBuf> {
     Ok(canonical_parent.join(name))
 }
 
-/// Returns a unique temporary file path next to `out_path`.
+/// Lexically normalizes `path` against `base` without creating anything.
 ///
-/// The name combines the output file name, the process id, and the current
-/// time in nanoseconds, making collisions practically impossible even for
-/// concurrent builds. The leading dot keeps the file hidden from plain
-/// directory listings.
-fn unique_temp_path(parent: &Path, out_path: &Path) -> PathBuf {
+/// `.` components are dropped and `..` pops the previously accumulated
+/// component, so `new/../document.qd` normalizes to `document.qd`. Relative
+/// paths are resolved against `base` so they compare in the same directory
+/// as the (absolute) input path. `..` components that would escape above
+/// the root or a Windows prefix cannot name a real file; `None` is returned
+/// for such paths and the caller falls back to the canonicalized checks.
+///
+/// The result is lexical only: symlinks inside `base` are not resolved
+/// here. The caller applies this check before any directory creation, then
+/// relies on the canonicalization and same-file identity checks for the
+/// final word.
+fn lexically_normalized(path: &Path, base: &Path) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    if path.is_absolute() {
+        out.push(path.components().next()?);
+        for component in path.components().skip(1) {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !out.pop() {
+                        return None;
+                    }
+                }
+                Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                    out.push(component);
+                }
+            }
+        }
+    } else {
+        out.push(base);
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !out.pop() {
+                        return None;
+                    }
+                }
+                Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                    out.push(component);
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Rejects `out_path` when its lexically normalized form names the input.
+///
+/// This early, creation-free check catches output paths whose `.`/`..`
+/// components obviously resolve to the input file — such as
+/// `new/../document.qd` or `a/b/../../document.qd` — before any output
+/// directory is created, so a rejected build never leaves empty
+/// intermediate directories behind. Symlinks inside the output path are
+/// resolved by canonicalizing the longest existing prefix, keeping the
+/// comparison on real filesystem paths. It is not the authoritative check:
+/// the canonicalized-parent same-file check immediately before the write
+/// remains the final guard.
+fn reject_lexically_colliding_output(input: &Path, out_path: &Path) -> anyhow::Result<()> {
+    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let Some(mut effective) = lexically_normalized(out_path, &base) else {
+        return Ok(());
+    };
+
+    // Resolve symlinks in the longest existing prefix of the effective
+    // path, then fold the remaining (non-existent) components lexically.
+    // Nothing is created; this only reads what already exists.
+    enum DroppedComponent {
+        Normal(std::ffi::OsString),
+        Parent,
+    }
+    let mut dropped: Vec<DroppedComponent> = Vec::new();
+    match effective.canonicalize() {
+        Ok(canonical) => effective = canonical,
+        Err(_) => {
+            let mut existing = effective.clone();
+            while existing.canonicalize().is_err() {
+                let last = existing.components().next_back();
+                let last = last.and_then(|c| match c {
+                    Component::Normal(name) => Some(DroppedComponent::Normal(name.to_os_string())),
+                    Component::ParentDir => Some(DroppedComponent::Parent),
+                    _ => None,
+                });
+                let Some(last) = last else { return Ok(()) };
+                dropped.push(last);
+                if !existing.pop() {
+                    return Ok(());
+                }
+            }
+            effective = existing.canonicalize().map_err(|e| {
+                anyhow::anyhow!(
+                    "cannot canonicalize existing output directory '{}': {}",
+                    existing.display(),
+                    e
+                )
+            })?;
+            for component in dropped.iter().rev() {
+                match component {
+                    DroppedComponent::Normal(name) => effective.push(name),
+                    DroppedComponent::Parent => {
+                        if !effective.pop() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The input always exists (it was canonicalized while loading), so its
+    // canonical form is the reference the effective output path is compared
+    // against.
+    let input_canonical = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
+    if same_file_name(
+        Some(effective.as_os_str()),
+        Some(input_canonical.as_os_str()),
+    ) {
+        anyhow::bail!(
+            "refusing to overwrite the input source file: input '{}' maps to output '{}'",
+            input.display(),
+            out_path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Maximum number of distinct candidate names tried for a temporary output
+/// file before failing.
+const MAX_TEMP_CANDIDATES: usize = 32;
+
+/// Monotonic counter backing temporary file candidate names.
+///
+/// Only used to make candidate names vary across calls within a process;
+/// uniqueness of a name is never relied upon for correctness. The
+/// authoritative collision guard is `create_new(true)` in
+/// [`write_output_atomically`].
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Returns candidate names for the temporary output file next to `out_path`.
+///
+/// Each name embeds the output file name, the process id, and a sequence
+/// number drawn from the supplied counter:
+/// `.scribium.{name}.{pid}.{seq:x}.tmp`. The leading dot keeps the file
+/// hidden from plain directory listings. The first candidate is always
+/// tried first; collisions found by `create_new(true)` move on to the next
+/// candidate. Purely a naming scheme — uniqueness of a name is never relied
+/// upon for correctness, so `start` may be any value.
+fn temp_candidate_names(parent: &Path, out_path: &Path, start: u64) -> Vec<PathBuf> {
     let name = out_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    parent.join(format!(".scribium.{}.{:x}.tmp", name, nonce))
+    let pid = std::process::id();
+    (0..MAX_TEMP_CANDIDATES as u64)
+        .map(|i| parent.join(format!(".scribium.{}.{}.{:x}.tmp", name, pid, start + i)))
+        .collect()
 }
 
 /// Copies the permission bits of an existing output file to the replacement
@@ -311,11 +460,11 @@ fn preserve_existing_output_mode(out_path: &Path, tmp_path: &Path) -> std::io::R
 /// call [`resolve_output_path`] first.
 ///
 /// Permissions (Unix): the temporary file is created with
-/// [`fs::File::create`], which applies the same default mode as
-/// `std::fs::write` (`0666 & !umask`). When an output file already exists,
-/// its permission bits are applied to the replacement first, so re-running
-/// a build never silently changes an existing output mode (e.g. from `0640`
-/// to the temporary file's `0600`).
+/// [`fs::OpenOptions`] plus `create_new(true)`, which applies the same
+/// default mode as `std::fs::write` (`0666 & !umask`). When an output file
+/// already exists, its permission bits are applied to the replacement
+/// first, so re-running a build never silently changes an existing output
+/// mode (e.g. from `0640` to the temporary file's `0600`).
 ///
 /// Scope: the rename guarantees that concurrent readers never observe
 /// partial content (`rename(2)` on Unix, `MoveFileExW` with
@@ -325,23 +474,69 @@ fn preserve_existing_output_mode(out_path: &Path, tmp_path: &Path) -> std::io::R
 /// newest file, and a hard process kill (SIGKILL, power loss) can leave the
 /// temporary file behind — normal error-return paths clean it up.
 fn write_output_atomically(out_path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    write_output_atomically_with(out_path, content, &TEMP_SEQUENCE)
+}
+
+/// Implementation of [`write_output_atomically`] with an explicit candidate
+/// sequence counter.
+///
+/// The counter is advanced per attempt batch; passing a dedicated counter
+/// keeps the candidate names deterministic in tests.
+fn write_output_atomically_with(
+    out_path: &Path,
+    content: &[u8],
+    sequence: &AtomicU64,
+) -> anyhow::Result<()> {
     let parent = out_path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
 
-    let tmp_path = unique_temp_path(parent, out_path);
-    let mut tmp = match fs::File::create(&tmp_path) {
-        Ok(file) => file,
-        Err(e) => {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(anyhow::anyhow!(
-                "cannot create temporary file in {}: {}",
-                parent.display(),
-                e
-            ));
+    let start = sequence.fetch_add(MAX_TEMP_CANDIDATES as u64, Ordering::Relaxed);
+
+    // Create the temporary file exclusively. `create_new(true)` fails when
+    // the candidate path already exists (as a regular file, directory,
+    // symlink, or anything else), which is the authoritative collision
+    // guard; the candidate names merely vary the attempt. On `AlreadyExists`
+    // the next candidate is tried, up to a bounded number of attempts.
+    let mut tmp_path: Option<PathBuf> = None;
+    let mut tmp: Option<fs::File> = None;
+    let mut last_conflict: Option<std::io::Error> = None;
+    for candidate in temp_candidate_names(parent, out_path, start) {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                tmp_path = Some(candidate);
+                tmp = Some(file);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_conflict = Some(e);
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "cannot create temporary file in {}: {}",
+                    parent.display(),
+                    e
+                ));
+            }
         }
-    };
+    }
+    let tmp_path = tmp_path.ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot create temporary file in {}: all {} candidate names are taken (last conflict: {})",
+            parent.display(),
+            MAX_TEMP_CANDIDATES,
+            last_conflict
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        )
+    })?;
+    let mut tmp = tmp.expect("tmp set iff tmp_path set");
 
     let prepared = (|| -> std::io::Result<()> {
         tmp.write_all(content)?;
@@ -359,6 +554,7 @@ fn write_output_atomically(out_path: &Path, content: &[u8]) -> anyhow::Result<()
             e
         ));
     }
+    drop(tmp);
 
     if let Err(e) = fs::rename(&tmp_path, out_path) {
         let _ = fs::remove_file(&tmp_path);
@@ -914,30 +1110,23 @@ mod tests {
             error
         );
 
-        // The resolver may create `new` before rejecting (on Unix, where the
-        // parent must exist to be canonicalized), but the input must survive
-        // byte-for-byte, and no temporary files may be left behind.
+        // The early lexical rejection fires before any directory is created:
+        // `new` must not exist, the input must survive byte-for-byte, and no
+        // temporary files may be left behind. On every supported OS.
         assert_eq!(
             fs::read(&input).unwrap(),
             before,
             "input bytes must not change"
         );
+        assert!(!missing.exists(), "`new` must not be created");
         let names: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert!(
-            names
-                .iter()
-                .all(|n| matches!(n.to_str(), Some("document.qd" | "new"))),
-            "unexpected leftover entries: {:?}",
-            names
-        );
-        assert!(
-            names
-                .iter()
-                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
-            "temporary files leaked: {:?}",
+        assert_eq!(
+            names,
+            vec![std::ffi::OsString::from("document.qd")],
+            "no leftover entries may exist: {:?}",
             names
         );
     }
@@ -977,25 +1166,23 @@ mod tests {
             before,
             "input bytes must not change"
         );
-        // `a` is created on Unix (where the parent must exist to be
-        // canonicalized) but not on Windows; either way no temporary files
-        // may be left behind.
+
+        // The early lexical rejection fires before any directory is created:
+        // neither `a` nor `a/b` may exist, and no temporary files may be
+        // left behind. On every supported OS.
+        assert!(!dir.path().join("a").exists(), "`a` must not be created");
+        assert!(
+            !dir.path().join("a").join("b").exists(),
+            "`a/b` must not be created"
+        );
         let names: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert!(
-            names
-                .iter()
-                .all(|n| matches!(n.to_str(), Some("document.qd" | "a"))),
-            "unexpected leftover entries: {:?}",
-            names
-        );
-        assert!(
-            names
-                .iter()
-                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
-            "temporary files leaked: {:?}",
+        assert_eq!(
+            names,
+            vec![std::ffi::OsString::from("document.qd")],
+            "no leftover entries may exist: {:?}",
             names
         );
     }
@@ -1241,6 +1428,161 @@ mod tests {
         assert!(result.is_err());
         assert!(!out.exists());
         assert!(!blocker.is_dir());
+    }
+
+    #[test]
+    fn temp_candidate_names_follow_the_documented_format() {
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("out.typ");
+        let names = temp_candidate_names(dir.path(), &out, 0);
+        assert_eq!(names.len(), MAX_TEMP_CANDIDATES);
+        let pid = std::process::id();
+        assert_eq!(
+            names[0].file_name().unwrap().to_string_lossy(),
+            format!(".scribium.out.typ.{pid}.0.tmp")
+        );
+        assert_eq!(
+            names[1].file_name().unwrap().to_string_lossy(),
+            format!(".scribium.out.typ.{pid}.1.tmp")
+        );
+        assert_eq!(
+            names[names.len() - 1]
+                .file_name()
+                .unwrap()
+                .to_string_lossy(),
+            format!(
+                ".scribium.out.typ.{pid}.{:x}.tmp",
+                MAX_TEMP_CANDIDATES as u64 - 1
+            )
+        );
+        assert!(
+            names
+                .iter()
+                .map(|n| n.to_string_lossy().into_owned())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == names.len()
+        );
+    }
+
+    #[test]
+    fn temp_write_skips_first_candidate_occupied_by_regular_file() {
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("out.typ");
+        let seq = AtomicU64::new(0);
+        let first = temp_candidate_names(dir.path(), &out, 0).remove(0);
+        fs::write(&first, "pre-existing blocker\n").unwrap();
+
+        let result = write_output_atomically_with(&out, b"final output", &seq);
+        assert!(result.is_ok(), "write failed: {:?}", result);
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "pre-existing blocker\n",
+            "a blocker file must never be modified"
+        );
+        assert_eq!(fs::read_to_string(&out).unwrap(), "final output");
+
+        let temps: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| {
+                n.to_string_lossy().starts_with(".scribium.")
+                    && n.to_string_lossy() != first.file_name().unwrap().to_string_lossy()
+            })
+            .collect();
+        assert!(
+            temps.is_empty(),
+            "no temporary files beyond the pre-existing blocker: {:?}",
+            temps
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn temp_write_skips_symlink_first_candidate() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("out.typ");
+        let seq = AtomicU64::new(0);
+        let target = dir.path().join("precious.txt");
+        fs::write(&target, "precious content\n").unwrap();
+        let first = temp_candidate_names(dir.path(), &out, 0).remove(0);
+        symlink(&target, &first).unwrap();
+
+        let result = write_output_atomically_with(&out, b"final output", &seq);
+        assert!(result.is_ok(), "write failed: {:?}", result);
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "precious content\n",
+            "the symlink target must never be modified"
+        );
+        assert!(
+            fs::symlink_metadata(&first)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the colliding symlink must be left in place"
+        );
+        assert_eq!(fs::read_to_string(&out).unwrap(), "final output");
+    }
+
+    #[test]
+    fn temp_write_fails_cleanly_when_all_candidates_conflict() {
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("out.typ");
+        let seq = AtomicU64::new(0);
+        let mut blockers = Vec::new();
+        for (i, path) in temp_candidate_names(dir.path(), &out, 0)
+            .into_iter()
+            .enumerate()
+        {
+            fs::write(&path, format!("blocker {i}\n")).unwrap();
+            blockers.push((i, path));
+        }
+
+        let result = write_output_atomically_with(&out, b"final output", &seq);
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains(&format!(
+                "all {MAX_TEMP_CANDIDATES} candidate names are taken"
+            )),
+            "error was: {}",
+            error
+        );
+        assert!(!out.exists(), "no output may be created");
+        for (i, path) in &blockers {
+            assert_eq!(
+                fs::read_to_string(path).unwrap(),
+                format!("blocker {i}\n"),
+                "blocker files must never be deleted or modified"
+            );
+        }
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), blockers.len());
+    }
+
+    #[test]
+    fn temp_write_leaves_no_artifacts_after_success_and_failure() {
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("out.typ");
+
+        let ok = write_output_atomically(&out, b"ok");
+        assert!(ok.is_ok(), "write failed: {:?}", ok);
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, "i am a file\n").unwrap();
+        let bad = blocker.join("out.typ");
+        assert!(write_output_atomically(&bad, b"x").is_err());
+
+        let temps: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().starts_with(".scribium."))
+            .collect();
+        assert!(temps.is_empty(), "temporary files leaked: {:?}", temps);
     }
 
     #[test]
