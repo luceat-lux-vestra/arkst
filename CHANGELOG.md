@@ -64,12 +64,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the real (canonicalized) parent, and the same-file check runs against
   that resolved path immediately before the atomic write. The input is
   never modified, even for `.`/`..`-containing output paths.
-- Output paths that lexically resolve to the input (e.g. `new/../document.qd`
+- Output paths whose real resolution is the input (e.g. `new/../document.qd`
   or `a/b/../../document.qd` with the intermediate directories missing) are
   now rejected *before* any directory is created, so a rejected build no
-  longer leaves empty `new`/`a`/`a/b` directories behind; the canonicalized
-  same-file check remains the authoritative guard for symlink and hard-link
-  aliases.
+  longer leaves empty `new`/`a`/`a/b` directories behind; the pre-validation
+  resolves the requested path in component order with symlinks interpreted
+  as reached (a `..` after a symlink moves to the symlink target's parent),
+  so distinct targets behind a symlink are accepted and only real aliases
+  are rejected. The canonicalized same-file check remains the authoritative
+  guard for symlink and hard-link aliases.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 

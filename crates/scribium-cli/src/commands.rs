@@ -273,116 +273,84 @@ fn resolve_output_path(out_path: &Path) -> anyhow::Result<PathBuf> {
     Ok(canonical_parent.join(name))
 }
 
-/// Lexically normalizes `path` against `base` without creating anything.
+/// Resolves the effective path of `path` following OS pathname resolution
+/// order, without creating anything.
 ///
-/// `.` components are dropped and `..` pops the previously accumulated
-/// component, so `new/../document.qd` normalizes to `document.qd`. Relative
-/// paths are resolved against `base` so they compare in the same directory
-/// as the (absolute) input path. `..` components that would escape above
-/// the root or a Windows prefix cannot name a real file; `None` is returned
-/// for such paths and the caller falls back to the canonicalized checks.
+/// Components are processed left to right:
 ///
-/// The result is lexical only: symlinks inside `base` are not resolved
-/// here. The caller applies this check before any directory creation, then
-/// relies on the canonicalization and same-file identity checks for the
-/// final word.
-fn lexically_normalized(path: &Path, base: &Path) -> Option<PathBuf> {
-    let mut out = PathBuf::new();
+/// 1. Relative paths start from `base`; absolute paths from their root (and
+///    prefix on Windows).
+/// 2. Whenever the path accumulated so far exists, it is canonicalized, so
+///    a symlink is resolved as soon as it is reached.
+/// 3. A `..` that follows a symlink therefore moves to the symlink target's
+///    parent, never the lexical parent.
+/// 4. Components of a not-yet-existing suffix are tracked in memory; a later
+///    `..` cancels them, and no directory is ever created for them.
+/// 5. A `..` that would escape above the root or a Windows prefix cannot
+///    name a real file; `None` is returned and the caller falls back to the
+///    canonicalized checks.
+///
+/// The result is the path a write would land on when the suffix exists, or
+/// the canonical existing prefix plus the unresolved suffix otherwise. It is
+/// not authoritative: the canonicalized same-file check immediately before
+/// the write remains the final guard.
+fn resolve_effective_output_without_creation(path: &Path, base: &Path) -> Option<PathBuf> {
+    let mut components = path.components();
+    let mut resolved = PathBuf::new();
     if path.is_absolute() {
-        out.push(path.components().next()?);
-        for component in path.components().skip(1) {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    if !out.pop() {
-                        return None;
-                    }
-                }
-                Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                    out.push(component);
-                }
-            }
+        resolved.push(components.next()?);
+        if let Some(next) = components.next() {
+            resolved.push(next);
         }
     } else {
-        out.push(base);
-        for component in path.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    if !out.pop() {
-                        return None;
-                    }
-                }
-                Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                    out.push(component);
+        resolved = base.canonicalize().ok()?;
+    }
+    let mut pending: Vec<std::ffi::OsString> = Vec::new();
+    for component in components {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(name) => {
+                pending.push(name.to_os_string());
+                let candidate = pending_suffix(&resolved, &pending);
+                if let Ok(canonical) = candidate.canonicalize() {
+                    resolved = canonical;
+                    pending.clear();
                 }
             }
+            Component::ParentDir => {
+                if pending.pop().is_none() && !resolved.pop() {
+                    return None;
+                }
+            }
+            Component::Prefix(_) | Component::RootDir => return None,
         }
     }
-    Some(out)
+    Some(pending_suffix(&resolved, &pending))
 }
 
-/// Rejects `out_path` when its lexically normalized form names the input.
+fn pending_suffix(resolved: &Path, pending: &[std::ffi::OsString]) -> PathBuf {
+    let mut out = resolved.to_path_buf();
+    for component in pending {
+        out.push(component);
+    }
+    out
+}
+
+/// Rejects `out_path` when it effectively names the input.
 ///
 /// This early, creation-free check catches output paths whose `.`/`..`
-/// components obviously resolve to the input file — such as
-/// `new/../document.qd` or `a/b/../../document.qd` — before any output
-/// directory is created, so a rejected build never leaves empty
-/// intermediate directories behind. Symlinks inside the output path are
-/// resolved by canonicalizing the longest existing prefix, keeping the
-/// comparison on real filesystem paths. It is not the authoritative check:
-/// the canonicalized-parent same-file check immediately before the write
-/// remains the final guard.
+/// components resolve to the input file — such as `new/../document.qd` or
+/// `a/b/../../document.qd` — before any output directory is created, so a
+/// rejected build never leaves empty intermediate directories behind.
+/// Symlinks are resolved in component order (a `..` after a symlink moves to
+/// the symlink target's parent), so distinct outputs are never rejected as
+/// false positives. It is not the authoritative check: the canonicalized
+/// same-file check immediately before the write remains the final guard.
 fn reject_lexically_colliding_output(input: &Path, out_path: &Path) -> anyhow::Result<()> {
     let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(mut effective) = lexically_normalized(out_path, &base) else {
+    let Some(effective) = resolve_effective_output_without_creation(out_path, &base) else {
         return Ok(());
     };
-
-    // Resolve symlinks in the longest existing prefix of the effective
-    // path, then fold the remaining (non-existent) components lexically.
-    // Nothing is created; this only reads what already exists.
-    enum DroppedComponent {
-        Normal(std::ffi::OsString),
-        Parent,
-    }
-    let mut dropped: Vec<DroppedComponent> = Vec::new();
-    match effective.canonicalize() {
-        Ok(canonical) => effective = canonical,
-        Err(_) => {
-            let mut existing = effective.clone();
-            while existing.canonicalize().is_err() {
-                let last = existing.components().next_back();
-                let last = last.and_then(|c| match c {
-                    Component::Normal(name) => Some(DroppedComponent::Normal(name.to_os_string())),
-                    Component::ParentDir => Some(DroppedComponent::Parent),
-                    _ => None,
-                });
-                let Some(last) = last else { return Ok(()) };
-                dropped.push(last);
-                if !existing.pop() {
-                    return Ok(());
-                }
-            }
-            effective = existing.canonicalize().map_err(|e| {
-                anyhow::anyhow!(
-                    "cannot canonicalize existing output directory '{}': {}",
-                    existing.display(),
-                    e
-                )
-            })?;
-            for component in dropped.iter().rev() {
-                match component {
-                    DroppedComponent::Normal(name) => effective.push(name),
-                    DroppedComponent::Parent => {
-                        if !effective.pop() {
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // The input always exists (it was canonicalized while loading), so its
     // canonical form is the reference the effective output path is compared
@@ -1204,6 +1172,162 @@ mod tests {
         assert!(output.exists(), "expected output {:?} to exist", output);
         let content = fs::read_to_string(&output).unwrap();
         assert!(content.contains("Hello"), "content was: {}", content);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_then_dotdot_to_distinct_output_is_allowed() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        let other = dir.path().join("other").join("subdir");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let input = project.join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+        let link = project.join("link");
+        symlink(dir.path().join("other").join("subdir"), &link).unwrap();
+
+        // `link/..` must move to the symlink target's parent (`other`), not
+        // the lexical parent (`project`), so this output is distinct from
+        // the input and must be allowed.
+        let output = link.join("..").join("document.qd");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        assert!(
+            !project.join("document.typ").exists(),
+            "lexical path must not be touched"
+        );
+        let written = dir.path().join("other").join("document.qd");
+        assert!(
+            written.exists(),
+            "expected output at {:?} (symlink target parent)",
+            written
+        );
+        let content = fs::read_to_string(&written).unwrap();
+        assert!(content.contains("Hello"), "content was: {}", content);
+        let names: Vec<_> = fs::read_dir(dir.path().join("other"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_then_dotdot_to_input_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let other = dir.path().join("other").join("subdir");
+        fs::create_dir_all(&other).unwrap();
+        let input = dir.path().join("other").join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+        let link = project.join("link");
+        symlink(dir.path().join("other").join("subdir"), &link).unwrap();
+
+        // `link/..` resolves to `other`, so the output names the input and
+        // must be rejected before anything is created.
+        let output = link.join("..").join("document.qd");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        let names: Vec<_> = fs::read_dir(dir.path().join("other"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_dotdot_collision_does_not_create_missing_directories() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let other = dir.path().join("other").join("subdir");
+        fs::create_dir_all(&other).unwrap();
+        let input = dir.path().join("other").join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+        let link = project.join("link");
+        symlink(dir.path().join("other").join("subdir"), &link).unwrap();
+
+        // `link` → `other/subdir`; `new` does not exist and is cancelled by
+        // the first `..`, then `..` moves to `other`, which is the input's
+        // directory. The collision must be detected without ever creating
+        // `other/subdir/new`.
+        let missing = other.join("new");
+        assert!(!missing.exists());
+        let output = link.join("new").join("..").join("..").join("document.qd");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+        assert!(!missing.exists(), "`new` must not be created");
+        let names: Vec<_> = fs::read_dir(dir.path().join("other"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.to_string_lossy().starts_with(".scribium.")),
+            "temporary files leaked: {:?}",
+            names
+        );
     }
 
     #[test]

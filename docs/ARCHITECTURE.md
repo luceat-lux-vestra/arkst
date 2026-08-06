@@ -190,12 +190,21 @@ pub fn compile(
   writing; the output path is then resolved against the real (canonicalized)
   parent and the same-file check runs against that resolved path immediately
   before the write, so `.`/`..` components and symlinks in the output path
-  are interpreted after directory creation. Output paths that lexically
-  resolve to the input (e.g. `new/../document.qd` or `a/b/../../document.qd`,
-  even when the intermediate directories do not exist yet) are rejected
-  *before* any directory is created, so a rejected build leaves no empty
-  directories behind; the canonicalized same-file check below remains the
-  authoritative guard for symlink and hard-link aliases. Output is written
+  are interpreted after directory creation. Before that, a side-effect-free
+  pre-validation resolves the requested output path in component order
+  (left to right, starting from the real working directory), canonicalizing
+  the path-so-far whenever it exists so symlinks resolve `as reached` and a
+  `..` after a symlink moves to the symlink target's parent; only the
+  non-existent suffix is kept on an in-memory stack (`..` canceling a
+  non-existent component never creates anything). Output paths whose real
+  resolution is the input (e.g. `new/../document.qd` or
+  `a/b/../../document.qd`, even when the intermediate directories do not
+  exist yet) are rejected *before* any directory is created, so a rejected
+  build leaves no empty directories behind — while distinct targets behind
+  a symlink (e.g. `link/../document.qd` with `link -> ../other/subdir`
+  resolving to `other/document.qd`) are accepted. The canonicalized
+  same-file check below remains the authoritative guard for symlink and
+  hard-link aliases. Output is written
   atomically: the content goes to a uniquely named temporary file in the
   output directory — created exclusively with `create_new(true)`, retrying
   up to 32 candidate names (each includes the PID and an in-process counter)

@@ -54,10 +54,13 @@ scribium build report.md
 > without an extension are rejected). A `.typ` input is rejected until Typst
 > passthrough is implemented. The build refuses to overwrite the input file:
 > an explicit `--output` that resolves to the input — including via
-> `.`/`..` components (rejected before any directory is created, so a
-> rejected build never leaves empty directories behind), symlinks, or hard
-> links — is rejected. Missing output directories (e.g. `out/` for
-> `--output out/main.typ`) are created automatically. Output is written
+> `.`/`..` components (resolved in component order with symlinks
+> interpreted as reached, and rejected before any directory is created, so
+> a rejected build never leaves empty directories behind), symlinks, or
+> hard links — is rejected. Distinct targets behind a symlink (e.g.
+> `link/../document.qd` with `link -> ../other/subdir`) are accepted and
+> written to their real location. Missing output directories (e.g. `out/`
+> for `--output out/main.typ`) are created automatically. Output is written
 > atomically: the content goes to a uniquely named temporary file (created
 > exclusively, retrying up to 32 candidate names) in the output directory
 > and is renamed into place, so
