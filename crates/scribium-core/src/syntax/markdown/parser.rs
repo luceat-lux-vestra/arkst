@@ -36,15 +36,16 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
     }
 
     // Check if first line is opening delimiter `---`
+    // Use raw to reject indented delimiters
     let first = &lines[0];
-    if first.text != "---" {
+    if first.raw != "---" {
         return (None, 0);
     }
 
     // Find closing delimiter
     let mut close_idx = None;
     for (i, line) in lines.iter().enumerate().skip(1) {
-        if line.text == "---" {
+        if line.raw == "---" {
             close_idx = Some(i);
             break;
         }
@@ -69,6 +70,8 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
             let key = text[..colon_pos].trim();
             let value = text[colon_pos + 1..].trim();
             if !key.is_empty() {
+                // last-wins: remove existing entry with same key
+                fields.retain(|(k, _)| k != key);
                 fields.push((key.to_string(), value.to_string()));
             }
         }
@@ -1450,5 +1453,62 @@ mod tests {
         let fm = doc.front_matter.unwrap();
         assert_eq!(fm.fields.len(), 1);
         assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+    }
+
+    #[test]
+    fn indented_front_matter_opening_delimiter_not_recognized() {
+        let doc = parse("  ---\ntitle: Hello\n---\n\n# Heading\n");
+        // Indented opening delimiter is not recognized
+        assert!(doc.front_matter.is_none());
+        // Should be treated as paragraph or thematic break
+        assert!(!doc.nodes.is_empty());
+    }
+
+    #[test]
+    fn indented_front_matter_closing_delimiter_not_recognized() {
+        let doc = parse("---\ntitle: Hello\n  ---\n\n# Heading\n");
+        // Indented closing delimiter is not recognized
+        assert!(doc.front_matter.is_none());
+        // Should be treated as unclosed front matter, so content is parsed as blocks
+        assert!(!doc.nodes.is_empty());
+    }
+
+    #[test]
+    fn malformed_front_matter_line_ignored() {
+        let doc = parse("---\ntitle: Hello\ninvalid line\n---\n\n# Heading\n");
+        // Malformed line (no colon) should be ignored
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+    }
+
+    #[test]
+    fn front_matter_value_with_colon() {
+        let doc = parse("---\ntitle: Hello: World\n---\n\n# Heading\n");
+        // Value can contain colon
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello: World".into()));
+    }
+
+    #[test]
+    fn duplicate_front_matter_key_last_wins() {
+        let doc = parse("---\ntitle: First\ntitle: Second\n---\n\n# Heading\n");
+        // Duplicate key: last-wins
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Second".into()));
+    }
+
+    #[test]
+    fn empty_front_matter() {
+        let doc = parse("---\n---\n\n# Heading\n");
+        // Empty front matter is valid
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 0);
     }
 }

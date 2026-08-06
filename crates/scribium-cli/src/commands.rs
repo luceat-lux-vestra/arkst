@@ -11,11 +11,7 @@ struct LoadedProject {
     project: scribium_core::VirtualProject,
     /// The path as requested by the user (logical path for output naming)
     requested_entry: PathBuf,
-    /// The canonicalized, resolved path (for file reading)
-    #[allow(dead_code)]
-    physical_entry: PathBuf,
 }
-/// Converts an OS-relative path to a VirtualPathBuf.
 fn os_relative_path_to_virtual(path: &Path) -> anyhow::Result<VirtualPathBuf> {
     let mut components = Vec::new();
 
@@ -77,7 +73,6 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     Ok(LoadedProject {
         project,
         requested_entry,
-        physical_entry,
     })
 }
 
@@ -90,7 +85,6 @@ fn compile_project(
     };
     Ok(scribium_core::compile(project, &options))
 }
-
 /// Execute the `build` command: compile input to output format(s).
 pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     let input = Path::new(input);
@@ -103,7 +97,7 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
     if formats.iter().any(|f| f == "typst") {
         let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-        let out_path = loaded.requested_entry.with_extension("qd.typ");
+        let out_path = default_typst_output_path(&loaded.requested_entry);
         fs::write(&out_path, &typst_code)
             .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
         eprintln!("Wrote generated Typst to {}", out_path.display());
@@ -111,6 +105,14 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 
     // TODO: invoke Typst backend for pdf/html/svg/png
     Ok(())
+}
+
+/// Returns the default output path for Typst output.
+/// Appends `.typ` to the requested input path.
+fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
+    let mut out = requested_entry.as_os_str().to_os_string();
+    out.push(".typ");
+    PathBuf::from(out)
 }
 
 /// Execute the `check` command: validate input without producing output.
@@ -204,7 +206,7 @@ mod tests {
         );
 
         // Output should be at link_dir/link.qd.typ (logical path)
-        let expected_output = link_file.with_extension("qd.typ");
+        let expected_output = default_typst_output_path(&link_file);
         assert!(
             expected_output.exists(),
             "output file should exist at logical path: {:?}",
@@ -220,7 +222,7 @@ mod tests {
         );
         assert!(content.contains("= Hello"), "content was: {}", content);
         // Ensure no output at external/real.qd.typ
-        let unexpected_output = real_file.with_extension("qd.typ");
+        let unexpected_output = default_typst_output_path(&real_file);
         assert!(
             !unexpected_output.exists(),
             "output should not be at resolved path: {:?}",
