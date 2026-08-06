@@ -178,13 +178,23 @@ pub fn compile(
 - Malformed front matter blocks (indented delimiters, indented keys, lines
   without colons, empty keys) are rejected and treated as regular Markdown
 - Supported CLI inputs are `.qd`, `.scrib`, `.md`; `.typ` is rejected until
-  Typst passthrough is implemented
+  Typst passthrough is implemented. Extension matching is ASCII
+  case-insensitive; files without an extension are rejected.
 - Typst default output path replaces file extension with `.typ`; the build
   refuses to write an output that resolves to the same file as the input.
   Existing outputs are compared by file identity (device/inode on Unix, file
   index on Windows), so symlink and hard-link aliases of the input are also
   rejected; non-existent outputs are compared by canonicalized parent plus
   normalized file name. The check is repeated immediately before writing.
+- Missing output parent directories are created (`create_dir_all`) before
+  writing. Output is written atomically: a temporary file in the output
+  directory receives the full content, is flushed and synced, then renamed
+  over the output path; on failure the temporary file is removed and any
+  previous output is left untouched. On Unix the replacement is `rename(2)`
+  (a symlink at the output path is replaced, not followed); on Windows it
+  uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`, whose symlink
+  replacement semantics differ — the output is verified not to alias the
+  input source file before writing on both platforms.
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).

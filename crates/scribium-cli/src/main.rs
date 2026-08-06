@@ -42,7 +42,7 @@ enum Commands {
     },
     /// Show intermediate representation(s)
     Inspect {
-        /// Input file
+        /// Input Scribium or Markdown file
         input: String,
         /// What to emit: ast, semantic, ir, typst, source-map
         #[arg(long, default_value = "typst")]

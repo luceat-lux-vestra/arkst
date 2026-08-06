@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hard and soft line breaks previously reached the IR with a synthesized
   `0..0` source span; they now carry the actual break position (byte
   offsets), matching the span policy of every other inline node.
+- Output is written atomically: the content goes to a temporary file in the
+  output directory, is flushed and synced, and is then renamed over the
+  output path. A failed build no longer leaves a partial output file or a
+  stray temporary file, and an existing output is replaced without ever
+  being truncated in place. (On Unix the rename is `rename(2)`; on Windows
+  it uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`.)
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 
@@ -51,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
   rejected as an unsupported format until Typst passthrough is implemented.
+  Extension matching is ASCII case-insensitive, and files without an
+  extension are rejected.
+- `build --output` now creates missing output parent directories (single- or
+  multi-level) instead of failing when they do not exist.
+- Source ID allocation in `SourceStore` no longer wraps: `u32::MAX` is never
+  assigned, and exhaustion is reported as `SourceStoreError::SourceIdExhausted`
+  before any store mutation.
 - Front matter is documented as a flat line-based `key: value` format, not
   full YAML: nested objects, arrays, and block strings are not supported.
   Keys split on the first colon; delimiters and metadata lines must start at

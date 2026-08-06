@@ -1,6 +1,8 @@
 use anyhow::Context;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use tempfile::NamedTempFile;
 
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
@@ -49,21 +51,31 @@ fn logical_project_root(requested_entry: &Path) -> PathBuf {
 
 /// Supported input extensions. Typst passthrough (`.typ`) is not implemented
 /// yet, so it is deliberately excluded and rejected at the CLI boundary.
+/// Extension matching is ASCII case-insensitive (`.QD` is accepted).
 const SUPPORTED_INPUT_EXTENSIONS: [&str; 3] = ["qd", "scrib", "md"];
 
 /// Validates that `input` has a supported source extension.
+///
+/// Files without an extension are rejected, as are extensions outside
+/// `.qd`/`.scrib`/`.md`. Matching is ASCII case-insensitive.
 fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
     let ext = input
         .extension()
         .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
         .unwrap_or_default();
-    if SUPPORTED_INPUT_EXTENSIONS.contains(&ext) {
+    if SUPPORTED_INPUT_EXTENSIONS.contains(&ext.as_str()) {
         Ok(())
+    } else if ext.is_empty() {
+        anyhow::bail!(
+            "missing input extension '{}' (supported: qd, scrib, md)",
+            input.display()
+        );
     } else {
         anyhow::bail!(
-            "unsupported input format: '{}' (supported: .qd, .scrib, .md)",
-            input.display()
-        )
+            "unsupported input extension '.{}' (supported: qd, scrib, md)",
+            ext
+        );
     }
 }
 
@@ -193,8 +205,7 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
     ensure_distinct_output(&loaded.requested_entry, &out_path)?;
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    fs::write(&out_path, &typst_code)
-        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
+    write_output_atomically(&out_path, typst_code.as_bytes())?;
     eprintln!("Wrote generated Typst to {}", out_path.display());
 
     // TODO: invoke Typst backend for pdf/html/svg/png
@@ -205,6 +216,61 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
 /// Replaces the extension with `.typ`.
 fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
     requested_entry.with_extension("typ")
+}
+
+/// Creates the parent directories of `out_path` when they do not exist.
+///
+/// A bare file name has no parent and needs no creation. Any component that
+/// exists as a regular file makes the operation fail with a clear error.
+fn create_output_dirs(out_path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create output directory {}", parent.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes `content` to `out_path` without leaving partial output behind.
+///
+/// The content is written to a temporary file inside the output directory,
+/// flushed and synced, then renamed over the output path. On failure the
+/// temporary file is removed and any previous output is left untouched.
+/// Output parent directories are created first.
+///
+/// Platform note: on Unix the replacement is `rename(2)`, which atomically
+/// replaces the destination entry (a symlink at the output path is replaced,
+/// not followed). On Windows the replace uses `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING`; replacement semantics can differ for
+/// symlinks, but the output was already verified not to alias the input
+/// source file before this function is called.
+fn write_output_atomically(out_path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    create_output_dirs(out_path)?;
+
+    let parent = out_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    let mut tmp = NamedTempFile::new_in(parent).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot create temporary file in {}: {}",
+            parent.display(),
+            e
+        )
+    })?;
+    tmp.write_all(content)
+        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
+    tmp.flush()
+        .map_err(|e| anyhow::anyhow!("cannot flush {}: {}", out_path.display(), e))?;
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| anyhow::anyhow!("cannot sync {}: {}", out_path.display(), e))?;
+
+    tmp.persist(out_path)
+        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e.error))?;
+    Ok(())
 }
 
 /// Bails when `output` refers to the same file as `input`.
@@ -576,15 +642,103 @@ mod tests {
         let input = dir.path().join("document.typ");
         fs::write(&input, "# Hello\n").unwrap();
 
+        // `--output` must not matter: the extension is rejected before any
+        // output path is considered.
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&input.with_extension("out.typ")),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("unsupported input extension '.typ'"),
+            "error was: {}",
+            error
+        );
+        assert!(error.contains("qd, scrib, md"), "error was: {}", error);
+    }
+
+    #[test]
+    fn unknown_extension_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.txt");
+        fs::write(&input, "# Hello\n").unwrap();
+
         let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
         assert!(
-            error.contains("unsupported input format"),
+            error.contains("unsupported input extension '.txt'"),
             "error was: {}",
             error
         );
-        assert!(error.contains(".qd, .scrib, .md"), "error was: {}", error);
+    }
+
+    #[test]
+    fn extensionless_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("missing input extension"),
+            "error was: {}",
+            error
+        );
+        assert!(error.contains("qd, scrib, md"), "error was: {}", error);
+    }
+
+    #[test]
+    fn all_supported_extensions_are_accepted() {
+        for ext in ["qd", "scrib", "md"] {
+            let dir = tempdir().unwrap();
+            let input = dir.path().join(format!("document.{ext}"));
+            fs::write(&input, "# Hello\n").unwrap();
+
+            let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+            assert!(result.is_ok(), "extension .{ext} failed: {:?}", result);
+
+            let expected = dir.path().join("document.typ");
+            assert!(expected.exists(), ".{ext} output was not written");
+        }
+    }
+
+    #[test]
+    fn case_insensitive_extension_is_accepted() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("DOCUMENT.QD");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert!(dir.path().join("DOCUMENT.typ").exists());
+    }
+
+    #[test]
+    fn check_and_inspect_apply_the_same_extension_policy() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.typ");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let check_err = check(&input.to_string_lossy()).unwrap_err().to_string();
+        assert!(
+            check_err.contains("unsupported input extension"),
+            "{}",
+            check_err
+        );
+
+        let inspect_err = inspect(&input.to_string_lossy(), "typst")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            inspect_err.contains("unsupported input extension"),
+            "{}",
+            inspect_err
+        );
     }
 
     #[test]
@@ -744,5 +898,147 @@ mod tests {
         );
         assert!(result.is_ok(), "Build failed: {:?}", result);
         assert!(output.exists(), "expected output {:?} to exist", output);
+    }
+
+    #[test]
+    fn single_level_output_directory_is_created() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let out_dir = dir.path().join("out");
+        let output = out_dir.join("main.typ");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert!(output.exists(), "expected output {:?} to exist", output);
+    }
+
+    #[test]
+    fn multilevel_output_directory_is_created() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let output = dir.path().join("a").join("b").join("c").join("main.typ");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert!(output.exists(), "expected output {:?} to exist", output);
+    }
+
+    #[test]
+    fn output_parent_that_is_a_file_fails_without_touching_input() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // `blocker` exists as a regular file, so it cannot be a parent directory.
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, "i am a file\n").unwrap();
+        let output = blocker.join("out.typ");
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("cannot create output directory"),
+            "{}",
+            error
+        );
+
+        // No partial output file and no stray temporary files are left behind.
+        assert!(!output.exists());
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "leftover files: {:?}", names);
+        assert!(names.contains(&"blocker".into()));
+        assert!(names.contains(&"document.qd".into()));
+
+        assert_eq!(fs::read(&input).unwrap(), before, "input must be unchanged");
+    }
+
+    #[test]
+    fn existing_output_is_atomically_replaced_without_leftovers() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let output = dir.path().join("out.typ");
+        fs::write(&output, "stale content\n").unwrap();
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+
+        let content = fs::read_to_string(&output).unwrap();
+        assert!(
+            !content.contains("stale content"),
+            "stale output content survived replacement"
+        );
+        assert!(content.contains("Hello"), "content was: {}", content);
+
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "temporary files leaked: {:?}", names);
+    }
+
+    #[test]
+    fn write_output_atomically_rejects_failure_without_partial_file() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, "i am a file\n").unwrap();
+
+        let out = blocker.join("out.typ");
+        let result = write_output_atomically(&out, b"content");
+        assert!(result.is_err());
+        assert!(!out.exists());
+        assert!(!blocker.is_dir());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn case_variant_output_path_is_rejected_on_windows() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // Windows filesystems are case-insensitive: `DOCUMENT.qd` and
+        // `document.qd` name the same file.
+        let variant = dir.path().join("DOCUMENT.qd");
+        assert!(same_file_paths(&input, &variant));
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&variant),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "{}",
+            error
+        );
+        assert_eq!(fs::read(&input).unwrap(), before);
     }
 }

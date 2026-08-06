@@ -56,17 +56,21 @@ impl SourceStore {
     }
 
     /// Allocates a new SourceId.
+    ///
+    /// Returns `SourceIdExhausted` once the ID space is used up, before any
+    /// storage is modified: `u32::MAX` is never assigned and the ID-backed
+    /// index is never grown to an impossible size.
     fn allocate_id(&mut self) -> Result<SourceId, SourceStoreError> {
-        if self.next_id == 0 {
-            return Err(SourceStoreError::SourceIdExhausted);
-        }
         let id = SourceId(self.next_id);
-        self.next_id = self.next_id.wrapping_add(1);
-
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(SourceStoreError::SourceIdExhausted)?;
         // Ensure by_id vec has space
         while self.by_id.len() <= id.0 as usize {
             self.by_id.push(None);
         }
+
         Ok(id)
     }
 
@@ -353,6 +357,32 @@ mod tests {
         // Get by ID - should be O(1) via Vec
         let source = store.get_by_id(id).unwrap();
         assert_eq!(source, "content 50");
+    }
+
+    #[test]
+    fn source_id_exhaustion_is_detected_before_any_growth() {
+        let mut store = SourceStore::new();
+        let path = VirtualPathBuf::parse("a.qd").unwrap();
+        let id = store.insert(path.clone(), "content".to_string()).unwrap();
+
+        // Drive the counter to the boundary of the ID space. `u32::MAX` itself
+        // must never be assigned: the next allocation has to fail cleanly.
+        store.next_id = u32::MAX;
+
+        let paths_before = store.by_path.clone();
+        let ids_len_before = store.by_id.len();
+
+        let other = VirtualPathBuf::parse("b.qd").unwrap();
+        let err = store.insert(other, "more".to_string()).unwrap_err();
+        assert_eq!(err, SourceStoreError::SourceIdExhausted);
+
+        // Neither index changed and no large vector expansion happened.
+        assert_eq!(store.by_path, paths_before);
+        assert_eq!(store.by_id.len(), ids_len_before);
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.get(&path), Some("content"));
+        assert_eq!(store.get_id(&path), Some(id));
+        assert_eq!(store.path_by_id(id), Some(&path));
     }
 
     #[test]

@@ -50,11 +50,17 @@ scribium inspect examples/hello/main.qd --emit typst
 scribium build report.md
 ```
 
-> Supported inputs are `.qd`, `.scrib`, and `.md`; a `.typ` input is rejected
-> until Typst passthrough is implemented. The build refuses to overwrite the
-> input file: an explicit `--output` that resolves to the input — including via
-> `.`/`..`, symlinks, or hard links — is rejected. PDF/HTML/SVG/PNG backends
-> are not implemented yet; requesting them fails with a clear error.
+> Supported inputs are `.qd`, `.scrib`, and `.md` (case-insensitive; files
+> without an extension are rejected). A `.typ` input is rejected until Typst
+> passthrough is implemented. The build refuses to overwrite the input file:
+> an explicit `--output` that resolves to the input — including via
+> `.`/`..`, symlinks, or hard links — is rejected. Missing output
+> directories (e.g. `out/` for `--output out/main.typ`) are created
+> automatically. Output is written atomically: the content goes to a
+> temporary file in the output directory and is renamed into place, so a
+> failed build never leaves a partial output file. PDF/HTML/SVG/PNG
+> backends are not implemented yet; requesting them fails with a clear
+> error.
 
 ## Example (.qd)
 
