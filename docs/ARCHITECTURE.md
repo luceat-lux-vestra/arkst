@@ -176,6 +176,21 @@ The native CLI adapter resolves OS paths (canonicalization, symlink resolution)
 and maps them into project-relative `VirtualPathBuf` values.
 Symlink handling is a CLI adapter responsibility; the core only sees virtual paths.
 
+### Symlink Security Boundary
+
+The CLI adapter enforces a strict symlink containment policy:
+
+* **Logical project root**: Derived from the user-provided input path (before canonicalization).
+* **Physical project root**: Canonicalized logical project root.
+* **Symlink containment check**: Before reading a file, the CLI canonicalizes the input path and verifies it lies within the canonicalized physical project root. If a symlink points outside the project root, the operation fails with a clear error message.
+* **Output path**: Computed from the user-provided logical path, preserving the original filename and directory structure. Symlinks do not affect output location.
+
+This design ensures:
+
+* A WASM frontend (which has no filesystem access) is inherently immune to symlink escape attacks.
+* Native CLI users are protected from accidental or malicious symlink escapes.
+* The `VirtualProject` abstraction remains purely logical, with no OS path leakage.
+
 ### Synchronous Core, Async Host
 
 Core compilation is synchronous. Host loads dependencies asynchronously.

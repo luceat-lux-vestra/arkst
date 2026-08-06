@@ -25,6 +25,20 @@ const MAX_BLOCK_DEPTH: usize = 64;
 
 /// Maximum inline-nesting depth before delimiters are treated as literal text.
 const MAX_INLINE_DEPTH: usize = 64;
+/// Result of parsing a front matter candidate block.
+#[allow(dead_code)]
+enum FrontMatterParse {
+    /// No front matter candidate found.
+    Absent,
+    /// Valid front matter with fields.
+    Valid {
+        fields: Vec<(String, String)>,
+        span: ByteSpan,
+        consumed_lines: usize,
+    },
+    /// Malformed front matter block - should be treated as regular Markdown.
+    Invalid,
+}
 
 /// Parse YAML front matter at document start.
 ///
@@ -59,7 +73,7 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
         }
     };
 
-    // Parse fields between delimiters
+    // Parse fields between delimiters, checking for malformed lines
     let mut fields = Vec::new();
     for line in &lines[1..close_idx] {
         let text = line.text;
@@ -69,11 +83,16 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
         if let Some(colon_pos) = text.find(':') {
             let key = text[..colon_pos].trim();
             let value = text[colon_pos + 1..].trim();
-            if !key.is_empty() {
-                // last-wins: remove existing entry with same key
-                fields.retain(|(k, _)| k != key);
-                fields.push((key.to_string(), value.to_string()));
+            if key.is_empty() {
+                // Empty key - malformed, treat entire block as invalid
+                return (None, 0);
             }
+            // last-wins: remove existing entry with same key
+            fields.retain(|(k, _)| k != key);
+            fields.push((key.to_string(), value.to_string()));
+        } else {
+            // Line without colon - malformed, treat entire block as invalid
+            return (None, 0);
         }
     }
 
@@ -1474,13 +1493,41 @@ mod tests {
     }
 
     #[test]
-    fn malformed_front_matter_line_ignored() {
+    fn malformed_front_matter_line_rejects_block() {
         let doc = parse("---\ntitle: Hello\ninvalid line\n---\n\n# Heading\n");
-        // Malformed line (no colon) should be ignored
-        assert!(doc.front_matter.is_some());
-        let fm = doc.front_matter.unwrap();
-        assert_eq!(fm.fields.len(), 1);
-        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+        // Malformed line (no colon) causes entire front matter block to be rejected
+        // Content is parsed as regular Markdown
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        // The heading should be parsed
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn empty_key_in_front_matter_rejects_block() {
+        let doc = parse("---\n: value\n---\n\n# Heading\n");
+        // Empty key causes entire block to be rejected
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn malformed_line_before_valid_field_rejects_block() {
+        let doc = parse("---\ninvalid line\ntitle: Hello\n---\n\n# Heading\n");
+        // Malformed line before valid field still rejects entire block
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn partial_front_matter_no_partial_result() {
+        let doc = parse("---\ntitle: Hello\ninvalid line\n---\n\n# Heading\n");
+        // No partial metadata should be generated
+        assert!(doc.front_matter.is_none());
+        // But content should be parsed
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
     }
 
     #[test]

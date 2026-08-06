@@ -2,7 +2,6 @@ use anyhow::Context;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use scribium_core::diagnostics::Severity;
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
 
@@ -42,8 +41,8 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
         .canonicalize()
         .with_context(|| format!("cannot resolve {}", input.display()))?;
 
-    // Project root is based on requested path (to handle symlinks correctly)
-    let project_root = requested_entry
+    // Project root is based on requested path (logical root)
+    let logical_project_root = requested_entry
         .parent()
         .ok_or_else(|| {
             anyhow::anyhow!(
@@ -53,13 +52,33 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
         })?
         .to_path_buf();
 
-    // Compute logical virtual entry from requested path (not canonicalized)
-    let requested_relative = requested_entry.strip_prefix(&project_root).map_err(|_| {
-        anyhow::anyhow!(
-            "input is outside project root: {}",
-            requested_entry.display()
+    // Canonicalized project root for symlink containment check
+    let canonical_project_root = logical_project_root.canonicalize().with_context(|| {
+        format!(
+            "cannot resolve project root {}",
+            logical_project_root.display()
         )
     })?;
+
+    // Verify the physical entry is within the canonical project root (symlink escape check)
+    if !physical_entry.starts_with(&canonical_project_root) {
+        return Err(anyhow::anyhow!(
+            "input file '{}' resolves to '{}' which is outside project root '{}' (symlink escape)",
+            requested_entry.display(),
+            physical_entry.display(),
+            canonical_project_root.display()
+        ));
+    }
+
+    // Compute logical virtual entry from requested path (not canonicalized)
+    let requested_relative = requested_entry
+        .strip_prefix(&logical_project_root)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "input is outside project root: {}",
+                requested_entry.display()
+            )
+        })?;
     let virtual_entry = os_relative_path_to_virtual(requested_relative)?;
 
     let source = fs::read_to_string(&physical_entry)
@@ -85,6 +104,18 @@ fn compile_project(
     };
     Ok(scribium_core::compile(project, &options))
 }
+/// Returns an error if any diagnostic has Severity::Error.
+fn ensure_no_errors(diagnostics: &[scribium_core::Diagnostic]) -> anyhow::Result<()> {
+    let error_count = diagnostics
+        .iter()
+        .filter(|d| matches!(&d.severity, scribium_core::Severity::Error))
+        .count();
+    if error_count > 0 {
+        anyhow::bail!("found {} error(s)", error_count);
+    }
+    Ok(())
+}
+
 /// Execute the `build` command: compile input to output format(s).
 pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     let input = Path::new(input);
@@ -94,6 +125,9 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
     }
+
+    // Fail on error diagnostics before writing output
+    ensure_no_errors(&result.diagnostics)?;
 
     if formats.iter().any(|f| f == "typst") {
         let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
@@ -108,11 +142,9 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 }
 
 /// Returns the default output path for Typst output.
-/// Appends `.typ` to the requested input path.
+/// Replaces the extension with `.typ`.
 fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
-    let mut out = requested_entry.as_os_str().to_os_string();
-    out.push(".typ");
-    PathBuf::from(out)
+    requested_entry.with_extension("typ")
 }
 
 /// Execute the `check` command: validate input without producing output.
@@ -121,19 +153,11 @@ pub fn check(input: &str) -> anyhow::Result<()> {
     let loaded = load_single_file_project(input)?;
     let result = compile_project(&loaded.project)?;
 
-    let error_count = result
-        .diagnostics
-        .iter()
-        .filter(|d| matches!(&d.severity, Severity::Error))
-        .count();
-
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
     }
 
-    if error_count > 0 {
-        anyhow::bail!("found {} error(s)", error_count);
-    }
+    ensure_no_errors(&result.diagnostics)?;
 
     Ok(())
 }
@@ -143,6 +167,9 @@ pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
     let input = Path::new(input);
     let loaded = load_single_file_project(input)?;
     let result = compile_project(&loaded.project)?;
+
+    // Fail on error diagnostics
+    ensure_no_errors(&result.diagnostics)?;
 
     match emit {
         "typst" => {
@@ -174,20 +201,20 @@ mod tests {
         use std::os::unix::fs::symlink;
         let dir = tempdir().unwrap();
         let link_dir = dir.path().join("link_dir");
-        let external_dir = dir.path().join("external");
         fs::create_dir(&link_dir).unwrap();
-        fs::create_dir(&external_dir).unwrap();
 
-        // Create real file
-        let real_file = external_dir.join("real.qd");
+        // Create real file inside project root
+        let real_file = link_dir.join("real.qd");
         fs::write(&real_file, "---\ntitle: Symlink Test\n---\n\n# Hello\n").unwrap();
 
-        // Create symlink
+        // Create symlink inside project root pointing to file inside project root
         let link_file = link_dir.join("link.qd");
         symlink(&real_file, &link_file).unwrap();
+
         // Build through CLI using the symlink path
         let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
         assert!(result.is_ok(), "Build failed: {:?}", result);
+
         // Verify VirtualProject entry is logical path
         let loaded = load_single_file_project(&link_file).unwrap();
         assert_eq!(loaded.project.entry().as_str(), "link.qd");
@@ -205,7 +232,7 @@ mod tests {
             entry
         );
 
-        // Output should be at link_dir/link.qd.typ (logical path)
+        // Output should be at link_dir/link.typ (logical path)
         let expected_output = default_typst_output_path(&link_file);
         assert!(
             expected_output.exists(),
@@ -221,12 +248,106 @@ mod tests {
             content
         );
         assert!(content.contains("= Hello"), "content was: {}", content);
-        // Ensure no output at external/real.qd.typ
-        let unexpected_output = default_typst_output_path(&real_file);
-        assert!(
-            !unexpected_output.exists(),
-            "output should not be at resolved path: {:?}",
-            unexpected_output
-        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_outside_project_root_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let link_dir = dir.path().join("link_dir");
+        let external_dir = dir.path().join("external");
+        fs::create_dir(&link_dir).unwrap();
+        fs::create_dir(&external_dir).unwrap();
+
+        // Create real file outside project root
+        let real_file = external_dir.join("real.qd");
+        fs::write(&real_file, "---\ntitle: Symlink Test\n---\n\n# Hello\n").unwrap();
+
+        // Create symlink inside project root pointing outside
+        let link_file = link_dir.join("link.qd");
+        symlink(&real_file, &link_file).unwrap();
+
+        // Build through CLI using the symlink path - should fail
+        let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("symlink escape"));
+        assert!(error.contains("outside project root"));
+
+        // Ensure no output file was created
+        let unexpected_output = default_typst_output_path(&link_file);
+        assert!(!unexpected_output.exists());
+    }
+
+    #[test]
+    fn output_path_qd_extension() {
+        let input = Path::new("document.qd");
+        let out = default_typst_output_path(input);
+        assert_eq!(out.to_str(), Some("document.typ"));
+    }
+
+    #[test]
+    fn output_path_no_extension() {
+        let input = Path::new("document");
+        let out = default_typst_output_path(input);
+        assert_eq!(out.to_str(), Some("document.typ"));
+    }
+
+    #[test]
+    fn output_path_multiple_dots() {
+        let input = Path::new("chapter.en.qd");
+        let out = default_typst_output_path(input);
+        assert_eq!(out.to_str(), Some("chapter.en.typ"));
+    }
+
+    #[test]
+    fn output_path_hidden_file() {
+        let input = Path::new(".hidden");
+        let out = default_typst_output_path(input);
+        assert_eq!(out.to_str(), Some(".hidden.typ"));
+    }
+
+    #[test]
+    fn output_path_subdirectory() {
+        let input = Path::new("src/main.qd");
+        let out = default_typst_output_path(input);
+        assert_eq!(out.to_str(), Some("src/main.typ"));
+    }
+    #[test]
+    fn ensure_no_errors_fails_on_error() {
+        let diagnostics = vec![scribium_core::Diagnostic {
+            code: "E0001".to_string(),
+            severity: scribium_core::Severity::Error,
+            message: "Test error".to_string(),
+            primary: None,
+            secondary: vec![],
+            hints: vec![],
+        }];
+        let result = ensure_no_errors(&diagnostics);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("1 error"));
+    }
+
+    #[test]
+    fn ensure_no_errors_passes_on_warning() {
+        let diagnostics = vec![scribium_core::Diagnostic {
+            code: "W0001".to_string(),
+            severity: scribium_core::Severity::Warning,
+            message: "Test warning".to_string(),
+            primary: None,
+            secondary: vec![],
+            hints: vec![],
+        }];
+        let result = ensure_no_errors(&diagnostics);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn ensure_no_errors_passes_on_empty() {
+        let diagnostics: Vec<scribium_core::Diagnostic> = vec![];
+        let result = ensure_no_errors(&diagnostics);
+        assert!(result.is_ok());
     }
 }
