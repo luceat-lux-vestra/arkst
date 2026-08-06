@@ -40,7 +40,12 @@ enum FrontMatterParse {
     Invalid,
 }
 
-/// Parse YAML front matter at document start.
+/// Parse flat key-value front matter at document start.
+///
+/// Front matter is a `---`-delimited block of `key: value` lines only. It is
+/// not full YAML: nested objects, arrays, block strings, and other YAML
+/// features are not supported. Keys and values are split on the first colon;
+/// duplicate keys use last-wins semantics.
 ///
 /// Returns `(front_matter, lines_consumed)`. If no valid front matter is found
 /// at the start, returns `(None, 0)` and the caller should start parsing from line 0.

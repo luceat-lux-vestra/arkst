@@ -32,6 +32,10 @@ Core uses `VirtualProject` for all I/O — no filesystem access.
 Acceptance: dot-prefixed calls, positional/named/body arguments, basic conditional,
 front matter, deterministic output.
 
+> **Front Matter scope:** currently a flat line-based `key: value` format only.
+> Nested objects, arrays, and block strings (full YAML) are deferred to a later
+> milestone and tracked separately.
+
 ## M2 — Quarkdown Core Language + Markdown MVP
 
 **Objective:** Production-ready Quarkdown core subset and Markdown baseline.

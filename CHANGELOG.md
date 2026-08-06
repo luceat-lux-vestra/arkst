@@ -28,6 +28,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI commands: `build`, `check`, `inspect`.
 - Typst backend trait (`TypstBackend`) with `SubprocessBackend` adapter skeleton.
 - Typst lowering skeleton (`lower_to_typst`).
+- `build` accepts a bare file name (`scribium build document.qd`), resolving
+  its project root to the current directory.
+- `build --output <path>` to override the generated output path.
+
+### Fixed
+
+- `build` never overwrites the input source file: an input whose computed
+  output path equals the input (e.g. `.typ` input, or `--output` equal to the
+  input) is rejected with a clear error. Rejected builds leave the input
+  byte-for-byte unchanged.
+- Console test targets build on Windows (unused-import warnings only surfaced
+  on non-unix platforms).
+
+### Changed
+
+- Front matter is documented as a flat line-based `key: value` format, not
+  full YAML: nested objects, arrays, and block strings are not supported.
+  Keys split on the first colon; duplicate keys use last-wins semantics;
+  user-defined metadata is stored in the IR in deterministic order.
+- Windows CI previously failed to compile the `scribium` test binary due to
+  unused imports on Windows-only configurations; this is resolved.
 
 ### Changed
 

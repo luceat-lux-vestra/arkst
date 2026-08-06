@@ -9,6 +9,7 @@
 mod commands;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -28,8 +29,11 @@ enum Commands {
         /// Input file (.qd, .scrib, .md, .typ)
         input: String,
         /// Output format(s): pdf, html, svg, png, typst
-        #[arg(short, long, default_value = "pdf")]
+        #[arg(short, long, default_value = "typst")]
         format: Vec<String>,
+        /// Output file path (defaults to input with a `.typ` extension)
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// Validate input without producing output
     Check {
@@ -51,7 +55,11 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Build { input, format } => commands::build(&input, &format),
+        Commands::Build {
+            input,
+            format,
+            output,
+        } => commands::build(&input, &format, output.as_deref()),
         Commands::Check { input } => commands::check(&input),
         Commands::Inspect { input, emit } => commands::inspect(&input, &emit),
     }

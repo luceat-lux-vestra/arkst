@@ -7,13 +7,18 @@ use crate::source::ByteSpan;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub nodes: Vec<Block>,
-    /// Parsed YAML front matter, if present (typically `---`-delimited).
+    /// Parsed front matter, if present (typically `---`-delimited).
+    /// Flat `key: value` entries only; not full YAML.
     pub front_matter: Option<FrontMatter>,
     /// Number of lines in the source document.
     pub line_count: usize,
 }
 
-/// YAML front matter block at the start of a document.
+/// Flat key-value front matter block at the start of a document.
+///
+/// Supports only `key: value` lines (split on the first colon). Nested
+/// objects, arrays, and block strings are not supported. Duplicate keys
+/// use last-wins semantics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontMatter {
     pub fields: Vec<(String, String)>,
@@ -60,7 +65,7 @@ pub enum Block {
         body: Option<Box<Block>>,
         span: ByteSpan,
     },
-    /// Metadata block (YAML front matter embedded inline).
+    /// Metadata block (flat key-value front matter embedded inline).
     Metadata {
         fields: Vec<(String, String)>,
         span: ByteSpan,

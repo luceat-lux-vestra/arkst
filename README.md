@@ -34,8 +34,11 @@ black-box behavior. No Quarkdown source code is copied or translated.
 ## Quickstart
 
 ```bash
-# Build a Quarkdown document to PDF
+# Build a document to generated Typst source (document.qd → document.typ)
 scribium build examples/hello/main.qd
+
+# Override the output path
+scribium build examples/hello/main.qd --output out/main.typ
 
 # Check for errors without compiling
 scribium check examples/hello/main.qd
@@ -43,10 +46,14 @@ scribium check examples/hello/main.qd
 # Inspect intermediate representations
 scribium inspect examples/hello/main.qd --emit typst
 
-# Build any supported input format
+# Build a Markdown input (report.md → report.typ)
 scribium build report.md
-scribium build report.typ
 ```
+
+> The build refuses to overwrite the input file: an input with a `.typ`
+> extension, or an explicit `--output` equal to the input path, is rejected.
+> PDF/HTML/SVG/PNG backends are not implemented yet; requesting them fails
+> with a clear error.
 
 ## Example (.qd)
 
@@ -66,6 +73,25 @@ This is a @strong[Quarkdown-compatible] document compiled through Typst to PDF.
   @col[Left]
   @col[Right]
 ]
+```
+
+## Front matter
+
+A `---`-delimited block at the start of a document provides metadata
+(`title`, `author`, `date`, and custom keys). The supported format is a
+flat line-based `key: value` form, **not full YAML**:
+
+- Keys and values are split on the first colon.
+- Nested objects, arrays, and block strings are **not** supported.
+- Duplicate keys: last occurrence wins.
+- Custom metadata is stored in the IR in a deterministic (lexicographic) order.
+
+```markdown
+---
+title: My Document
+author: Alice
+---
+# Heading
 ```
 
 ## Current Status

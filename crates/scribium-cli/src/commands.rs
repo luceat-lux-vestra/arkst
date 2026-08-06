@@ -32,6 +32,21 @@ fn os_relative_path_to_virtual(path: &Path) -> anyhow::Result<VirtualPathBuf> {
 
     VirtualPathBuf::parse(components.join("/")).map_err(Into::into)
 }
+
+/// Returns the logical project root for an input path.
+///
+/// The project root is the parent directory of the requested entry. When the
+/// request is a bare file name (e.g. `document.qd`) the parent is empty, and
+/// the current directory `"."` is used instead. Returned for relative and
+/// absolute paths alike; the caller decides how to resolve it.
+fn logical_project_root(requested_entry: &Path) -> PathBuf {
+    requested_entry
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
 /// Loads a single file as a VirtualProject.
 fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     // Store the user-requested path for output naming
@@ -42,15 +57,7 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
         .with_context(|| format!("cannot resolve {}", input.display()))?;
 
     // Project root is based on requested path (logical root)
-    let logical_project_root = requested_entry
-        .parent()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "input has no parent directory: {}",
-                requested_entry.display()
-            )
-        })?
-        .to_path_buf();
+    let logical_project_root = logical_project_root(&requested_entry);
 
     // Canonicalized project root for symlink containment check
     let canonical_project_root = logical_project_root.canonicalize().with_context(|| {
@@ -71,15 +78,28 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     }
 
     // Compute logical virtual entry from requested path (not canonicalized)
-    let requested_relative = requested_entry
-        .strip_prefix(&logical_project_root)
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "input is outside project root: {}",
-                requested_entry.display()
-            )
-        })?;
-    let virtual_entry = os_relative_path_to_virtual(requested_relative)?;
+    let requested_relative = if requested_entry
+        .parent()
+        .map(|parent| parent.as_os_str().is_empty())
+        .unwrap_or(false)
+    {
+        // Bare file name: the logical root is "." which has no path components,
+        // so strip_prefix would fail. Use the file name directly.
+        PathBuf::from(requested_entry.file_name().ok_or_else(|| {
+            anyhow::anyhow!("input has no file name: {}", requested_entry.display())
+        })?)
+    } else {
+        requested_entry
+            .strip_prefix(&logical_project_root)
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "input is outside project root: {}",
+                    requested_entry.display()
+                )
+            })?
+            .to_path_buf()
+    };
+    let virtual_entry = os_relative_path_to_virtual(&requested_relative)?;
 
     let source = fs::read_to_string(&physical_entry)
         .with_context(|| format!("cannot read {}", physical_entry.display()))?;
@@ -117,9 +137,33 @@ fn ensure_no_errors(diagnostics: &[scribium_core::Diagnostic]) -> anyhow::Result
 }
 
 /// Execute the `build` command: compile input to output format(s).
-pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
+pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
+    let unsupported: Vec<&String> = formats.iter().filter(|f| f.as_str() != "typst").collect();
+    if let Some(format) = unsupported.first() {
+        anyhow::bail!(
+            "output format '{}' is not yet implemented (supported: typst)",
+            format
+        );
+    }
+    if !formats.iter().any(|f| f.as_str() == "typst") {
+        anyhow::bail!("no writable output format requested");
+    }
+
     let input = Path::new(input);
     let loaded = load_single_file_project(input)?;
+
+    let out_path = match output {
+        Some(path) => path.to_path_buf(),
+        None => default_typst_output_path(&loaded.requested_entry),
+    };
+    if same_file_paths(&loaded.requested_entry, &out_path) {
+        anyhow::bail!(
+            "refusing to overwrite the input source file: input '{}' maps to output '{}'",
+            loaded.requested_entry.display(),
+            out_path.display()
+        );
+    }
+
     let result = compile_project(&loaded.project)?;
 
     for diag in &result.diagnostics {
@@ -129,13 +173,10 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
     // Fail on error diagnostics before writing output
     ensure_no_errors(&result.diagnostics)?;
 
-    if formats.iter().any(|f| f == "typst") {
-        let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-        let out_path = default_typst_output_path(&loaded.requested_entry);
-        fs::write(&out_path, &typst_code)
-            .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
-        eprintln!("Wrote generated Typst to {}", out_path.display());
-    }
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    fs::write(&out_path, &typst_code)
+        .map_err(|e| anyhow::anyhow!("cannot write {}: {}", out_path.display(), e))?;
+    eprintln!("Wrote generated Typst to {}", out_path.display());
 
     // TODO: invoke Typst backend for pdf/html/svg/png
     Ok(())
@@ -145,6 +186,30 @@ pub fn build(input: &str, formats: &[String]) -> anyhow::Result<()> {
 /// Replaces the extension with `.typ`.
 fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
     requested_entry.with_extension("typ")
+}
+
+/// Returns whether two paths refer to the same file.
+///
+/// The output file may not exist yet, so it cannot be canonicalized directly.
+/// Instead the parent directory of each path is canonicalized (the input
+/// parent always exists) and the file names are compared, which resolves
+/// `.`/`..`/relative forms without requiring the output to exist. A path
+/// whose parent cannot be resolved never collides with the input.
+fn same_file_paths(a: &Path, b: &Path) -> bool {
+    match (canonical_parent(a), canonical_parent(b)) {
+        (Some(parent_a), Some(parent_b)) => parent_a == parent_b && a.file_name() == b.file_name(),
+        _ => false,
+    }
+}
+
+/// Canonicalizes the parent directory of `path`, treating an empty parent as
+/// the current directory. Returns `None` when the parent cannot be resolved.
+fn canonical_parent(path: &Path) -> Option<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    parent.canonicalize().ok()
 }
 
 /// Execute the `check` command: validate input without producing output.
@@ -212,7 +277,7 @@ mod tests {
         symlink(&real_file, &link_file).unwrap();
 
         // Build through CLI using the symlink path
-        let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
+        let result = build(&link_file.to_string_lossy(), &["typst".to_string()], None);
         assert!(result.is_ok(), "Build failed: {:?}", result);
 
         // Verify VirtualProject entry is logical path
@@ -269,7 +334,7 @@ mod tests {
         symlink(&real_file, &link_file).unwrap();
 
         // Build through CLI using the symlink path - should fail
-        let result = build(&link_file.to_string_lossy(), &["typst".to_string()]);
+        let result = build(&link_file.to_string_lossy(), &["typst".to_string()], None);
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
         assert!(error.contains("symlink escape"));
@@ -349,5 +414,113 @@ mod tests {
         let diagnostics: Vec<scribium_core::Diagnostic> = vec![];
         let result = ensure_no_errors(&diagnostics);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn logical_root_for_bare_filename() {
+        assert_eq!(
+            logical_project_root(Path::new("document.qd")),
+            PathBuf::from(".")
+        );
+    }
+
+    #[test]
+    fn logical_root_for_dot_prefixed_filename() {
+        assert_eq!(
+            logical_project_root(Path::new("./document.qd")),
+            PathBuf::from(".")
+        );
+    }
+
+    #[test]
+    fn logical_root_for_nested_directory() {
+        assert_eq!(
+            logical_project_root(Path::new("docs/document.qd")),
+            PathBuf::from("docs")
+        );
+    }
+
+    #[test]
+    fn logical_root_for_absolute_path() {
+        assert_eq!(
+            logical_project_root(Path::new("/abs/dir/document.qd")),
+            PathBuf::from("/abs/dir")
+        );
+    }
+
+    #[test]
+    fn same_file_paths_relative_vs_absolute() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.typ");
+        fs::write(&input, "content").unwrap();
+
+        // Same file: one path starts with a `.` parent, the other is absolute.
+        let dotted = dir.path().join(".").join("document.typ");
+        assert!(same_file_paths(&input, &dotted));
+        assert!(same_file_paths(&input, &input));
+        assert!(!same_file_paths(&input, &dir.path().join("document.qd")));
+    }
+
+    #[test]
+    fn input_already_has_typ_extension_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.typ");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn explicit_output_equal_to_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&input),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn rejected_build_does_not_modify_input() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.typ");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_err());
+
+        let after = fs::read(&input).unwrap();
+        assert_eq!(before, after, "input bytes must not change on rejection");
+    }
+
+    #[test]
+    fn qd_input_defaults_to_typ_output() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+
+        let expected = dir.path().join("document.typ");
+        assert!(expected.exists(), "expected output {:?} to exist", expected);
     }
 }

@@ -72,7 +72,7 @@ Parser (Markdown baseline + Quarkdown-compatible syntax)
   ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
   ├── Quarkdown directives: @function, @function(args)[body]
   ├── Expressions: literals, variables, function calls, conditionals
-  └── Front matter: YAML metadata block
+  └── Front matter: flat key-value metadata block
   │
   ▼
 Semantic Analysis
@@ -166,9 +166,18 @@ pub fn compile(
 - WASM builds `VirtualProject` from in-memory sources
 - Core never touches filesystem
 - SourceId assignment is deterministic (sources sorted by path before insertion)
-- Front matter YAML at document start is parsed and merged with project metadata
-- Malformed front matter blocks (indented delimiters, lines without colons, empty keys) are rejected and treated as regular Markdown
-- Typst default output path replaces file extension with `.typ`
+- Front matter at document start is parsed and merged with project metadata
+- Front matter is a flat, line-based `key: value` format, not full YAML:
+  nested objects, arrays, and block strings are not supported
+- Keys and values are split on the first colon; empty keys reject the block
+- Duplicate keys use last-wins semantics (last occurrence wins)
+- User-defined metadata is stored in the IR in deterministic
+  (lexicographic key) order
+- Malformed front matter blocks (indented delimiters, lines without colons,
+  empty keys) are rejected and treated as regular Markdown
+- Typst default output path replaces file extension with `.typ`; the build
+  refuses to write an output that resolves to the same file as the input
+  (e.g. `.typ` input, or an explicit `--output` equal to the input)
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
