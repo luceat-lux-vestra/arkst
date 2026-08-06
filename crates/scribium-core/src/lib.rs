@@ -198,10 +198,77 @@ mod tests {
             ("custom".into(), "project_value".into())
         );
     }
+    #[test]
+    fn known_metadata_keys_are_not_duplicated_in_raw() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source(
+                "main.qd",
+                "---\ntitle: FM Title\nauthor: FM Author\ndate: 2025-12-31\n---\n\nhello",
+            )
+            .expect("valid path")
+            .title("Project Title")
+            .author("Project Author")
+            .date("2026-01-01")
+            .build()
+            .unwrap();
+
+        let result = super::compile(&project, &CompileOptions::default());
+
+        // Typed fields from front matter should be in typed fields only, not in raw
+        assert_eq!(result.ir.metadata.title, Some("FM Title".into()));
+        assert_eq!(result.ir.metadata.author, Some("FM Author".into()));
+        assert_eq!(result.ir.metadata.date, Some("2025-12-31".into()));
+
+        // raw should be empty (no duplicate of title/author/date)
+        assert_eq!(result.ir.metadata.raw.len(), 0);
+    }
+
+    #[test]
+    fn custom_metadata_order_does_not_affect_compiled_ir() {
+        // Build two projects with same custom metadata but different insertion order
+        let project1 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", "hello")
+            .expect("valid path")
+            .field("zeta", "last")
+            .field("alpha", "first")
+            .field("epsilon", "middle")
+            .build()
+            .unwrap();
+
+        let project2 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", "hello")
+            .expect("valid path")
+            .field("epsilon", "middle")
+            .field("zeta", "last")
+            .field("alpha", "first")
+            .build()
+            .unwrap();
+
+        let result1 = super::compile(&project1, &CompileOptions::default());
+        let result2 = super::compile(&project2, &CompileOptions::default());
+
+        // IR metadata should be identical regardless of field insertion order
+        assert_eq!(result1.ir.metadata.raw, result2.ir.metadata.raw);
+
+        // Verify sorting: should be alphabetical by key
+        assert_eq!(
+            result1.ir.metadata.raw,
+            vec![
+                ("alpha".into(), "first".into()),
+                ("epsilon".into(), "middle".into()),
+                ("zeta".into(), "last".into()),
+            ]
+        );
+    }
 
     #[test]
     fn source_ids_are_independent_of_builder_insertion_order() {
-        // Build two projects with same sources but different insertion order
         let project1 = VirtualProjectBuilder::new()
             .entry("main.qd")
             .expect("valid path")

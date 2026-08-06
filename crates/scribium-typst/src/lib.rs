@@ -9,6 +9,7 @@
 pub mod backend;
 pub mod lowering;
 
+pub use lowering::{lower_to_typst, lower_to_typst_code};
 /// The Scribium-Typst result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

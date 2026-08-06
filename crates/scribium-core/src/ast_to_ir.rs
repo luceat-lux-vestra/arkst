@@ -48,6 +48,9 @@ pub fn ast_to_ir(
         }
     }
 
+    // Sort raw metadata by key for deterministic ordering
+    raw.sort_by(|a, b| a.0.cmp(&b.0));
+
     IrDocument {
         nodes,
         metadata: IrMetadata {

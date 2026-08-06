@@ -65,12 +65,22 @@ impl VirtualProject {
         &self.metadata
     }
 }
-/// Metadata extracted from document front matter.
+
+/// Project-level metadata defaults provided by the host (CLI, WASM embedder).
+/// These are *not* extracted from document front matter; they serve as
+/// defaults that document front matter can override on a per-document basis.
 ///
-/// Typed fields (`title`, `author`, `date`) are managed by their respective setters.
-/// The `field` method adds arbitrary key-value pairs to `raw` and also syncs
-/// typed fields when the key matches a known typed field (last-wins).
-/// Unknown/custom keys are stored only in `raw`.
+/// Precedence (highest to lowest):
+/// - Document front matter (per-document, overrides everything)
+/// - Project-level defaults (this struct)
+/// - None
+///
+/// Typed fields (`title`, `author`, `date`) are stored in their dedicated
+/// accessors. Custom keys are stored in `raw`.
+/// Known keys (`title`, `author`, `date`) are never duplicated in `raw`.
+/// Duplicate custom keys use last-wins semantics.
+/// The order of entries in `raw` is not semantically meaningful; it is
+/// normalized to lexicographic key order during IR construction.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectMetadata {
     title: Option<String>,

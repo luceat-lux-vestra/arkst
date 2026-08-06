@@ -528,4 +528,45 @@ mod tests {
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "$ x = (-b pm sqrt(b^2 - 4ac)) / (2a) $\n\n");
     }
+    #[test]
+    fn source_map_is_independent_of_source_insertion_order() {
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        let project1 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("a.qd", "content a")
+            .expect("valid path")
+            .add_source("b.qd", "content b")
+            .expect("valid path")
+            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let project2 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("b.qd", "content b")
+            .expect("valid path")
+            .add_source("a.qd", "content a")
+            .expect("valid path")
+            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let result1 = compile(&project1, &CompileOptions::default());
+        let result2 = compile(&project2, &CompileOptions::default());
+
+        // Lower to Typst with source maps
+        let (typst1, map1) = super::lower_to_typst(&result1.ir);
+        let (typst2, map2) = super::lower_to_typst(&result2.ir);
+
+        // Generated Typst should be identical
+        assert_eq!(typst1, typst2);
+
+        // Source maps should be identical
+        assert_eq!(map1, map2);
+    }
 }
