@@ -33,8 +33,9 @@ Acceptance: dot-prefixed calls, positional/named/body arguments, basic condition
 front matter, deterministic output.
 
 > **Front Matter scope:** currently a flat line-based `key: value` format only.
-> Nested objects, arrays, and block strings (full YAML) are deferred to a later
-> milestone and tracked separately.
+> Delimiters and metadata lines must start at column 0; indented keys reject
+> the block. Nested objects, arrays, and block strings (full YAML) are deferred
+> to a later milestone and tracked separately.
 
 ## M2 — Quarkdown Core Language + Markdown MVP
 

@@ -170,14 +170,21 @@ pub fn compile(
 - Front matter is a flat, line-based `key: value` format, not full YAML:
   nested objects, arrays, and block strings are not supported
 - Keys and values are split on the first colon; empty keys reject the block
+- Metadata lines must start at column 0: indentation is not stripped and
+  indented keys reject the whole block (no nested-object flattening)
 - Duplicate keys use last-wins semantics (last occurrence wins)
 - User-defined metadata is stored in the IR in deterministic
   (lexicographic key) order
-- Malformed front matter blocks (indented delimiters, lines without colons,
-  empty keys) are rejected and treated as regular Markdown
+- Malformed front matter blocks (indented delimiters, indented keys, lines
+  without colons, empty keys) are rejected and treated as regular Markdown
+- Supported CLI inputs are `.qd`, `.scrib`, `.md`; `.typ` is rejected until
+  Typst passthrough is implemented
 - Typst default output path replaces file extension with `.typ`; the build
-  refuses to write an output that resolves to the same file as the input
-  (e.g. `.typ` input, or an explicit `--output` equal to the input)
+  refuses to write an output that resolves to the same file as the input.
+  Existing outputs are compared by file identity (device/inode on Unix, file
+  index on Windows), so symlink and hard-link aliases of the input are also
+  rejected; non-existent outputs are compared by canonicalized parent plus
+  normalized file name. The check is repeated immediately before writing.
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).

@@ -50,10 +50,11 @@ scribium inspect examples/hello/main.qd --emit typst
 scribium build report.md
 ```
 
-> The build refuses to overwrite the input file: an input with a `.typ`
-> extension, or an explicit `--output` equal to the input path, is rejected.
-> PDF/HTML/SVG/PNG backends are not implemented yet; requesting them fails
-> with a clear error.
+> Supported inputs are `.qd`, `.scrib`, and `.md`; a `.typ` input is rejected
+> until Typst passthrough is implemented. The build refuses to overwrite the
+> input file: an explicit `--output` that resolves to the input — including via
+> `.`/`..`, symlinks, or hard links — is rejected. PDF/HTML/SVG/PNG backends
+> are not implemented yet; requesting them fails with a clear error.
 
 ## Example (.qd)
 
@@ -83,6 +84,8 @@ flat line-based `key: value` form, **not full YAML**:
 
 - Keys and values are split on the first colon.
 - Nested objects, arrays, and block strings are **not** supported.
+- Delimiters and metadata lines must start at column 0; indented keys reject
+  the block, which is preserved as regular Markdown instead of being flattened.
 - Duplicate keys: last occurrence wins.
 - Custom metadata is stored in the IR in a deterministic (lexicographic) order.
 

@@ -139,6 +139,9 @@ A `---`-delimited block at the start of a document carries metadata
 
 - Keys and values are split on the first colon (`key: rest of line`).
 - Nested objects, arrays, and block strings are not supported.
+- The opening delimiter must be `---` at column 0; every non-empty metadata
+  line must also start at column 0. Indented metadata lines (nested structure)
+  reject the whole block, which is preserved intact as regular Markdown.
 - A line without a colon, an empty key, or an indented `---` delimiter
   rejects the whole block (it is treated as regular Markdown).
 - Duplicate keys use last-wins semantics.

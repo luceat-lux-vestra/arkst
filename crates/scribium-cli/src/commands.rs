@@ -47,8 +47,29 @@ fn logical_project_root(requested_entry: &Path) -> PathBuf {
         .to_path_buf()
 }
 
+/// Supported input extensions. Typst passthrough (`.typ`) is not implemented
+/// yet, so it is deliberately excluded and rejected at the CLI boundary.
+const SUPPORTED_INPUT_EXTENSIONS: [&str; 3] = ["qd", "scrib", "md"];
+
+/// Validates that `input` has a supported source extension.
+fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    if SUPPORTED_INPUT_EXTENSIONS.contains(&ext) {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "unsupported input format: '{}' (supported: .qd, .scrib, .md)",
+            input.display()
+        )
+    }
+}
+
 /// Loads a single file as a VirtualProject.
 fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
+    validate_input_extension(input)?;
     // Store the user-requested path for output naming
     let requested_entry = input.to_path_buf();
 
@@ -156,13 +177,7 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
         Some(path) => path.to_path_buf(),
         None => default_typst_output_path(&loaded.requested_entry),
     };
-    if same_file_paths(&loaded.requested_entry, &out_path) {
-        anyhow::bail!(
-            "refusing to overwrite the input source file: input '{}' maps to output '{}'",
-            loaded.requested_entry.display(),
-            out_path.display()
-        );
-    }
+    ensure_distinct_output(&loaded.requested_entry, &out_path)?;
 
     let result = compile_project(&loaded.project)?;
 
@@ -172,6 +187,10 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
 
     // Fail on error diagnostics before writing output
     ensure_no_errors(&result.diagnostics)?;
+
+    // Re-verify immediately before writing: the output path may have appeared
+    // or been replaced since the initial check (TOCTOU window).
+    ensure_distinct_output(&loaded.requested_entry, &out_path)?;
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
     fs::write(&out_path, &typst_code)
@@ -188,16 +207,79 @@ fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
     requested_entry.with_extension("typ")
 }
 
+/// Bails when `output` refers to the same file as `input`.
+fn ensure_distinct_output(input: &Path, output: &Path) -> anyhow::Result<()> {
+    if same_file_paths(input, output) {
+        anyhow::bail!(
+            "refusing to overwrite the input source file: input '{}' maps to output '{}'",
+            input.display(),
+            output.display()
+        );
+    }
+    Ok(())
+}
+
 /// Returns whether two paths refer to the same file.
 ///
-/// The output file may not exist yet, so it cannot be canonicalized directly.
-/// Instead the parent directory of each path is canonicalized (the input
-/// parent always exists) and the file names are compared, which resolves
-/// `.`/`..`/relative forms without requiring the output to exist. A path
-/// whose parent cannot be resolved never collides with the input.
+/// When the output already exists, real file identity is compared via
+/// `same-file` (device/inode on Unix, file index on Windows): this detects
+/// hard links and symlinks that alias the input, whatever the path spelling.
+/// When the output does not exist, the parent directory of each path is
+/// canonicalized (the input parent always exists) and the file names are
+/// compared, which resolves `.`/`..`/relative forms without requiring the
+/// output to exist. A dangling symlink is resolved manually so that a link
+/// pointing at the input is still detected.
 fn same_file_paths(a: &Path, b: &Path) -> bool {
+    // Output exists: compare actual file identity.
+    if b.exists() {
+        return same_file::is_same_file(a, b).unwrap_or(false);
+    }
+    // A dangling symlink still creates a directory entry; writing through it
+    // would create the link target. Resolve the link and compare against the
+    // input before falling back to path comparison.
+    if let Ok(meta) = fs::symlink_metadata(b) {
+        if meta.file_type().is_symlink() {
+            if let Ok(target) = fs::read_link(b) {
+                let resolved = if target.is_absolute() {
+                    target
+                } else {
+                    b.parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(target)
+                };
+                return same_file::is_same_file(a, &resolved).unwrap_or(false);
+            }
+        }
+    }
+    // Output does not exist: normalize the parent directories and compare the
+    // file names.
     match (canonical_parent(a), canonical_parent(b)) {
-        (Some(parent_a), Some(parent_b)) => parent_a == parent_b && a.file_name() == b.file_name(),
+        (Some(parent_a), Some(parent_b)) => {
+            parent_a == parent_b && same_file_name(a.file_name(), b.file_name())
+        }
+        _ => false,
+    }
+}
+
+/// Compares file names for the not-yet-existing output case.
+///
+/// Windows filesystems are case-insensitive, so two names differing only in
+/// case would still collide there; other platforms compare byte-exact.
+#[cfg(windows)]
+fn same_file_name(a: Option<&std::ffi::OsStr>, b: Option<&std::ffi::OsStr>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy()),
+        _ => false,
+    }
+}
+
+#[cfg(not(windows))]
+fn same_file_name(a: Option<&std::ffi::OsStr>, b: Option<&std::ffi::OsStr>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a == b,
         _ => false,
     }
 }
@@ -451,18 +533,45 @@ mod tests {
     #[test]
     fn same_file_paths_relative_vs_absolute() {
         let dir = tempdir().unwrap();
-        let input = dir.path().join("document.typ");
-        fs::write(&input, "content").unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
 
         // Same file: one path starts with a `.` parent, the other is absolute.
-        let dotted = dir.path().join(".").join("document.typ");
+        let dotted = dir.path().join(".").join("document.qd");
         assert!(same_file_paths(&input, &dotted));
         assert!(same_file_paths(&input, &input));
-        assert!(!same_file_paths(&input, &dir.path().join("document.qd")));
+        assert!(!same_file_paths(&input, &dir.path().join("document.md")));
     }
 
     #[test]
-    fn input_already_has_typ_extension_is_rejected() {
+    fn same_file_paths_with_dotdot_components() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        // `sub/..` resolves to the input's directory, so both paths are the same file.
+        let dotdot = sub.join("..").join("document.qd");
+        assert!(same_file_paths(&input, &dotdot));
+    }
+
+    #[test]
+    fn same_file_paths_nonexistent_output_is_never_the_input() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        // Output does not exist: same directory, different name is a different file.
+        assert!(!same_file_paths(&input, &dir.path().join("out.typ")));
+        // Same name in a different (existing) directory is a different file.
+        let other = dir.path().join("other");
+        fs::create_dir(&other).unwrap();
+        assert!(!same_file_paths(&input, &other.join("document.qd")));
+    }
+
+    #[test]
+    fn typ_input_is_rejected_as_unsupported_format() {
         let dir = tempdir().unwrap();
         let input = dir.path().join("document.typ");
         fs::write(&input, "# Hello\n").unwrap();
@@ -471,10 +580,11 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
         assert!(
-            error.contains("refusing to overwrite the input source file"),
+            error.contains("unsupported input format"),
             "error was: {}",
             error
         );
+        assert!(error.contains(".qd, .scrib, .md"), "error was: {}", error);
     }
 
     #[test]
@@ -498,13 +608,108 @@ mod tests {
     }
 
     #[test]
+    fn dotdot_output_equal_to_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        let output = sub.join("..").join("document.qd");
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn output_symlink_to_input_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // The output path is a symlink pointing at the input file.
+        let output = dir.path().join("out.typ");
+        symlink(&input, &output).unwrap();
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+    }
+
+    #[test]
+    fn output_hardlink_to_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let before = fs::read(&input).unwrap();
+
+        // The output path is a hard link to the input file (same inode).
+        let output = dir.path().join("out.typ");
+        fs::hard_link(&input, &output).unwrap();
+
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+    }
+
+    #[test]
     fn rejected_build_does_not_modify_input() {
         let dir = tempdir().unwrap();
-        let input = dir.path().join("document.typ");
+        let input = dir.path().join("document.qd");
         fs::write(&input, "original source\n").unwrap();
         let before = fs::read(&input).unwrap();
 
-        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&input),
+        );
         assert!(result.is_err());
 
         let after = fs::read(&input).unwrap();
@@ -522,5 +727,22 @@ mod tests {
 
         let expected = dir.path().join("document.typ");
         assert!(expected.exists(), "expected output {:?} to exist", expected);
+    }
+
+    #[test]
+    fn nonexistent_sibling_output_is_written() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let output = dir.path().join("out.typ");
+        assert!(!output.exists());
+        let result = build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            Some(&output),
+        );
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        assert!(output.exists(), "expected output {:?} to exist", output);
     }
 }

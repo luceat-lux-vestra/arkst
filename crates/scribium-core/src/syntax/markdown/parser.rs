@@ -25,27 +25,14 @@ const MAX_BLOCK_DEPTH: usize = 64;
 
 /// Maximum inline-nesting depth before delimiters are treated as literal text.
 const MAX_INLINE_DEPTH: usize = 64;
-/// Result of parsing a front matter candidate block.
-#[allow(dead_code)]
-enum FrontMatterParse {
-    /// No front matter candidate found.
-    Absent,
-    /// Valid front matter with fields.
-    Valid {
-        fields: Vec<(String, String)>,
-        span: ByteSpan,
-        consumed_lines: usize,
-    },
-    /// Malformed front matter block - should be treated as regular Markdown.
-    Invalid,
-}
-
 /// Parse flat key-value front matter at document start.
 ///
 /// Front matter is a `---`-delimited block of `key: value` lines only. It is
 /// not full YAML: nested objects, arrays, block strings, and other YAML
-/// features are not supported. Keys and values are split on the first colon;
-/// duplicate keys use last-wins semantics.
+/// features are not supported. The delimiters must start at column 0, and
+/// every non-empty metadata line must start at column 0 — leading indentation
+/// marks nested structure and rejects the whole block. Keys and values are
+/// split on the first colon; duplicate keys use last-wins semantics.
 ///
 /// Returns `(front_matter, lines_consumed)`. If no valid front matter is found
 /// at the start, returns `(None, 0)` and the caller should start parsing from line 0.
@@ -84,6 +71,12 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
         let text = line.text;
         if text.is_empty() {
             continue; // Skip empty lines in front matter
+        }
+        // Metadata lines must start at column 0: leading indentation marks
+        // nested (YAML-style) structure, which is not flattened. Reject the
+        // whole block so it stays intact as regular Markdown.
+        if line.raw != line.text {
+            return (None, 0);
         }
         if let Some(colon_pos) = text.find(':') {
             let key = text[..colon_pos].trim();
@@ -1495,6 +1488,49 @@ mod tests {
         assert!(doc.front_matter.is_none());
         // Should be treated as unclosed front matter, so content is parsed as blocks
         assert!(!doc.nodes.is_empty());
+    }
+
+    /// Returns whether any paragraph in the document contains `needle` text.
+    fn has_paragraph_text(doc: &Document, needle: &str) -> bool {
+        doc.nodes.iter().any(|node| {
+            matches!(
+                node,
+                Block::Paragraph { content, .. }
+                    if content.iter().any(|inline| matches!(
+                        inline,
+                        Inline::Text { content, .. } if content.contains(needle)
+                    ))
+            )
+        })
+    }
+
+    #[test]
+    fn indented_key_rejects_front_matter_block() {
+        let doc = parse("---\n  title: Hello\n---\n\n# Heading\n");
+        // Indented metadata lines are not valid flat key: value front matter
+        assert!(doc.front_matter.is_none());
+        // The malformed block is preserved as regular Markdown body text
+        assert!(has_paragraph_text(&doc, "title: Hello"));
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn nested_object_rejects_front_matter_block() {
+        let doc = parse("---\nauthor:\n  name: Alice\n---\n\n# Heading\n");
+        // Nested object shape is not flattened into metadata
+        assert!(doc.front_matter.is_none());
+        assert!(has_paragraph_text(&doc, "name: Alice"));
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn duplicate_custom_key_last_wins() {
+        let doc = parse("---\ncustom: First\ncustom: Second\n---\n\n# Heading\n");
+        // Duplicate custom key: last-wins, single field
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("custom".into(), "Second".into()));
     }
 
     #[test]

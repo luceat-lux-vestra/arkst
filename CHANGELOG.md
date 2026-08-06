@@ -34,19 +34,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `build` never overwrites the input source file: an input whose computed
-  output path equals the input (e.g. `.typ` input, or `--output` equal to the
-  input) is rejected with a clear error. Rejected builds leave the input
-  byte-for-byte unchanged.
+- `build` never overwrites the input source file: an output that resolves to
+  the input is rejected with a clear error. Existing outputs are compared by
+  file identity (device/inode on Unix, file index on Windows via `same-file`),
+  so relative/absolute spellings, `.`/`..` components, symlinks, and hard
+  links that alias the input are all detected; the check is repeated
+  immediately before writing. Rejected builds leave the input byte-for-byte
+  unchanged.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 
 ### Changed
 
+- Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
+  rejected as an unsupported format until Typst passthrough is implemented.
 - Front matter is documented as a flat line-based `key: value` format, not
   full YAML: nested objects, arrays, and block strings are not supported.
-  Keys split on the first colon; duplicate keys use last-wins semantics;
-  user-defined metadata is stored in the IR in deterministic order.
+  Keys split on the first colon; delimiters and metadata lines must start at
+  column 0 (indented keys reject the block, which is preserved as regular
+  Markdown); duplicate keys use last-wins semantics; user-defined metadata is
+  stored in the IR in deterministic order.
+- Added the `same-file` dependency for cross-platform file-identity checks.
 - Windows CI previously failed to compile the `scribium` test binary due to
   unused imports on Windows-only configurations; this is resolved.
 
