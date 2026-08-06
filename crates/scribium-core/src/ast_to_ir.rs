@@ -189,11 +189,11 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
                 span: byte_to_source_span(span, source_id),
             })
         }
-        Inline::HardBreak { .. } | Inline::SoftBreak { .. } => {
+        Inline::HardBreak { span } | Inline::SoftBreak { span } => {
             // Breaks become whitespace in the text flow for M1
             Some(IrInline::Text {
                 content: "\n".to_string(),
-                span: SourceSpan::new(source_id, 0, 0),
+                span: byte_to_source_span(span, source_id),
             })
         }
     }
@@ -305,6 +305,112 @@ mod tests {
                 assert_eq!(content.len(), 2);
                 assert!(matches!(content[0], IrInline::Text { .. }));
                 assert!(matches!(content[1], IrInline::Emphasis { .. }));
+            }
+            _ => panic!("expected Paragraph"),
+        }
+    }
+
+    #[test]
+    fn soft_break_preserves_source_span() {
+        let doc = Document {
+            nodes: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Text {
+                        content: "Hello".into(),
+                        span: bs(0, 5),
+                    },
+                    Inline::SoftBreak { span: bs(5, 6) },
+                    Inline::Text {
+                        content: "world".into(),
+                        span: bs(6, 11),
+                    },
+                ],
+                span: bs(0, 11),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        match &ir.nodes[0] {
+            IrNode::Paragraph { content, .. } => {
+                assert_eq!(content.len(), 3);
+                match &content[1] {
+                    IrInline::Text { content, span } => {
+                        assert_eq!(content, "\n");
+                        assert_eq!(*span, SourceSpan::new(SourceId(42), 5, 6));
+                    }
+                    other => panic!("expected Text, got {other:?}"),
+                }
+            }
+            _ => panic!("expected Paragraph"),
+        }
+    }
+
+    #[test]
+    fn hard_break_preserves_source_span() {
+        let doc = Document {
+            nodes: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Text {
+                        content: "Hello".into(),
+                        span: bs(0, 5),
+                    },
+                    Inline::HardBreak { span: bs(5, 7) },
+                    Inline::Text {
+                        content: "world".into(),
+                        span: bs(7, 12),
+                    },
+                ],
+                span: bs(0, 12),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        match &ir.nodes[0] {
+            IrNode::Paragraph { content, .. } => {
+                assert_eq!(content.len(), 3);
+                match &content[1] {
+                    IrInline::Text { content, span } => {
+                        assert_eq!(content, "\n");
+                        assert_eq!(*span, SourceSpan::new(SourceId(42), 5, 7));
+                    }
+                    other => panic!("expected Text, got {other:?}"),
+                }
+            }
+            _ => panic!("expected Paragraph"),
+        }
+    }
+
+    #[test]
+    fn breaks_do_not_report_zero_span_when_mid_document() {
+        let doc = Document {
+            nodes: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Text {
+                        content: "Hello world ".into(),
+                        span: bs(0, 12),
+                    },
+                    Inline::SoftBreak { span: bs(12, 13) },
+                ],
+                span: bs(0, 13),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        match &ir.nodes[0] {
+            IrNode::Paragraph { content, .. } => {
+                match &content[1] {
+                    IrInline::Text { content, span } => {
+                        assert_eq!(content, "\n");
+                        // The break is not at the document start: the span must
+                        // point at the real source position, never synthesize 0..0.
+                        assert_eq!(*span, SourceSpan::new(SourceId(42), 12, 13));
+                        assert!(span.start != 0 || span.end != 0);
+                    }
+                    other => panic!("expected Text, got {other:?}"),
+                }
             }
             _ => panic!("expected Paragraph"),
         }

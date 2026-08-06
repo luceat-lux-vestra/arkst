@@ -37,7 +37,7 @@ enum Commands {
     },
     /// Validate input without producing output
     Check {
-        /// Input file or directory
+        /// Input Scribium or Markdown file
         input: String,
     },
     /// Show intermediate representation(s)

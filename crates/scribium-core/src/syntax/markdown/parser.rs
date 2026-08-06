@@ -1373,6 +1373,33 @@ mod tests {
     }
 
     #[test]
+    fn break_spans_after_multibyte_are_byte_accurate() {
+        let doc = parse("안녕\n세상");
+        let content = paragraph_inlines(&doc);
+        assert_text(&content[0], "안녕");
+        match &content[1] {
+            Inline::SoftBreak { span } => {
+                // "안녕" is 6 UTF-8 bytes; the newline starts at byte offset 6.
+                assert_eq!(*span, ByteSpan::new(6, 7));
+            }
+            other => panic!("expected SoftBreak, got {other:?}"),
+        }
+        assert_text(&content[2], "세상");
+
+        let doc = parse("안녕  \n세상");
+        let content = paragraph_inlines(&doc);
+        assert_text(&content[0], "안녕");
+        match &content[1] {
+            Inline::HardBreak { span } => {
+                // Two trailing spaces occupy bytes 6..8, newline at byte 8.
+                assert_eq!(*span, ByteSpan::new(6, 9));
+            }
+            other => panic!("expected HardBreak, got {other:?}"),
+        }
+        assert_text(&content[2], "세상");
+    }
+
+    #[test]
     fn emphasis_with_unicode_content() {
         let doc = parse("*강조*");
         let content = paragraph_inlines(&doc);

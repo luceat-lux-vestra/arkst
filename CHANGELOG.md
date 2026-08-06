@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   links that alias the input are all detected; the check is repeated
   immediately before writing. Rejected builds leave the input byte-for-byte
   unchanged.
+- Hard and soft line breaks previously reached the IR with a synthesized
+  `0..0` source span; they now carry the actual break position (byte
+  offsets), matching the span policy of every other inline node.
 - Console test targets build on Windows (unused-import warnings only surfaced
   on non-unix platforms).
 
@@ -57,9 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the `same-file` dependency for cross-platform file-identity checks.
 - Windows CI previously failed to compile the `scribium` test binary due to
   unused imports on Windows-only configurations; this is resolved.
-
-### Changed
-
 - Issue templates: fixed label formatting (`type: bug` → `type:bug`),
   added milestone dropdown to feature requests.
 - Removed duplicate/obsolete GitHub labels: `bug`, `enhancement`,
