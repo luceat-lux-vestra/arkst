@@ -215,8 +215,8 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
     use crate::source::{ByteSpan, SourceId};
-    use crate::virtual_project::ProjectMetadata;
-
+    #[allow(unused_imports)]
+    use crate::syntax::markdown::ast::FrontMatter;
     #[allow(dead_code)]
     fn source_id() -> SourceId {
         SourceId(42)
