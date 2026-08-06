@@ -1893,15 +1893,13 @@ mod tests {
         assert_eq!(fs::read(&input).unwrap(), before);
     }
 
-    /// Removes a directory tree when dropped, even if an assertion panics.
     #[cfg(windows)]
-    struct TestOutputDir(PathBuf);
-
-    #[cfg(windows)]
-    impl Drop for TestOutputDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    fn same_drive_tempdir(prefix: &str) -> tempfile::TempDir {
+        let cwd = std::env::current_dir().expect("current directory must be available");
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(&cwd)
+            .expect("same-drive temporary directory must be created")
     }
 
     #[test]
@@ -1911,11 +1909,8 @@ mod tests {
         // input must live on that same drive. The temp dir may be on another
         // drive on CI (the workspace is on `D:` while `%TEMP%` is on `C:`),
         // so create a working directory under the crate's current directory.
-        let cwd = std::env::current_dir().unwrap();
-        let dir = cwd.join(".root-relative-collision-test");
-        fs::create_dir_all(&dir).unwrap();
-        let _guard = TestOutputDir(dir.clone());
-        let input = dir.join("document.qd");
+        let dir = same_drive_tempdir(".root-relative-collision-test-");
+        let input = dir.path().join("document.qd");
         fs::write(&input, "original source\n").unwrap();
         let before = fs::read(&input).unwrap();
 
@@ -1953,10 +1948,10 @@ mod tests {
             "input bytes must not change"
         );
         assert!(
-            !dir.join("new").exists(),
+            !dir.path().join("new").exists(),
             "intermediate directory must not be created"
         );
-        let names: Vec<_> = fs::read_dir(&dir)
+        let names: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
@@ -1972,11 +1967,8 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn root_relative_output_to_distinct_file_is_written() {
-        let cwd = std::env::current_dir().unwrap();
-        let dir = cwd.join(".root-relative-distinct-test");
-        fs::create_dir_all(&dir).unwrap();
-        let _guard = TestOutputDir(dir.clone());
-        let input = dir.join("document.qd");
+        let dir = same_drive_tempdir(".root-relative-distinct-test-");
+        let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         let before = fs::read(&input).unwrap();
 
@@ -1999,7 +1991,7 @@ mod tests {
         if let Err(error) = &result {
             panic!("build failed: {}", error);
         }
-        let written = fs::read(dir.join("out.typ")).unwrap();
+        let written = fs::read(dir.path().join("out.typ")).unwrap();
         let text = String::from_utf8(written).unwrap();
         assert!(text.contains("Hello"), "output content was: {:?}", text);
         assert_eq!(
