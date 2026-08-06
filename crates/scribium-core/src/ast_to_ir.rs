@@ -210,23 +210,20 @@ fn value_to_ir(value: &Value) -> crate::ir::IrValue {
 fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId) -> SourceSpan {
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::{ByteSpan, SourceId};
-    #[allow(unused_imports)]
     use crate::syntax::markdown::ast::FrontMatter;
 
-    #[allow(dead_code)]
     fn source_id() -> SourceId {
         SourceId(42)
     }
 
-    #[allow(dead_code)]
     fn bs(start: usize, end: usize) -> ByteSpan {
         ByteSpan::new(start, end)
     }
 
-    #[allow(dead_code)]
     fn empty_project_metadata() -> ProjectMetadata {
         ProjectMetadata::default()
     }
