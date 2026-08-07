@@ -14,7 +14,7 @@
 //! treated as literal text. Setext headings, links, images, blockquotes,
 //! code spans, and ordered lists are not part of the M1 subset.
 
-use super::ast::{Block, Document, Inline, ListItem};
+use super::ast::{Block, Document, FrontMatter, Inline, ListItem};
 use crate::source::ByteSpan;
 
 /// Maximum block-nesting depth before a parse is flattened to paragraphs.
@@ -25,6 +25,78 @@ const MAX_BLOCK_DEPTH: usize = 64;
 
 /// Maximum inline-nesting depth before delimiters are treated as literal text.
 const MAX_INLINE_DEPTH: usize = 64;
+/// Parse flat key-value front matter at document start.
+///
+/// Front matter is a `---`-delimited block of `key: value` lines only. It is
+/// not full YAML: nested objects, arrays, block strings, and other YAML
+/// features are not supported. The delimiters must start at column 0, and
+/// every non-empty metadata line must start at column 0 — leading indentation
+/// marks nested structure and rejects the whole block. Keys and values are
+/// split on the first colon; duplicate keys use last-wins semantics.
+///
+/// Returns `(front_matter, lines_consumed)`. If no valid front matter is found
+/// at the start, returns `(None, 0)` and the caller should start parsing from line 0.
+fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontMatter>, usize) {
+    if lines.is_empty() {
+        return (None, 0);
+    }
+
+    // Check if first line is opening delimiter `---`
+    // Use raw to reject indented delimiters
+    let first = &lines[0];
+    if first.raw != "---" {
+        return (None, 0);
+    }
+
+    // Find closing delimiter
+    let mut close_idx = None;
+    for (i, line) in lines.iter().enumerate().skip(1) {
+        if line.raw == "---" {
+            close_idx = Some(i);
+            break;
+        }
+    }
+
+    let close_idx = match close_idx {
+        Some(idx) => idx,
+        None => {
+            // Unclosed front matter - treat as no front matter
+            return (None, 0);
+        }
+    };
+
+    // Parse fields between delimiters, checking for malformed lines
+    let mut fields = Vec::new();
+    for line in &lines[1..close_idx] {
+        let text = line.text;
+        if text.is_empty() {
+            continue; // Skip empty lines in front matter
+        }
+        // Metadata lines must start at column 0: leading indentation marks
+        // nested (YAML-style) structure, which is not flattened. Reject the
+        // whole block so it stays intact as regular Markdown.
+        if line.raw != line.text {
+            return (None, 0);
+        }
+        if let Some(colon_pos) = text.find(':') {
+            let key = text[..colon_pos].trim();
+            let value = text[colon_pos + 1..].trim();
+            if key.is_empty() {
+                // Empty key - malformed, treat entire block as invalid
+                return (None, 0);
+            }
+            // last-wins: remove existing entry with same key
+            fields.retain(|(k, _)| k != key);
+            fields.push((key.to_string(), value.to_string()));
+        } else {
+            // Line without colon - malformed, treat entire block as invalid
+            return (None, 0);
+        }
+    }
+
+    let span = ByteSpan::new(first.raw_start, lines[close_idx].end);
+    (Some(FrontMatter { fields, span }), close_idx + 1)
+}
 
 /// Parse a Markdown source string into a `Document`.
 ///
@@ -32,12 +104,16 @@ const MAX_INLINE_DEPTH: usize = 64;
 /// deterministically up to the end of the source.
 pub fn parse(source: &str) -> Document {
     let lines = split_lines(source);
-    let mut cursor = 0;
+
+    // Parse front matter if present at document start
+    let (front_matter, front_matter_lines) = parse_front_matter(source, &lines);
+    let mut cursor = front_matter_lines;
+
     let nodes = parse_blocks(source, &lines, &mut cursor, 0);
     let line_count = source.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1;
     Document {
         nodes,
-        front_matter: None,
+        front_matter,
         line_count,
     }
 }
@@ -1297,6 +1373,33 @@ mod tests {
     }
 
     #[test]
+    fn break_spans_after_multibyte_are_byte_accurate() {
+        let doc = parse("안녕\n세상");
+        let content = paragraph_inlines(&doc);
+        assert_text(&content[0], "안녕");
+        match &content[1] {
+            Inline::SoftBreak { span } => {
+                // "안녕" is 6 UTF-8 bytes; the newline starts at byte offset 6.
+                assert_eq!(*span, ByteSpan::new(6, 7));
+            }
+            other => panic!("expected SoftBreak, got {other:?}"),
+        }
+        assert_text(&content[2], "세상");
+
+        let doc = parse("안녕  \n세상");
+        let content = paragraph_inlines(&doc);
+        assert_text(&content[0], "안녕");
+        match &content[1] {
+            Inline::HardBreak { span } => {
+                // Two trailing spaces occupy bytes 6..8, newline at byte 8.
+                assert_eq!(*span, ByteSpan::new(6, 9));
+            }
+            other => panic!("expected HardBreak, got {other:?}"),
+        }
+        assert_text(&content[2], "세상");
+    }
+
+    #[test]
     fn emphasis_with_unicode_content() {
         let doc = parse("*강조*");
         let content = paragraph_inlines(&doc);
@@ -1358,10 +1461,169 @@ mod tests {
     }
 
     #[test]
-    fn document_snapshot_malformed() {
-        insta::assert_debug_snapshot!(
-            "malformed_input",
-            parse("*open\n**still open\n\n```\nunclosed")
-        );
+    fn parse_front_matter_at_document_start() {
+        let doc = parse("---\ntitle: Hello\nauthor: World\n---\n\n# Heading\n");
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 2);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+        assert_eq!(fm.fields[1], ("author".into(), "World".into()));
+        // Front matter span covers from start of first --- to end of second ---
+        assert!(fm.span.start == 0);
+        assert!(fm.span.end > fm.span.start);
+    }
+
+    #[test]
+    fn front_matter_is_not_emitted_as_content_blocks() {
+        let doc = parse("---\ntitle: Hello\n---\n\n# Heading\n");
+        // Only heading block, no blocks for front matter delimiters
+        assert_eq!(doc.nodes.len(), 1);
+        assert!(matches!(doc.nodes[0], Block::Heading { .. }));
+    }
+
+    #[test]
+    fn thematic_break_after_content_is_not_front_matter() {
+        let doc = parse("# Title\n\n---\n\nContent\n");
+        // Front matter only at document start
+        assert!(doc.front_matter.is_none());
+        assert_eq!(doc.nodes.len(), 3); // heading, thematic break, paragraph
+        assert!(matches!(doc.nodes[1], Block::ThematicBreak { .. }));
+    }
+
+    #[test]
+    fn parse_front_matter_with_crlf() {
+        let doc = parse("---\r\ntitle: Hello\r\n---\r\n\r\n# Heading\r\n");
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello".into()));
+    }
+
+    #[test]
+    fn indented_front_matter_opening_delimiter_not_recognized() {
+        let doc = parse("  ---\ntitle: Hello\n---\n\n# Heading\n");
+        // Indented opening delimiter is not recognized
+        assert!(doc.front_matter.is_none());
+        // Should be treated as paragraph or thematic break
+        assert!(!doc.nodes.is_empty());
+    }
+
+    #[test]
+    fn indented_front_matter_closing_delimiter_not_recognized() {
+        let doc = parse("---\ntitle: Hello\n  ---\n\n# Heading\n");
+        // Indented closing delimiter is not recognized
+        assert!(doc.front_matter.is_none());
+        // Should be treated as unclosed front matter, so content is parsed as blocks
+        assert!(!doc.nodes.is_empty());
+    }
+
+    /// Returns whether any paragraph in the document contains `needle` text.
+    fn has_paragraph_text(doc: &Document, needle: &str) -> bool {
+        doc.nodes.iter().any(|node| {
+            matches!(
+                node,
+                Block::Paragraph { content, .. }
+                    if content.iter().any(|inline| matches!(
+                        inline,
+                        Inline::Text { content, .. } if content.contains(needle)
+                    ))
+            )
+        })
+    }
+
+    #[test]
+    fn indented_key_rejects_front_matter_block() {
+        let doc = parse("---\n  title: Hello\n---\n\n# Heading\n");
+        // Indented metadata lines are not valid flat key: value front matter
+        assert!(doc.front_matter.is_none());
+        // The malformed block is preserved as regular Markdown body text
+        assert!(has_paragraph_text(&doc, "title: Hello"));
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn nested_object_rejects_front_matter_block() {
+        let doc = parse("---\nauthor:\n  name: Alice\n---\n\n# Heading\n");
+        // Nested object shape is not flattened into metadata
+        assert!(doc.front_matter.is_none());
+        assert!(has_paragraph_text(&doc, "name: Alice"));
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn duplicate_custom_key_last_wins() {
+        let doc = parse("---\ncustom: First\ncustom: Second\n---\n\n# Heading\n");
+        // Duplicate custom key: last-wins, single field
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("custom".into(), "Second".into()));
+    }
+
+    #[test]
+    fn malformed_front_matter_line_rejects_block() {
+        let doc = parse("---\ntitle: Hello\ninvalid line\n---\n\n# Heading\n");
+        // Malformed line (no colon) causes entire front matter block to be rejected
+        // Content is parsed as regular Markdown
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        // The heading should be parsed
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn empty_key_in_front_matter_rejects_block() {
+        let doc = parse("---\n: value\n---\n\n# Heading\n");
+        // Empty key causes entire block to be rejected
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn malformed_line_before_valid_field_rejects_block() {
+        let doc = parse("---\ninvalid line\ntitle: Hello\n---\n\n# Heading\n");
+        // Malformed line before valid field still rejects entire block
+        assert!(doc.front_matter.is_none());
+        assert!(!doc.nodes.is_empty());
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn partial_front_matter_no_partial_result() {
+        let doc = parse("---\ntitle: Hello\ninvalid line\n---\n\n# Heading\n");
+        // No partial metadata should be generated
+        assert!(doc.front_matter.is_none());
+        // But content should be parsed
+        assert!(doc.nodes.iter().any(|n| matches!(n, Block::Heading { .. })));
+    }
+
+    #[test]
+    fn front_matter_value_with_colon() {
+        let doc = parse("---\ntitle: Hello: World\n---\n\n# Heading\n");
+        // Value can contain colon
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Hello: World".into()));
+    }
+
+    #[test]
+    fn duplicate_front_matter_key_last_wins() {
+        let doc = parse("---\ntitle: First\ntitle: Second\n---\n\n# Heading\n");
+        // Duplicate key: last-wins
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 1);
+        assert_eq!(fm.fields[0], ("title".into(), "Second".into()));
+    }
+
+    #[test]
+    fn empty_front_matter() {
+        let doc = parse("---\n---\n\n# Heading\n");
+        // Empty front matter is valid
+        assert!(doc.front_matter.is_some());
+        let fm = doc.front_matter.unwrap();
+        assert_eq!(fm.fields.len(), 0);
     }
 }

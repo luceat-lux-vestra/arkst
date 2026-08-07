@@ -46,6 +46,11 @@ Support three input paths:
 | `.md`     | Markdown-only (no `@` directive processing)      |
 | `.typ`    | Passthrough to Typst compiler                    |
 
+> **Implementation status:** `.typ` passthrough is not implemented yet. The
+> CLI currently accepts `.qd`, `.scrib`, and `.md` and rejects `.typ` inputs
+> with a clear "unsupported input format" error. The `.typ` row of this ADR
+> applies once passthrough lands.
+
 ## Consequences
 
 ### Positive

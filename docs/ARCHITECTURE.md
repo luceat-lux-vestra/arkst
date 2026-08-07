@@ -72,7 +72,7 @@ Parser (Markdown baseline + Quarkdown-compatible syntax)
   ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
   ├── Quarkdown directives: @function, @function(args)[body]
   ├── Expressions: literals, variables, function calls, conditionals
-  └── Front matter: YAML metadata block
+  └── Front matter: flat key-value metadata block
   │
   ▼
 Semantic Analysis
@@ -132,28 +132,122 @@ Typst Backend (trait)
 - `TcpStream` — no network access
 - System clock dependency
 - Global mutable state
-- `std::path::PathBuf` in public API — use `VirtualPath` instead
+- `std::path::PathBuf` in public API — use `VirtualPathBuf` instead
 
 ### VirtualProject: I/O-Free Core
 
 ```rust
 pub struct VirtualProject {
-    pub entry: VirtualPath,
-    pub sources: SourceStore,
-    pub assets: AssetStore,
+    entry: VirtualPathBuf,
+    sources: SourceStore,
+    assets: AssetStore,
+    metadata: ProjectMetadata,
 }
 
-pub fn compile(project: &VirtualProject) -> CompileResult;
-```
+// Constructed only through the fluent builder:
+VirtualProjectBuilder::new()
+    .entry("main.qd")?
+    .add_source("main.qd", "...")?
+    .add_source("chapter/intro.qd", "...")?
+    .add_asset("fonts/main.otf", data)
+    .build()?;
 
+project.entry();
+project.sources();
+project.assets();
+project.metadata();
+
+pub fn compile(
+    project: &VirtualProject,
+    options: &CompileOptions,
+) -> CompileResult;
+```
 - CLI builds `VirtualProject` from disk
 - WASM builds `VirtualProject` from in-memory sources
 - Core never touches filesystem
-
+- SourceId assignment is deterministic (sources sorted by path before insertion)
+- Front matter at document start is parsed and merged with project metadata
+- Front matter is a flat, line-based `key: value` format, not full YAML:
+  nested objects, arrays, and block strings are not supported
+- Keys and values are split on the first colon; empty keys reject the block
+- Metadata lines must start at column 0: indentation is not stripped and
+  indented keys reject the whole block (no nested-object flattening)
+- Duplicate keys use last-wins semantics (last occurrence wins)
+- User-defined metadata is stored in the IR in deterministic
+  (lexicographic key) order
+- Malformed front matter blocks (indented delimiters, indented keys, lines
+  without colons, empty keys) are rejected and treated as regular Markdown
+- Supported CLI inputs are `.qd`, `.scrib`, `.md`; `.typ` is rejected until
+  Typst passthrough is implemented. Extension matching is ASCII
+  case-insensitive; files without an extension are rejected.
+- Typst default output path replaces file extension with `.typ`; the build
+  refuses to write an output that resolves to the same file as the input.
+  Existing outputs are compared by file identity (device/inode on Unix, file
+  index on Windows), so symlink and hard-link aliases of the input are also
+  rejected; non-existent outputs are compared by canonicalized parent plus
+  normalized file name. The check is repeated immediately before writing.
+- Missing output parent directories are created (`create_dir_all`) before
+  writing; the output path is then resolved against the real (canonicalized)
+  parent and the same-file check runs against that resolved path immediately
+  before the write, so `.`/`..` components and symlinks in the output path
+  are interpreted after directory creation. Before that, a side-effect-free
+  pre-validation resolves the requested output path in component order
+  (left to right, starting from the real working directory), canonicalizing
+  the path-so-far whenever it exists so symlinks resolve `as reached` and a
+  `..` after a symlink moves to the symlink target's parent; only the
+  non-existent suffix is kept on an in-memory stack (`..` canceling a
+  non-existent component never creates anything). Output paths whose real
+  resolution is the input (e.g. `new/../document.qd` or
+  `a/b/../../document.qd`, even when the intermediate directories do not
+  exist yet) are rejected *before* any directory is created, so a rejected
+  build leaves no empty directories behind — while distinct targets behind
+  a symlink (e.g. `link/../document.qd` with `link -> ../other/subdir`
+  resolving to `other/document.qd`) are accepted. The canonicalized
+  same-file check below remains the authoritative guard for symlink and
+  hard-link aliases. Output is written
+  atomically: the content goes to a uniquely named temporary file in the
+  output directory — created exclusively with `create_new(true)`, retrying
+  up to 32 candidate names (each includes the PID and an in-process counter)
+  when a candidate is already taken, and touching only files this call
+  created — is flushed and synced, then renamed over the output path; on an
+  error return the temporary file is removed and any previous output is left
+  untouched. On Unix the replacement is `rename(2)` (a symlink at the output
+  path is replaced, not followed); on Windows it uses `MoveFileExW` with
+  `MOVEFILE_REPLACE_EXISTING`, whose symlink replacement semantics differ —
+  the output is verified not to alias the input source file before writing
+  on both platforms.
+- Atomicity scope: the rename guarantees readers never observe partial
+  content, but this is *not* a crash-durability guarantee — the output
+  directory is not fsynced, so power loss may not preserve the newest file,
+  and an abrupt process kill can leave a temporary file behind (normal
+  error-return paths remove it).
+- Permissions (Unix): the temporary file is created with `OpenOptions` plus
+  `create_new(true)`, which applies the standard `0666 & !umask` mode (same as
+  `std::fs::write`). When an output file already exists, its permission bits
+  are copied to the replacement first, so re-running a build never silently
+  changes an existing output mode (e.g. from `0640` to a temp file's `0600`).
+  Windows has no Unix mode semantics and is left untouched.
 ### Virtual Paths
 
 Internal paths are logical, not OS paths (`"chapter/intro.qd"`).
-The native CLI adapter converts `VirtualPath ↔ PathBuf` at the boundary.
+The native CLI adapter resolves OS paths (canonicalization, symlink resolution)
+and maps them into project-relative `VirtualPathBuf` values.
+Symlink handling is a CLI adapter responsibility; the core only sees virtual paths.
+
+### Symlink Security Boundary
+
+The CLI adapter enforces a strict symlink containment policy:
+
+* **Logical project root**: Derived from the user-provided input path (before canonicalization).
+* **Physical project root**: Canonicalized logical project root.
+* **Symlink containment check**: Before reading a file, the CLI canonicalizes the input path and verifies it lies within the canonicalized physical project root. If a symlink points outside the project root, the operation fails with a clear error message.
+* **Output path**: Computed from the user-provided logical path, preserving the original filename and directory structure. Symlinks do not affect output location.
+
+This design ensures:
+
+* A WASM frontend (which has no filesystem access) is inherently immune to symlink escape attacks.
+* Native CLI users are protected from accidental or malicious symlink escapes.
+* The `VirtualProject` abstraction remains purely logical, with no OS path leakage.
 
 ### Synchronous Core, Async Host
 
@@ -162,7 +256,7 @@ Core compilation is synchronous. Host loads dependencies asynchronously.
 ```rust
 pub enum CompileStatus {
     Complete(CompileOutput),
-    NeedsSources(Vec<VirtualPath>),
+    NeedsSources(Vec<VirtualPathBuf>),
 }
 ```
 
