@@ -9,28 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Repository bootstrap with Apache-2.0 licensing and provenance policy.
-- Product vision defining Scribium as a Quarkdown-compatible compiler.
-- Clean-room Quarkdown compatibility policy and process documentation.
-- Architecture, roadmap, and non-goals documentation.
-- Baseline Rust workspace with scribium-core, scribium-typst, scribium-cli, scribium-test-support.
-- ADR process and initial architecture decisions.
-- GitHub templates for issues and pull requests.
-- CI workflow with fmt, clippy, test, and dependency checks.
-- M0 Foundation milestone — clean-room policy, naming research, parser/backend spikes.
-- Minimal CommonMark-compatible Markdown parser (`syntax::markdown`) with
-  byte-level source spans: ATX headings, paragraphs, emphasis/strong,
-  unordered lists with nesting, fenced code blocks, thematic breaks, and
-  hard/line breaks. No panics on malformed input.
-- Source span infrastructure: `SourceId`, `ByteSpan`, `LineColumn`, `SourceSpan`.
-- Structured diagnostics with stable error codes (`Diagnostic`, `Severity`).
-- Compatibility profile selection and divergence tracking.
-- CLI commands: `build`, `check`, `inspect`.
-- Typst backend trait (`TypstBackend`) with `SubprocessBackend` adapter skeleton.
-- Typst lowering skeleton (`lower_to_typst`).
-- `build` accepts a bare file name (`scribium build document.qd`), resolving
-  its project root to the current directory.
-- `build --output <path>` to override the generated output path.
+- **PDF output via external Typst subprocess** — `scribium build --format pdf` compiles
+  supported input documents (`.qd`, `.scrib`, `.md`) directly to PDF using the
+  configured Typst executable. The `SubprocessBackend` implements the `TypstBackend`
+  trait, invoking `typst compile` via `std::process::Command` without shell
+  interpolation. Real `typst --version` detection is implemented. Typst diagnostics
+  are captured and surfaced as actionable Scribium errors. Generated PDFs are
+  validated for non-empty output and correct `%PDF-` header.
+- Multiple output formats in a single invocation — `scribium build --format typst
+  --format pdf` produces both `.typ` and `.pdf` from a single lowering pass.
+- Explicit `--output` path support for PDF; collision/overwrite protection and
+  atomic write semantics are preserved from the Typst output path.
+- Backend tests covering missing executable, non-zero exit, successful execution,
+  output reading, and version command.
+- CLI integration tests for `--format pdf`, `--format typst --format pdf`,
+  `--output` with PDF, unsupported format rejection (HTML/SVG/PNG), and input/output
+  collision checks.
+- README quickstart and status table updated to reflect experimental PDF support.
+
+### Fixed
+
+- `build` with multiple formats and `--output` now returns a clear validation error
+  instead of silently using the output path for only one format.
+
+### Changed
+
+- Supported output formats are now `typst` and `pdf`; `html`, `svg`, `png` remain
+  explicitly unsupported with actionable error messages.
 
 ### Fixed
 

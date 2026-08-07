@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
+use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
 
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {
@@ -171,33 +172,24 @@ fn ensure_no_errors(diagnostics: &[scribium_core::Diagnostic]) -> anyhow::Result
 
 /// Execute the `build` command: compile input to output format(s).
 pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
-    let unsupported: Vec<&String> = formats.iter().filter(|f| f.as_str() != "typst").collect();
+    const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
+
+    let unsupported: Vec<&String> = formats
+        .iter()
+        .filter(|f| !SUPPORTED_FORMATS.contains(&f.as_str()))
+        .collect();
     if let Some(format) = unsupported.first() {
         anyhow::bail!(
-            "output format '{}' is not yet implemented (supported: typst)",
+            "output format '{}' is not yet implemented (supported: typst, pdf)",
             format
         );
     }
-    if !formats.iter().any(|f| f.as_str() == "typst") {
-        anyhow::bail!("no writable output format requested");
+    if formats.is_empty() {
+        anyhow::bail!("no output format requested");
     }
 
-    let input = Path::new(input);
-    let loaded = load_single_file_project(input)?;
-
-    let out_path = match output {
-        Some(path) => path.to_path_buf(),
-        None => default_typst_output_path(&loaded.requested_entry),
-    };
-    // Fail fast on the requested path; the authoritative check runs against
-    // the resolved path immediately before the write.
-    ensure_distinct_output(&loaded.requested_entry, &out_path)?;
-    // Early, filesystem-light rejection: when the requested output path
-    // lexically resolves to the same file as the input, fail before any
-    // output directory is created so a rejected build leaves nothing
-    // behind. The canonicalization and same-file identity checks against
-    // the resolved path below remain authoritative.
-    reject_lexically_colliding_output(&loaded.requested_entry, &out_path)?;
+    let input_path = Path::new(input);
+    let loaded = load_single_file_project(input_path)?;
 
     let result = compile_project(&loaded.project)?;
 
@@ -208,22 +200,72 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
     // Fail on error diagnostics before writing output
     ensure_no_errors(&result.diagnostics)?;
 
-    // Create missing output parent directories, then resolve the effective
-    // output path against the real (canonicalized) parent. `.`/`..` and
-    // symlinks inside the output path are interpreted after directory
-    // creation, so no later step can change what the path means.
-    let resolved_out_path = resolve_output_path(&out_path)?;
-    // Re-verify immediately before writing: the resolved output may alias the
-    // input even when the requested path could not be checked earlier (e.g.
-    // a parent directory that did not exist yet), or may have appeared since
-    // the initial check (TOCTOU window).
-    ensure_distinct_output(&loaded.requested_entry, &resolved_out_path)?;
-
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    write_output_atomically(&resolved_out_path, typst_code.as_bytes())?;
-    eprintln!("Wrote generated Typst to {}", resolved_out_path.display());
 
-    // TODO: invoke Typst backend for pdf/html/svg/png
+    // Initialize subprocess backend for PDF generation
+    let backend = SubprocessBackend::new("typst");
+
+    // Determine output paths for each requested format
+    let mut output_paths = Vec::new();
+    for format in formats {
+        let out_path = match (output, format.as_str()) {
+            // If explicit output is given and only one format, use it
+            (Some(path), _) if formats.len() == 1 => path.to_path_buf(),
+            // If explicit output is given with multiple formats, that's an error
+            (Some(_), _) => {
+                anyhow::bail!(
+                    "cannot use --output with multiple formats; specify one format or omit --output"
+                );
+            }
+            // Default output path for each format
+            (None, "typst") => default_typst_output_path(&loaded.requested_entry),
+            (None, "pdf") => default_pdf_output_path(&loaded.requested_entry),
+            (None, _) => unreachable!("validated above"),
+        };
+        output_paths.push((format.clone(), out_path));
+    }
+
+    // Check all output paths for collisions before any writes
+    for (_, out_path) in &output_paths {
+        ensure_distinct_output(&loaded.requested_entry, out_path)?;
+        reject_lexically_colliding_output(&loaded.requested_entry, out_path)?;
+    }
+
+    // Resolve all output paths
+    let mut resolved_paths = Vec::new();
+    for (format, out_path) in output_paths {
+        let resolved = resolve_output_path(&out_path)?;
+        // Re-verify immediately before writing
+        ensure_distinct_output(&loaded.requested_entry, &resolved)?;
+        resolved_paths.push((format, resolved));
+    }
+
+    // Write outputs for each format
+    for (format, resolved_out_path) in resolved_paths {
+        match format.as_str() {
+            "typst" => {
+                write_output_atomically(&resolved_out_path, typst_code.as_bytes())?;
+                eprintln!("Wrote generated Typst to {}", resolved_out_path.display());
+            }
+            "pdf" => {
+                let typst_input = TypstInput {
+                    source: typst_code.clone(),
+                    entry_path: loaded.requested_entry.to_string_lossy().to_string(),
+                };
+                let typst_output = backend
+                    .compile(&typst_input)
+                    .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?;
+                if let Some(pdf_bytes) = typst_output.pdf {
+                    write_output_atomically(&resolved_out_path, &pdf_bytes)?;
+                    eprintln!("Wrote PDF to {}", resolved_out_path.display());
+                } else {
+                    anyhow::bail!("PDF backend did not produce output");
+                }
+            }
+            _ => unreachable!("validated above"),
+        }
+    }
+
     Ok(())
 }
 
@@ -231,6 +273,12 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
 /// Replaces the extension with `.typ`.
 fn default_typst_output_path(requested_entry: &Path) -> PathBuf {
     requested_entry.with_extension("typ")
+}
+
+/// Returns the default output path for PDF output.
+/// Replaces the extension with `.pdf`.
+fn default_pdf_output_path(requested_entry: &Path) -> PathBuf {
+    requested_entry.with_extension("pdf")
 }
 
 /// Creates the parent directories of `out_path` when they do not exist.

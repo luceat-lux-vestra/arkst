@@ -37,8 +37,12 @@ black-box behavior. No Quarkdown source code is copied or translated.
 # Build a document to generated Typst source (document.qd → document.typ)
 scribium build examples/hello/main.qd
 
+# Build a document to PDF (document.qd → document.pdf)
+scribium build examples/hello/main.qd --format pdf
+
 # Override the output path
 scribium build examples/hello/main.qd --output out/main.typ
+scribium build examples/hello/main.qd --format pdf --output out/main.pdf
 
 # Check for errors without compiling
 scribium check examples/hello/main.qd
@@ -74,9 +78,9 @@ scribium build report.md
 > crash-durability guarantee — the output directory is not fsynced, so
 > power loss may not preserve the newest file. On Unix, replacing an
 > existing output keeps its permission bits, and new outputs use the
-> standard `0666 & !umask` mode (same as `fs::write`). PDF/HTML/SVG/PNG
-> backends are not implemented yet; requesting them fails with a clear
-> error.
+> standard `0666 & !umask` mode (same as `fs::write`). **PDF via external
+> Typst subprocess is experimental; HTML/SVG/PNG backends are not
+> implemented yet; requesting them fails with a clear error.**
 
 ## Example (.qd)
 
@@ -137,6 +141,7 @@ author: Alice
 | `watch` mode, source maps               | Planned      |
 | LSP integration                         | Planned      |
 | WASM support                            | Deferred     |
+| **PDF via Typst subprocess**            | **Experimental** |
 
 ## Architecture
 
