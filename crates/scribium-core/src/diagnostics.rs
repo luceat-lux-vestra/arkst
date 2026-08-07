@@ -19,6 +19,12 @@ impl std::fmt::Display for Diagnostic {
     }
 }
 
+impl std::error::Error for Diagnostic {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
 /// Diagnostic severity level.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Severity {

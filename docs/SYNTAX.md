@@ -131,6 +131,38 @@ The following prefixes are reserved for future Scribium syntax:
 - `#` — raw Typst (pass-through in Typst escape blocks)
 - Front matter delimiter `---`
 
+## Front Matter (Implemented)
+
+A `---`-delimited block at the start of a document carries metadata
+(`title`, `author`, `date`, and custom keys). It is a flat, line-based
+`key: value` format — **not full YAML**:
+
+- Keys and values are split on the first colon (`key: rest of line`).
+- Nested objects, arrays, and block strings are not supported.
+- The opening delimiter must be `---` at column 0; every non-empty metadata
+  line must also start at column 0. Indented metadata lines (nested structure)
+  reject the whole block, which is preserved intact as regular Markdown.
+- A line without a colon, an empty key, or an indented `---` delimiter
+  rejects the whole block (it is treated as regular Markdown).
+- Duplicate keys use last-wins semantics.
+- Custom metadata is stored in the IR in deterministic (lexicographic
+  key) order.
+
+Example:
+
+```markdown
+---
+title: My Document
+author: Alice
+date: 2026-08-06
+custom: value
+---
+
+# Heading
+```
+
+Full YAML support is a separate, future milestone.
+
 ## Versioning
 
 - Syntax version: tied to Scribium release version

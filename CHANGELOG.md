@@ -28,9 +28,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI commands: `build`, `check`, `inspect`.
 - Typst backend trait (`TypstBackend`) with `SubprocessBackend` adapter skeleton.
 - Typst lowering skeleton (`lower_to_typst`).
+- `build` accepts a bare file name (`scribium build document.qd`), resolving
+  its project root to the current directory.
+- `build --output <path>` to override the generated output path.
+
+### Fixed
+
+- `build` never overwrites the input source file: an output that resolves to
+  the input is rejected with a clear error. Existing outputs are compared by
+  file identity (device/inode on Unix, file index on Windows via `same-file`),
+  so relative/absolute spellings, `.`/`..` components, symlinks, and hard
+  links that alias the input are all detected; the check is repeated
+  immediately before writing. Rejected builds leave the input byte-for-byte
+  unchanged.
+- Hard and soft line breaks previously reached the IR with a synthesized
+  `0..0` source span; they now carry the actual break position (byte
+  offsets), matching the span policy of every other inline node.
+- Output is written atomically: the content goes to a uniquely named
+  temporary file in the output directory, is flushed and synced, and is then
+  renamed over the output path. The temporary file is created exclusively
+  with `create_new(true)` — candidate names include the PID and an
+  in-process counter, and up to 32 candidates are retried when one is
+  already taken, so the write never clobbers an existing file. A failed
+  build no longer leaves a partial output file or a stray temporary file on
+  its error-return path, and an existing output is replaced without ever
+  being truncated in place. (On Unix the rename is `rename(2)`; on Windows
+  it uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`.) This is an
+  atomic-replace guarantee, not a crash-durability guarantee: the output
+  directory is not fsynced, so power loss may not preserve the newest file,
+  and an abrupt kill (SIGKILL, power loss) can leave a temporary file behind.
+- `build --output` whose parent directories do not exist could still resolve
+  to the input file *after* the directories were created — e.g.
+  `new/../document.qd` with `new` missing — and overwrite it. Parent
+  directories are now created first, the effective output path is resolved
+  from the real (canonicalized) parent, and the same-file check runs against
+  that resolved path immediately before the atomic write. The input is
+  never modified, even for `.`/`..`-containing output paths.
+- Output paths whose real resolution is the input (e.g. `new/../document.qd`
+  or `a/b/../../document.qd` with the intermediate directories missing) are
+  now rejected *before* any directory is created, so a rejected build no
+  longer leaves empty `new`/`a`/`a/b` directories behind; the pre-validation
+  resolves the requested path in component order with symlinks interpreted
+  as reached (a `..` after a symlink moves to the symlink target's parent),
+  so distinct targets behind a symlink are accepted and only real aliases
+  are rejected. The canonicalized same-file check remains the authoritative
+  guard for symlink and hard-link aliases.
+- Windows output path kinds are now classified explicitly: root-relative
+  paths (`\out\main.typ`) are resolved from the current drive's root
+  (previously they silently skipped the pre-write collision check), and
+  drive-relative paths (`C:out\main.typ`) are rejected with a clear error
+  suggesting an absolute or ordinary relative path, since they depend on
+  the per-drive current-directory state. Resolution failures are reported
+  instead of being silently ignored.
+- Console test targets build on Windows (unused-import warnings only surfaced
+  on non-unix platforms).
 
 ### Changed
 
+- Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
+  rejected as an unsupported format until Typst passthrough is implemented.
+  Extension matching is ASCII case-insensitive, and files without an
+  extension are rejected.
+- `build --output` now creates missing output parent directories (single- or
+  multi-level) instead of failing when they do not exist.
+- Unix output permissions: replacing an existing output keeps its permission
+  bits (no silent change from e.g. `0640` to the temp file's `0600`), and
+  new outputs are created with `0666 & !umask` — the same default mode
+  `std::fs::write` produces. The output temporary file is now created
+  directly (`fs::File::create` + `rename`) instead of via a permission-locked
+  helper crate. Windows behavior is unchanged.
+- Source ID allocation in `SourceStore` no longer wraps: `u32::MAX` is never
+  assigned, and exhaustion is reported as `SourceStoreError::SourceIdExhausted`
+  before any store mutation.
+- Front matter is documented as a flat line-based `key: value` format, not
+  full YAML: nested objects, arrays, and block strings are not supported.
+  Keys split on the first colon; delimiters and metadata lines must start at
+  column 0 (indented keys reject the block, which is preserved as regular
+  Markdown); duplicate keys use last-wins semantics; user-defined metadata is
+  stored in the IR in deterministic order.
+- Added the `same-file` dependency for cross-platform file-identity checks.
+- Windows CI previously failed to compile the `scribium` test binary due to
+  unused imports on Windows-only configurations; this is resolved.
 - Issue templates: fixed label formatting (`type: bug` → `type:bug`),
   added milestone dropdown to feature requests.
 - Removed duplicate/obsolete GitHub labels: `bug`, `enhancement`,

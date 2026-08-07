@@ -34,8 +34,11 @@ black-box behavior. No Quarkdown source code is copied or translated.
 ## Quickstart
 
 ```bash
-# Build a Quarkdown document to PDF
+# Build a document to generated Typst source (document.qd → document.typ)
 scribium build examples/hello/main.qd
+
+# Override the output path
+scribium build examples/hello/main.qd --output out/main.typ
 
 # Check for errors without compiling
 scribium check examples/hello/main.qd
@@ -43,10 +46,37 @@ scribium check examples/hello/main.qd
 # Inspect intermediate representations
 scribium inspect examples/hello/main.qd --emit typst
 
-# Build any supported input format
+# Build a Markdown input (report.md → report.typ)
 scribium build report.md
-scribium build report.typ
 ```
+
+> Supported inputs are `.qd`, `.scrib`, and `.md` (case-insensitive; files
+> without an extension are rejected). A `.typ` input is rejected until Typst
+> passthrough is implemented. The build refuses to overwrite the input file:
+> an explicit `--output` that resolves to the input — including via
+> `.`/`..` components (resolved in component order with symlinks
+> interpreted as reached, and rejected before any directory is created, so
+> a rejected build never leaves empty directories behind), symlinks, or
+> hard links — is rejected. Distinct targets behind a symlink (e.g.
+> `link/../document.qd` with `link -> ../other/subdir`) are accepted and
+> written to their real location. On Windows, root-relative output paths
+> (`\out\main.typ`) are resolved from the current drive's root, and
+> drive-relative paths (`C:out\main.typ`) are rejected with a clear error
+> because they depend on the per-drive current-directory state. Missing
+> output directories (e.g. `out/` for `--output out/main.typ`) are created
+> automatically. Output is written
+> atomically: the content goes to a uniquely named temporary file (created
+> exclusively, retrying up to 32 candidate names) in the output directory
+> and is renamed into place, so
+> readers never observe a partially written output and an erroring build
+> leaves no partial file (temporary files are cleaned up on error-return
+> paths; an abrupt crash or forced kill may leave one). This is not a
+> crash-durability guarantee — the output directory is not fsynced, so
+> power loss may not preserve the newest file. On Unix, replacing an
+> existing output keeps its permission bits, and new outputs use the
+> standard `0666 & !umask` mode (same as `fs::write`). PDF/HTML/SVG/PNG
+> backends are not implemented yet; requesting them fails with a clear
+> error.
 
 ## Example (.qd)
 
@@ -66,6 +96,27 @@ This is a @strong[Quarkdown-compatible] document compiled through Typst to PDF.
   @col[Left]
   @col[Right]
 ]
+```
+
+## Front matter
+
+A `---`-delimited block at the start of a document provides metadata
+(`title`, `author`, `date`, and custom keys). The supported format is a
+flat line-based `key: value` form, **not full YAML**:
+
+- Keys and values are split on the first colon.
+- Nested objects, arrays, and block strings are **not** supported.
+- Delimiters and metadata lines must start at column 0; indented keys reject
+  the block, which is preserved as regular Markdown instead of being flattened.
+- Duplicate keys: last occurrence wins.
+- Custom metadata is stored in the IR in a deterministic (lexicographic) order.
+
+```markdown
+---
+title: My Document
+author: Alice
+---
+# Heading
 ```
 
 ## Current Status

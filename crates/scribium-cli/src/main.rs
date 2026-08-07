@@ -9,6 +9,7 @@
 mod commands;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -25,20 +26,23 @@ struct Cli {
 enum Commands {
     /// Compile input document(s) to output format(s)
     Build {
-        /// Input file (.qd, .scrib, .md, .typ)
+        /// Input file (.qd, .scrib, .md)
         input: String,
         /// Output format(s): pdf, html, svg, png, typst
-        #[arg(short, long, default_value = "pdf")]
+        #[arg(short, long, default_value = "typst")]
         format: Vec<String>,
+        /// Output file path (defaults to input with a `.typ` extension)
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// Validate input without producing output
     Check {
-        /// Input file or directory
+        /// Input Scribium or Markdown file
         input: String,
     },
     /// Show intermediate representation(s)
     Inspect {
-        /// Input file
+        /// Input Scribium or Markdown file
         input: String,
         /// What to emit: ast, semantic, ir, typst, source-map
         #[arg(long, default_value = "typst")]
@@ -51,7 +55,11 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Build { input, format } => commands::build(&input, &format),
+        Commands::Build {
+            input,
+            format,
+            output,
+        } => commands::build(&input, &format, output.as_deref()),
         Commands::Check { input } => commands::check(&input),
         Commands::Inspect { input, emit } => commands::inspect(&input, &emit),
     }

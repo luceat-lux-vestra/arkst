@@ -78,7 +78,7 @@ impl LoweringContext {
                 self.push(' ');
                 self.lower_inlines(content);
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -86,7 +86,7 @@ impl LoweringContext {
                 let before = self.output.len();
                 self.lower_inlines(content);
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -99,7 +99,7 @@ impl LoweringContext {
                     }
                     self.push('\n');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -119,7 +119,7 @@ impl LoweringContext {
                     self.push('\n');
                 }
                 self.push_str("```\n");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -129,7 +129,7 @@ impl LoweringContext {
                 if !source.ends_with('\n') {
                     self.push('\n');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -170,14 +170,14 @@ impl LoweringContext {
                     self.push(']');
                 }
                 self.push('\n');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrNode::ThematicBreak { span } => {
                 let before = self.output.len();
                 self.push_str("---\n");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -196,7 +196,7 @@ impl LoweringContext {
                     self.push_str(source);
                     self.push('$');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -214,7 +214,7 @@ impl LoweringContext {
             IrInline::Text { content, span } => {
                 let before = self.output.len();
                 self.push_str(content);
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -223,7 +223,7 @@ impl LoweringContext {
                 self.push('*');
                 self.lower_inlines(content);
                 self.push('*');
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -232,7 +232,7 @@ impl LoweringContext {
                 self.push_str("*");
                 self.lower_inlines(content);
                 self.push_str("*");
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -272,7 +272,7 @@ impl LoweringContext {
                     self.lower_inlines(body_inlines);
                     self.push(']');
                 }
-                if span.source_id != 0 {
+                if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -322,7 +322,7 @@ mod tests {
     use scribium_core::source::SourceSpan;
 
     fn empty_span() -> SourceSpan {
-        SourceSpan::new(0, 0, 0)
+        SourceSpan::new(scribium_core::SourceId(0), 0, 0)
     }
 
     fn text(text: &str) -> IrInline {
@@ -527,5 +527,46 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "$ x = (-b pm sqrt(b^2 - 4ac)) / (2a) $\n\n");
+    }
+    #[test]
+    fn source_map_is_independent_of_source_insertion_order() {
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        let project1 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("a.qd", "content a")
+            .expect("valid path")
+            .add_source("b.qd", "content b")
+            .expect("valid path")
+            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let project2 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("b.qd", "content b")
+            .expect("valid path")
+            .add_source("a.qd", "content a")
+            .expect("valid path")
+            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let result1 = compile(&project1, &CompileOptions::default());
+        let result2 = compile(&project2, &CompileOptions::default());
+
+        // Lower to Typst with source maps
+        let (typst1, map1) = super::lower_to_typst(&result1.ir);
+        let (typst2, map2) = super::lower_to_typst(&result2.ir);
+
+        // Generated Typst should be identical
+        assert_eq!(typst1, typst2);
+
+        // Source maps should be identical
+        assert_eq!(map1, map2);
     }
 }
