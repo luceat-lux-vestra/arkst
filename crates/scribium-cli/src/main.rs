@@ -28,12 +28,15 @@ enum Commands {
     Build {
         /// Input file (.qd, .scrib, .md)
         input: String,
-        /// Output format(s): pdf, html, svg, png, typst
+        /// Output format(s): typst, pdf (html, svg, png are not yet implemented)
         #[arg(short, long, default_value = "typst")]
         format: Vec<String>,
-        /// Output file path (defaults to input with a `.typ` extension)
+        /// Output file path (defaults to .typ for typst and .pdf for pdf)
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Path to the Typst executable used for PDF output (defaults to `typst` on PATH)
+        #[arg(long, default_value = "typst")]
+        typst_path: PathBuf,
     },
     /// Validate input without producing output
     Check {
@@ -59,7 +62,8 @@ fn main() -> anyhow::Result<()> {
             input,
             format,
             output,
-        } => commands::build(&input, &format, output.as_deref()),
+            typst_path,
+        } => commands::build(&input, &format, output.as_deref(), &typst_path),
         Commands::Check { input } => commands::check(&input),
         Commands::Inspect { input, emit } => commands::inspect(&input, &emit),
     }

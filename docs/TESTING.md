@@ -82,6 +82,22 @@ CLI integration tests:
 - Cross-platform path handling
 - Output overwrite protection
 
+## Typst Integration Tests
+
+Backend tests that invoke a **real** `typst` executable live in
+`crates/scribium-typst/tests/backend_integration.rs`, separate from the unit
+tests in `src/backend.rs` (which use fake executable fixtures and never
+require a Typst install, so the ordinary Rust suite is environment-independent).
+
+The integration tests locate an executable via (in order) `SCRIBIUM_TYPST_PATH`,
+`typst` on `PATH`, or the Homebrew default `/opt/homebrew/bin/typst`. When none
+is found they **skip with a notice**; set `SCRIBIUM_REQUIRE_TYPST=1` to turn a
+missing executable into a hard failure. CI installs a pinned Typst version
+explicitly (see `.github/workflows/ci.yml`) and runs the suite with
+`SCRIBIUM_REQUIRE_TYPST=1` on the Ubuntu/macOS/Windows matrix, so the variants
+that produce and validate a real `%PDF-` PDF always run in CI without relying
+on the runner image.
+
 ## Property Tests
 
 Invariants:

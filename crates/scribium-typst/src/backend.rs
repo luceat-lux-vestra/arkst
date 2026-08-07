@@ -1,5 +1,6 @@
 /// Typst backend trait and adapters.
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -48,11 +49,11 @@ impl std::error::Error for TypstError {}
 
 /// Subprocess backend — calls `typst compile` via CLI.
 pub struct SubprocessBackend {
-    pub typst_path: String,
+    pub typst_path: PathBuf,
 }
 
 impl SubprocessBackend {
-    pub fn new(typst_path: impl Into<String>) -> Self {
+    pub fn new(typst_path: impl Into<PathBuf>) -> Self {
         Self {
             typst_path: typst_path.into(),
         }
@@ -79,7 +80,8 @@ impl TypstBackend for SubprocessBackend {
             if e.kind() == std::io::ErrorKind::NotFound {
                 TypstError::Subprocess(format!(
                     "Typst executable not found at '{}': {}",
-                    self.typst_path, e
+                    self.typst_path.display(),
+                    e
                 ))
             } else {
                 TypstError::Io(e)
@@ -105,6 +107,14 @@ impl TypstBackend for SubprocessBackend {
             ));
         }
 
+        // A successful subprocess can still produce a corrupt or non-PDF
+        // file; never treat that as success.
+        if !pdf_bytes.starts_with(b"%PDF-") {
+            return Err(TypstError::Subprocess(
+                "Typst produced invalid PDF output: missing %PDF- header".into(),
+            ));
+        }
+
         Ok(TypstOutput {
             pdf: Some(pdf_bytes),
             html: None,
@@ -123,7 +133,8 @@ impl TypstBackend for SubprocessBackend {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     TypstError::Subprocess(format!(
                         "Typst executable not found at '{}': {}",
-                        self.typst_path, e
+                        self.typst_path.display(),
+                        e
                     ))
                 } else {
                     TypstError::Io(e)
@@ -146,12 +157,68 @@ impl TypstBackend for SubprocessBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
+    /// Writes a fake Typst executable to `dir` and returns its path.
+    ///
+    /// The script honours the subprocess protocol used by the backend:
+    /// `compile <input.typ> <output.pdf>` and `--version`. `pdf_body` is
+    /// written verbatim to the third argument when invoked as `compile`;
+    /// `stderr` (when non-empty) is written to stderr and the process exits
+    /// with `status` instead. Version invocations always succeed.
+    ///
+    /// The fixture is a small shell script spawned by the backend directly
+    /// via `std::process::Command` — the script is a stand-in for the real
+    /// Typst binary, not a command wrapper — so the "no shell invocation"
+    /// rule is unaffected. It is unix-only: Windows `CreateProcess` cannot
+    /// execute `.cmd`/`.bat` files, so executable-spawning tests run only on
+    /// unix, while the real-Typst integration tests
+    /// (`tests/backend_integration.rs`) cover every OS in CI.
+    #[cfg(unix)]
+    fn write_fake_typst(
+        dir: &std::path::Path,
+        pdf_body: &str,
+        stderr: &str,
+        status: i32,
+    ) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let mut script = String::new();
+        script.push_str("#!/bin/sh\n");
+        if stderr.is_empty() {
+            script.push_str("if [ \"$1\" = \"compile\" ]; then\n");
+            script.push_str(&format!("  printf '%s' '{}' > \"$3\"\n", pdf_body));
+            script.push_str("  exit 0\n");
+            script.push_str("fi\n");
+            script.push_str("printf '%s\\n' 'typst fake 0.15.1'\n");
+        } else {
+            script.push_str(&format!("printf '%s\\n' '{}' >&2\n", stderr));
+            script.push_str(&format!("exit {}\n", status));
+        }
+        let path = dir.join("fake_typst");
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    fn compile_with(fake: &std::path::Path) -> Result<TypstOutput, TypstError> {
+        let backend = SubprocessBackend::new(fake);
+        let input = TypstInput {
+            source: "#heading[Test]\n\nHello world.\n".to_string(),
+            entry_path: "test.qd".to_string(),
+        };
+        backend.compile(&input)
+    }
+
+    #[cfg(unix)]
     #[test]
     fn subprocess_backend_version() {
-        let backend = SubprocessBackend::new("typst");
+        let dir = tempfile::tempdir().unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake", "", 0);
+        let backend = SubprocessBackend::new(fake);
         let version = backend.version().expect("version should succeed");
-        assert!(version.contains("typst") || version.contains("0."));
+        assert!(version.contains("typst"), "version was: {}", version);
+        assert!(version.contains("0.15.1"), "version was: {}", version);
     }
 
     #[test]
@@ -160,34 +227,55 @@ mod tests {
         let result = backend.version();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert!(err.contains("not found"), "error was: {}", err);
+        assert!(
+            err.contains("nonexistent"),
+            "error must name the configured path: {}",
+            err
+        );
     }
 
+    #[cfg(unix)]
     #[test]
     fn subprocess_backend_compile_success() {
-        let backend = SubprocessBackend::new("typst");
-        let input = TypstInput {
-            source: "#heading[Test]\n\nHello world.\n".to_string(),
-            entry_path: "test.qd".to_string(),
-        };
-        let output = backend.compile(&input).expect("compile should succeed");
-        assert!(output.pdf.is_some());
-        let pdf = output.pdf.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake", "", 0);
+        let output = compile_with(&fake).expect("compile should succeed");
+        let pdf = output.pdf.expect("pdf output must be present");
         assert!(!pdf.is_empty());
-        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(pdf.starts_with(b"%PDF-"), "pdf header was: {:?}", &pdf[..8]);
+        assert_eq!(pdf, b"%PDF-1.7 fake");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn subprocess_backend_compile_failure() {
-        let backend = SubprocessBackend::new("typst");
-        // Invalid Typst syntax - unmatched bracket
-        let input = TypstInput {
-            source: "#heading[Test\n".to_string(),
-            entry_path: "test.qd".to_string(),
-        };
-        let result = backend.compile(&input);
+    fn subprocess_backend_invalid_pdf_header_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        // The fake exits successfully but writes a non-PDF file.
+        let fake = write_fake_typst(dir.path(), "garbage not a pdf", "", 0);
+        let result = compile_with(&fake);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("compilation failed") || err.contains("error"));
+        assert!(
+            err.contains("invalid PDF output: missing %PDF- header"),
+            "error was: {}",
+            err
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn subprocess_backend_compile_failure_surfaces_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = write_fake_typst(dir.path(), "", "fake typst error: bad syntax", 1);
+        let result = compile_with(&fake);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Typst compilation failed"),
+            "error was: {}",
+            err
+        );
+        assert!(err.contains("fake typst error"), "error was: {}", err);
     }
 }

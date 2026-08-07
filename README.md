@@ -44,6 +44,9 @@ scribium build examples/hello/main.qd --format pdf
 scribium build examples/hello/main.qd --output out/main.typ
 scribium build examples/hello/main.qd --format pdf --output out/main.pdf
 
+# Select a specific Typst executable for PDF output (defaults to `typst` on PATH)
+scribium build examples/hello/main.qd --format pdf --typst-path /opt/typst/bin/typst
+
 # Check for errors without compiling
 scribium check examples/hello/main.qd
 
@@ -80,7 +83,12 @@ scribium build report.md
 > existing output keeps its permission bits, and new outputs use the
 > standard `0666 & !umask` mode (same as `fs::write`). **PDF via external
 > Typst subprocess is experimental; HTML/SVG/PNG backends are not
-> implemented yet; requesting them fails with a clear error.**
+> implemented yet; requesting them fails with a clear error.** PDF builds
+> invoke the configured Typst executable (`typst` on `PATH` by default,
+> overridable with `--typst-path <PATH>`) directly via `std::process::Command`
+> — never through a shell. A `--format typst` build does not require a Typst
+> install. Generated PDFs are validated for non-empty output and a `%PDF-`
+> header before being written.
 
 ## Example (.qd)
 

@@ -171,7 +171,16 @@ fn ensure_no_errors(diagnostics: &[scribium_core::Diagnostic]) -> anyhow::Result
 }
 
 /// Execute the `build` command: compile input to output format(s).
-pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
+///
+/// `typst_path` selects the Typst executable used for PDF output. It is only
+/// consulted when a `pdf` format is requested; a `typst`-only build never
+/// spawns a subprocess.
+pub fn build(
+    input: &str,
+    formats: &[String],
+    output: Option<&Path>,
+    typst_path: &Path,
+) -> anyhow::Result<()> {
     const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
 
     let unsupported: Vec<&String> = formats
@@ -201,9 +210,6 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
     ensure_no_errors(&result.diagnostics)?;
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-
-    // Initialize subprocess backend for PDF generation
-    let backend = SubprocessBackend::new("typst");
 
     // Determine output paths for each requested format
     let mut output_paths = Vec::new();
@@ -252,6 +258,7 @@ pub fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::
                     source: typst_code.clone(),
                     entry_path: loaded.requested_entry.to_string_lossy().to_string(),
                 };
+                let backend = SubprocessBackend::new(typst_path);
                 let typst_output = backend
                     .compile(&typst_input)
                     .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?;
@@ -786,6 +793,13 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    /// Test-only variant of [`super::build`] that keeps the pre-`--typst-path`
+    /// three-argument shape for the many typst-output tests. PDF tests use
+    /// [`super::build`] directly so they can pass a fake executable path.
+    fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
+        super::build(input, formats, output, Path::new("typst"))
+    }
 
     #[test]
     #[cfg(unix)]
@@ -2100,5 +2114,261 @@ mod tests {
             "no directory or temporary file may be created: {:?}",
             names
         );
+    }
+
+    /// Writes a fake Typst executable into `dir` whose `compile` invocation
+    /// writes `pdf_body` to the output PDF argument and exits successfully.
+    /// Returns the executable's path; the tests never need a real Typst
+    /// install to exercise the CLI's PDF plumbing.
+    fn write_fake_typst(dir: &std::path::Path, pdf_body: &str) -> PathBuf {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"compile\" ]; then\n  printf '%s' '{}' > \"$3\"\n  exit 0\nfi\nprintf '%s\\n' 'typst fake 0.15.1'\n",
+                pdf_body
+            );
+            let path = dir.join("fake_typst");
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+        #[cfg(windows)]
+        {
+            // Write the pdf body to a secondary file and `copy /B` it into
+            // place, so `%` in PDF content is never interpreted by `echo`.
+            let body_path = dir.join("fake_body.bin");
+            fs::write(&body_path, pdf_body.as_bytes()).unwrap();
+            let script = format!(
+                "@echo off\nif \"%1\"==\"compile\" (\n  copy /B \"{}\" \"%~3\" >nul\n  exit /b 0\n)\necho typst fake 0.15.1\n",
+                body_path.display()
+            );
+            let path = dir.join("fake_typst.cmd");
+            fs::write(&path, script).unwrap();
+            path
+        }
+    }
+
+    /// Like [`write_fake_typst`] but fails the `compile` invocation: it
+    /// writes `stderr_body` to stderr and exits non-zero without producing a
+    /// PDF file.
+    fn write_failing_fake_typst(dir: &std::path::Path, stderr_body: &str) -> PathBuf {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"compile\" ]; then\n  printf '%s\\n' '{}' >&2\n  exit 1\nfi\nprintf '%s\\n' 'typst fake 0.15.1'\n",
+                stderr_body
+            );
+            let path = dir.join("failing_typst");
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+        #[cfg(windows)]
+        {
+            let script = format!(
+                "@echo off\nif \"%1\"==\"compile\" (\n  echo {} 1>&2\n  exit /b 1\n)\necho typst fake 0.15.1\n",
+                stderr_body
+            );
+            let path = dir.join("failing_typst.cmd");
+            fs::write(&path, script).unwrap();
+            path
+        }
+    }
+
+    #[test]
+    fn typst_format_does_not_invoke_the_typst_executable() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        // Point --typst-path at a path that does not exist: a typst-only
+        // build must never spawn a subprocess, so this must succeed.
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            None,
+            Path::new("/nonexistent/typst"),
+        );
+        assert!(result.is_ok(), "typst-only build failed: {:?}", result);
+        assert!(dir.path().join("document.typ").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_build_respects_custom_typst_path() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
+
+        let result = super::build(&input.to_string_lossy(), &["pdf".to_string()], None, &fake);
+        assert!(result.is_ok(), "pdf build failed: {:?}", result);
+        let output = dir.path().join("document.pdf");
+        assert!(output.exists(), "pdf output must exist");
+        let pdf = fs::read(&output).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"), "pdf header was: {:?}", pdf);
+        assert_eq!(pdf, b"%PDF-1.7 fake");
+    }
+
+    #[test]
+    fn pdf_build_with_missing_executable_fails_cleanly() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            None,
+            Path::new("/nonexistent/typst"),
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("Typst executable not found"),
+            "error was: {}",
+            error
+        );
+        assert!(
+            !dir.path().join("document.pdf").exists(),
+            "no pdf may be written when the executable is missing"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_compilation_failure_leaves_no_output_and_surfaces_diagnostic() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let before = fs::read(&input).unwrap();
+        let fake = write_failing_fake_typst(dir.path(), "fake typst error: bad syntax");
+
+        let result = super::build(&input.to_string_lossy(), &["pdf".to_string()], None, &fake);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("fake typst error"),
+            "compiler diagnostic must be surfaced, error was: {}",
+            error
+        );
+        assert!(
+            !dir.path().join("document.pdf").exists(),
+            "no pdf file may be written on compilation failure"
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            before,
+            "input bytes must not change"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_invalid_header_is_rejected_without_writing_output() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        // The fake exits 0 but returns a non-PDF body.
+        let fake = write_fake_typst(dir.path(), "garbage not a pdf");
+
+        let result = super::build(&input.to_string_lossy(), &["pdf".to_string()], None, &fake);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("invalid PDF output: missing %PDF- header"),
+            "error was: {}",
+            error
+        );
+        assert!(
+            !dir.path().join("document.pdf").exists(),
+            "no pdf file may be written for an invalid PDF header"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_and_typst_formats_produce_both_outputs() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
+
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["typst".to_string(), "pdf".to_string()],
+            None,
+            &fake,
+        );
+        assert!(result.is_ok(), "multi-format build failed: {:?}", result);
+        let typst = dir.path().join("document.typ");
+        let pdf = dir.path().join("document.pdf");
+        assert!(typst.exists(), ".typ output must exist");
+        assert!(pdf.exists(), ".pdf output must exist");
+        assert!(fs::read(&pdf).unwrap().starts_with(b"%PDF-"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pdf_explicit_output_is_respected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
+        let output = dir.path().join("custom").join("out.pdf");
+
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            Some(&output),
+            &fake,
+        );
+        assert!(result.is_ok(), "pdf build failed: {:?}", result);
+        assert!(output.exists(), "explicit pdf output must exist");
+        assert!(fs::read(&output).unwrap().starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn pdf_output_equal_to_input_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "original source\n").unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
+
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            Some(&input),
+            &fake,
+        );
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("refusing to overwrite the input source file"),
+            "error was: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn unsupported_formats_fail_for_pdf_too() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
+
+        for format in ["html", "svg", "png"] {
+            let result = super::build(&input.to_string_lossy(), &[format.to_string()], None, &fake);
+            assert!(result.is_err());
+            let error = result.unwrap_err().to_string();
+            assert!(
+                error.contains("not yet implemented"),
+                "format {} error was: {}",
+                format,
+                error
+            );
+        }
     }
 }
