@@ -2151,9 +2151,10 @@ mod tests {
 
     /// Like [`write_fake_typst`] but fails the `compile` invocation: it
     /// writes `stderr_body` to stderr and exits non-zero without producing a
-    /// PDF file.
+    /// PDF file. Unix-only for the same reason as the fake executable itself
+    /// (Windows `CreateProcess` cannot spawn `.cmd`/`.bat`).
+    #[cfg(unix)]
     fn write_failing_fake_typst(dir: &std::path::Path, stderr_body: &str) -> PathBuf {
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let script = format!(
@@ -2163,16 +2164,6 @@ mod tests {
             let path = dir.join("failing_typst");
             fs::write(&path, script).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-            path
-        }
-        #[cfg(windows)]
-        {
-            let script = format!(
-                "@echo off\nif \"%1\"==\"compile\" (\n  echo {} 1>&2\n  exit /b 1\n)\necho typst fake 0.15.1\n",
-                stderr_body
-            );
-            let path = dir.join("failing_typst.cmd");
-            fs::write(&path, script).unwrap();
             path
         }
     }
