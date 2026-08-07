@@ -6,7 +6,7 @@
 toolchain powered by the official Typst compiler. Quarkdown compatibility is a
 first-class requirement — not a deferred milestone.
 
-- **Current milestone:** M0 Foundation
+- **Current milestone:** M1 Vertical Slice (first `.qd → PDF` via Typst subprocess)
 - **Stability:** Pre-alpha, experimental
 - **Rendering backend:** Official Typst compiler (subprocess, in-process TBD)
 - **Non-goals:** Custom PDF/HTML renderers, SaaS, package registry
@@ -30,6 +30,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo test -p scribium-core
 cargo run -p scribium-cli -- build examples/hello/main.qd
+cargo run -p scribium-cli -- build examples/hello/main.qd --format pdf
 cargo run -p scribium-cli -- inspect examples/hello/main.qd --emit typst
 ```
 

@@ -31,9 +31,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `build` accepts a bare file name (`scribium build document.qd`), resolving
   its project root to the current directory.
 - `build --output <path>` to override the generated output path.
+- **PDF output via external Typst subprocess** — `scribium build --format pdf` compiles
+  supported input documents (`.qd`, `.scrib`, `.md`) directly to PDF using the
+  configured Typst executable. The `SubprocessBackend` implements the `TypstBackend`
+  trait, invoking `typst compile` via `std::process::Command` without shell
+  interpolation. Real `typst --version` detection is implemented. Typst diagnostics
+  are captured and surfaced as actionable Scribium errors. Generated PDFs are
+  validated for non-empty output and correct `%PDF-` header.
+- `--typst-path <PATH>` selects the Typst executable used for PDF output (defaults
+  to `typst` on `PATH`); a `typst`-only build never spawns a subprocess.
+- Multiple output formats in a single invocation — `scribium build --format typst
+  --format pdf` produces both `.typ` and `.pdf` from a single lowering pass.
+- Explicit `--output` path support for PDF; collision/overwrite protection and
+  atomic write semantics are preserved from the Typst output path.
+- Backend unit tests covering missing executable, non-zero exit, successful
+  execution, output reading, `%PDF-` header validation, and version command —
+  runnable without a Typst install (fake executable fixtures).
+- Backend integration tests (`crates/scribium-typst/tests/backend_integration.rs`)
+  exercising the real `typst` executable; they skip with a notice when it is
+  absent, and CI installs a pinned Typst version (0.15.1) explicitly and runs
+  them with `SCRIBIUM_REQUIRE_TYPST=1`.
+- CLI integration tests for `--format pdf`, `--format typst --format pdf`,
+  custom Typst path, missing executable, compilation failure, `%PDF-` validation,
+  `--output` with PDF, unsupported format rejection (HTML/SVG/PNG), and input/output
+  collision checks.
+- README quickstart and status table updated to reflect experimental PDF support.
 
 ### Fixed
 
+- `build` with multiple formats and `--output` now returns a clear validation error
+  instead of silently using the output path for only one format.
 - `build` never overwrites the input source file: an output that resolves to
   the input is rejected with a clear error. Existing outputs are compared by
   file identity (device/inode on Unix, file index on Windows via `same-file`),
@@ -85,6 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Supported output formats are now `typst` and `pdf`; `html`, `svg`, `png` remain
+  explicitly unsupported with actionable error messages.
+- CLI help text updated: `--output` documents the format-dependent default
+  (`.typ` for typst, `.pdf` for pdf) and `--format` lists only the supported formats.
 - Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
   rejected as an unsupported format until Typst passthrough is implemented.
   Extension matching is ASCII case-insensitive, and files without an

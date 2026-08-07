@@ -371,6 +371,7 @@ dependencies = [
  "scribium-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tracing",
 ]
