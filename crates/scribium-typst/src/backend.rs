@@ -157,6 +157,7 @@ impl TypstBackend for SubprocessBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs;
 
     /// Writes a fake Typst executable to `dir` and returns its path.
