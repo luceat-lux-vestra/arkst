@@ -1,0 +1,181 @@
+name: Quarkdown Upstream Watch
+
+on:
+  schedule:
+    - cron: '37 3 * * *'  # Daily at 03:37 UTC (avoids GitHub peak hours)
+  workflow_dispatch:
+    inputs:
+      observed_tag:
+        description: 'Override observed tag for dry-run (e.g., v9.9.9)'
+        required: false
+        type: string
+      dry_run:
+        description: 'If true, print issue payload without creating issue'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    name: Check Quarkdown upstream drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build upstream watcher
+        run: cargo build -p scribium-upstream-watch --locked
+
+      - name: Get latest stable release from GitHub
+        if: github.event.inputs.observed_tag == ''
+        id: get_release
+        run: |
+          RELEASE=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.tag_name')
+          URL=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.html_url')
+          echo "tag=$RELEASE" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Use manual override for dry-run
+        if: github.event.inputs.observed_tag != ''
+        id: manual_override
+        run: |
+          echo "tag=${{ github.event.inputs.observed_tag }}" >> $GITHUB_OUTPUT
+          echo "url=https://github.com/iamgio/quarkdown/releases/tag/${{ github.event.inputs.observed_tag }}" >> $GITHUB_OUTPUT
+
+      - name: Determine observed release
+        id: observed
+        run: |
+          if [ "${{ steps.get_release.outputs.tag }}" != "" ]; then
+            echo "tag=${{ steps.get_release.outputs.tag }}" >> $GITHUB_OUTPUT
+            echo "url=${{ steps.get_release.outputs.url }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ steps.manual_override.outputs.tag }}" >> $GITHUB_OUTPUT
+            echo "url=${{ steps.manual_override.outputs.url }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run drift detection
+        id: drift
+        run: |
+          RESULT=$(cargo run -p scribium-upstream-watch -- check-release \
+            --manifest docs/compatibility/quarkdown/upstream.toml \
+            --observed-tag "${{ steps.observed.outputs.tag }}" \
+            --observed-url "${{ steps.observed.outputs.url }}" \
+            --output json)
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          echo "$RESULT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if drift detected
+        id: check_drift
+        run: |
+          STATUS=$(echo '${{ steps.drift.outputs.result }}' | jq -r '.status')
+          if [ "$STATUS" = "drift" ]; then
+            echo "drift=true" >> $GITHUB_OUTPUT
+          else
+            echo "drift=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Print dry-run result
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "=== DRY RUN ==="
+          echo "Supported baseline: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.supported_baseline')"
+          echo "Observed tag: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.observed_tag')"
+          echo "Status: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.status')"
+          echo "Issue key: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.issue_key // \"none\"')"
+          echo ""
+          echo "Issue payload that would be created:"
+          echo '${{ steps.drift.outputs.result }}' | jq -r '
+            "[upstream] Quarkdown \(.observed_tag) detected (baseline \(.supported_baseline))"
+          '
+          echo ""
+          echo "Supported baseline: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.supported_baseline')"
+          echo "Observed stable release: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.observed_tag')"
+          echo "Upstream release URL: $(echo '${{ steps.drift.outputs.result }}' | jq -r '.observed_tag as $tag | "https://github.com/iamgio/quarkdown/releases/tag/" + $tag')"
+          echo "Detection source: scheduled upstream observer"
+          echo ""
+          echo "Checklist:"
+          echo "- [ ] Review permitted public specification changes"
+          echo "- [ ] Identify affected Scribium compatibility features"
+          echo "- [ ] Add independently authored conformance cases"
+          echo "- [ ] Perform black-box observations where necessary"
+          echo "- [ ] Document known divergences"
+          echo "- [ ] Implement required compatibility changes"
+          echo "- [ ] Run full conformance suite"
+          echo "- [ ] Update supported baseline only after verification"
+          echo ""
+          echo "⚠️ Clean-room warning:"
+          echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
+          echo ""
+          echo "<!-- scribium-upstream-drift:quarkdown:$(echo '${{ steps.drift.outputs.result }}' | jq -r '.observed_tag') -->"
+
+      - name: Check for existing issue
+        if: steps.check_drift.outputs.drift == 'true' && github.event.inputs.dry_run != 'true'
+        id: check_issue
+        run: |
+          ISSUE_KEY="quarkdown:${{ steps.observed.outputs.tag }}"
+          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+          EXISTING=$(gh issue list --repo ${{ github.repository }} --state all --search "$MARKER" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
+            echo "Issue #$EXISTING already exists for $ISSUE_KEY"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create drift issue
+        if: steps.check_drift.outputs.drift == 'true' && steps.check_issue.outputs.exists != 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          OBSERVED_TAG="${{ steps.observed.outputs.tag }}"
+          SUPPORTED_BASELINE=$(echo '${{ steps.drift.outputs.result }}' | jq -r '.supported_baseline')
+          URL="https://github.com/iamgio/quarkdown/releases/tag/$OBSERVED_TAG"
+          ISSUE_KEY="quarkdown:$OBSERVED_TAG"
+          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+
+          BODY="Supported baseline: $SUPPORTED_BASELINE
+Observed stable release: $OBSERVED_TAG
+Upstream release URL: $URL
+Detection source: scheduled upstream observer
+
+**Checklist:**
+- [ ] Review permitted public specification changes
+- [ ] Identify affected Scribium compatibility features
+- [ ] Add independently authored conformance cases
+- [ ] Perform black-box observations where necessary
+- [ ] Document known divergences
+- [ ] Implement required compatibility changes
+- [ ] Run full conformance suite
+- [ ] Update supported baseline only after verification
+
+⚠️ **Clean-room warning:**
+Do not inspect or translate Quarkdown implementation source while resolving this issue.
+
+$MARKER"
+
+          gh issue create \
+            --repo ${{ github.repository }} \
+            --title "[upstream] Quarkdown $OBSERVED_TAG detected (baseline $SUPPORTED_BASELINE)" \
+            --body "$BODY" \
+            --label "upstream-drift,quarkdown,compatibility"
