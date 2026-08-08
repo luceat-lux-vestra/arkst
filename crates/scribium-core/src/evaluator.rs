@@ -66,10 +66,17 @@ impl Evaluator {
                 span,
             } => {
                 if is_conditional(name) {
-                    let condition = resolve_condition(name, positional_args, span, diagnostics);
+                    let condition =
+                        resolve_condition(name, positional_args, named_args, span, diagnostics);
                     let take = take_branch(name, condition);
                     if take {
-                        self.conditional_block_content(positional_args, body, span, diagnostics)
+                        self.conditional_block_content(
+                            positional_args,
+                            named_args,
+                            body,
+                            span,
+                            diagnostics,
+                        )
                     } else {
                         Vec::new()
                     }
@@ -148,10 +155,17 @@ impl Evaluator {
                 span,
             } => {
                 if is_conditional(name) {
-                    let condition = resolve_condition(name, positional_args, span, diagnostics);
+                    let condition =
+                        resolve_condition(name, positional_args, named_args, span, diagnostics);
                     let take = if *name == "if" { condition } else { !condition };
                     if take {
-                        self.conditional_inline_content(positional_args, body, span, diagnostics)
+                        self.conditional_inline_content(
+                            positional_args,
+                            named_args,
+                            body,
+                            span,
+                            diagnostics,
+                        )
                     } else {
                         Vec::new()
                     }
@@ -211,16 +225,31 @@ impl Evaluator {
     }
 
     /// Content of a conditional block call: the body if present, otherwise
-    /// the second positional argument (content or scalar), otherwise nothing.
+    /// the named `body` argument if present, otherwise the second positional
+    /// argument (content or scalar), otherwise nothing.
     fn conditional_block_content(
         &self,
         positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
         body: &Option<Vec<IrNode>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Vec<IrNode> {
         if let Some(nodes) = body {
             return self.evaluate_nodes(nodes, diagnostics);
+        }
+        // Check named "body" argument
+        if let Some((_, IrValue::Content(nodes))) = named_args.iter().find(|(k, _)| k == "body") {
+            return self.evaluate_nodes(nodes, diagnostics);
+        }
+        if let Some((_, scalar)) = named_args.iter().find(|(k, _)| k == "body") {
+            return vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: scalar_to_text(scalar),
+                    span: *span,
+                }],
+                span: *span,
+            }];
         }
         match positional_args.get(1) {
             Some(IrValue::Content(nodes)) => self.evaluate_nodes(nodes, diagnostics),
@@ -236,17 +265,32 @@ impl Evaluator {
     }
 
     /// Content of a conditional inline call: the body if present, otherwise
-    /// the second positional argument (a single-paragraph content value or a
-    /// bare scalar), otherwise nothing.
+    /// the named `body` argument if present, otherwise the second positional
+    /// argument (a single-paragraph content value or a bare scalar),
+    /// otherwise nothing.
     fn conditional_inline_content(
         &self,
         positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
         body: &Option<Vec<IrInline>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Vec<IrInline> {
         if let Some(inlines) = body {
             return self.evaluate_inlines(inlines, diagnostics);
+        }
+        // Check named "body" argument
+        if let Some((_, IrValue::Content(nodes))) = named_args.iter().find(|(k, _)| k == "body") {
+            return match nodes.as_slice() {
+                [IrNode::Paragraph { content, .. }] => self.evaluate_inlines(content, diagnostics),
+                _ => Vec::new(),
+            };
+        }
+        if let Some((_, scalar)) = named_args.iter().find(|(k, _)| k == "body") {
+            return vec![IrInline::Text {
+                content: scalar_to_text(scalar),
+                span: *span,
+            }];
         }
         match positional_args.get(1) {
             Some(IrValue::Content(nodes)) => match nodes.as_slice() {
@@ -271,12 +315,26 @@ fn is_conditional(name: &str) -> bool {
 ///
 /// A missing or non-boolean condition produces an `E3001` diagnostic and
 /// is treated as `false` (deterministic output).
+/// The condition can be provided as the first positional argument or as
+/// a named argument `condition`.
 fn resolve_condition(
     name: &str,
     positional_args: &[IrValue],
+    named_args: &[(String, IrValue)],
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
+    // First check named argument "condition"
+    if let Some((_, value)) = named_args.iter().find(|(k, _)| k == "condition") {
+        return match boolean_value(value) {
+            Some(value) => value,
+            None => {
+                diagnostics.push(unresolvable_condition(name, span));
+                false
+            }
+        };
+    }
+    // Fall back to first positional argument
     match positional_args.first() {
         Some(value) => match boolean_value(value) {
             Some(value) => value,
@@ -334,7 +392,7 @@ fn unresolvable_condition(name: &str, span: &SourceSpan) -> Diagnostic {
         code: "E3001".to_string(),
         severity: Severity::Error,
         message: format!(
-            "`{name}` requires a boolean condition (literals `true`, `false`, `yes`, or `no`) as its first positional argument"
+            "`{name}` requires a boolean condition (literals `true`, `false`, `yes`, or `no`) as its `condition` argument"
         ),
         primary: Some(*span),
         secondary: Vec::new(),
@@ -684,5 +742,200 @@ mod tests {
         let second = Evaluator::new().evaluate(&input);
         assert_eq!(first.0, second.0);
         assert!(first.1.is_empty() && second.1.is_empty());
+    }
+
+    #[test]
+    fn named_condition_argument_works() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: Vec::new(),
+            named_args: vec![("condition".to_string(), IrValue::Boolean(true))],
+            body: Some(vec![text_paragraph("kept")]),
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert_eq!(nodes, vec![text_paragraph("kept")]);
+    }
+
+    #[test]
+    fn named_condition_false_drops_body() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: Vec::new(),
+            named_args: vec![("condition".to_string(), IrValue::Boolean(false))],
+            body: Some(vec![text_paragraph("dropped")]),
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn named_condition_ifnot_inverts() {
+        let call = IrNode::FunctionCall {
+            name: "ifnot".to_string(),
+            positional_args: Vec::new(),
+            named_args: vec![("condition".to_string(), IrValue::Boolean(false))],
+            body: Some(vec![text_paragraph("kept")]),
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert_eq!(nodes, vec![text_paragraph("kept")]);
+    }
+
+    #[test]
+    fn named_condition_identifier_yes_no() {
+        for (ident, expected) in [("yes", true), ("YES", true), ("no", false), ("No", false)] {
+            let call = IrNode::FunctionCall {
+                name: "if".to_string(),
+                positional_args: Vec::new(),
+                named_args: vec![(
+                    "condition".to_string(),
+                    IrValue::Identifier(ident.to_string()),
+                )],
+                body: Some(vec![text_paragraph("content")]),
+                span: span(0, 1),
+            };
+            let nodes = evaluate(vec![call]);
+            if expected {
+                assert_eq!(nodes, vec![text_paragraph("content")], "ident {ident}");
+            } else {
+                assert!(nodes.is_empty(), "ident {ident}");
+            }
+        }
+    }
+
+    #[test]
+    fn named_body_argument_works() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: vec![IrValue::Boolean(true)],
+            named_args: vec![(
+                "body".to_string(),
+                IrValue::Content(vec![text_paragraph("from named body")]),
+            )],
+            body: None,
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert_eq!(nodes, vec![text_paragraph("from named body")]);
+    }
+
+    #[test]
+    fn named_body_scalar_argument_works() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: vec![IrValue::Boolean(true)],
+            named_args: vec![(
+                "body".to_string(),
+                IrValue::String("scalar body".to_string()),
+            )],
+            body: None,
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert_eq!(
+            nodes,
+            vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "scalar body".to_string(),
+                    span: span(0, 1),
+                }],
+                span: span(0, 1),
+            }]
+        );
+    }
+
+    #[test]
+    fn block_body_priority_over_named_body() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: vec![IrValue::Boolean(true)],
+            named_args: vec![(
+                "body".to_string(),
+                IrValue::Content(vec![text_paragraph("from named body")]),
+            )],
+            body: Some(vec![text_paragraph("from indented body")]),
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![call]);
+        assert_eq!(nodes, vec![text_paragraph("from indented body")]);
+    }
+
+    #[test]
+    fn inline_named_condition_works() {
+        let paragraph = IrNode::Paragraph {
+            content: vec![
+                text_inline("before "),
+                IrInline::DirectiveCall {
+                    name: "if".to_string(),
+                    positional_args: Vec::new(),
+                    named_args: vec![("condition".to_string(), IrValue::Boolean(true))],
+                    body: Some(vec![text_inline("kept")]),
+                    span: span(0, 1),
+                },
+                text_inline(" after"),
+            ],
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![paragraph]);
+        let IrNode::Paragraph { content, .. } = &nodes[0] else {
+            panic!()
+        };
+        let rendered: Vec<&str> = content
+            .iter()
+            .map(|i| match i {
+                IrInline::Text { content, .. } => content.as_str(),
+                _ => panic!(),
+            })
+            .collect();
+        assert_eq!(rendered, vec!["before ", "kept", " after"]);
+    }
+
+    #[test]
+    fn inline_named_body_works() {
+        let call = IrInline::DirectiveCall {
+            name: "if".to_string(),
+            positional_args: vec![IrValue::Boolean(true)],
+            named_args: vec![(
+                "body".to_string(),
+                IrValue::String("inline shown".to_string()),
+            )],
+            body: None,
+            span: span(0, 1),
+        };
+        let paragraph = IrNode::Paragraph {
+            content: vec![text_inline("x "), call],
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![paragraph]);
+        let IrNode::Paragraph { content, .. } = &nodes[0] else {
+            panic!()
+        };
+        assert_eq!(
+            content,
+            &vec![
+                text_inline("x "),
+                IrInline::Text {
+                    content: "inline shown".to_string(),
+                    span: span(0, 1),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn named_condition_unresolvable_reports_e3001() {
+        let call = IrNode::FunctionCall {
+            name: "if".to_string(),
+            positional_args: Vec::new(),
+            named_args: vec![("condition".to_string(), IrValue::Number(3.0))],
+            body: Some(vec![text_paragraph("body")]),
+            span: span(3, 6),
+        };
+        let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
+        assert!(result.nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3001");
     }
 }

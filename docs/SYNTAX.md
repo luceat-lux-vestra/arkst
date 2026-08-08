@@ -144,9 +144,21 @@ parsing above.
 
 .ifnot {condition}
     false branch
+
+.if condition:{condition}
+    true branch
+
+.ifnot condition:{condition}
+    false branch
+
+.if {condition} body:{content}
+
+.if condition:{condition} body:{content}
 ```
 
-Conditionals evaluate the first positional argument as a boolean condition:
+Conditionals evaluate the `condition` argument as a boolean condition. The
+argument can be provided as the first positional argument or as a named
+argument `condition`:
 
 - Boolean literals: `true` / `false`
 - Boolean identifiers (case-insensitive): `yes` / `no`
@@ -154,8 +166,9 @@ Conditionals evaluate the first positional argument as a boolean condition:
   error) and the conditional is treated as `false` for deterministic
   output.
 
-The content is, in order of priority: the indented block body, the
-second positional argument (a content value or bare scalar), or nothing.
+The content is, in order of priority: the indented block body, the named
+`body` argument, the second positional argument (a content value or bare
+scalar), or nothing.
 
 `.ifnot` inverts the condition: its content is rendered when the
 condition is false.

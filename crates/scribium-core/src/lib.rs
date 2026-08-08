@@ -474,4 +474,75 @@ mod tests {
         // If condition unknown -> false -> body dropped
         assert!(result.ir.nodes.is_empty());
     }
+
+    #[test]
+    fn compile_evaluates_named_condition_true() {
+        let (result, _) = compile_source(".if condition:{true}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_false() {
+        let (result, _) = compile_source(".if condition:{false}\n    dropped\n");
+        assert!(result.diagnostics.is_empty());
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_yes_no() {
+        let (result, _) = compile_source(".if condition:{yes}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+
+        let (result, _) = compile_source(".ifnot condition:{no}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_named_body() {
+        let (result, _) = compile_source(".if {true} body:{shown}\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "shown");
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_and_body() {
+        let (result, _) = compile_source(".if condition:{true} body:{shown}\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "shown");
+    }
+
+    #[test]
+    fn compile_inline_named_condition() {
+        let (result, _) = compile_source("before .if condition:{true} body:{inline} after\n");
+        eprintln!("Diagnostics: {:?}", result.diagnostics);
+        assert!(result.diagnostics.is_empty());
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let rendered: String = content
+            .iter()
+            .map(|i| match i {
+                IrInline::Text { content, .. } => content.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(rendered.contains("inline"));
+    }
 }
