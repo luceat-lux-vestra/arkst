@@ -219,7 +219,7 @@ The automated observer (`.github/workflows/upstream-quarkdown.yml`) runs daily a
 6. Documentation of known divergences
 7. Human-reviewed PR updating `upstream.toml` and this compatibility matrix
 
-See `docs/adr/XXXX-upstream-compatibility-observation.md` for the full decision record.
+See `docs/adr/0013-upstream-compatibility-observation-and-baseline-promotion.md` for the full decision record.
 
 ### Why the Compatibility Matrix Does Not Auto-Update
 

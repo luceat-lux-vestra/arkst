@@ -207,10 +207,12 @@ mod tests {
     #[test]
     fn test_baseline_consistency() {
         // Verify that the supported baseline in upstream.toml matches
-        // the reference baseline mentioned in other documentation files.
+        // the explicitly declared reference baseline in documentation files.
+        // This test extracts the declared baseline from specific patterns
+        // to avoid false positives from historical version references.
         let root = workspace_root();
 
-        // Read upstream.toml
+        // Read upstream.toml (authoritative source)
         let upstream_toml = root.join("docs/compatibility/quarkdown/upstream.toml");
         let upstream_content = std::fs::read_to_string(&upstream_toml)
             .unwrap_or_else(|e| panic!("cannot read upstream.toml: {}", e));
@@ -221,38 +223,65 @@ mod tests {
             .as_str()
             .expect("upstream.supported_baseline not found in upstream.toml");
 
-        // Read SPEC_SOURCES.md and verify it mentions the same baseline
+        // Helper to extract declared baseline from a document
+        let version_re = regex::Regex::new(r"v\d+\.\d+\.\d+").unwrap();
+        fn extract_declared_baseline(
+            content: &str,
+            patterns: &[&str],
+            version_re: &regex::Regex,
+        ) -> Option<String> {
+            for pattern in patterns {
+                if let Some(idx) = content.find(pattern) {
+                    let after = &content[idx + pattern.len()..];
+                    if let Some(mat) = version_re.find(after) {
+                        return Some(mat.as_str().to_string());
+                    }
+                }
+            }
+            None
+        }
+
+        // SPEC_SOURCES.md: "Reference version: Quarkdown **vX.Y.Z**"
         let spec_sources = root.join("docs/compatibility/quarkdown/SPEC_SOURCES.md");
         let spec_content = std::fs::read_to_string(&spec_sources)
             .unwrap_or_else(|e| panic!("cannot read SPEC_SOURCES.md: {}", e));
-        assert!(
-            spec_content.contains("v2.5.0"),
-            "SPEC_SOURCES.md should reference baseline v2.5.0"
-        );
-        assert!(
-            spec_content.contains(baseline_from_toml),
-            "SPEC_SOURCES.md should reference the same baseline as upstream.toml ({})",
-            baseline_from_toml
+        let spec_patterns = ["Reference version:", "Reference baseline:"];
+        let spec_baseline = extract_declared_baseline(&spec_content, &spec_patterns, &version_re)
+            .expect("SPEC_SOURCES.md should declare a reference baseline");
+        assert_eq!(
+            spec_baseline, baseline_from_toml,
+            "SPEC_SOURCES.md declared baseline ({}) should match upstream.toml ({})",
+            spec_baseline, baseline_from_toml
         );
 
-        // Read README.md and verify it mentions the same baseline
+        // README.md: "reference baseline vX.Y.Z" or "Reference upstream: Quarkdown vX.Y.Z"
         let readme = root.join("docs/compatibility/quarkdown/README.md");
         let readme_content = std::fs::read_to_string(&readme)
             .unwrap_or_else(|e| panic!("cannot read compatibility README.md: {}", e));
-        assert!(
-            readme_content.contains(baseline_from_toml),
-            "compatibility README.md should reference the same baseline as upstream.toml ({})",
-            baseline_from_toml
+        let readme_patterns = ["reference baseline", "Reference upstream:"];
+        let readme_baseline =
+            extract_declared_baseline(&readme_content, &readme_patterns, &version_re)
+                .expect("compatibility README.md should declare a reference baseline");
+        assert_eq!(
+            readme_baseline, baseline_from_toml,
+            "compatibility README.md declared baseline ({}) should match upstream.toml ({})",
+            readme_baseline, baseline_from_toml
         );
 
-        // Read root README.md
+        // Root README.md
         let root_readme = root.join("README.md");
         let root_readme_content = std::fs::read_to_string(&root_readme)
             .unwrap_or_else(|e| panic!("cannot read root README.md: {}", e));
-        assert!(
-            root_readme_content.contains(baseline_from_toml),
-            "root README.md should reference the same baseline as upstream.toml ({})",
-            baseline_from_toml
+        // Use only the Quarkdown-specific pattern to avoid matching Scribium milestone versions
+        // Pattern excludes the "v" prefix since the version regex expects it
+        let root_patterns = ["referenced against Quarkdown "];
+        let root_baseline =
+            extract_declared_baseline(&root_readme_content, &root_patterns, &version_re)
+                .expect("root README.md should declare a reference baseline");
+        assert_eq!(
+            root_baseline, baseline_from_toml,
+            "root README.md declared baseline ({}) should match upstream.toml ({})",
+            root_baseline, baseline_from_toml
         );
 
         println!("✓ Baseline consistency verified: {}", baseline_from_toml);

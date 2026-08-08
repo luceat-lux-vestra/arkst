@@ -25,10 +25,10 @@ id = "call-positional-basic"
 feature = "positional-arguments"
 compatibility_level = "Parsed"
 specification_source = "quarkdown-function-call-syntax"
+description = "Basic positional argument call"
 
 # Optional fields
-description = "Basic positional argument call"
-known_divergence = null  # or string describing known divergence
+# known_divergence = "Description of known divergence"  # omit if none
 ```
 
 ### Fields
@@ -39,8 +39,8 @@ known_divergence = null  # or string describing known divergence
 | `feature` | Feature name from the compatibility matrix (e.g., `dot-prefixed-call`, `positional-arguments`, `named-arguments`, `indented-body`, `conditionals`, `variables`) |
 | `compatibility_level` | One of: `Unsupported`, `Parsed`, `Semantically supported`, `Output-equivalent`, `Known divergence` |
 | `specification_source` | Short key referencing the specification source in `SPEC_SOURCES.md` |
-| `description` | Human-readable description of what this case tests |
-| `known_divergence` | Null if none, or a description of a documented divergence |
+| `description` | Human-readable description of what this case tests (required) |
+| `known_divergence` | Omitted if none, or a description of a documented divergence |
 
 ## Adding New Cases
 
