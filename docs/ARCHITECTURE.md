@@ -70,7 +70,8 @@ Lexer / Tokenizer
   ▼
 Parser (Markdown baseline + Quarkdown-compatible syntax)
   ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
-  ├── Quarkdown directives: @function, @function(args)[body]
+  ├── Quarkdown directives: .function, .function {arg} name:{value}
+      (indented block bodies)
   ├── Expressions: literals, variables, function calls, conditionals
   └── Front matter: flat key-value metadata block
   │

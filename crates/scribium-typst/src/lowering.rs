@@ -164,9 +164,11 @@ impl LoweringContext {
                     }
                     self.push(')');
                 }
-                if let Some(body_node) = body {
+                if let Some(body_nodes) = body {
                     self.push('[');
-                    self.lower_node(body_node);
+                    for node in body_nodes {
+                        self.lower_node(node);
+                    }
                     self.push(']');
                 }
                 self.push('\n');
@@ -295,7 +297,13 @@ impl LoweringContext {
                 self.push_str(if *b { "true" } else { "false" });
             }
             IrValue::Identifier(id) => {
-                self.push_str(id);
+                // A bare identifier argument is emitted as a string literal so
+                // the generated Typst always compiles. Semantic resolution
+                // against a function signature is the evaluator's job.
+                let escaped = id.replace('\\', "\\\\").replace('"', "\\\"");
+                self.push('"');
+                self.push_str(&escaped);
+                self.push('"');
             }
             IrValue::Content(nodes) => {
                 self.push('[');
@@ -489,10 +497,10 @@ mod tests {
                 name: "figure".into(),
                 positional_args: vec![],
                 named_args: vec![("kind".into(), IrValue::String("table".into()))],
-                body: Some(Box::new(IrNode::Paragraph {
+                body: Some(vec![IrNode::Paragraph {
                     content: vec![text("content")],
                     span: empty_span(),
-                })),
+                }]),
                 span: empty_span(),
             }],
             metadata: IrMetadata::default(),

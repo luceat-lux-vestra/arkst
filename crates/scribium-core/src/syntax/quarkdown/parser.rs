@@ -1,4 +1,4 @@
-//! Quarkdown-compatible `@`-prefixed directive parser.
+//! Quarkdown-compatible function-call syntax parser.
 //!
 //! This is a clean-room implementation based on publicly available
 //! Quarkdown syntax documentation. See `docs/compatibility/quarkdown/`
@@ -6,545 +6,818 @@
 //!
 //! ## Supported forms
 //!
-//! - `@name`
-//! - `@name(arg1, arg2, named: value)`
-//! - `@name[body content]`
-//! - `@name(named: value)[body]`
+//! - `.note` — a call with no arguments
+//! - `.note {hello}` — positional argument
+//! - `.range {1} {10}` — multiple positional arguments
+//! - `.panel width:{320}` — named argument
+//! - `.panel {Intro} width:{320}` — mixed positional/named arguments
+//! - `.outer {.inner {value}}` — nested call inside an argument
+//! - `.1`, `.2`, `.12` — implicit positional (lambda parameter) references
 //!
-//! ## Values
+//! Each argument is wrapped in curly braces `{...}`. An argument may hold a
+//! plain scalar value (number, boolean, identifier, or string) or an arbitrary
+//! content fragment that may itself contain nested function calls.
 //!
-//! - String: `"hello"` (double-quoted)
-//! - Number: `42`, `3.14`
-//! - Boolean: `true`, `false`
-//! - Identifier: `name` (unquoted bare word)
+//! Indented bodies are NOT part of this parser: they are attached to
+//! block-level calls by the Markdown block parser.
+//!
+//! Only horizontal whitespace separates arguments: an unescaped newline
+//! always terminates the current call, so arguments never spill onto the
+//! next line without an explicit line-continuation (which is out of scope).
 
-use crate::source::{ByteSpan, SourceId};
+use crate::source::ByteSpan;
 use crate::syntax::markdown::ast::Value;
-use crate::syntax::quarkdown::Directive;
 
-/// Characters that are valid in a directive/identifier name.
-fn is_name_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-'
+/// A parsed Quarkdown function call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuarkdownCall {
+    /// Function name (without the leading dot).
+    pub name: String,
+    /// Span of the function name including the leading dot (`.heading` at
+    /// `0..8`). For implicit positional references this is `.1` at `0..2`.
+    pub name_span: ByteSpan,
+    /// Positional arguments in source order.
+    pub positional_args: Vec<Arg>,
+    /// Named arguments in source order.
+    pub named_args: Vec<NamedArg>,
+    /// Span of the entire call (leading dot through the last argument).
+    pub span: ByteSpan,
 }
 
-/// Try to parse a directive from a byte slice starting at position `start`.
+/// One parsed argument: the outer braces plus either a scalar value or a
+/// raw content span (to be refined by the inline parser).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arg {
+    pub content: ArgContent,
+    /// Span of the argument including surrounding braces.
+    pub span: ByteSpan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArgContent {
+    /// A literal scalar value (string, number, boolean, identifier).
+    Scalar(Value),
+    /// A content fragment that contains inline markup and/or nested calls.
+    /// `span` excludes the surrounding braces.
+    Content(ByteSpan),
+}
+
+/// A named argument `name:{value}`, preserving both the key and the full
+/// construct so diagnostics can point at the argument precisely.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedArg {
+    /// Parameter name (without the trailing colon).
+    pub name: String,
+    /// Span of the parameter name (`width` in `width:{320}`).
+    pub name_span: ByteSpan,
+    /// The braced value.
+    pub value: Arg,
+    /// Span of the whole named argument (name through closing brace).
+    pub span: ByteSpan,
+}
+
+/// A structured parser error for malformed function-call syntax.
 ///
-/// Returns `Some((directive, end_offset))` on success, `None` if no directive
-/// starts at the given position. `end_offset` is the byte offset just past the
-/// parsed directive in the source.
+/// The error is recoverable: callers treat it as ordinary text and continue
+/// parsing. All malformed-input handling must go through this type — the
+/// parser never panics on user input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParseError {
+    /// Stable error code (e.g. `E2001`).
+    pub code: &'static str,
+    /// Human-readable message describing the problem.
+    pub message: String,
+    /// Span covering the offending construct.
+    pub span: ByteSpan,
+}
+
+impl ParseError {
+    fn new(code: &'static str, message: impl Into<String>, span: ByteSpan) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            span,
+        }
+    }
+}
+
+/// Characters permitted in a function-call name (after the leading dot).
+fn is_function_name_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
+}
+
+/// The leading character of a *normal* name must be a letter or underscore.
+/// is `1..=9` are the separate `implicit-positional-reference` grammar
+/// (`.1`, `.2`, ...), which only accepts further digits. A leading `0`
+/// (e.g. `.0`) is neither and stays ordinary text.
+fn is_name_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_'
+}
+
+/// Characters that glue to an adjacent call, making the construct a single
+/// word instead of a call surrounded by symbols/whitespace.
+///
+/// This is deliberately narrower than the function-name alphabet: hyphens
+/// and underscores *are* valid inside names, but a hyphen is a symbol and a
+/// symbol is a legal call boundary per Quarkdown's public syntax
+/// documentation (`-.call`, `.call-`). ASCII letters, digits and `_` are
+/// word characters and reject a tight call.
+///
+/// Any non-ASCII byte is treated as a word character: UTF-8 continuation
+/// bytes are never symbols, so non-ASCII letters and digits (e.g. `한`) also
+/// glue to a call.
+pub(crate) fn is_call_word_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || !c.is_ascii()
+}
+
+/// Whether a call may start at byte offset `pos`: the byte before it is
+/// not a word character and not another dot (so `3.14`, `foo.1`, `..note`
+/// and `한.note` never start a call). The start of the input is always a
+/// valid boundary.
+pub(crate) fn has_valid_call_boundary(bytes: &[u8], pos: usize) -> bool {
+    if pos == 0 {
+        return true;
+    }
+    let prev = bytes[pos - 1];
+    prev != b'.' && !is_call_word_char(prev)
+}
+
+/// Try to parse a Quarkdown function call starting at byte offset `start`.
+///
+/// Returns:
+/// - `Ok(Some((call, end)))` — a call was parsed; `end` is the byte offset
+///   just past the call (past the last brace or name).
+/// - `Ok(None)` — the source does not start a function call at `start`.
+/// - `Err(error)` — the source *starts* a call but is malformed.
 pub fn parse_directive_at(
     source: &str,
     start: usize,
-    source_id: SourceId,
-) -> Option<(Directive, usize)> {
+) -> Result<Option<(QuarkdownCall, usize)>, ParseError> {
     let bytes = source.as_bytes();
-    if start >= bytes.len() || bytes[start] != b'@' {
-        return None;
+    if start >= bytes.len() || bytes[start] != b'.' {
+        return Ok(None);
     }
-
-    let after_at = start + 1;
-    let rest = &source[after_at..];
-
-    // Parse identifier (name)
-    let name_end = rest
-        .char_indices()
-        .find(|&(_, c)| !is_name_char(c))
-        .map(|(i, _)| after_at + i)
-        .unwrap_or(source.len());
-
-    let name = &source[after_at..name_end];
-    if name.is_empty() {
-        // Just '@' with no name — not a directive
-        return None;
+    if start + 1 >= bytes.len() {
+        return Ok(None);
     }
-
-    let mut cursor = name_end;
-
-    // Parse argument list: `(arg1, arg2, named: val)`
-    let mut positional_args = Vec::new();
-    let mut named_args = Vec::new();
-    let mut has_parens = false;
-
-    if cursor < bytes.len() && bytes[cursor] == b'(' {
-        has_parens = true;
-        cursor += 1; // skip '('
-        cursor = skip_whitespace(source, cursor);
-
-        if cursor < bytes.len() && bytes[cursor] != b')' {
-            // Parse first argument
-            let (args_consumed, named) = parse_arg_list_body(source, cursor, source_id)?;
-            positional_args = args_consumed.0;
-            named_args = args_consumed.1;
-            cursor += named;
-        }
-
-        // Expect ')'
-        if cursor >= bytes.len() || bytes[cursor] != b')' {
-            return None;
-        }
-        cursor += 1; // skip ')'
+    // Tight leading boundary: a word or another dot immediately before the
+    // dot keeps the whole construct ordinary text (`3.14`, `foo.1`, `..`).
+    // The Markdown inline parser also checks this before calling us; the
+    // check lives here so every caller enforces the same rule through
+    // `has_valid_call_boundary`.
+    if !has_valid_call_boundary(bytes, start) {
+        return Ok(None);
     }
-
-    // Parse body: `[...]`
-    let body = if cursor < bytes.len() && bytes[cursor] == b'[' {
-        cursor += 1; // skip '['
-        let body_start = cursor;
-        let mut depth = 1u32;
-        let mut body_end = body_start;
-
-        while cursor < bytes.len() {
-            match bytes[cursor] {
-                b'[' => {
-                    depth += 1;
-                    cursor += 1;
-                }
-                b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        body_end = cursor;
-                        cursor += 1; // skip ']'
-                        break;
-                    }
-                    cursor += 1;
-                }
-                _ => {
-                    cursor += 1;
-                }
-            }
+    // `.N` (N in 1..9) is an implicit positional reference, not a normal
+    // name: its name part consists of digits only. `is_name_start` covers
+    // the normal-name grammar; a leading `0` is rejected outright so
+    // decimal numbers like `0.5` never turn into calls.
+    let name_start = start + 1;
+    let mut name_end = name_start;
+    if matches!(bytes[name_start], b'1'..=b'9') {
+        while name_end < bytes.len() && bytes[name_end].is_ascii_digit() {
+            name_end += 1;
         }
-
-        if depth != 0 {
-            return None; // unclosed bracket
-        }
-
-        let body_source = &source[body_start..body_end];
-        let body_directive = parse_body_content(body_source, source_id);
-        Some(body_directive)
-    } else {
-        None
-    };
-
-    let span_start = start;
-    let span_end = cursor;
-
-    let directive = if has_parens || body.is_some() {
-        Directive::Call {
-            name: name.to_string(),
-            positional_args,
-            named_args,
-            body: body.map(Box::new),
-            span: ByteSpan::new(span_start, span_end),
+    } else if is_name_start(bytes[name_start]) {
+        while name_end < bytes.len() && is_function_name_char(bytes[name_end]) {
+            name_end += 1;
         }
     } else {
-        Directive::Variable {
-            name: name.to_string(),
-            span: ByteSpan::new(span_start, span_end),
+        return Ok(None);
+    }
+    let name = source[name_start..name_end].to_string();
+
+    if matches!(bytes[name_start], b'1'..=b'9') {
+        // Implicit positional reference (`.1`, `.2`, `.12`, ...). It is a
+        // bare reference token, not a function call:
+        // - a following word character glues to the reference
+        //   (`.1abc`, `.12foo` are ordinary text, never `ref + text`);
+        //   a symbol such as `-` is a legal boundary (`.1-1` is a reference
+        //   followed by the text `-1`);
+        // - it never enters the argument-consumption loop, so `.1 {item}`
+        //   is NOT a call with a positional argument.
+        if name_end < bytes.len() && is_call_word_char(bytes[name_end]) {
+            return Ok(None);
         }
-    };
+        return Ok(Some((
+            QuarkdownCall {
+                name,
+                name_span: ByteSpan::new(start, name_end),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                span: ByteSpan::new(start, name_end),
+            },
+            name_end,
+        )));
+    }
 
-    Some((directive, cursor))
-}
-
-/// Parse the content inside `(...)` — positionals and named args.
-///
-/// Returns `( (positionals, named), bytes_consumed )`.
-type ArgsResult = (Vec<Value>, Vec<(String, Value)>);
-
-fn parse_arg_list_body(
-    source: &str,
-    start: usize,
-    source_id: SourceId,
-) -> Option<(ArgsResult, usize)> {
-    let bytes = source.as_bytes();
-    let mut cursor = start;
-    let mut positional = Vec::new();
-    let mut named = Vec::new();
+    let mut cursor = skip_horizontal_whitespace(source, name_end);
+    let mut positional_args: Vec<Arg> = Vec::new();
+    let mut named_args: Vec<NamedArg> = Vec::new();
 
     loop {
-        cursor = skip_whitespace(source, cursor);
-
-        if cursor >= bytes.len() || bytes[cursor] == b')' {
+        if cursor >= bytes.len() {
             break;
         }
 
-        // Try to parse a value
-        let (val, after_val) = parse_value(source, cursor, source_id)?;
-        let after_val = skip_whitespace(source, after_val);
-
-        // Check if this is `name: value`
-        if let Value::Identifier(ref id) = val {
-            if after_val < bytes.len() && bytes[after_val] == b':' {
-                cursor = skip_whitespace(source, after_val + 1);
-                let (named_val, after_named) = parse_value(source, cursor, source_id)?;
-                named.push((id.clone(), named_val));
-                cursor = after_named;
-            } else {
-                positional.push(Value::Identifier(id.clone()));
-                cursor = after_val;
+        // End of the call: anything that is not `{arg}` or `name:{arg}`.
+        if bytes[cursor] == b'{' {
+            if !named_args.is_empty() {
+                return Err(ParseError::new(
+                    "E2001",
+                    "positional argument after named argument is not allowed \
+                     in a Quarkdown function call",
+                    ByteSpan::new(cursor, cursor + 1),
+                ));
             }
+            let arg = parse_braced(source, cursor)?;
+            let arg_end = arg.span.end;
+            positional_args.push(arg);
+            cursor = arg_end;
         } else {
-            positional.push(val);
-            cursor = after_val;
+            // Attempt a named argument `name:{...}` or `name: {...}`.
+            let name_base = cursor;
+            let mut name_end_at = name_base;
+            while name_end_at < bytes.len() && is_function_name_char(bytes[name_end_at]) {
+                name_end_at += 1;
+            }
+            if name_end_at == name_base {
+                break;
+            }
+            let after_name = skip_horizontal_whitespace(source, name_end_at);
+            let maybe_brace = after_name;
+            if maybe_brace < bytes.len() && bytes[maybe_brace] == b':' {
+                let after_colon = skip_horizontal_whitespace(source, maybe_brace + 1);
+                if after_colon >= bytes.len() || bytes[after_colon] != b'{' {
+                    return Err(ParseError::new(
+                        "E2002",
+                        format!(
+                            "named argument `{}` must be followed by a value in braces `{{...}}`",
+                            &source[name_base..name_end_at]
+                        ),
+                        ByteSpan::new(name_base, maybe_brace + 1),
+                    ));
+                }
+                let arg = parse_braced(source, after_colon)?;
+                let arg_end = arg.span.end;
+                let named = NamedArg {
+                    name: source[name_base..name_end_at].to_string(),
+                    name_span: ByteSpan::new(name_base, name_end_at),
+                    value: arg,
+                    span: ByteSpan::new(name_base, arg_end),
+                };
+                named_args.push(named);
+                cursor = arg_end;
+            } else {
+                break;
+            }
         }
+        cursor = skip_horizontal_whitespace(source, cursor);
+    }
 
-        cursor = skip_whitespace(source, cursor);
+    // Names (including their leading dots) must not be followed by trailing
+    // whitespace in the reported span. Newlines never appear here: the call
+    // always ends before an unescaped line break.
+    let mut trimmed_end = cursor;
+    while trimmed_end > name_start && matches!(bytes[trimmed_end - 1], b' ' | b'\t') {
+        trimmed_end -= 1;
+    }
 
-        if cursor < bytes.len() && bytes[cursor] == b',' {
-            cursor += 1;
-            cursor = skip_whitespace(source, cursor);
-        } else {
-            break;
+    let end = trimmed_end;
+    // Tight trailing boundary: a word character glued to the end of the
+    // parsed call means the whole construct is ordinary text rather than a
+    // call plus trailing content (`See .sum {1} {2}items` stays prose).
+    // Symbols such as `.`, `-` and `)` are legal boundaries.
+    if end < bytes.len() && is_call_word_char(bytes[end]) {
+        return Ok(None);
+    }
+    Ok(Some((
+        QuarkdownCall {
+            name,
+            name_span: ByteSpan::new(start, name_end),
+            positional_args,
+            named_args,
+            span: ByteSpan::new(start, end),
+        },
+        end,
+    )))
+}
+
+/// Parse a single `{...}` argument starting at the opening brace.
+fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
+    let bytes = source.as_bytes();
+    debug_assert_eq!(bytes[open], b'{');
+    let mut depth = 1u32;
+    let mut cursor = open + 1;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'{' => {
+                depth += 1;
+                cursor += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let close = cursor;
+                    let content = ByteSpan::new(open + 1, close);
+                    let kind = if let Some(scalar) = parse_scalar(source, content) {
+                        ArgContent::Scalar(scalar)
+                    } else {
+                        ArgContent::Content(content)
+                    };
+                    return Ok(Arg {
+                        content: kind,
+                        span: ByteSpan::new(open, close + 1),
+                    });
+                }
+                cursor += 1;
+            }
+            // Cross-line arguments are deliberately not supported: an
+            // unclosed brace at end of line is a recoverable error.
+            b'\n' => {
+                return Err(ParseError::new(
+                    "E2003",
+                    "unclosed `{...}` argument in function call",
+                    ByteSpan::new(open, cursor + 1),
+                ));
+            }
+            _ => cursor += 1,
+        }
+    }
+    Err(ParseError::new(
+        "E2003",
+        "unclosed `{...}` argument in function call",
+        ByteSpan::new(open, source.len()),
+    ))
+}
+
+/// Attempt to read the argument content as a scalar literal.
+///
+/// A scalar has no whitespace, no inline markup and no nested call; it is a
+/// single bare token or a double-quoted string. Returns `None` when the
+/// content is a general inline fragment that must go through the inline
+/// parser.
+fn parse_scalar(source: &str, content: ByteSpan) -> Option<Value> {
+    let raw = &source[content.start..content.end];
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Some(Value::String(String::new()));
+    }
+
+    // Quoted strings are always scalars.
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        let unescaped = inner.replace("\\\"", "\"").replace("\\\\", "\\");
+        return Some(Value::String(unescaped));
+    }
+
+    // Numbers first: `0.5` and `1e4` are valid scalars even though they
+    // contain dots.
+    if trimmed.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-')
+        && !trimmed.contains(|c: char| c.is_alphabetic() && c != 'e' && c != 'E')
+    {
+        if let Ok(n) = trimmed.parse::<f64>() {
+            return Some(Value::Number(n));
         }
     }
 
-    Some(((positional, named), cursor - start))
-}
-
-/// Parse a single value from the given position.
-fn parse_value(source: &str, start: usize, _source_id: SourceId) -> Option<(Value, usize)> {
-    let bytes = source.as_bytes();
-    let cursor = skip_whitespace(source, start);
-
-    if cursor >= bytes.len() {
+    // A scalar has no inline markup: braces, quotes, emphasis markers or
+    // dots make it a content fragment (dots may start nested calls).
+    // Underscores are kept: they are part of common identifiers
+    // (`show_code`) and only read as emphasis inside multi-word fragments.
+    if trimmed.contains(['{', '}', '"', '.', '*']) {
         return None;
     }
 
-    match bytes[cursor] {
-        b'"' => {
-            // Double-quoted string
-            let mut end = cursor + 1;
-            while end < bytes.len() && bytes[end] != b'"' {
-                if bytes[end] == b'\\' {
-                    end += 1; // skip escaped char
-                }
-                end += 1;
-            }
-            if end >= bytes.len() {
-                return None; // unclosed string
-            }
-            let raw = &source[cursor + 1..end];
-            let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
-            Some((Value::String(unescaped), end + 1))
-        }
-        b't' if source[cursor..].starts_with("true") => Some((Value::Boolean(true), cursor + 4)),
-        b'f' if source[cursor..].starts_with("false") => Some((Value::Boolean(false), cursor + 5)),
-        _ => {
-            // Number or identifier
-            let end = cursor
-                + source[cursor..]
-                    .char_indices()
-                    .find(|&(_, c)| !is_value_char(c))
-                    .map(|(i, _)| i)
-                    .unwrap_or(source.len() - cursor);
-
-            let token = &source[cursor..end];
-            if token.is_empty() {
-                return None;
-            }
-
-            // Try number first
-            if let Ok(n) = token.parse::<f64>() {
-                Some((Value::Number(n), end))
-            } else {
-                Some((Value::Identifier(token.to_string()), end))
-            }
-        }
-    }
-}
-
-fn is_value_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-' || c == '.'
-}
-
-/// Parse the content inside `[...]` body brackets.
-///
-/// The body can contain nested directives, plain text, or a mix.
-/// For M1, we parse it as a flat sequence: plain text + nested `@` calls.
-fn parse_body_content(source: &str, source_id: SourceId) -> Directive {
-    let trimmed = source.trim();
-    if trimmed.is_empty() {
-        return Directive::Value(Value::String(String::new()));
+    // A multi-word fragment is treated as a plain string.
+    if trimmed.contains(char::is_whitespace) {
+        return Some(Value::String(trimmed.to_string()));
     }
 
-    // Try to parse the entire body as a single nested directive
-    if let Some((directive, consumed)) = parse_directive_at(source, 0, source_id) {
-        if consumed == source.len() {
-            return directive;
-        }
+    // Booleans are named in Quarkdown examples.
+    match trimmed {
+        "true" => return Some(Value::Boolean(true)),
+        "false" => return Some(Value::Boolean(false)),
+        _ => {}
     }
 
-    // Otherwise, treat the body as literal string content.
-    // Body text will be further processed by the evaluator.
-    Directive::Value(Value::String(trimmed.to_string()))
+    // A bare identifier token: letters, digits, underscore, hyphen,
+    // starting with a letter or underscore.
+    if trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    {
+        return Some(Value::Identifier(trimmed.to_string()));
+    }
+
+    None
 }
 
-/// Parse a directive from a `@`-prefixed source string.
-///
-/// Returns `None` if the source does not start with a valid directive.
-pub fn parse_directive(source: &str, source_id: SourceId) -> Option<Directive> {
-    parse_directive_at(source, 0, source_id).map(|(d, _)| d)
-}
-
-fn skip_whitespace(source: &str, start: usize) -> usize {
-    source[start..]
-        .char_indices()
-        .find(|&(_, c)| !c.is_ascii_whitespace())
-        .map(|(i, _)| start + i)
-        .unwrap_or(source.len())
+/// Skip spaces and tabs only. Newlines are NOT consumed: an unescaped line
+/// break always terminates the current function call (Quarkdown requires an
+/// explicit line continuation `\` to extend an argument list across lines).
+fn skip_horizontal_whitespace(source: &str, start: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
+        i += 1;
+    }
+    i
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::SourceId;
 
-    fn sid() -> SourceId {
-        SourceId(1)
-    }
-
-    #[test]
-    fn parse_empty_returns_none() {
-        assert!(parse_directive("", sid()).is_none());
-    }
-
-    #[test]
-    fn parse_plain_text_returns_none() {
-        assert!(parse_directive("hello world", sid()).is_none());
-    }
-
-    #[test]
-    fn parse_just_at_sign() {
-        assert!(parse_directive("@", sid()).is_none());
-    }
-
-    #[test]
-    fn parse_simple_variable() {
-        let d = parse_directive("@name", sid()).unwrap();
-        assert_eq!(
-            d,
-            Directive::Variable {
-                name: "name".into(),
-                span: ByteSpan::new(0, 5),
+    fn call(src: &str) -> QuarkdownCall {
+        match parse_directive_at(src, 0) {
+            Ok(Some((c, end))) => {
+                assert_eq!(end, src.len(), "call must consume the source");
+                c
             }
+            Ok(None) => panic!("no call parsed from {src:?}"),
+            Err(e) => panic!("parse error for {src:?}: {e:?}"),
+        }
+    }
+    fn no_call(src: &str) {
+        assert!(
+            matches!(parse_directive_at(src, 0), Ok(None)),
+            "expected no call for {src:?}"
         );
     }
-
-    #[test]
-    fn parse_variable_with_hyphen() {
-        let d = parse_directive("@my-var", sid()).unwrap();
-        assert_eq!(
-            d,
-            Directive::Variable {
-                name: "my-var".into(),
-                span: ByteSpan::new(0, 7),
-            }
-        );
+    fn err(src: &str, code: &'static str) {
+        match parse_directive_at(src, 0) {
+            Err(e) => assert_eq!(e.code, code, "wrong code for {src:?}"),
+            other => panic!("expected error for {src:?}, got {other:?}"),
+        }
     }
-
-    #[test]
-    fn parse_call_no_args_no_body() {
-        let d = parse_directive("@fn()", sid()).unwrap();
-        match d {
-            Directive::Call {
-                name,
-                positional_args,
-                named_args,
-                body,
-                ..
-            } => {
-                assert_eq!(name, "fn");
-                assert!(positional_args.is_empty());
-                assert!(named_args.is_empty());
-                assert!(body.is_none());
-            }
-            _ => panic!("expected Call"),
+    fn scalar(kind: ArgContent) -> Value {
+        match kind {
+            ArgContent::Scalar(v) => v,
+            other => panic!("expected scalar, got {other:?}"),
         }
     }
 
     #[test]
-    fn parse_call_positional_args() {
-        let d = parse_directive("@fn(42, \"hello\")", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args,
-                named_args,
-                body,
-                ..
-            } => {
-                assert_eq!(positional_args.len(), 2);
-                assert_eq!(positional_args[0], Value::Number(42.0));
-                assert_eq!(positional_args[1], Value::String("hello".into()));
-                assert!(named_args.is_empty());
-                assert!(body.is_none());
-            }
-            _ => panic!("expected Call"),
+    fn empty_and_plain_text_are_not_calls() {
+        no_call("");
+        no_call("hello world");
+        no_call(".");
+        no_call(".0");
+        no_call(".05");
+        no_call(". note");
+        no_call("...ellipsis");
+    }
+
+    #[test]
+    fn implicit_positional_references() {
+        for (src, expected) in [(".1", "1"), (".2", "2"), (".12", "12")] {
+            let d = call(src);
+            assert_eq!(d.name, expected, "implicit ref {src}");
+            assert!(d.positional_args.is_empty());
+            assert!(d.named_args.is_empty());
+            assert_eq!(d.name_span, ByteSpan::new(0, src.len()));
         }
+    }
+
+    #[test]
+    fn implicit_reference_boundary_stops_at_word_characters() {
+        // A word character glued to the reference keeps the whole
+        // token ordinary text: it must never split into `ref + text`.
+        no_call(".1abc");
+        no_call(".12foo");
+        no_call(".1e5");
+        no_call(".1한");
+
+        // Word boundaries (whitespace, punctuation, EOF) still form refs.
+        for src in [".1", ".1.", ".2 ", ".12\n"] {
+            match parse_directive_at(src, 0) {
+                Ok(Some((d, end))) => {
+                    assert!(d.name.starts_with(|c: char| c.is_ascii_digit()));
+                    assert_eq!(end, 2 + d.name.len().saturating_sub(1), "ref {src:?}");
+                    assert!(d.positional_args.is_empty(), "ref {src:?}");
+                }
+                other => panic!("expected implicit ref in {src:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn implicit_reference_survives_symbol_boundaries() {
+        // `-` is a symbol, and a symbol is a legal call boundary: `.1-1`
+        // is the `.1` reference followed by the text `-1`, not prose.
+        match parse_directive_at(".1-1", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert_eq!(end, 2);
+                assert!(d.positional_args.is_empty());
+            }
+            other => panic!("expected `.1` reference, got {other:?}"),
+        }
+        // Other symbol characters behave the same way.
+        for src in [".1.", ".1)", ".1-", ".1!"] {
+            assert!(
+                matches!(parse_directive_at(src, 0), Ok(Some((d, end))) if d.name == "1" && end == 2),
+                "expected `.1` reference in {src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tight_word_adjacency_makes_call_ordinary_text() {
+        // Trailing word characters glue to the call: the whole construct
+        // stays ordinary text (never `call + trailing text`).
+        no_call(".note {x}suffix");
+        no_call(".sum {1} {2}items");
+        no_call(".note {x}B");
+        no_call(".note {x}한");
+
+        // Leading word characters invalidate the call as well.
+        assert!(
+            matches!(parse_directive_at("A.note {x}", 1), Ok(None)),
+            "word before the dot must invalidate the call"
+        );
+        assert!(
+            matches!(parse_directive_at("한.note {x}", 3), Ok(None)),
+            "non-ASCII word before the dot must invalidate the call"
+        );
+        assert!(
+            matches!(parse_directive_at("..note {x}", 1), Ok(None)),
+            "a dot before the dot must invalidate the call"
+        );
+    }
+
+    #[test]
+    fn symbols_are_valid_call_boundaries() {
+        // A hyphen is a symbol, and a symbol is a legal boundary. The call
+        // is parsed from the offset right after the hyphen.
+        match parse_directive_at("-.note {x}", 1) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "note");
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 10);
+            }
+            other => panic!("expected `.note` after hyphen, got {other:?}"),
+        }
+
+        // A trailing hyphen does not glue to the call either.
+        match parse_directive_at(".note {x}-", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "note");
+                assert_eq!(end, 9);
+            }
+            other => panic!("expected note call with trailing hyphen, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_reference_does_not_consume_arguments() {
+        // `.1 {item}` is NOT a call with a positional argument: the
+        // reference token ends at the name, the rest stays ordinary text.
+        match parse_directive_at(".1 {item}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert!(d.positional_args.is_empty());
+                assert!(d.named_args.is_empty());
+                assert_eq!(d.span, ByteSpan::new(0, 2));
+                assert_eq!(end, 2);
+            }
+            other => panic!("expected bare implicit ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_reference_span_and_surrounding_text() {
+        match parse_directive_at("The value is .1.", 13) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert_eq!(d.name_span, ByteSpan::new(13, 15));
+                assert_eq!(d.span, ByteSpan::new(13, 15));
+                assert_eq!(end, 15);
+            }
+            other => panic!("expected implicit ref, got {other:?}"),
+        }
+        match parse_directive_at(".value .3", 0) {
+            Ok(Some((d, end))) => {
+                // The implicit reference `.3` is a separate call and must not
+                // extend `.value`'s argument list (no braces involved).
+                assert_eq!(d.name, "value");
+                assert_eq!(end, 6);
+            }
+            other => panic!("expected value call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decimals_do_not_form_implicit_references() {
+        // Inside a braces-less sentence these must stay ordinary text.
+        no_call("0.5");
+        no_call("3.14");
+        no_call("foo.1");
+        // A digit-starting call at the atomic level only forms when the dot
+        // is actually present (`1` in "0.5" is not after a dot). The
+        // word-adjacency boundary (`foo.1` stays prose) is enforced by the
+        // Markdown inline parser, not by this function.
+        let d = call(".1");
+        assert_eq!(d.name, "1");
+        let _ = d;
+    }
+
+    #[test]
+    fn newline_terminates_the_call() {
+        // `.foo` followed by a line break must NOT absorb `{bar}`.
+        match parse_directive_at(".foo\n{bar}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "foo");
+                assert!(d.positional_args.is_empty());
+                assert_eq!(end, 4);
+            }
+            other => panic!("expected foo call, got {other:?}"),
+        }
+        // `{b}` on the next line must not become a second positional arg.
+        match parse_directive_at(".foo {a}\n{b}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 8);
+            }
+            other => panic!("expected single-arg call, got {other:?}"),
+        }
+        // CRLF behaves the same.
+        match parse_directive_at(".foo {a}\r\n{b}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 8);
+            }
+            other => panic!("expected single-arg call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_call_no_args() {
+        let d = call(".note");
+        assert_eq!(d.name, "note");
+        assert!(d.positional_args.is_empty());
+        assert!(d.named_args.is_empty());
+    }
+
+    #[test]
+    fn parse_call_underscore_name() {
+        let d = call(".my_call");
+        assert_eq!(d.name, "my_call");
+    }
+
+    #[test]
+    fn parse_call_hyphen_name() {
+        let d = call(".my-call {1}");
+        assert_eq!(d.name, "my-call");
+    }
+
+    #[test]
+    fn parse_call_span_covers_name_and_args() {
+        let d = call(".note {hello} width:{320}");
+        assert_eq!(d.span, ByteSpan::new(0, 25));
+    }
+
+    #[test]
+    fn parse_call_positional_scalar() {
+        let d = call(".range {1} {10}");
+        assert_eq!(d.positional_args.len(), 2);
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::Number(1.0)
+        );
+        assert_eq!(
+            scalar(d.positional_args[1].content.clone()),
+            Value::Number(10.0)
+        );
+    }
+
+    #[test]
+    fn parse_call_positional_string() {
+        let d = call(".note {hello world}");
+        assert_eq!(d.positional_args.len(), 1);
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::String("hello world".into())
+        );
     }
 
     #[test]
     fn parse_call_named_args() {
-        let d = parse_directive("@fn(level: 1, title: \"Hi\")", sid()).unwrap();
-        match d {
-            Directive::Call { named_args, .. } => {
-                assert_eq!(named_args.len(), 2);
-                assert_eq!(named_args[0], ("level".into(), Value::Number(1.0)));
-                assert_eq!(named_args[1], ("title".into(), Value::String("Hi".into())));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_with_body() {
-        let d = parse_directive("@fn[body text]", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args,
-                named_args,
-                body,
-                ..
-            } => {
-                assert!(positional_args.is_empty());
-                assert!(named_args.is_empty());
-                let body = *body.unwrap();
-                assert_eq!(body, Directive::Value(Value::String("body text".into())));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_args_and_body() {
-        let d = parse_directive("@heading(level: 1)[Title]", sid()).unwrap();
-        match d {
-            Directive::Call {
-                name,
-                named_args,
-                body,
-                ..
-            } => {
-                assert_eq!(name, "heading");
-                assert_eq!(named_args.len(), 1);
-                assert_eq!(named_args[0], ("level".into(), Value::Number(1.0)));
-                let body = *body.unwrap();
-                assert_eq!(body, Directive::Value(Value::String("Title".into())));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_nested_directive_in_body() {
-        let d = parse_directive("@fn[@inner(42)]", sid()).unwrap();
-        match d {
-            Directive::Call { body, .. } => {
-                let body = *body.unwrap();
-                match body {
-                    Directive::Call {
-                        name,
-                        positional_args,
-                        ..
-                    } => {
-                        assert_eq!(name, "inner");
-                        assert_eq!(positional_args.len(), 1);
-                        assert_eq!(positional_args[0], Value::Number(42.0));
-                    }
-                    _ => panic!("expected nested Call"),
-                }
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_string_with_escaped_quotes() {
-        let d = parse_directive("@fn(\"hello \\\"world\\\"\")", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args, ..
-            } => {
-                assert_eq!(positional_args.len(), 1);
-                assert_eq!(positional_args[0], Value::String("hello \"world\"".into()));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_boolean_args() {
-        let d = parse_directive("@fn(true, false)", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args, ..
-            } => {
-                assert_eq!(positional_args.len(), 2);
-                assert_eq!(positional_args[0], Value::Boolean(true));
-                assert_eq!(positional_args[1], Value::Boolean(false));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_mixed_args() {
-        let d = parse_directive("@fn(42, name: \"val\")", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args,
-                named_args,
-                ..
-            } => {
-                assert_eq!(positional_args.len(), 1);
-                assert_eq!(positional_args[0], Value::Number(42.0));
-                assert_eq!(named_args.len(), 1);
-                assert_eq!(named_args[0], ("name".into(), Value::String("val".into())));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_call_after_text() {
-        // Should fail — directive must start with @
-        assert!(parse_directive("text@fn()", sid()).is_none());
-    }
-
-    #[test]
-    fn parse_call_with_whitespace() {
-        let d = parse_directive("@fn( 42 , name : \"val\" )", sid()).unwrap();
-        match d {
-            Directive::Call {
-                positional_args,
-                named_args,
-                ..
-            } => {
-                assert_eq!(positional_args.len(), 1);
-                assert_eq!(positional_args[0], Value::Number(42.0));
-                assert_eq!(named_args.len(), 1);
-                assert_eq!(named_args[0], ("name".into(), Value::String("val".into())));
-            }
-            _ => panic!("expected Call"),
-        }
-    }
-
-    #[test]
-    fn parse_variable_underscore_name() {
-        let d = parse_directive("@my_var", sid()).unwrap();
+        let d = call(".panel width:{320} align:{center}");
+        assert_eq!(d.positional_args.len(), 0);
+        assert_eq!(d.named_args.len(), 2);
+        assert_eq!(d.named_args[0].name, "width");
+        assert_eq!(d.named_args[0].name_span, ByteSpan::new(7, 12));
         assert_eq!(
-            d,
-            Directive::Variable {
-                name: "my_var".into(),
-                span: ByteSpan::new(0, 7),
-            }
+            scalar(d.named_args[0].value.content.clone()),
+            Value::Number(320.0)
+        );
+        assert_eq!(d.named_args[0].span, ByteSpan::new(7, 18));
+        assert_eq!(d.named_args[1].name, "align");
+        assert_eq!(
+            scalar(d.named_args[1].value.content.clone()),
+            Value::Identifier("center".into())
         );
     }
 
     #[test]
-    fn parse_conditional_style_not_supported_as_syntax() {
-        // @if is parsed as a regular function call for now;
-        // Conditional semantic handling is done by the evaluator.
-        let d = parse_directive("@if(cond)[then][else]", sid());
-        assert!(d.is_some());
-        // Just verifies it parses — conditional syntax evaluation is an M1+ concern
+    fn parse_mixed_args() {
+        let d = call(".panel {Introduction} width:{320}");
+        assert_eq!(d.positional_args.len(), 1);
+        assert_eq!(d.named_args.len(), 1);
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::Identifier("Introduction".into())
+        );
+    }
+
+    #[test]
+    fn parse_nested_call_in_argument() {
+        let d = call(".outer {.inner {value}}");
+        assert_eq!(d.positional_args.len(), 1);
+        match &d.positional_args[0].content {
+            ArgContent::Content(_) => {}
+            other => panic!("expected content argument, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_number_with_decimal_point() {
+        let d = call(".panel width:{0.5}");
+        assert_eq!(
+            scalar(d.named_args[0].value.content.clone()),
+            Value::Number(0.5)
+        );
+    }
+
+    #[test]
+    fn parse_identifier_with_underscore() {
+        let d = call(".if {show_code}");
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::Identifier("show_code".into())
+        );
+    }
+
+    #[test]
+    fn parse_call_quoted_string_arg() {
+        let d = call(".fn {\"hello \\\"world\\\"\"}");
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::String("hello \"world\"".into())
+        );
+    }
+
+    #[test]
+    fn parse_call_boolean_args() {
+        let d = call(".fn {true} {false}");
+        assert_eq!(
+            scalar(d.positional_args[0].content.clone()),
+            Value::Boolean(true)
+        );
+        assert_eq!(
+            scalar(d.positional_args[1].content.clone()),
+            Value::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn positional_after_named_is_rejected() {
+        err(".foo width:{\"x\"} {y}", "E2001");
+    }
+
+    #[test]
+    fn unclosed_argument_is_error() {
+        err(".foo {", "E2003");
+        err(".foo {value", "E2003");
+        err(".foo key:{", "E2003");
+        err(".foo key:{value", "E2003");
+    }
+
+    #[test]
+    fn named_argument_without_braces_is_error() {
+        err(".foo key:", "E2002");
+        err(".foo key: value", "E2002");
+    }
+
+    #[test]
+    fn call_stops_at_non_argument() {
+        let src = ".note and more text";
+        assert!(
+            matches!(parse_directive_at(src, 0), Ok(Some((c, end))) if c.name == "note" && end == 5)
+        );
+    }
+
+    #[test]
+    fn multiple_args_with_various_whitespace() {
+        let d = call(".range {1}    {2}");
+        assert_eq!(d.positional_args.len(), 2);
+        let d2 = call(".range{1}{ 14}");
+        assert_eq!(d2.positional_args.len(), 2);
     }
 }

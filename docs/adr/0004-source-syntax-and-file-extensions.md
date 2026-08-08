@@ -43,7 +43,7 @@ Support three input paths:
 |-----------|--------------------------------------------------|
 | `.qd`     | Scribium parser: Markdown + Quarkdown-compatible |
 | `.scrib`  | Alias for `.qd`                                  |
-| `.md`     | Markdown-only (no `@` directive processing)      |
+| `.md`     | Markdown-only (no Scribium directive processing)      |
 | `.typ`    | Passthrough to Typst compiler                    |
 
 > **Implementation status:** `.typ` passthrough is not implemented yet. The

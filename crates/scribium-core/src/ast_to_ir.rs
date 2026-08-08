@@ -119,17 +119,25 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
             body,
             span,
         } => {
-            let ir_positional: Vec<_> = positional_args.iter().map(value_to_ir).collect();
+            let ir_positional: Vec<_> = positional_args
+                .iter()
+                .map(|v| value_to_ir(v, source_id))
+                .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v)))
+                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
                 .collect();
-            let ir_body = body.as_ref().and_then(|b| block_to_ir(b, source_id));
+            let ir_body = body.as_ref().map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| block_to_ir(b, source_id))
+                    .collect::<Vec<_>>()
+            });
             Some(IrNode::FunctionCall {
                 name: name.clone(),
                 positional_args: ir_positional,
                 named_args: ir_named,
-                body: ir_body.map(Box::new),
+                body: ir_body,
                 span: byte_to_source_span(span, source_id),
             })
         }
@@ -174,10 +182,13 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
             body,
             span,
         } => {
-            let ir_positional: Vec<_> = positional_args.iter().map(value_to_ir).collect();
+            let ir_positional: Vec<_> = positional_args
+                .iter()
+                .map(|v| value_to_ir(v, source_id))
+                .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v)))
+                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
                 .collect();
             let ir_body = body.as_ref().map(|b| inlines_to_ir(b, source_id));
             Some(IrInline::DirectiveCall {
@@ -198,12 +209,74 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
     }
 }
 
-fn value_to_ir(value: &Value) -> crate::ir::IrValue {
+fn value_to_ir(value: &Value, source_id: SourceId) -> crate::ir::IrValue {
     match value {
         Value::String(s) => crate::ir::IrValue::String(s.clone()),
         Value::Number(n) => crate::ir::IrValue::Number(*n),
         Value::Boolean(b) => crate::ir::IrValue::Boolean(*b),
         Value::Identifier(id) => crate::ir::IrValue::Identifier(id.clone()),
+        Value::Content(inlines) => {
+            if let [Inline::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+            }] = inlines.as_slice()
+            {
+                let ir_positional: Vec<_> = positional_args
+                    .iter()
+                    .map(|v| value_to_ir(v, source_id))
+                    .collect();
+                let ir_named: Vec<_> = named_args
+                    .iter()
+                    .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
+                    .collect();
+                let ir_body = body.as_ref().map(|b| {
+                    vec![IrNode::Paragraph {
+                        content: inlines_to_ir(b, source_id),
+                        span: byte_to_source_span(span, source_id),
+                    }]
+                });
+                crate::ir::IrValue::Content(vec![IrNode::FunctionCall {
+                    name: name.clone(),
+                    positional_args: ir_positional,
+                    named_args: ir_named,
+                    body: ir_body,
+                    span: byte_to_source_span(span, source_id),
+                }])
+            } else {
+                let start = inlines.first().map(inline_span_start);
+                let end = inlines.last().map(inline_span_end);
+                let span = crate::source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
+                crate::ir::IrValue::Content(vec![IrNode::Paragraph {
+                    content: inlines_to_ir(inlines, source_id),
+                    span: byte_to_source_span(&span, source_id),
+                }])
+            }
+        }
+    }
+}
+
+fn inline_span_start(inline: &Inline) -> usize {
+    match inline {
+        Inline::Text { span, .. }
+        | Inline::Emphasis { span, .. }
+        | Inline::Strong { span, .. }
+        | Inline::DirectiveCall { span, .. }
+        | Inline::HardBreak { span }
+        | Inline::SoftBreak { span } => span.start,
+    }
+}
+
+fn inline_span_end(inline: &Inline) -> usize {
+    match inline {
+        Inline::Text { span, .. }
+        | Inline::Emphasis { span, .. }
+        | Inline::Strong { span, .. }
+        | Inline::DirectiveCall { span, .. }
+        | Inline::HardBreak { span }
+        | Inline::SoftBreak { span } => span.end,
     }
 }
 
