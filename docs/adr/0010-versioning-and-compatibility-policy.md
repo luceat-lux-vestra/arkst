@@ -35,7 +35,7 @@ profile per target.
 - **Config schema:** Integer version in scribium.toml (`config-version = 1`)
 - **Diagnostic codes:** Stable within a major version. Never reassign codes.
   Deprecated codes do not reappear.
-- **Compatibility profile:** Named after target version (`quarkdown-v0.9`)
+- **Compatibility profile:** Named after target version (`quarkdown-v2.5`)
 - **Syntax version:** Tied to tool version in pre-1.0; stabilized at 1.0
 
 ## Pre-1.0 policy

@@ -114,7 +114,7 @@ Each compatibility fixture records:
 
 ```yaml
 specification_source: public-docs
-reference_version: 0.9.0
+reference_version: 2.5.0
 feature: dot-prefixed-call
 expected_level: output-equivalent
 notes: basic case, single positional argument

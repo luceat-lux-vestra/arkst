@@ -2,15 +2,27 @@
 
 ## Status
 
-- **Specification version:** 0.2 (function-call syntax)
-- **Target Quarkdown version:** 0.9.x
-- **Compatibility level:** In progress — implemented features are listed below
+- **Specification version:** 0.3 (reference baseline v2.5.0)
+- **Reference upstream:** Quarkdown v2.5.0
+- **Compatibility model:** documented feature subset
+- **Full Quarkdown compatibility:** not claimed
 
 ## Scope
 
 This document defines Scribium's Quarkdown-compatible syntax and semantics.
 Each feature records its specification source, compatibility level, and known
 divergences.
+
+Scribium does **not** claim full Quarkdown v2.5.0 compatibility. The
+compatibility contract is the **documented subset** defined by this document:
+only rows marked `Implemented`, at the stated compatibility level, and covered
+by Scribium conformance tests (see [Conformance Evidence](#conformance-evidence))
+are part of the current compatibility contract. `SPEC_SOURCES.md` records the
+upstream specification provenance for those claims. The Feature Matrix also
+lists `Planned` and `Not implemented` rows; those are tracking entries and
+constitute **no** compatibility claim. Features that Quarkdown v2.5.0
+documents but Scribium does not implement are not bugs; they are outside the
+contract until implemented and recorded in this matrix (see ADR 0012).
 
 The Quarkdown function-call grammar is implemented clean-room from the public
 documentation, notably *"Syntax of a function call"* on the Quarkdown wiki.
@@ -19,44 +31,80 @@ provenance records.
 
 ## Feature Matrix
 
-| Feature                     | Syntax                 | Compatibility | Status      |
-|-----------------------------|------------------------|---------------|-------------|
-| Dot-prefixed call           | `.note`                | Parsed        | Implemented |
-| Implicit positional refs   | `.1`, `.2`, ...        | Parsed        | Implemented |
-| Positional arguments        | `.range {1} {10}`      | Parsed        | Implemented |
-| Named arguments             | `.panel width:{320}`   | Parsed        | Implemented |
-| Mixed positional/named      | `.panel {Intro} width:{320}` | Parsed | Implemented |
-| Indented body argument      | `.panel {x}` + indent  | Parsed        | Implemented |
-| Nested calls                | `.outer {.inner {x}}`  | Parsed        | Implemented |
-| Inline (mid-paragraph) call | `see .note {x}`        | Parsed        | Implemented |
-| Tight-call boundaries       | word adjacency rejected | Parsed       | Implemented |
-| Variables                   | —                      | Parsed        | Planned      |
-| Conditionals                | —                      | Parsed        | Planned      |
-| Iteration                   | —                      | Parsed        | Planned      |
-| Functions/components        | —                      | Parsed        | Planned      |
-| Include/read                | —                      | Parsed        | Planned      |
-| Metadata                    | —                      | Parsed        | Planned      |
-| Row/column/grid             | —                      | Parsed        | Planned      |
-| Call chaining (`::`)        | —                      | Unsupported   | Planned      |
-| Line continuation (`\`)     | —                      | Unsupported   | Planned      |
-| Multi-line arguments        | —                      | Unsupported   | Planned      |
-| Semantic evaluation         | —                      | Unsupported   | Planned      |
+| Feature                        | Syntax                           | Compatibility            | Status           |
+|--------------------------------|----------------------------------|--------------------------|------------------|
+| Dot-prefixed call              | `.note`                          | Parsed                   | Implemented      |
+| Implicit positional refs       | `.1`, `.2`, ...                  | Parsed                   | Implemented      |
+| Positional arguments           | `.range {1} {10}`                | Parsed                   | Implemented      |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Implemented      |
+| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Implemented      |
+| Indented body argument         | `.panel {x}` + indent            | Parsed                   | Implemented      |
+| Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Implemented      |
+| Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Implemented      |
+| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
+| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`        | Error                    | Implemented      |
+| Variables                      | —                                | —                        | Planned          |
+| Conditionals                   | —                                | —                        | Planned          |
+| Iteration                      | —                                | —                        | Planned          |
+| Functions/components            | —                                | —                        | Planned          |
+| Include/read                   | —                                | —                        | Planned          |
+| Metadata                       | —                                | —                        | Planned          |
+| Row/column/grid                | —                                | —                        | Planned          |
+| Semantic evaluation            | —                                | —                        | Planned          |
+| Call chaining (`::`)           | `.a {x}::b {y}`                  | Not implemented          | Planned          |
+| Line continuation (`\`)        | `\` at end of line               | Not implemented          | Planned          |
+| Tight / brace-wrapped calls    | `.x` wrapped in braces at adjacency | Not implemented       | Planned          |
+| Multi-line arguments           | `{.…}` parsing spans lines        | Not implemented (E2xxx today) | Planned          |
+| `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
+| `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
-Planned status means the syntax is not implemented yet, in whole or in part.
-Implemented rows are covered by tests and goldens.
+`Implemented` rows are covered by unit and golden tests (see
+[Conformance Evidence](#conformance-evidence)). `Planned` means the syntax is
+not implemented yet, in whole or in part: it has no documented `Unsupported`
+diagnostic and must not be assumed to work.
+
+## Conformance Evidence
+
+Each `Implemented` row is backed by at least one Scribium conformance test.
+The table maps every `Implemented` feature to the test(s) that verify it;
+`quarkdown/parser.rs` refers to
+`crates/scribium-core/src/syntax/quarkdown/parser.rs` and `markdown/parser.rs`
+to `crates/scribium-core/src/syntax/markdown/parser.rs`. A single test may
+cover multiple features. This table is the implementation-evidence
+counterpart of the upstream provenance recorded in `SPEC_SOURCES.md`; the two
+are kept separate on purpose.
+
+| Feature                         | Evidence (unit tests) |
+|---------------------------------|------------------------|
+| Dot-prefixed call               | `quarkdown/parser.rs::parse_call_no_args`, `quarkdown/parser.rs::parse_call_underscore_name`, `quarkdown/parser.rs::parse_call_hyphen_name`, `quarkdown/parser.rs::empty_and_plain_text_are_not_calls`, `markdown/parser.rs::block_call_no_arguments`, `markdown/parser.rs::valid_calls_produce_no_diagnostics` |
+| Implicit positional refs        | `quarkdown/parser.rs::implicit_positional_references`, `quarkdown/parser.rs::implicit_reference_boundary_stops_at_word_characters`, `quarkdown/parser.rs::implicit_reference_survives_symbol_boundaries`, `markdown/parser.rs::implicit_reference_call_at_block_level`, `markdown/parser.rs::implicit_reference_inline_boundaries` |
+| Positional arguments            | `quarkdown/parser.rs::parse_call_positional_scalar`, `quarkdown/parser.rs::parse_call_positional_string`, `quarkdown/parser.rs::parse_call_boolean_args`, `quarkdown/parser.rs::multiple_args_with_various_whitespace`, `markdown/parser.rs::block_call_positional_args` |
+| Named arguments                 | `quarkdown/parser.rs::parse_call_named_args`, `markdown/parser.rs::block_call_named_args` |
+| Mixed positional/named          | `quarkdown/parser.rs::parse_mixed_args`, `markdown/parser.rs::block_call_mixed_args` |
+| Indented body argument          | `markdown/parser.rs::block_call_with_indented_body`, `markdown/parser.rs::block_call_body_span_covers_indented_lines`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls`, `markdown/parser.rs::body_requires_minimum_indentation`, `markdown/parser.rs::body_single_tab_counts_as_body`, `markdown/parser.rs::body_stops_at_less_indented_line` |
+| Nested calls                    | `quarkdown/parser.rs::parse_nested_call_in_argument`, `markdown/parser.rs::nested_call_inside_argument`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls` |
+| Inline (mid-paragraph) call     | `markdown/parser.rs::inline_call_in_sentence`, `markdown/parser.rs::call_with_trailing_text_is_inline_call`, `markdown/parser.rs::inline_call_at_line_start_continues_paragraph`, `markdown/parser.rs::isolated_call_line_still_starts_block` |
+| Tight-call boundaries           | `quarkdown/parser.rs::tight_word_adjacency_makes_call_ordinary_text`, `quarkdown/parser.rs::symbols_are_valid_call_boundaries`, `quarkdown/parser.rs::implicit_reference_does_not_consume_arguments`, `markdown/parser.rs::tight_call_boundary_rejects_trailing_word`, `markdown/parser.rs::tight_call_hyphen_boundaries_are_valid`, `markdown/parser.rs::unicode_word_characters_are_tight_adjacency`, `markdown/parser.rs::inline_call_does_not_parse_in_numbers` |
+| Malformed-call diagnostics      | `quarkdown/parser.rs::positional_after_named_is_rejected` (`E2001`), `quarkdown/parser.rs::named_argument_without_braces_is_error` (`E2002`), `quarkdown/parser.rs::unclosed_argument_is_error` (`E2003`), `markdown/parser.rs::malformed_calls_produce_structured_diagnostics`, `markdown/parser.rs::malformed_calls_do_not_panic_and_fall_back_to_paragraph` |
 
 ## Compatibility Levels
 
-- **Unsupported:** Produces explicit `E8xxx` diagnostic
+- **Unsupported:** Produces explicit `E8xxx` diagnostic (used only by the
+  compatibility-profile diagnostics; see `compatibility/diagnostics.rs`)
+- **Error:** Produces an explicit parse diagnostic (`E2xxx`) at the call site
 - **Parsed:** Accepted syntactically; behavior may be undefined or rejected
 - **Semantically supported:** Scribium semantics match documented behavior
 - **Output-equivalent:** Typst output matches reference for tested inputs
-- **Known divergence:** Deliberate behavioral difference with documented rationale
+- **Known divergence:** Deliberate behavioral difference with documented
+  rationale
 
 Function calls are currently **Parsed**: `.name`, positional arguments
 `{arg}`, named arguments `name:{arg}`, nested calls, and indented block
 bodies are parsed into the Scribium AST/IR. Semantic evaluation is the next
-milestone (see `docs/SYNTAX.md` and `docs/ROADMAP.md`).
+milestone (see `docs/SYNTAX.md` and `docs/ROADMAP.md`). Note that a feature
+which currently fails to parse (e.g. `E2xxx` syntax errors on some input
+forms) is still labeled by its documented support level in the matrix — an
+input-level parse error is not an `Unsupported` marker.
 
 ### Tight-call boundaries
 
@@ -70,6 +118,21 @@ the whole construct stays ordinary text. Examples:
 - `-.note` and `.note-` are valid calls: `-` is a symbol, not a word
   character.
 
+The new-in-Quarkdown brace-wrapped form (`H{.text {2}}O`), which lifts the
+boundary requirement, is a documented v2.5.0 behavior but is **not
+implemented** here; the inner call parses, but the wrapping braces are kept
+as literal text.
+
+### v2.5.0 additions outside the contract
+
+Quarkdown has documented features that are part of the v2.5.0 baseline but are
+outside Scribium's current contract. These are listed in the Feature Matrix as
+`Planned` and are **not** claimed as compatible. They do not produce `E8xxx`
+diagnostics today and their current behavior is undefined for the purposes of
+this contract; examples: line continuation (`\` at EOL), `::` chaining, tight
+brace-wrapped calls, multi-line arguments spanning raw lines, and the new
+v2.5.0 builtins (data loading, `.markdown`).
+
 ## Specification Record Format
 
 Each implemented compatibility feature records its public documentation
@@ -79,7 +142,7 @@ source, an independently authored input example, and the observed behavior.
 feature: dot-prefixed-call
 specification_source: |
   Quarkdown wiki, "Syntax of a function call":
-  https://quarkdown.com/wiki/syntax-of-a-function-call/
+  https://quarkdown.com/wiki/syntax-of-a-function-call/ (v2.5.0 badge)
 independently_authored_input: |
   .heading level:{1}
       Title
@@ -87,7 +150,9 @@ independently_authored_input: |
 observed_reference_behavior: |
   Dot-prefixed names form function calls; each argument is wrapped in
   curly braces; named arguments use name:{value}; indented lines after
-  a block call form its body.
+  a block call form its body. The current v2.5.0 documentation describes the
+  same basic dot-prefixed, brace-argument model on which Scribium's existing
+  parser subset is based.
 scribium_behavior: |
   Parses dot calls, positional/named arguments, nested calls, and
   indented bodies into the shared DirectiveCall AST.
@@ -102,28 +167,33 @@ tests (clean-room policy, see `docs/adr/0007-quarkdown-compatibility-scope-and-c
 ## Provenance
 
 The call grammar was derived from the public documentation *"Syntax of a
-function call"* (quarkdown.com wiki; accessed 2026-08-08). The basic
-dot-and-braces grammar is documented across the release history; it is
-valid for the 0.9.x target and has not changed as of the 2.5.x series.
-Line continuation and `::`-chaining are newer additions and stay outside
-the current scope. `SPEC_SOURCES.md` documents the source list.
+function call"* (wiki, badged `2.5.0`, accessed 2026-08-08). The current
+v2.5.0 documentation describes the same basic dot-prefixed, brace-argument
+model on which Scribium's parser subset is based. Scribium's previous
+compatibility baseline was 0.9.x, but no claim is made that the upstream
+grammar was verified to be identical across every version in between.
+`SPEC_SOURCES.md` documents the source list, per-source version badges, and
+accessed dates.
 
 ## Known Divergences
 
 - (None yet for the implemented call-syntax subset)
-- Scope note: only the features listed in the matrix above are implemented.
-  Rows marked **Planned** (Variables, Conditionals, Iteration, ... and the
-  **Unsupported** rows below) are *not* implemented; public-syntax elements
-  outside this matrix must not be assumed to work in Scribium.
+- Scope note: only the features listed in the matrix above are implemented
+  and claimed. Rows marked **Planned** are *not* implemented; anything
+  documented in Quarkdown but absent from this matrix must not be assumed to
+  work in Scribium.
 
-## Unsupported Features
+## Features Outside the Contract
 
-Features intentionally not supported for this target (produce an `E8xxx`
-diagnostic where applicable):
+The following are not part of the documented subset and are not claimed:
 
 - Quarkdown interactive slide runtime
 - Quarkdown internal plugin ABI
 - Quarkdown-specific CSS themes
 - Quarkdown HTML post-processing
-- Call chaining (`::`) and line continuation (`\`) — planned, not yet
-  implemented
+- Quarkdown line click interactivity
+
+New v2.5.0 builtins (data loading via `.json`, `.markdown`, `.llmstxt`,
+stdlib `foreach`/iterables) are tracked as `Planned` above; they do not belong
+here because none produces an `E8xxx` diagnostic today. As features are
+implemented, they move from this section into the Feature Matrix.

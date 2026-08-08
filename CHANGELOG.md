@@ -111,7 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on non-unix platforms).
 
 ### Changed
-
+- Compatibility baseline: Scribium's Quarkdown compatibility contract is now
+  the **documented subset** referenced against Quarkdown **v2.5.0** (see
+  ADR-0012). Full Quarkdown compatibility is not claimed. The compatibility
+  matrix and provenance records in `docs/compatibility/quarkdown/` were
+  updated. No parser, evaluator, lowering, or compiler semantic behavior
+  changed. The default compatibility-profile label was updated from
+  `quarkdown-v0.9` to `quarkdown-v2.5` to reflect the new reference
+  baseline. `::` chaining, line continuation, tight/brace-wrapped calls, and
+  new builtins remain out of scope for M1.
 - Supported output formats are now `typst` and `pdf`; `html`, `svg`, `png` remain
   explicitly unsupported with actionable error messages.
 - CLI help text updated: `--output` documents the format-dependent default

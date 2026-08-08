@@ -3,31 +3,52 @@
 This file records all public specification sources used for Scribium's
 Quarkdown-compatible feature implementation.
 
+## Reference Baseline
+
+- **Reference version:** Quarkdown **v2.5.0** (released 2026-08-04;
+  `iamgio/quarkdown` tag `v2.5.0`)
+- **Compatibility model:** documented feature subset (ADR 0012)
+- **Full compatibility claim:** none
+
 ## Primary Sources
 
-| Source                                        | Title / Citation                           | Used For                                        | Date Accessed |
-|-----------------------------------------------|--------------------------------------------|-------------------------------------------------|---------------|
-| Public syntax documentation (deprecated)      | https://quarkdown.org/docs/syntax           | (unreachable — replaced by the wiki below)      | —             |
-| Quarkdown wiki                                | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Dot-prefixed calls; positional, named, and mixed arguments; nested calls; block vs inline calls; indented bodies | 2026-08-08 |
+| Source                                        | Title / Citation                                   | Used For                                        | Date Accessed |
+|-----------------------------------------------|----------------------------------------------------|-------------------------------------------------|---------------|
+| GitHub release tag `v2.5.0`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.0 | Reference baseline identification and v2.5.0 release additions such as `.markdown`, `.llmstxt`, `.code` and `.json` | 2026-08-08 |
+| Quarkdown wiki (badged **2.5.0**)              | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Dot-prefixed calls; positional, named, and mixed arguments; nested calls; block vs inline calls; indented bodies | 2026-08-08 |
+| Quarkdown wiki — "Syntax of a function call"  | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
+| Quarkdown wiki — "Lambda"                      | https://quarkdown.com/wiki/lambda/ | Implicit positional references (`.1`, `.2`, ...) in lambdas | 2026-08-08 |
 | Quarkdown quickstart                          | https://quarkdown.com/                      | Call examples (`.pow {5} to:{2}`, `.align {center}` with an indented body) | 2026-08-08 |
-| Public release notes / changelog              | public release notes                        | Confirmation that the basic dot-and-brace call grammar is stable for the 0.9.x target and unchanged in later series | 2026-08-08 |
 | Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
 
 The grammar implemented in Scribium is limited to the **function-call
 syntax** documented on the wiki page above, restricted to the scope in
 `docs/compatibility/quarkdown/README.md`, plus the **implicit positional
-references** (`.1`, `.2`, ...) documented on the `Lambda` and `foreach`
-pages above. The project keeps the documented
-0.9.x target version; the basic call grammar is valid for that target.
+references** (`.1`, `.2`, ...).
+
+The reference baseline is **Quarkdown v2.5.0**. The v2.5.0-badged *"Syntax of
+a function call"* wiki page is the primary public specification source for
+the currently implemented function-call syntax subset. Version provenance is
+recorded per source:
+
+- The **function-call syntax** page carries a `2.5.0` badge as of
+  2026-08-08.
+- The **Lambda** wiki page carries a `2.4.1` badge as of 2026-08-08 and is
+  used only as documentation for implicit positional references; it
+  documents already existing behavior and is not evidence that the feature
+  was introduced in v2.5.0.
+- The **`docs/latest/…` API pages** are unversioned and are corroborating
+  sources rather than evidence that a behavior was introduced in or
+  uniquely belongs to v2.5.0.
 
 URLs other than those listed above were not consulted for this feature set.
 
 ## Observational Method
 
-- Implemented exclusively from public documentation (no interactive
-  reference sessions were run for this subset)
-- No source code is read or copied
+- Implemented from public documentation only (no interactive reference
+  sessions were run for this subset)
+- No Quarkdown source code is read or copied
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs
 - Each feature's provenance is recorded in
