@@ -29,6 +29,7 @@ provenance records.
 | Indented body argument      | `.panel {x}` + indent  | Parsed        | Implemented |
 | Nested calls                | `.outer {.inner {x}}`  | Parsed        | Implemented |
 | Inline (mid-paragraph) call | `see .note {x}`        | Parsed        | Implemented |
+| Tight-call boundaries       | word adjacency rejected | Parsed       | Implemented |
 | Variables                   | —                      | Parsed        | Planned      |
 | Conditionals                | —                      | Parsed        | Planned      |
 | Iteration                   | —                      | Parsed        | Planned      |
@@ -56,6 +57,18 @@ Function calls are currently **Parsed**: `.name`, positional arguments
 `{arg}`, named arguments `name:{arg}`, nested calls, and indented block
 bodies are parsed into the Scribium AST/IR. Semantic evaluation is the next
 milestone (see `docs/SYNTAX.md` and `docs/ROADMAP.md`).
+
+### Tight-call boundaries
+
+A call requires a boundary before and after it: whitespace, a symbol
+(including `-`), or the start/end of the line. A call directly adjacent to a
+word character — any Unicode letter or digit, plus `_` — is not recognized and
+the whole construct stays ordinary text. Examples:
+
+- `.note {x}` is a call; `.note {x}B` and `한.note {x}` are not (both
+  Unicode and ASCII letters count as word characters).
+- `-.note` and `.note-` are valid calls: `-` is a symbol, not a word
+  character.
 
 ## Specification Record Format
 

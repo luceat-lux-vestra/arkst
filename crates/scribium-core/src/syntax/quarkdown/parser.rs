@@ -102,7 +102,7 @@ impl ParseError {
 }
 
 /// Characters permitted in a function-call name (after the leading dot).
-fn is_name_char(c: u8) -> bool {
+fn is_function_name_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
 }
 
@@ -112,6 +112,34 @@ fn is_name_char(c: u8) -> bool {
 /// (e.g. `.0`) is neither and stays ordinary text.
 fn is_name_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
+}
+
+/// Characters that glue to an adjacent call, making the construct a single
+/// word instead of a call surrounded by symbols/whitespace.
+///
+/// This is deliberately narrower than the function-name alphabet: hyphens
+/// and underscores *are* valid inside names, but a hyphen is a symbol and a
+/// symbol is a legal call boundary per Quarkdown's public syntax
+/// documentation (`-.call`, `.call-`). ASCII letters, digits and `_` are
+/// word characters and reject a tight call.
+///
+/// Any non-ASCII byte is treated as a word character: UTF-8 continuation
+/// bytes are never symbols, so non-ASCII letters and digits (e.g. `한`) also
+/// glue to a call.
+pub(crate) fn is_call_word_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || !c.is_ascii()
+}
+
+/// Whether a call may start at byte offset `pos`: the byte before it is
+/// not a word character and not another dot (so `3.14`, `foo.1`, `..note`
+/// and `한.note` never start a call). The start of the input is always a
+/// valid boundary.
+pub(crate) fn has_valid_call_boundary(bytes: &[u8], pos: usize) -> bool {
+    if pos == 0 {
+        return true;
+    }
+    let prev = bytes[pos - 1];
+    prev != b'.' && !is_call_word_char(prev)
 }
 
 /// Try to parse a Quarkdown function call starting at byte offset `start`.
@@ -132,6 +160,14 @@ pub fn parse_directive_at(
     if start + 1 >= bytes.len() {
         return Ok(None);
     }
+    // Tight leading boundary: a word or another dot immediately before the
+    // dot keeps the whole construct ordinary text (`3.14`, `foo.1`, `..`).
+    // The Markdown inline parser also checks this before calling us; the
+    // check lives here so every caller enforces the same rule through
+    // `has_valid_call_boundary`.
+    if !has_valid_call_boundary(bytes, start) {
+        return Ok(None);
+    }
     // `.N` (N in 1..9) is an implicit positional reference, not a normal
     // name: its name part consists of digits only. `is_name_start` covers
     // the normal-name grammar; a leading `0` is rejected outright so
@@ -143,7 +179,7 @@ pub fn parse_directive_at(
             name_end += 1;
         }
     } else if is_name_start(bytes[name_start]) {
-        while name_end < bytes.len() && is_name_char(bytes[name_end]) {
+        while name_end < bytes.len() && is_function_name_char(bytes[name_end]) {
             name_end += 1;
         }
     } else {
@@ -154,11 +190,13 @@ pub fn parse_directive_at(
     if matches!(bytes[name_start], b'1'..=b'9') {
         // Implicit positional reference (`.1`, `.2`, `.12`, ...). It is a
         // bare reference token, not a function call:
-        // - a following name/word character glues to the reference
+        // - a following word character glues to the reference
         //   (`.1abc`, `.12foo` are ordinary text, never `ref + text`);
+        //   a symbol such as `-` is a legal boundary (`.1-1` is a reference
+        //   followed by the text `-1`);
         // - it never enters the argument-consumption loop, so `.1 {item}`
         //   is NOT a call with a positional argument.
-        if name_end < bytes.len() && is_name_char(bytes[name_end]) {
+        if name_end < bytes.len() && is_call_word_char(bytes[name_end]) {
             return Ok(None);
         }
         return Ok(Some((
@@ -200,7 +238,7 @@ pub fn parse_directive_at(
             // Attempt a named argument `name:{...}` or `name: {...}`.
             let name_base = cursor;
             let mut name_end_at = name_base;
-            while name_end_at < bytes.len() && is_name_char(bytes[name_end_at]) {
+            while name_end_at < bytes.len() && is_function_name_char(bytes[name_end_at]) {
                 name_end_at += 1;
             }
             if name_end_at == name_base {
@@ -246,6 +284,13 @@ pub fn parse_directive_at(
     }
 
     let end = trimmed_end;
+    // Tight trailing boundary: a word character glued to the end of the
+    // parsed call means the whole construct is ordinary text rather than a
+    // call plus trailing content (`See .sum {1} {2}items` stays prose).
+    // Symbols such as `.`, `-` and `)` are legal boundaries.
+    if end < bytes.len() && is_call_word_char(bytes[end]) {
+        return Ok(None);
+    }
     Ok(Some((
         QuarkdownCall {
             name,
@@ -441,12 +486,12 @@ mod tests {
 
     #[test]
     fn implicit_reference_boundary_stops_at_word_characters() {
-        // A name/word character glued to the reference keeps the whole
+        // A word character glued to the reference keeps the whole
         // token ordinary text: it must never split into `ref + text`.
         no_call(".1abc");
         no_call(".12foo");
         no_call(".1e5");
-        no_call(".1-1");
+        no_call(".1한");
 
         // Word boundaries (whitespace, punctuation, EOF) still form refs.
         for src in [".1", ".1.", ".2 ", ".12\n"] {
@@ -458,6 +503,74 @@ mod tests {
                 }
                 other => panic!("expected implicit ref in {src:?}, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn implicit_reference_survives_symbol_boundaries() {
+        // `-` is a symbol, and a symbol is a legal call boundary: `.1-1`
+        // is the `.1` reference followed by the text `-1`, not prose.
+        match parse_directive_at(".1-1", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert_eq!(end, 2);
+                assert!(d.positional_args.is_empty());
+            }
+            other => panic!("expected `.1` reference, got {other:?}"),
+        }
+        // Other symbol characters behave the same way.
+        for src in [".1.", ".1)", ".1-", ".1!"] {
+            assert!(
+                matches!(parse_directive_at(src, 0), Ok(Some((d, end))) if d.name == "1" && end == 2),
+                "expected `.1` reference in {src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tight_word_adjacency_makes_call_ordinary_text() {
+        // Trailing word characters glue to the call: the whole construct
+        // stays ordinary text (never `call + trailing text`).
+        no_call(".note {x}suffix");
+        no_call(".sum {1} {2}items");
+        no_call(".note {x}B");
+        no_call(".note {x}한");
+
+        // Leading word characters invalidate the call as well.
+        assert!(
+            matches!(parse_directive_at("A.note {x}", 1), Ok(None)),
+            "word before the dot must invalidate the call"
+        );
+        assert!(
+            matches!(parse_directive_at("한.note {x}", 3), Ok(None)),
+            "non-ASCII word before the dot must invalidate the call"
+        );
+        assert!(
+            matches!(parse_directive_at("..note {x}", 1), Ok(None)),
+            "a dot before the dot must invalidate the call"
+        );
+    }
+
+    #[test]
+    fn symbols_are_valid_call_boundaries() {
+        // A hyphen is a symbol, and a symbol is a legal boundary. The call
+        // is parsed from the offset right after the hyphen.
+        match parse_directive_at("-.note {x}", 1) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "note");
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 10);
+            }
+            other => panic!("expected `.note` after hyphen, got {other:?}"),
+        }
+
+        // A trailing hyphen does not glue to the call either.
+        match parse_directive_at(".note {x}-", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "note");
+                assert_eq!(end, 9);
+            }
+            other => panic!("expected note call with trailing hyphen, got {other:?}"),
         }
     }
 

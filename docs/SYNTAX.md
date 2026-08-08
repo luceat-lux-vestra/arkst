@@ -73,8 +73,8 @@ implicit-positional-reference:
 
 `normal-call-name` may be followed by `{arg}` / `name:{value}` arguments;
 `implicit-positional-reference` is a bare token and does not consume
-arguments. An implicit reference followed by a name/word character
-(`[A-Za-z0-9_-]`) is not recognized as a reference at all.
+arguments. An implicit reference followed by a word character (any Unicode
+letter or digit, or `_`) is not recognized as a reference at all.
 
 Call syntax has the following properties:
 
@@ -82,9 +82,15 @@ Call syntax has the following properties:
   allowed, the first character must be a letter or `_`.
 - **Implicit positional references** (`.1`, `.2`, `.12`, ...) are a separate
   grammar case from normal function names: digits only, no leading `0`, and
-  a following name/word character keeps the whole token ordinary text
-  (`.1abc` is not a reference). They are bare reference tokens — unlike
-  normal calls they never take arguments (`.1 {item}` does not form a call).
+  a following word character keeps the whole token ordinary text
+  (`.1abc` is not a reference; `.1-1` is a `.1` reference followed by `-1`).
+  They are bare reference tokens — unlike normal calls they never take
+  arguments (`.1 {item}` does not form a call).
+- A call requires a **boundary** on both sides: whitespace, a symbol
+  (including `-`), or the start/end of a line. A word character (any Unicode
+  letter or digit, or `_`) directly before or after the call makes the whole
+  construct ordinary text: `.note {x}suffix` and `word.note {x}` are not
+  calls, while `-.note {x}`, `.note {x}-` and `See .note {x} items` are.
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`.
 - Positional and named arguments may be mixed, but every argument after a

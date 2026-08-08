@@ -190,7 +190,7 @@ impl SourceLine<'_> {
             || fence_length(self.text).is_some()
             || is_thematic_break(self.text)
             || is_list_marker(self.text).is_some()
-            || is_directive_line(self.text)
+            || is_block_directive_line(self.text)
     }
 }
 
@@ -275,7 +275,7 @@ fn parse_blocks(
                 continue;
             }
         }
-        if is_directive_line(line.text) {
+        if is_block_directive_line(line.text) {
             blocks.push(parse_directive_block(
                 source,
                 lines,
@@ -771,12 +771,22 @@ fn is_list_marker(text: &str) -> Option<u8> {
     }
 }
 
-/// Whether the text starts a Quarkdown function call (block-level).
-fn is_directive_line(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    bytes.first() == Some(&b'.')
-        && bytes.len() > 1
-        && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_' || matches!(bytes[1], b'1'..=b'9'))
+/// Whether the line is an *isolated* block-level Quarkdown function call:
+/// a syntactically valid call that consumes the entire meaningful content
+/// of the line (trailing horizontal whitespace allowed).
+///
+/// The actual parse is performed again by `parse_directive_block`; this
+/// pre-flight must agree with that parse so that a line with trailing
+/// inline content (`.note {x} continues`) is never misclassified as a block
+/// and does not terminate the surrounding paragraph. The call is parsed on
+/// the line-local slice, so reported spans are already line-relative. The
+/// parse may report an error; that error is intentionally dropped here and
+/// re-reported by the inline fallback, which parses the line exactly once.
+fn is_block_directive_line(text: &str) -> bool {
+    match crate::syntax::quarkdown::parse_directive_at(text, 0) {
+        Ok(Some((_, consumed))) => text[consumed..].bytes().all(|b| b == b' ' || b == b'\t'),
+        _ => false,
+    }
 }
 
 /// Whether the line starts a list item with the given marker.
@@ -1112,9 +1122,10 @@ impl<'a> InlineParser<'a> {
     }
 }
 
-/// Whether the dot at `pos` can start a function call: the byte after it is a
-/// valid name start, and the byte before it is not a word character or
-/// another dot (`3.14`, `foo.bar`, `...` do not start calls).
+/// Whether the dot at `pos` can start a function call: the byte after it is
+/// a valid name start, and the byte before it satisfies the shared tight-call
+/// boundary rule (no word character and no other dot: `3.14`, `foo.bar`,
+/// `...` and `한.note` do not start calls).
 fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
     if pos + 1 >= end {
         return false;
@@ -1123,11 +1134,7 @@ fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
     if !(next.is_ascii_alphabetic() || next == b'_' || matches!(next, b'1'..=b'9')) {
         return false;
     }
-    if pos == 0 {
-        return true;
-    }
-    let prev = bytes[pos - 1];
-    !(prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'-' || prev == b'.')
+    crate::syntax::quarkdown::has_valid_call_boundary(bytes, pos)
 }
 
 /// Parse inline nodes from the contiguous source slice `[start, end)`.
@@ -1152,13 +1159,16 @@ mod tests {
         }
     }
 
-    /// Concatenate all text in a flat list of inline nodes.
+    /// Concatenate all text in a flat list of inline nodes, rendering
+    /// soft/hard breaks as `\n`. Panics when any other inline kind appears,
+    /// so tests can use it to assert that a span contains only prose.
     fn joined_text(inlines: &[Inline]) -> String {
         let mut out = String::new();
         for inline in inlines {
             match inline {
                 Inline::Text { content, .. } => out.push_str(content),
-                other => panic!("expected Text, got {other:?}"),
+                Inline::SoftBreak { .. } | Inline::HardBreak { .. } => out.push('\n'),
+                other => panic!("expected Text or break, got {other:?}"),
             }
         }
         out
@@ -2329,5 +2339,142 @@ mod tests {
             |inline| matches!(inline, Inline::DirectiveCall { name, positional_args, .. }
                 if name == "1" && positional_args.is_empty())
         ));
+    }
+
+    #[test]
+    fn inline_call_at_line_start_continues_paragraph() {
+        // A call with trailing inline content is not a block directive, so
+        // it must not terminate the surrounding paragraph.
+        let doc = parse("before\n.note {x} after\nend\n");
+        assert_eq!(doc.nodes.len(), 1, "expected a single paragraph");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 6);
+        assert_text(&content[0], "before");
+        assert!(matches!(content[1], Inline::SoftBreak { .. }));
+        match &content[2] {
+            Inline::DirectiveCall {
+                name,
+                positional_args,
+                ..
+            } => {
+                assert_eq!(name, "note");
+                assert_eq!(positional_args.len(), 1);
+            }
+            other => panic!("expected inline call, got {other:?}"),
+        }
+        assert_text(&content[3], " after");
+        assert!(matches!(content[4], Inline::SoftBreak { .. }));
+        assert!(matches!(&content[5], Inline::Text { .. }));
+    }
+
+    #[test]
+    fn invalid_implicit_reference_does_not_split_paragraph() {
+        // `.1abc` is ordinary text and must not split the paragraph.
+        let doc = parse("before\n.1abc\nafter\n");
+        assert_eq!(doc.nodes.len(), 1);
+        assert_eq!(
+            joined_text(paragraph_inlines(&doc)),
+            "before\n.1abc\nafter",
+            "no call may appear inside the paragraph"
+        );
+        let output = parse_with_diagnostics("before\n.1abc\nafter\n");
+        assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn isolated_call_line_still_starts_block() {
+        let doc = parse("before\n.note {x}\nafter\n");
+        assert_eq!(doc.nodes.len(), 3);
+        assert!(matches!(doc.nodes[0], Block::Paragraph { .. }));
+        assert!(matches!(
+            &doc.nodes[1],
+            Block::DirectiveCall { name, .. } if name == "note"
+        ));
+        assert!(matches!(doc.nodes[2], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn block_body_still_works_with_semantic_classification() {
+        let doc = parse("before\n\n.note {x}\n    body\n\nafter\n");
+        assert_eq!(doc.nodes.len(), 3);
+        match &doc.nodes[1] {
+            Block::DirectiveCall { name, body, .. } => {
+                assert_eq!(name, "note");
+                let blocks = body.as_ref().expect("expected an indented body");
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "body");
+                    }
+                    other => panic!("expected body paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tight_call_boundary_rejects_trailing_word() {
+        // `before .note {x}suffix` must NOT produce a call: the suffix
+        // glues to the call, so the whole construct is prose.
+        let doc = parse("before .note {x}suffix\n");
+        assert_eq!(
+            joined_text(paragraph_inlines(&doc)),
+            "before .note {x}suffix",
+            "tight trailing word must keep the whole construct ordinary text"
+        );
+        // A spaced suffix is a legal boundary.
+        let doc = parse("before .note {x} suffix\n");
+        let content = paragraph_inlines(&doc);
+        assert!(
+            matches!(&content[1], Inline::DirectiveCall { name, .. } if name == "note"),
+            "a space after the call is a valid boundary"
+        );
+    }
+
+    #[test]
+    fn tight_call_hyphen_boundaries_are_valid() {
+        // The hyphen is a documented symbol boundary on both sides.
+        let doc = parse("before-.note {x}-after\n");
+        let content = paragraph_inlines(&doc);
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::DirectiveCall { name, .. } if name == "note"
+        )));
+    }
+
+    #[test]
+    fn unicode_word_characters_are_tight_adjacency() {
+        // Non-ASCII letters are word characters, not symbols: a call glued
+        // to Korean script must not be recognized.
+        let doc = parse("한.note {x}\n");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "한.note {x}");
+        let doc = parse(".note {x}한\n");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), ".note {x}한");
+    }
+
+    #[test]
+    fn nested_call_with_tight_suffix_is_not_a_call() {
+        // Inside an argument the same boundary rules apply: `.inner`
+        // followed by a word character must not become a nested call.
+        let doc = parse(".outer {prefix .inner {x}suffix}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                name,
+                positional_args,
+                ..
+            } => {
+                assert_eq!(name, "outer");
+                match &positional_args[0] {
+                    Value::Content(content) => {
+                        assert!(!content
+                            .iter()
+                            .any(|inline| matches!(inline, Inline::DirectiveCall { .. })));
+                    }
+                    other => panic!("expected content argument, got {other:?}"),
+                }
+            }
+            other => panic!("expected outer call, got {other:?}"),
+        }
     }
 }

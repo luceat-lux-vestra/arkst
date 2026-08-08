@@ -139,8 +139,8 @@ author: Alice
 | Markdown heading, paragraph             | Experimental |
 | Emphasis, strong                        | Experimental |
 | Lists                                   | Experimental |
-| Dot-prefixed function calls             | Planned      |
-| Positional/named/body arguments         | Planned      |
+| Dot-prefixed function calls             | Experimental / Parsed |
+| Positional/named/body arguments         | Experimental / Parsed |
 | Variables and conditionals              | Planned      |
 | Iteration and components                | Planned      |
 | Tables, math, footnotes                 | Planned      |
