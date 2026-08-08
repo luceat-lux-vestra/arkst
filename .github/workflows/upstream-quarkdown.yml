@@ -143,13 +143,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
-        run: |
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
-          # Use gh api issues endpoint with explicit GET method, filter by body content
-          # Write jq filter to avoid shell escaping issues
-          printf '%s\n' 'map(select(.body | contains($MARKER))) | .[0].number // empty' > /tmp/jq_filter.jq
-          EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 --jq "$(cat /tmp/jq_filter.jq)" -f MARKER="$MARKER" | head -1)
+          # Write jq filter with embedded marker to avoid shell escaping issues
+          printf '%s\n' 'map(select(.body | contains("<!-- scribium-upstream-drift:'"$ISSUE_KEY"'-->"))) | .[0].number // empty' > /tmp/jq_filter.jq
+          EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 --jq "$(cat /tmp/jq_filter.jq)" | head -1)
           echo "DEBUG: ISSUE_KEY=$ISSUE_KEY"
           echo "DEBUG: MARKER=$MARKER"
           echo "DEBUG: EXISTING=[$EXISTING]"
