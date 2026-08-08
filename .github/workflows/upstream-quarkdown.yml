@@ -43,3 +43,28 @@ jobs:
           echo "url=$URL" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Use manual override for dry-run
+        if: github.event.inputs.observed_tag != ''
+        id: manual_override
+        env:
+          OBSERVED_TAG: ${{ github.event.inputs.observed_tag }}
+        run: |
+          echo "tag=$OBSERVED_TAG" >> $GITHUB_OUTPUT
+          echo "url=https://github.com/iamgio/quarkdown/releases/tag/$OBSERVED_TAG" >> $GITHUB_OUTPUT
+
+      - name: Determine observed release
+        id: observed
+        env:
+          GET_RELEASE_TAG: ${{ steps.get_release.outputs.tag }}
+          GET_RELEASE_URL: ${{ steps.get_release.outputs.url }}
+          MANUAL_TAG: ${{ steps.manual_override.outputs.tag }}
+          MANUAL_URL: ${{ steps.manual_override.outputs.url }}
+        run: |
+          if [ -n "$GET_RELEASE_TAG" ]; then
+            echo "tag=$GET_RELEASE_TAG" >> $GITHUB_OUTPUT
+            echo "url=$GET_RELEASE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$MANUAL_TAG" >> $GITHUB_OUTPUT
+            echo "url=$MANUAL_URL" >> $GITHUB_OUTPUT
+          fi
