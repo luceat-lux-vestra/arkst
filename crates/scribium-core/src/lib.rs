@@ -531,7 +531,6 @@ mod tests {
     #[test]
     fn compile_inline_named_condition() {
         let (result, _) = compile_source("before .if condition:{true} body:{inline} after\n");
-        eprintln!("Diagnostics: {:?}", result.diagnostics);
         assert!(result.diagnostics.is_empty());
         let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
             panic!()
