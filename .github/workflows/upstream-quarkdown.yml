@@ -68,3 +68,16 @@ jobs:
             echo "tag=$MANUAL_TAG" >> $GITHUB_OUTPUT
             echo "url=$MANUAL_URL" >> $GITHUB_OUTPUT
           fi
+
+      - name: Run drift detection
+        id: drift
+        env:
+          OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
+          OBSERVED_URL: ${{ steps.observed.outputs.url }}
+        run: |
+          cargo run -p scribium-upstream-watch -- \
+            check-release \
+            --manifest docs/compatibility/quarkdown/upstream.toml \
+            --observed-tag "$OBSERVED_TAG" \
+            --observed-url "$OBSERVED_URL" \
+            --output json
