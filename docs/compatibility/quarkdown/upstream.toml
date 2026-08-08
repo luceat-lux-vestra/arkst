@@ -12,4 +12,4 @@ schema_version = 1
 id = "quarkdown"
 repository = "iamgio/quarkdown"
 release_channel = "stable"
-supported_baseline = "v2.5.0"
+supported_baseline = "v2.4.0"
