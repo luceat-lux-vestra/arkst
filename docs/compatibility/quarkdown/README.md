@@ -44,7 +44,7 @@ provenance records.
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
 | Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`        | Error                    | Implemented      |
 | Variables                      | —                                | —                        | Planned          |
-|| Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
+| Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
 | Iteration                      | —                                | —                        | Planned          |
 | Functions/components            | —                                | —                        | Planned          |
 | Include/read                   | —                                | —                        | Planned          |
