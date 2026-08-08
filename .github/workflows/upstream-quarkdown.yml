@@ -146,7 +146,8 @@ jobs:
         run: |
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
-          EXISTING=$(gh issue list --repo ${{ github.repository }} --state all --search "$MARKER" --json number --jq '.[0].number // empty')
+          # Use gh api for reliable search including closed issues and HTML comment markers
+          EXISTING=$(gh api repos/${{ github.repository }}/issues --paginate --jq '.[] | select(.body | contains($MARKER)) | .number' -f MARKER="$MARKER" | head -1)
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
