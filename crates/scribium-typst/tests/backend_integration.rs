@@ -128,3 +128,81 @@ fn integration_configured_path_is_respected() {
         assert!(pdf.starts_with(b"%PDF-"));
     });
 }
+
+#[test]
+fn integration_variable_evaluation_before_lowering() {
+    // This test validates that variable evaluation happens before Typst lowering.
+    // It uses the core compile path directly since the backend doesn't expose
+    // the generated Typst source.
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    // Test variable declaration and reference
+    let source = ".var {name} {Scribium}\nHello .name\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    // Variable should be resolved in the output
+    assert!(
+        typst_code.contains("Scribium"),
+        "variable value should appear in output: {}",
+        typst_code
+    );
+    // .var declaration artifact should not appear
+    assert!(
+        !typst_code.contains(".var"),
+        ".var declaration should not leak to output: {}",
+        typst_code
+    );
+    // Variable reference artifact should not appear
+    assert!(
+        !typst_code.contains(".name"),
+        "variable reference should not leak to output: {}",
+        typst_code
+    );
+
+    // Test rich content variable
+    let source = ".var {name} {**Scribium**}\nHello .name\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    // Rich content should be preserved (strong markup in Typst)
+    assert!(
+        typst_code.contains("*Scribium*"),
+        "rich variable content must preserve strong markup: {}",
+        typst_code
+    );
+    assert!(
+        !typst_code.contains(".var"),
+        ".var declaration should not leak to output: {}",
+        typst_code
+    );
+    assert!(
+        !typst_code.contains(".name"),
+        "variable reference should not leak to output: {}",
+        typst_code
+    );
+}

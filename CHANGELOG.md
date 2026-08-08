@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **M2 Core Language**: Document-scope variable evaluation (`.var` declaration, parameterless reference, reassignment, block/content variables, conditional integration)
+  - `.var {name} {value}` — scalar declarations (string, number, boolean, identifier)
+  - `.var {name} {**content**}` — rich/content-valued declarations preserving strong/emphasis
+  - `.var {name}\n    content` — block variables with indented body
+  - `.name` — parameterless variable reference (inline and block)
+  - `.name {new-value}` — variable-name reassignment (only for existing variables)
+  - `.if {.name}` — boolean variable conditions with `yes`/`no`/`true`/`false` identifiers
+  - Malformed `.var` declarations produce `E3002` diagnostic
+  - Invalid variable names (per `normal-call-name` grammar) produce `E3002` diagnostic
+  - Unknown parameterless calls preserved as function calls (no variable error inflation)
+  - Evaluation context is deterministic, immutable input IR, no global mutable state
+  - Unit, compile-level, and lowering regression coverage
+- **Compatibility**: Variables feature matrix updated to `Implemented` / `Semantically supported`; provenance recorded for Variables, Boolean, and Syntax of a function call wiki pages
+- **Milestone**: M1 marked `Completed`, M2 marked `In progress` with variable evaluation as first feature
+
 - Repository bootstrap with Apache-2.0 licensing and provenance policy.
 - Product vision defining Scribium as a Quarkdown-compatible compiler.
 - Clean-room Quarkdown compatibility policy and process documentation.

@@ -143,12 +143,12 @@ author: Alice
 | Lists                                   | Experimental |
 | Dot-prefixed function calls             | Experimental / Parsed |
 | Positional/named/body arguments         | Experimental / Parsed |
-| Variables and conditionals              | Planned      |
+| Variables and conditionals              | Experimental / Implemented |
 | Iteration and components                | Planned      |
 | Tables, math, footnotes                 | Planned      |
 | Include/read, data loading              | Planned      |
 | Typst escape blocks                     | Planned      |
-| Quarkdown compatibility                 | Planned      |
+| Quarkdown compatibility                 | Partial / In progress |
 | `watch` mode, source maps               | Planned      |
 | LSP integration                         | Planned      |
 | WASM support                            | Deferred     |

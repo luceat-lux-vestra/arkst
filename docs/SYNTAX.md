@@ -127,14 +127,69 @@ block-level call. Its body is the indented content that follows:
         Nested body
 ```
 
-### Variable Reference (Planned)
+### Variable Reference (Implemented)
+
+Variable references use the same parameterless call syntax as function calls.
+A variable must be declared with `.var` before it can be referenced.
 
 ```
-.variable-name {default}        // planned: evaluates to variable value
+.var {name} {value}         // declaration (no output)
+.name                       // reference (evaluates to variable value)
+.name {new-value}           // reassignment (only if `name` is a variable)
 ```
 
-Not yet implemented. Variable semantics will build on the function-call
-parsing above.
+- Variable names follow `normal-call-name` grammar: `[A-Za-z_][A-Za-z0-9_-]*`
+- Declarations accept scalar values, boolean identifiers, rich/content values (e.g., `**bold**`), or indented block content
+- References in conditionals (`.if {.name}`) resolve to the variable's boolean value
+- Unknown parameterless calls are preserved as function calls, not variable errors
+
+### Variable Binding (Implemented)
+
+Variables are document-scoped and evaluated in source order.
+
+```
+.var {language} {Rust}
+Language: .language
+```
+
+Output:
+```
+Language: Rust
+```
+
+Reassignment:
+```
+.var {name} {A}
+.name {B}
+.name
+```
+
+Output:
+```
+B
+```
+
+Block variables:
+```
+.var {section}
+    # Title
+    body
+.section
+```
+
+Conditional integration:
+```
+.var {enabled} {yes}
+.if {.enabled}
+    visible
+```
+
+Boolean identifiers: `true` / `false` / `yes` / `no` (case-insensitive).
+
+Malformed `.var` declarations (missing name or value) produce `E3002`.
+Invalid variable names (not matching `normal-call-name` grammar) produce `E3002`.
+
+> **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
 
 ### Conditional (Implemented)
 
@@ -173,17 +228,11 @@ scalar), or nothing.
 `.ifnot` inverts the condition: its content is rendered when the
 condition is false.
 
-Nested conditionals are supported. Variable-based or function-call
-conditions (e.g., `.if {.var {cond}}`) are outside the M1 scope and
-produce an `E3001` diagnostic.
+Nested conditionals are supported. Variable references (`.name`) in conditions resolve to the variable's boolean value. Function-call conditions (e.g., `.if {.func {x}}`) are not supported and produce an `E3001` diagnostic.
 
 ### Iteration (Planned)
 
 Planned. Iteration will build on the indented body syntax.
-
-### Variable Binding (Planned)
-
-Planned.
 
 ### Include / Read (Planned)
 
