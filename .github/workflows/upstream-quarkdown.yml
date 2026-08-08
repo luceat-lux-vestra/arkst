@@ -33,5 +33,13 @@ jobs:
       - name: Build upstream watcher
         run: cargo build -p scribium-upstream-watch --locked
 
-      - name: Test workflow runs
-        run: echo "Workflow parsed successfully"
+      - name: Get latest stable release from GitHub
+        if: github.event.inputs.observed_tag == ''
+        id: get_release
+        run: |
+          RELEASE=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.tag_name')
+          URL=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.html_url')
+          echo "tag=$RELEASE" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
