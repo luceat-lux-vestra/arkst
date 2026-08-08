@@ -12,6 +12,7 @@
 //! - `.panel width:{320}` — named argument
 //! - `.panel {Intro} width:{320}` — mixed positional/named arguments
 //! - `.outer {.inner {value}}` — nested call inside an argument
+//! - `.1`, `.2`, `.12` — implicit positional (lambda parameter) references
 //!
 //! Each argument is wrapped in curly braces `{...}`. An argument may hold a
 //! plain scalar value (number, boolean, identifier, or string) or an arbitrary
@@ -19,6 +20,10 @@
 //!
 //! Indented bodies are NOT part of this parser: they are attached to
 //! block-level calls by the Markdown block parser.
+//!
+//! Only horizontal whitespace separates arguments: an unescaped newline
+//! always terminates the current call, so arguments never spill onto the
+//! next line without an explicit line-continuation (which is out of scope).
 
 use crate::source::ByteSpan;
 use crate::syntax::markdown::ast::Value;
@@ -28,10 +33,13 @@ use crate::syntax::markdown::ast::Value;
 pub struct QuarkdownCall {
     /// Function name (without the leading dot).
     pub name: String,
+    /// Span of the function name including the leading dot (`.heading` at
+    /// `0..8`). For implicit positional references this is `.1` at `0..2`.
+    pub name_span: ByteSpan,
     /// Positional arguments in source order.
     pub positional_args: Vec<Arg>,
     /// Named arguments in source order.
-    pub named_args: Vec<(String, Arg)>,
+    pub named_args: Vec<NamedArg>,
     /// Span of the entire call (leading dot through the last argument).
     pub span: ByteSpan,
 }
@@ -52,6 +60,20 @@ pub enum ArgContent {
     /// A content fragment that contains inline markup and/or nested calls.
     /// `span` excludes the surrounding braces.
     Content(ByteSpan),
+}
+
+/// A named argument `name:{value}`, preserving both the key and the full
+/// construct so diagnostics can point at the argument precisely.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedArg {
+    /// Parameter name (without the trailing colon).
+    pub name: String,
+    /// Span of the parameter name (`width` in `width:{320}`).
+    pub name_span: ByteSpan,
+    /// The braced value.
+    pub value: Arg,
+    /// Span of the whole named argument (name through closing brace).
+    pub span: ByteSpan,
 }
 
 /// A structured parser error for malformed function-call syntax.
@@ -84,8 +106,10 @@ fn is_name_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
 }
 
-/// The leading character of a name must be a letter or underscore to avoid
-/// confusing `.5` or `.` with function calls.
+/// The leading character of a *normal* name must be a letter or underscore.
+/// is `1..=9` are the separate `implicit-positional-reference` grammar
+/// (`.1`, `.2`, ...), which only accepts further digits. A leading `0`
+/// (e.g. `.0`) is neither and stays ordinary text.
 fn is_name_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
@@ -105,20 +129,31 @@ pub fn parse_directive_at(
     if start >= bytes.len() || bytes[start] != b'.' {
         return Ok(None);
     }
-    if start + 1 >= bytes.len() || !is_name_start(bytes[start + 1]) {
+    if start + 1 >= bytes.len() {
         return Ok(None);
     }
-
+    // `.N` (N in 1..9) is an implicit positional reference, not a normal
+    // name: its name part consists of digits only. `is_name_start` covers
+    // the normal-name grammar; a leading `0` is rejected outright so
+    // decimal numbers like `0.5` never turn into calls.
     let name_start = start + 1;
     let mut name_end = name_start;
-    while name_end < bytes.len() && is_name_char(bytes[name_end]) {
-        name_end += 1;
+    if matches!(bytes[name_start], b'1'..=b'9') {
+        while name_end < bytes.len() && bytes[name_end].is_ascii_digit() {
+            name_end += 1;
+        }
+    } else if is_name_start(bytes[name_start]) {
+        while name_end < bytes.len() && is_name_char(bytes[name_end]) {
+            name_end += 1;
+        }
+    } else {
+        return Ok(None);
     }
     let name = source[name_start..name_end].to_string();
 
-    let mut cursor = skip_ascii_whitespace(source, name_end);
+    let mut cursor = skip_horizontal_whitespace(source, name_end);
     let mut positional_args: Vec<Arg> = Vec::new();
-    let mut named_args: Vec<(String, Arg)> = Vec::new();
+    let mut named_args: Vec<NamedArg> = Vec::new();
 
     loop {
         if cursor >= bytes.len() {
@@ -149,10 +184,10 @@ pub fn parse_directive_at(
             if name_end_at == name_base {
                 break;
             }
-            let after_name = skip_ascii_whitespace(source, name_end_at);
+            let after_name = skip_horizontal_whitespace(source, name_end_at);
             let maybe_brace = after_name;
             if maybe_brace < bytes.len() && bytes[maybe_brace] == b':' {
-                let after_colon = skip_ascii_whitespace(source, maybe_brace + 1);
+                let after_colon = skip_horizontal_whitespace(source, maybe_brace + 1);
                 if after_colon >= bytes.len() || bytes[after_colon] != b'{' {
                     return Err(ParseError::new(
                         "E2002",
@@ -165,20 +200,26 @@ pub fn parse_directive_at(
                 }
                 let arg = parse_braced(source, after_colon)?;
                 let arg_end = arg.span.end;
-                named_args.push((source[name_base..name_end_at].to_string(), arg));
+                let named = NamedArg {
+                    name: source[name_base..name_end_at].to_string(),
+                    name_span: ByteSpan::new(name_base, name_end_at),
+                    value: arg,
+                    span: ByteSpan::new(name_base, arg_end),
+                };
+                named_args.push(named);
                 cursor = arg_end;
             } else {
                 break;
             }
         }
-        cursor = skip_ascii_whitespace(source, cursor);
+        cursor = skip_horizontal_whitespace(source, cursor);
     }
 
     // Names (including their leading dots) must not be followed by trailing
-    // whitespace in the reported span.
+    // whitespace in the reported span. Newlines never appear here: the call
+    // always ends before an unescaped line break.
     let mut trimmed_end = cursor;
-    while trimmed_end > name_start && matches!(bytes[trimmed_end - 1], b' ' | b'\t' | b'\r' | b'\n')
-    {
+    while trimmed_end > name_start && matches!(bytes[trimmed_end - 1], b' ' | b'\t') {
         trimmed_end -= 1;
     }
 
@@ -186,6 +227,7 @@ pub fn parse_directive_at(
     Ok(Some((
         QuarkdownCall {
             name,
+            name_span: ByteSpan::new(start, name_end),
             positional_args,
             named_args,
             span: ByteSpan::new(start, end),
@@ -308,10 +350,13 @@ fn parse_scalar(source: &str, content: ByteSpan) -> Option<Value> {
     None
 }
 
-fn skip_ascii_whitespace(source: &str, start: usize) -> usize {
+/// Skip spaces and tabs only. Newlines are NOT consumed: an unescaped line
+/// break always terminates the current function call (Quarkdown requires an
+/// explicit line continuation `\` to extend an argument list across lines).
+fn skip_horizontal_whitespace(source: &str, start: usize) -> usize {
     let bytes = source.as_bytes();
     let mut i = start;
-    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\r' | b'\n') {
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
         i += 1;
     }
     i
@@ -355,9 +400,87 @@ mod tests {
         no_call("");
         no_call("hello world");
         no_call(".");
-        no_call(".5");
+        no_call(".0");
+        no_call(".05");
         no_call(". note");
         no_call("...ellipsis");
+    }
+
+    #[test]
+    fn implicit_positional_references() {
+        for (src, expected) in [(".1", "1"), (".2", "2"), (".12", "12")] {
+            let d = call(src);
+            assert_eq!(d.name, expected, "implicit ref {src}");
+            assert!(d.positional_args.is_empty());
+            assert!(d.named_args.is_empty());
+            assert_eq!(d.name_span, ByteSpan::new(0, src.len()));
+        }
+    }
+
+    #[test]
+    fn implicit_reference_span_and_surrounding_text() {
+        match parse_directive_at("The value is .1.", 13) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert_eq!(d.name_span, ByteSpan::new(13, 15));
+                assert_eq!(d.span, ByteSpan::new(13, 15));
+                assert_eq!(end, 15);
+            }
+            other => panic!("expected implicit ref, got {other:?}"),
+        }
+        match parse_directive_at(".value .3", 0) {
+            Ok(Some((d, end))) => {
+                // The implicit reference `.3` is a separate call and must not
+                // extend `.value`'s argument list (no braces involved).
+                assert_eq!(d.name, "value");
+                assert_eq!(end, 6);
+            }
+            other => panic!("expected value call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decimals_do_not_form_implicit_references() {
+        // Inside a braces-less sentence these must stay ordinary text.
+        no_call("0.5");
+        no_call("3.14");
+        no_call("foo.1");
+        // A digit-starting call at the atomic level only forms when the dot
+        // is actually present (`1` in "0.5" is not after a dot). The
+        // word-adjacency boundary (`foo.1` stays prose) is enforced by the
+        // Markdown inline parser, not by this function.
+        let d = call(".1");
+        assert_eq!(d.name, "1");
+        let _ = d;
+    }
+
+    #[test]
+    fn newline_terminates_the_call() {
+        // `.foo` followed by a line break must NOT absorb `{bar}`.
+        match parse_directive_at(".foo\n{bar}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "foo");
+                assert!(d.positional_args.is_empty());
+                assert_eq!(end, 4);
+            }
+            other => panic!("expected foo call, got {other:?}"),
+        }
+        // `{b}` on the next line must not become a second positional arg.
+        match parse_directive_at(".foo {a}\n{b}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 8);
+            }
+            other => panic!("expected single-arg call, got {other:?}"),
+        }
+        // CRLF behaves the same.
+        match parse_directive_at(".foo {a}\r\n{b}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.positional_args.len(), 1);
+                assert_eq!(end, 8);
+            }
+            other => panic!("expected single-arg call, got {other:?}"),
+        }
     }
 
     #[test]
@@ -415,14 +538,16 @@ mod tests {
         let d = call(".panel width:{320} align:{center}");
         assert_eq!(d.positional_args.len(), 0);
         assert_eq!(d.named_args.len(), 2);
-        assert_eq!(d.named_args[0].0, "width");
+        assert_eq!(d.named_args[0].name, "width");
+        assert_eq!(d.named_args[0].name_span, ByteSpan::new(7, 12));
         assert_eq!(
-            scalar(d.named_args[0].1.content.clone()),
+            scalar(d.named_args[0].value.content.clone()),
             Value::Number(320.0)
         );
-        assert_eq!(d.named_args[1].0, "align");
+        assert_eq!(d.named_args[0].span, ByteSpan::new(7, 18));
+        assert_eq!(d.named_args[1].name, "align");
         assert_eq!(
-            scalar(d.named_args[1].1.content.clone()),
+            scalar(d.named_args[1].value.content.clone()),
             Value::Identifier("center".into())
         );
     }
@@ -452,7 +577,7 @@ mod tests {
     fn parse_number_with_decimal_point() {
         let d = call(".panel width:{0.5}");
         assert_eq!(
-            scalar(d.named_args[0].1.content.clone()),
+            scalar(d.named_args[0].value.content.clone()),
             Value::Number(0.5)
         );
     }

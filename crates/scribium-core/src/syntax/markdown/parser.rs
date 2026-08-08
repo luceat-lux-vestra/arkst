@@ -98,24 +98,56 @@ fn parse_front_matter(_source: &str, lines: &[SourceLine<'_>]) -> (Option<FrontM
     (Some(FrontMatter { fields, span }), close_idx + 1)
 }
 
+/// A parse-level diagnostic produced for malformed but recoverable input
+/// (never fatal: parsing continues and the offending text is treated as
+/// ordinary content).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParserDiagnostic {
+    /// Stable error code (e.g. `E2003`).
+    pub code: &'static str,
+    /// Human-readable description.
+    pub message: String,
+    /// Source span of the offending construct.
+    pub span: ByteSpan,
+}
+
 /// Parse a Markdown source string into a `Document`.
 ///
 /// Never panics on malformed input; unclosed constructs are parsed
 /// deterministically up to the end of the source.
 pub fn parse(source: &str) -> Document {
+    parse_with_diagnostics(source).document
+}
+
+/// Parse a Markdown source string, returning the document together with the
+/// structured diagnostics gathered for malformed-but-recoverable constructs.
+pub fn parse_with_diagnostics(source: &str) -> ParseOutput {
     let lines = split_lines(source);
+    let mut diagnostics: Vec<ParserDiagnostic> = Vec::new();
 
     // Parse front matter if present at document start
     let (front_matter, front_matter_lines) = parse_front_matter(source, &lines);
     let mut cursor = front_matter_lines;
 
-    let nodes = parse_blocks(source, &lines, &mut cursor, 0);
+    let nodes = parse_blocks(source, &lines, &mut cursor, 0, &mut diagnostics);
     let line_count = source.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1;
-    Document {
-        nodes,
-        front_matter,
-        line_count,
+    ParseOutput {
+        document: Document {
+            nodes,
+            front_matter,
+            line_count,
+        },
+        diagnostics,
     }
+}
+
+/// The result of `parse_with_diagnostics`.
+#[derive(Debug, Clone)]
+pub struct ParseOutput {
+    pub document: Document,
+    /// Diagnostics for malformed constructs; the document still parses the
+    /// offending text as ordinary content.
+    pub diagnostics: Vec<ParserDiagnostic>,
 }
 
 /// A logical source line with byte offsets into the original source.
@@ -205,6 +237,7 @@ fn parse_blocks(
     lines: &[SourceLine<'_>],
     cursor: &mut usize,
     depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Vec<Block> {
     let mut blocks = Vec::new();
     while *cursor < lines.len() {
@@ -214,7 +247,7 @@ fn parse_blocks(
             continue;
         }
         if let Some(level) = is_heading_text(line.text) {
-            blocks.push(parse_heading(source, line, level));
+            blocks.push(parse_heading(source, line, level, diagnostics));
             *cursor += 1;
             continue;
         }
@@ -231,15 +264,28 @@ fn parse_blocks(
         }
         if let Some(marker) = is_list_marker(line.text) {
             if depth < MAX_BLOCK_DEPTH {
-                blocks.push(parse_list(source, lines, cursor, marker, depth));
+                blocks.push(parse_list(
+                    source,
+                    lines,
+                    cursor,
+                    marker,
+                    depth,
+                    diagnostics,
+                ));
                 continue;
             }
         }
         if is_directive_line(line.text) {
-            blocks.push(parse_directive_block(source, lines, cursor, depth));
+            blocks.push(parse_directive_block(
+                source,
+                lines,
+                cursor,
+                depth,
+                diagnostics,
+            ));
             continue;
         }
-        blocks.push(parse_paragraph(source, lines, cursor));
+        blocks.push(parse_paragraph(source, lines, cursor, diagnostics));
     }
     blocks
 }
@@ -263,40 +309,76 @@ fn parse_directive_block(
     lines: &[SourceLine<'_>],
     cursor: &mut usize,
     depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Block {
     let line = &lines[*cursor];
     let mut parsed = None;
-    if let Ok(Some((call, consumed))) =
-        crate::syntax::quarkdown::parse_directive_at(source, line.text_start)
-    {
-        // Trailing non-whitespace content on the same line turns the call
-        // into an inline call within a paragraph.
-        let trailing_ok = source
-            .get(consumed..line.content_end())
-            .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_whitespace()));
-        if trailing_ok {
-            *cursor += 1;
-            let body = collect_directive_body(source, lines, cursor, depth);
-            parsed = Some(Block::DirectiveCall {
-                name: call.name,
-                positional_args: call
-                    .positional_args
-                    .iter()
-                    .map(|arg| convert_quarkdown_arg(source, arg, depth + 1))
-                    .collect(),
-                named_args: call
-                    .named_args
-                    .iter()
-                    .map(|(name, arg)| {
-                        (name.clone(), convert_quarkdown_arg(source, arg, depth + 1))
-                    })
-                    .collect(),
-                body,
-                span: call.span,
-            });
+    match crate::syntax::quarkdown::parse_directive_at(source, line.text_start) {
+        Ok(Some((call, consumed))) => parse_directive_block_ok(
+            source,
+            lines,
+            cursor,
+            depth,
+            diagnostics,
+            call,
+            consumed,
+            &mut parsed,
+        ),
+        Err(e) => {
+            // Malformed call: recover by parsing the line as an ordinary
+            // paragraph. The inline fallback reports the structured
+            // diagnostic exactly once (same `parse_directive_at` error).
+            let _ = e;
         }
+        Ok(None) => {}
     }
-    parsed.unwrap_or_else(|| parse_paragraph(source, lines, cursor))
+    parsed.unwrap_or_else(|| parse_paragraph(source, lines, cursor, diagnostics))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_directive_block_ok(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+    call: crate::syntax::quarkdown::QuarkdownCall,
+    consumed: usize,
+    parsed: &mut Option<Block>,
+) {
+    let line = &lines[*cursor];
+    // Trailing non-whitespace content on the same line turns the call
+    // into an inline call within a paragraph.
+    let trailing_ok = source
+        .get(consumed..line.content_end())
+        .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_whitespace()));
+    if trailing_ok {
+        *cursor += 1;
+        let body = collect_directive_body(source, lines, cursor, depth, diagnostics);
+        let span = block_span_with_body(&call.span, &body);
+        *parsed = Some(Block::DirectiveCall {
+            name: call.name,
+            positional_args: call
+                .positional_args
+                .iter()
+                .map(|arg| convert_quarkdown_arg(source, arg, depth + 1, diagnostics))
+                .collect(),
+            named_args: call
+                .named_args
+                .iter()
+                .map(|named| {
+                    (
+                        named.name.clone(),
+                        convert_quarkdown_arg(source, &named.value, depth + 1, diagnostics),
+                    )
+                })
+                .collect(),
+            body,
+            // The block span covers the call header AND the indented
+            // body; `call.span` by itself covers only the header.
+            span,
+        });
+    }
 }
 
 /// Collect the indented body of a block call starting at the line right
@@ -306,6 +388,7 @@ fn collect_directive_body(
     lines: &[SourceLine<'_>],
     cursor: &mut usize,
     depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Option<Vec<Block>> {
     let mut start = *cursor;
     while start < lines.len() && lines[start].is_blank() {
@@ -342,7 +425,13 @@ fn collect_directive_body(
     // offsets, so the resulting nodes keep accurate document spans and may
     // themselves contain nested calls with their own bodies.
     let mut local_cursor = 0usize;
-    let blocks = parse_blocks(source, &lines[start..end], &mut local_cursor, depth + 1);
+    let blocks = parse_blocks(
+        source,
+        &lines[start..end],
+        &mut local_cursor,
+        depth + 1,
+        diagnostics,
+    );
     *cursor = end;
     if blocks.is_empty() {
         None
@@ -355,15 +444,59 @@ fn collect_directive_body(
 ///
 /// Scalars map directly; content fragments are run through the inline parser
 /// so that nested calls and inline markup inside the argument are preserved.
-fn convert_quarkdown_arg(source: &str, arg: &crate::syntax::quarkdown::Arg, depth: usize) -> Value {
+fn convert_quarkdown_arg(
+    source: &str,
+    arg: &crate::syntax::quarkdown::Arg,
+    depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Value {
     match &arg.content {
         crate::syntax::quarkdown::ArgContent::Scalar(value) => value.clone(),
-        crate::syntax::quarkdown::ArgContent::Content(span) => {
-            Value::Content(parse_inlines(source, span.start, span.end, depth))
-        }
+        crate::syntax::quarkdown::ArgContent::Content(span) => Value::Content(parse_inlines(
+            source,
+            span.start,
+            span.end,
+            depth,
+            diagnostics,
+        )),
     }
 }
-fn parse_paragraph(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -> Block {
+
+/// The span of a `Block` node, extracted from whichever variant it is.
+fn block_span(block: &Block) -> ByteSpan {
+    match block {
+        Block::Heading { span, .. } => *span,
+        Block::Paragraph { span, .. } => *span,
+        Block::UnorderedList { span, .. } => *span,
+        Block::CodeBlock { span, .. } => *span,
+        Block::ThematicBreak { span } => *span,
+        Block::BlankLine { span } => *span,
+        Block::DirectiveCall { span, .. } => *span,
+        Block::Metadata { span, .. } => *span,
+    }
+}
+
+/// The complete span of a block directive: the header plus the body, so
+/// the outer span ends at the last body source.
+fn block_span_with_body(header: &ByteSpan, body: &Option<Vec<Block>>) -> ByteSpan {
+    match body {
+        Some(blocks) => {
+            let end = blocks
+                .last()
+                .map(block_span)
+                .map(|s| s.end)
+                .unwrap_or(header.end);
+            ByteSpan::new(header.start, end.max(header.end))
+        }
+        None => *header,
+    }
+}
+fn parse_paragraph(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Block {
     let first = &lines[*cursor];
     loop {
         *cursor += 1;
@@ -372,7 +505,7 @@ fn parse_paragraph(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -
         }
     }
     let last = &lines[*cursor - 1];
-    let content = parse_inlines(source, first.text_start, last.content_end(), 0);
+    let content = parse_inlines(source, first.text_start, last.content_end(), 0, diagnostics);
     Block::Paragraph {
         content,
         span: ByteSpan::new(first.text_start, last.end),
@@ -380,7 +513,12 @@ fn parse_paragraph(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -
 }
 
 /// Parse an ATX heading line.
-fn parse_heading(source: &str, line: &SourceLine<'_>, level: usize) -> Block {
+fn parse_heading(
+    source: &str,
+    line: &SourceLine<'_>,
+    level: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Block {
     let content_start = line.text_start + level;
     let rest = &line.text[level..];
     let content_trim = rest
@@ -393,7 +531,7 @@ fn parse_heading(source: &str, line: &SourceLine<'_>, level: usize) -> Block {
         None => line.content_end(),
     };
     let content = if content_start < content_end {
-        parse_inlines(source, content_start, content_end, 0)
+        parse_inlines(source, content_start, content_end, 0, diagnostics)
     } else {
         Vec::new()
     };
@@ -465,6 +603,7 @@ fn parse_list(
     cursor: &mut usize,
     marker: u8,
     depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Block {
     let mut items = Vec::new();
     let content_col = {
@@ -529,7 +668,13 @@ fn parse_list(
             }
         }
         let mut inner_cursor = 0;
-        let content = parse_blocks(source, &item_lines, &mut inner_cursor, depth + 1);
+        let content = parse_blocks(
+            source,
+            &item_lines,
+            &mut inner_cursor,
+            depth + 1,
+            diagnostics,
+        );
         let last_line = &item_lines[item_lines.len() - 1];
         items.push(ListItem {
             content,
@@ -631,7 +776,7 @@ fn is_directive_line(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.first() == Some(&b'.')
         && bytes.len() > 1
-        && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_')
+        && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_' || matches!(bytes[1], b'1'..=b'9'))
 }
 
 /// Whether the line starts a list item with the given marker.
@@ -646,15 +791,23 @@ struct InlineParser<'a> {
     pos: usize,
     end: usize,
     depth: usize,
+    diagnostics: &'a mut Vec<ParserDiagnostic>,
 }
 
 impl<'a> InlineParser<'a> {
-    fn new(source: &'a str, start: usize, end: usize, depth: usize) -> Self {
+    fn new(
+        source: &'a str,
+        start: usize,
+        end: usize,
+        depth: usize,
+        diagnostics: &'a mut Vec<ParserDiagnostic>,
+    ) -> Self {
         Self {
             source,
             pos: start,
             end,
             depth,
+            diagnostics,
         }
     }
 
@@ -722,15 +875,27 @@ impl<'a> InlineParser<'a> {
                     positional_args: call
                         .positional_args
                         .iter()
-                        .map(|arg| convert_quarkdown_arg(self.source, arg, self.depth + 1))
+                        .map(|arg| {
+                            convert_quarkdown_arg(
+                                self.source,
+                                arg,
+                                self.depth + 1,
+                                self.diagnostics,
+                            )
+                        })
                         .collect(),
                     named_args: call
                         .named_args
                         .iter()
-                        .map(|(name, arg)| {
+                        .map(|named| {
                             (
-                                name.clone(),
-                                convert_quarkdown_arg(self.source, arg, self.depth + 1),
+                                named.name.clone(),
+                                convert_quarkdown_arg(
+                                    self.source,
+                                    &named.value,
+                                    self.depth + 1,
+                                    self.diagnostics,
+                                ),
                             )
                         })
                         .collect(),
@@ -739,7 +904,17 @@ impl<'a> InlineParser<'a> {
                 });
                 self.pos = consumed;
             }
-            _ => self.literal_dot(start, inlines),
+            Err(e) => {
+                // Malformed inline call: record the diagnostic and recover
+                // by emitting the dot as literal text.
+                self.diagnostics.push(ParserDiagnostic {
+                    code: e.code,
+                    message: e.message,
+                    span: e.span,
+                });
+                self.literal_dot(start, inlines);
+            }
+            Ok(None) => self.literal_dot(start, inlines),
         }
     }
 
@@ -791,7 +966,14 @@ impl<'a> InlineParser<'a> {
         if self.is_whitespace_only(open_end, close_start) {
             return false;
         }
-        let content = InlineParser::new(self.source, open_end, close_start, self.depth + 1).parse();
+        let content = InlineParser::new(
+            self.source,
+            open_end,
+            close_start,
+            self.depth + 1,
+            self.diagnostics,
+        )
+        .parse();
         inlines.push(Inline::Strong {
             content,
             span: ByteSpan::new(open, close_start + 2),
@@ -820,7 +1002,14 @@ impl<'a> InlineParser<'a> {
         if self.is_whitespace_only(open_end, close_start) {
             return false;
         }
-        let content = InlineParser::new(self.source, open_end, close_start, self.depth + 1).parse();
+        let content = InlineParser::new(
+            self.source,
+            open_end,
+            close_start,
+            self.depth + 1,
+            self.diagnostics,
+        )
+        .parse();
         inlines.push(Inline::Emphasis {
             content,
             span: ByteSpan::new(open, close_start + 1),
@@ -931,7 +1120,7 @@ fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
         return false;
     }
     let next = bytes[pos + 1];
-    if !(next.is_ascii_alphabetic() || next == b'_') {
+    if !(next.is_ascii_alphabetic() || next == b'_' || matches!(next, b'1'..=b'9')) {
         return false;
     }
     if pos == 0 {
@@ -942,8 +1131,14 @@ fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
 }
 
 /// Parse inline nodes from the contiguous source slice `[start, end)`.
-fn parse_inlines(source: &str, start: usize, end: usize, depth: usize) -> Vec<Inline> {
-    InlineParser::new(source, start, end, depth).parse()
+fn parse_inlines(
+    source: &str,
+    start: usize,
+    end: usize,
+    depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Vec<Inline> {
+    InlineParser::new(source, start, end, depth, diagnostics).parse()
 }
 
 #[cfg(test)]
@@ -1822,8 +2017,9 @@ mod tests {
                         assert_eq!(name, "note");
                         assert_eq!(positional_args.len(), 1);
                         assert_eq!(positional_args[0], Value::Identifier("Nested".into()));
-                        // Nested call on its own line: starts after its indentation.
-                        assert_eq!(*span, ByteSpan::new(30, 44));
+                        // Nested call span covers its header AND its body: starts after its
+                        // indentation (30) and ends after "Nested body" (65).
+                        assert_eq!(*span, ByteSpan::new(30, 65));
                         let nested_body = body.as_ref().expect("nested body");
                         assert_eq!(nested_body.len(), 1);
                         match &nested_body[0] {
@@ -2041,6 +2237,55 @@ mod tests {
         assert!(matches!(
             &doc.nodes[0],
             Block::DirectiveCall { name, .. } if name == "my_call"
+        ));
+    }
+
+    #[test]
+    fn malformed_calls_produce_structured_diagnostics() {
+        for (input, expected_code) in [
+            (".foo {", "E2003"),
+            (".foo {value", "E2003"),
+            (".foo key:{", "E2003"),
+            (".foo key:{value", "E2003"),
+            (".foo width:{x} {y}", "E2001"),
+        ] {
+            let output = parse_with_diagnostics(input);
+            assert_eq!(
+                output.diagnostics.len(),
+                1,
+                "input {input:?} should yield exactly one diagnostic"
+            );
+            assert_eq!(output.diagnostics[0].code, expected_code, "input {input:?}");
+            assert!(
+                output.diagnostics[0].span.start <= output.diagnostics[0].span.end,
+                "input {input:?}"
+            );
+            assert!(!output.diagnostics[0].message.is_empty(), "input {input:?}");
+            assert!(
+                matches!(output.document.nodes[0], Block::Paragraph { .. }),
+                "input {input:?} should fall back to paragraph"
+            );
+        }
+    }
+
+    #[test]
+    fn valid_calls_produce_no_diagnostics() {
+        for input in [".foo {bar}\n", ".foo key:{value}\n", ".1 {item}\n"] {
+            let output = parse_with_diagnostics(input);
+            assert!(output.diagnostics.is_empty(), "input {input:?}");
+            assert!(matches!(
+                output.document.nodes[0],
+                Block::DirectiveCall { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn implicit_reference_call_at_block_level() {
+        let doc = parse(".1 {item}\n");
+        assert!(matches!(
+            &doc.nodes[0],
+            Block::DirectiveCall { name, .. } if name == "1"
         ));
     }
 }
