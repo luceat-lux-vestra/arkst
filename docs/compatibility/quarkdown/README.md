@@ -22,6 +22,7 @@ provenance records.
 | Feature                     | Syntax                 | Compatibility | Status      |
 |-----------------------------|------------------------|---------------|-------------|
 | Dot-prefixed call           | `.note`                | Parsed        | Implemented |
+| Implicit positional refs   | `.1 {item}`            | Parsed        | Implemented |
 | Positional arguments        | `.range {1} {10}`      | Parsed        | Implemented |
 | Named arguments             | `.panel width:{320}`   | Parsed        | Implemented |
 | Mixed positional/named      | `.panel {Intro} width:{320}` | Parsed | Implemented |
@@ -97,6 +98,10 @@ the current scope. `SPEC_SOURCES.md` documents the source list.
 ## Known Divergences
 
 - (None yet for the implemented call-syntax subset)
+- Scope note: only the features listed in the matrix above are implemented.
+  Rows marked **Planned** (Variables, Conditionals, Iteration, ... and the
+  **Unsupported** rows below) are *not* implemented; public-syntax elements
+  outside this matrix must not be assumed to work in Scribium.
 
 ## Unsupported Features
 

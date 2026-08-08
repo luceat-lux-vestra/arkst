@@ -11,10 +11,14 @@ Quarkdown-compatible feature implementation.
 | Quarkdown wiki                                | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Dot-prefixed calls; positional, named, and mixed arguments; nested calls; block vs inline calls; indented bodies | 2026-08-08 |
 | Quarkdown quickstart                          | https://quarkdown.com/                      | Call examples (`.pow {5} to:{2}`, `.align {center}` with an indented body) | 2026-08-08 |
 | Public release notes / changelog              | public release notes                        | Confirmation that the basic dot-and-brace call grammar is stable for the 0.9.x target and unchanged in later series | 2026-08-08 |
+| Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
+| Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
 
 The grammar implemented in Scribium is limited to the **function-call
 syntax** documented on the wiki page above, restricted to the scope in
-`docs/compatibility/quarkdown/README.md`. The project keeps the documented
+`docs/compatibility/quarkdown/README.md`, plus the **implicit positional
+references** (`.1`, `.2`, ...) documented on the `Lambda` and `foreach`
+pages above. The project keeps the documented
 0.9.x target version; the basic call grammar is valid for that target.
 
 URLs other than those listed above were not consulted for this feature set.
