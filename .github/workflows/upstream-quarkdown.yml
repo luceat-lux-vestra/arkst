@@ -75,12 +75,15 @@ jobs:
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
           OBSERVED_URL: ${{ steps.observed.outputs.url }}
         run: |
-          cargo run -p scribium-upstream-watch -- \
+          RESULT=$(cargo run -p scribium-upstream-watch -- \
             check-release \
             --manifest docs/compatibility/quarkdown/upstream.toml \
             --observed-tag "$OBSERVED_TAG" \
             --observed-url "$OBSERVED_URL" \
-            --output json
+            --output json)
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          echo "$RESULT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Check if drift detected
         id: check_drift
