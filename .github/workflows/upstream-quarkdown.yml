@@ -127,3 +127,20 @@ jobs:
           echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
           echo ""
           echo "<!-- scribium-upstream-drift:quarkdown:$(echo "$DRIFT_RESULT" | jq -r '.observed_tag') -->"
+
+      - name: Check for existing issue
+        if: steps.check_drift.outputs.drift == 'true' && github.event.inputs.dry_run != 'true'
+        id: check_issue
+        env:
+          OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
+        run: |
+          ISSUE_KEY="quarkdown:$OBSERVED_TAG"
+          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+          EXISTING=$(gh issue list --repo ${{ github.repository }} --state all --search "$MARKER" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
+            echo "Issue #$EXISTING already exists for $ISSUE_KEY"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
