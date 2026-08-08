@@ -156,27 +156,8 @@ jobs:
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
 
-          cat > "$RUNNER_TEMP/upstream-issue.md" <<EOF
-Supported baseline: $SUPPORTED_BASELINE
-Observed stable release: $OBSERVED_TAG
-Upstream release URL: $URL
-Detection source: scheduled upstream observer
-
-**Checklist:**
-- [ ] Review permitted public specification changes
-- [ ] Identify affected Scribium compatibility features
-- [ ] Add independently authored conformance cases
-- [ ] Perform black-box observations where necessary
-- [ ] Document known divergences
-- [ ] Implement required compatibility changes
-- [ ] Run full conformance suite
-- [ ] Update supported baseline only after verification
-
-**Clean-room warning:**
-Do not inspect or translate Quarkdown implementation source while resolving this issue.
-
-$MARKER
-EOF
+          # Write issue body using printf to avoid heredoc issues
+          printf 'Supported baseline: %s\nObserved stable release: %s\nUpstream release URL: %s\nDetection source: scheduled upstream observer\n\n**Checklist:**\n- [ ] Review permitted public specification changes\n- [ ] Identify affected Scribium compatibility features\n- [ ] Add independently authored conformance cases\n- [ ] Perform black-box observations where necessary\n- [ ] Document known divergences\n- [ ] Implement required compatibility changes\n- [ ] Run full conformance suite\n- [ ] Update supported baseline only after verification\n\n**Clean-room warning:**\nDo not inspect or translate Quarkdown implementation source while resolving this issue.\n\n%s\n' "$SUPPORTED_BASELINE" "$OBSERVED_TAG" "$URL" "$MARKER" > "$RUNNER_TEMP/upstream-issue.md"
 
           gh issue create \
             --repo ${{ github.repository }} \
