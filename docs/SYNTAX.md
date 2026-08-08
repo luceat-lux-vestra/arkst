@@ -136,15 +136,33 @@ block-level call. Its body is the indented content that follows:
 Not yet implemented. Variable semantics will build on the function-call
 parsing above.
 
-### Conditional (Planned)
+### Conditional (Implemented)
 
 ```
 .if {condition}
     true branch
+
+.ifnot {condition}
+    false branch
 ```
 
-Conditional evaluation is planned; parsing of the call syntax above is
-implemented, semantic evaluation is not.
+Conditionals evaluate the first positional argument as a boolean condition:
+
+- Boolean literals: `true` / `false`
+- Boolean identifiers (case-insensitive): `yes` / `no`
+- Missing or unresolvable conditions are reported as `E3001` (evaluation
+  error) and the conditional is treated as `false` for deterministic
+  output.
+
+The content is, in order of priority: the indented block body, the
+second positional argument (a content value or bare scalar), or nothing.
+
+`.ifnot` inverts the condition: its content is rendered when the
+condition is false.
+
+Nested conditionals are supported. Variable-based or function-call
+conditions (e.g., `.if {.var {cond}}`) are outside the M1 scope and
+produce an `E3001` diagnostic.
 
 ### Iteration (Planned)
 

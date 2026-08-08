@@ -44,7 +44,7 @@ provenance records.
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
 | Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`        | Error                    | Implemented      |
 | Variables                      | —                                | —                        | Planned          |
-| Conditionals                   | —                                | —                        | Planned          |
+|| Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
 | Iteration                      | —                                | —                        | Planned          |
 | Functions/components            | —                                | —                        | Planned          |
 | Include/read                   | —                                | —                        | Planned          |
@@ -86,6 +86,7 @@ are kept separate on purpose.
 | Inline (mid-paragraph) call     | `markdown/parser.rs::inline_call_in_sentence`, `markdown/parser.rs::call_with_trailing_text_is_inline_call`, `markdown/parser.rs::inline_call_at_line_start_continues_paragraph`, `markdown/parser.rs::isolated_call_line_still_starts_block` |
 | Tight-call boundaries           | `quarkdown/parser.rs::tight_word_adjacency_makes_call_ordinary_text`, `quarkdown/parser.rs::symbols_are_valid_call_boundaries`, `quarkdown/parser.rs::implicit_reference_does_not_consume_arguments`, `markdown/parser.rs::tight_call_boundary_rejects_trailing_word`, `markdown/parser.rs::tight_call_hyphen_boundaries_are_valid`, `markdown/parser.rs::unicode_word_characters_are_tight_adjacency`, `markdown/parser.rs::inline_call_does_not_parse_in_numbers` |
 | Malformed-call diagnostics      | `quarkdown/parser.rs::positional_after_named_is_rejected` (`E2001`), `quarkdown/parser.rs::named_argument_without_braces_is_error` (`E2002`), `quarkdown/parser.rs::unclosed_argument_is_error` (`E2003`), `markdown/parser.rs::malformed_calls_produce_structured_diagnostics`, `markdown/parser.rs::malformed_calls_do_not_panic_and_fall_back_to_paragraph` |
+|| Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `typst::conditional_evaluation_before_lowering` |
 
 ## Compatibility Levels
 
@@ -100,11 +101,13 @@ are kept separate on purpose.
 
 Function calls are currently **Parsed**: `.name`, positional arguments
 `{arg}`, named arguments `name:{arg}`, nested calls, and indented block
-bodies are parsed into the Scribium AST/IR. Semantic evaluation is the next
-milestone (see `docs/SYNTAX.md` and `docs/ROADMAP.md`). Note that a feature
-which currently fails to parse (e.g. `E2xxx` syntax errors on some input
-forms) is still labeled by its documented support level in the matrix — an
-input-level parse error is not an `Unsupported` marker.
+bodies are parsed into the Scribium AST/IR. **Basic conditional evaluation
+(`.if` / `.ifnot` with boolean-literal conditions) is implemented**; full
+semantic evaluation remains the next milestone (see `docs/SYNTAX.md` and
+`docs/ROADMAP.md`). Note that a feature which currently fails to parse
+(e.g. `E2xxx` syntax errors on some input forms) is still labeled by its
+documented support level in the matrix — an input-level parse error is
+not an `Unsupported` marker.
 
 ### Tight-call boundaries
 
