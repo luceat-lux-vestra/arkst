@@ -146,8 +146,8 @@ jobs:
         run: |
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
-          # Use GitHub Search API to find issues (including closed) containing the marker in body
-          EXISTING=$(gh api "/search/issues" -f q="repo:${{ github.repository }} type:issue \"$MARKER\" in:body" --jq '.items[0].number // empty')
+          # Use gh api issues endpoint with pagination, filter by body content
+          EXISTING=$(gh api "repos/${{ github.repository }}/issues" --paginate --jq '.[] | select(.body | contains($MARKER)) | .number' -f MARKER="$MARKER" | head -1)
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
