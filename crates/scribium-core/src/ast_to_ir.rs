@@ -99,6 +99,24 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Block::OrderedList { items, start, span } => {
+            let ir_items: Vec<IrListItem> = items
+                .iter()
+                .map(|item| IrListItem {
+                    nodes: item
+                        .content
+                        .iter()
+                        .filter_map(|b| block_to_ir(b, source_id))
+                        .collect(),
+                    span: byte_to_source_span(&item.span, source_id),
+                })
+                .collect();
+            Some(IrNode::OrderedList {
+                items: ir_items,
+                start: *start,
+                span: byte_to_source_span(span, source_id),
+            })
+        }
         Block::CodeBlock {
             language,
             source,
