@@ -577,4 +577,66 @@ mod tests {
         // Source maps should be identical
         assert_eq!(map1, map2);
     }
+
+    #[test]
+    fn conditional_evaluation_before_lowering() {
+        use crate::lower_to_typst_code;
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        // .if {true} block body -> kept, no #if in output
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", ".if {true}\n    kept\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(result.diagnostics.is_empty());
+        assert!(typst.contains("kept"));
+        assert!(!typst.contains("#if"));
+
+        // .if {false} -> dropped
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", ".if {false}\n    dropped\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(result.diagnostics.is_empty());
+        assert!(!typst.contains("dropped"));
+
+        // .ifnot {no} -> kept
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", ".ifnot {no}\n    kept\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(result.diagnostics.is_empty());
+        assert!(typst.contains("kept"));
+
+        // Inline .if {true} {text}
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", "before .if {true} {inline} after\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(result.diagnostics.is_empty());
+        assert!(typst.contains("before"));
+        assert!(typst.contains("inline"));
+        assert!(typst.contains("after"));
+        assert!(!typst.contains("#if"));
+    }
 }

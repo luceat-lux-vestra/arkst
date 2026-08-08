@@ -66,7 +66,8 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
 
     let parsed = syntax::markdown::parse_with_diagnostics(source);
     let ir = ast_to_ir::ast_to_ir(&parsed.document, source_id, project.metadata());
-    let diagnostics = parsed
+    let (ir, evaluation_diagnostics) = evaluator::Evaluator::new().evaluate(&ir);
+    let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()
         .map(|d| Diagnostic {
@@ -82,6 +83,7 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
             hints: Vec::new(),
         })
         .collect();
+    diagnostics.extend(evaluation_diagnostics);
     CompileResult { ir, diagnostics }
 }
 
@@ -100,6 +102,7 @@ pub struct CompileResult {
 
 #[cfg(test)]
 mod tests {
+    use crate::ir::{IrInline, IrNode};
     use crate::{CompileOptions, Severity, VirtualPathBuf, VirtualProjectBuilder};
     #[test]
     fn it_compiles_empty_document() {
@@ -414,5 +417,131 @@ mod tests {
         let (result, _) = compile_source(".foo {bar}\n");
         assert!(result.diagnostics.is_empty());
         assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_if_true() {
+        let (result, _) = compile_source(".if {true}\n    hello\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        assert_eq!(content.len(), 1);
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn compile_evaluates_if_false() {
+        let (result, _) = compile_source(".if {false}\n    dropped\n");
+        assert!(result.diagnostics.is_empty());
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_evaluates_ifnot() {
+        let (result, _) = compile_source(".ifnot {no}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_nested_if() {
+        let (result, _) =
+            compile_source(".if {yes}\n    .if {no}\n        inner-dropped\n    inner-kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "inner-kept");
+    }
+
+    #[test]
+    fn compile_reports_e3001_for_unresolvable_condition() {
+        let (result, source_id) = compile_source(".if {maybe}\n    body\n");
+        assert_eq!(result.diagnostics.len(), 1);
+        let diag = &result.diagnostics[0];
+        assert_eq!(diag.code, "E3001");
+        assert!(matches!(diag.severity, Severity::Error));
+        assert_eq!(diag.primary.as_ref().map(|s| s.source_id), Some(source_id));
+        // If condition unknown -> false -> body dropped
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_true() {
+        let (result, _) = compile_source(".if condition:{true}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_false() {
+        let (result, _) = compile_source(".if condition:{false}\n    dropped\n");
+        assert!(result.diagnostics.is_empty());
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_yes_no() {
+        let (result, _) = compile_source(".if condition:{yes}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+
+        let (result, _) = compile_source(".ifnot condition:{no}\n    kept\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_evaluates_named_body() {
+        let (result, _) = compile_source(".if {true} body:{shown}\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "shown");
+    }
+
+    #[test]
+    fn compile_evaluates_named_condition_and_body() {
+        let (result, _) = compile_source(".if condition:{true} body:{shown}\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "shown");
+    }
+
+    #[test]
+    fn compile_inline_named_condition() {
+        let (result, _) = compile_source("before .if condition:{true} body:{inline} after\n");
+        assert!(result.diagnostics.is_empty());
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let rendered: String = content
+            .iter()
+            .map(|i| match i {
+                IrInline::Text { content, .. } => content.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(rendered.contains("inline"));
     }
 }

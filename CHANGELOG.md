@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collision checks.
 - README quickstart and status table updated to reflect experimental PDF support.
 
+- **M1 Evaluator**: minimal semantic evaluator resolving Quarkdown `.if` /
+  `.ifnot` conditional constructs (boolean-literal conditions only:
+  `true`/`false`/`yes`/`no` case-insensitive). Named `condition` and `body`
+  arguments supported per Quarkdown function signature. Nested conditionals
+  supported. Unresolvable conditions produce `E3001` evaluation diagnostic
+  and deterministic false treatment.
 ### Fixed
 
 - `build` with multiple formats and `--output` now returns a clear validation error
