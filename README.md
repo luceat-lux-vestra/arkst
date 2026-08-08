@@ -93,21 +93,22 @@ scribium build report.md
 ## Example (.qd)
 
 ```quarkdown
-@import "template.typ"
+.heading level:{1}
+    Hello, Scribium
 
-@heading(level: 1)[Hello, Scribium]
+This is a .strong {Quarkdown} document compiled through Typst to PDF.
 
-This is a @strong[Quarkdown-compatible] document compiled through Typst to PDF.
+.list
+    .item
+        Simple code lists work
+    .item
+        Math is supported: $E = mc^2$
 
-@list[
-  @item[Simple @code[lists] work]
-  @item[Math is supported: $E = mc^2$]
-]
-
-@row[
-  @col[Left]
-  @col[Right]
-]
+.row
+    .col
+        Left
+    .col
+        Right
 ```
 
 ## Front matter

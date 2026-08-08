@@ -55,7 +55,6 @@ pub enum IrNode {
         span: SourceSpan,
     },
     /// Raw Typst source — inserted verbatim into the output.
-    /// Used for `@raw` directives and inline Typst escapes.
     RawTypst { source: String, span: SourceSpan },
     /// A function/component call that was resolved during evaluation.
     /// The lowering pass renders this as the corresponding Typst construct.
@@ -63,7 +62,7 @@ pub enum IrNode {
         name: String,
         positional_args: Vec<IrValue>,
         named_args: Vec<(String, IrValue)>,
-        body: Option<Box<IrNode>>,
+        body: Option<Vec<IrNode>>,
         span: SourceSpan,
     },
     /// A thematic break (horizontal rule).
@@ -91,7 +90,7 @@ pub enum IrInline {
         content: Vec<IrInline>,
         span: SourceSpan,
     },
-    /// An inline directive call (@strong[text], @raw).
+    /// An inline function call (`.name {arg}` inside a text flow).
     DirectiveCall {
         name: String,
         positional_args: Vec<IrValue>,

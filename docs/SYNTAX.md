@@ -48,85 +48,104 @@ Planned (M2+):
 - Math (`$...$` and `$$...$$`)
 - HTML passthrough (policy TBD)
 
-## Quarkdown-Compatible Directives
+## Quarkdown-Compatible Function Calls
 
-Directives use the `@` prefix to distinguish Scribium constructs from
-plain Markdown. This is the primary mechanism for programmable documents.
-
-### Function Call (Planned)
+Function calls use Quarkdown's dot-prefixed syntax. A call is introduced by
+a `.` followed by a function name:
 
 ```
-@function-name
-@function-name[pos1, pos2, named: value]
-@function-name(pos1)[body content]
-@function-name(named: value)[
-  block body
-  with multiple lines
-]
+.function
+.function {arg}
+.function {arg1} {arg2}
+.function option:{value}
+.function {arg} option:{value}
 ```
 
-- `@` prefix introduces the call
-- Arguments can be positional (`pos1, pos2`) or named (`name: value`)
-- Body argument in `[...]` as the last (or only) argument
-- Empty parentheses `()` or empty brackets `[]` are valid
-- No space between `@name` and `(` or `[`
+Call syntax has the following properties:
+
+- The function name follows the dot directly: alphanumeric, `_` and `-` are
+  allowed, the first character must be a letter or `_`.
+- Positional arguments are wrapped in curly braces: `{...}`.
+- Named arguments are `name:{...}`.
+- Positional and named arguments may be mixed, but every argument after a
+  named argument must also be named.
+- An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
+  arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
+- Inline calls appear inside a paragraph: `.strong {bold}` in surrounding
+  text. A call that has trailing text after it on the same line is treated
+  as an inline call, not a block-level call.
+
+### Block-level calls with indented body (Implemented)
+
+A call that stands alone on its line (with only whitespace after it) is a
+block-level call. Its body is the indented content that follows:
+
+```
+.panel {Introduction}
+    This is the panel body.
+    It may contain **Markdown** content.
+```
+
+- The body starts at the next non-blank line indented by at least 2 spaces
+  or one tab.
+- All body lines share the same indentation; deeper indentation is allowed
+  inside for nested calls.
+- The body ends at the first line with less indentation.
+- Markdown parsing continues inside the body, including nested block calls:
+
+```
+.panel {Outer}
+    Hello
+
+    .note {Nested}
+        Nested body
+```
 
 ### Variable Reference (Planned)
 
 ```
-@variable-name        // evaluates to variable value
-@(expression)         // parenthesized expression
+.variable-name {default}        // planned: evaluates to variable value
 ```
+
+Not yet implemented. Variable semantics will build on the function-call
+parsing above.
 
 ### Conditional (Planned)
 
 ```
-@if(condition)[true branch]
-@if(condition)[true branch][false branch]
+.if {condition}
+    true branch
 ```
+
+Conditional evaluation is planned; parsing of the call syntax above is
+implemented, semantic evaluation is not.
 
 ### Iteration (Planned)
 
-```
-@for(item in list)[
-  @item
-]
-```
+Planned. Iteration will build on the indented body syntax.
 
 ### Variable Binding (Planned)
 
-```
-@let name = value
-@let name = expression
-```
+Planned.
 
 ### Include / Read (Planned)
 
-```
-@include("path/to/file.qd")
-@read("path/to/data.yaml")
-```
+Planned. `include` and `read` are function calls like any other and will be
+evaluated by the builtin layer.
 
 ### Typst Escape (Planned)
 
-````markdown
-```typst
-#figure(table(...))
-```
-````
+Planned.
 
 ### Data Loading (Planned)
 
-```
-@let data = read("data.yaml")
-@for(item in data.items)[...]
-```
+Planned.
 
 ## Reserved Syntax
 
 The following prefixes are reserved for future Scribium syntax:
 
-- `@` — directives and function calls
+- `.` — Quarkdown-compatible function calls (dot-prefixed)
 - `$` — math (delegated to Typst or pass-through)
 - `#` — raw Typst (pass-through in Typst escape blocks)
 - Front matter delimiter `---`

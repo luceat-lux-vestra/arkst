@@ -1,3 +1,4 @@
-@heading(level: 1)[Directive Test]
+.heading level:{1}
+    Directive Test
 
-Single-line body: @strong[bold] and @emph[italic].
+Single-line body: .strong {bold} and .emph {italic}.

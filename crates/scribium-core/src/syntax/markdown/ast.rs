@@ -57,12 +57,12 @@ pub enum Block {
     /// Blank line / vertical space.
     /// Preserved for round-trip accuracy even though it carries no semantic meaning.
     BlankLine { span: ByteSpan },
-    /// A Quarkdown-compatible directive call (`@name`, `@name(args)`, `@name[body]`).
+    /// A Quarkdown-compatible function call (`.name {arg} key:{value}`).
     DirectiveCall {
         name: String,
         positional_args: Vec<Value>,
         named_args: Vec<(String, Value)>,
-        body: Option<Box<Block>>,
+        body: Option<Vec<Block>>,
         span: ByteSpan,
     },
     /// Metadata block (flat key-value front matter embedded inline).
@@ -94,7 +94,7 @@ pub enum Inline {
         content: Vec<Inline>,
         span: ByteSpan,
     },
-    /// A Quarkdown-compatible inline directive call (`@name`, `@name(args)`, `@name[body]`).
+    /// An inline Quarkdown function call (`.name {arg}` inside a text flow).
     DirectiveCall {
         name: String,
         positional_args: Vec<Value>,
@@ -115,4 +115,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Identifier(String),
+    /// A content fragment: inline markup and/or nested function calls, as
+    /// found inside an argument (`{.inner {value}}`) or a body.
+    Content(Vec<Inline>),
 }

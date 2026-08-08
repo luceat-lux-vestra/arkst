@@ -14,7 +14,7 @@
 //! treated as literal text. Setext headings, links, images, blockquotes,
 //! code spans, and ordered lists are not part of the M1 subset.
 
-use super::ast::{Block, Document, FrontMatter, Inline, ListItem};
+use super::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
 use crate::source::ByteSpan;
 
 /// Maximum block-nesting depth before a parse is flattened to paragraphs.
@@ -236,7 +236,7 @@ fn parse_blocks(
             }
         }
         if is_directive_line(line.text) {
-            blocks.push(parse_directive_block(source, lines, cursor));
+            blocks.push(parse_directive_block(source, lines, cursor, depth));
             continue;
         }
         blocks.push(parse_paragraph(source, lines, cursor));
@@ -244,78 +244,124 @@ fn parse_blocks(
     blocks
 }
 
-/// Parse a block-level `@` directive line.
+/// Minimum indentation that makes a line part of a call's indented body:
+/// two spaces or a single tab.
+const MIN_BODY_INDENT: usize = 2;
+
+/// Parse a block-level Quarkdown function call (`.name {arg} key:{value}`).
 ///
-/// Consumes only the directive line itself. Multi-line bodies are an M1+ extension.
-fn parse_directive_block(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -> Block {
+/// A line only starts a *block* call when the call consumes the entire line
+/// (trailing whitespace allowed). Otherwise the line is parsed as a paragraph
+/// containing an inline call.
+///
+/// When the call does become a block call, the following lines are part of
+/// its body when they are blank or indented by at least `MIN_BODY_INDENT`
+/// columns (or start with a tab). The body must share the same indentation:
+/// a line indented less than the first body line terminates the body.
+fn parse_directive_block(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    depth: usize,
+) -> Block {
     let line = &lines[*cursor];
-    *cursor += 1;
-    let line_source = &source[line.text_start..line.content_end()];
-
-    if let Some((directive, _consumed)) = crate::syntax::quarkdown::parser::parse_directive_at(
-        line_source,
-        0,
-        crate::source::SourceId(0),
-    ) {
-        match directive {
-            crate::syntax::quarkdown::Directive::Call {
-                name,
-                positional_args,
-                named_args,
+    let mut parsed = None;
+    if let Ok(Some((call, consumed))) =
+        crate::syntax::quarkdown::parse_directive_at(source, line.text_start)
+    {
+        // Trailing non-whitespace content on the same line turns the call
+        // into an inline call within a paragraph.
+        let trailing_ok = source
+            .get(consumed..line.content_end())
+            .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_whitespace()));
+        if trailing_ok {
+            *cursor += 1;
+            let body = collect_directive_body(source, lines, cursor, depth);
+            parsed = Some(Block::DirectiveCall {
+                name: call.name,
+                positional_args: call
+                    .positional_args
+                    .iter()
+                    .map(|arg| convert_quarkdown_arg(source, arg, depth + 1))
+                    .collect(),
+                named_args: call
+                    .named_args
+                    .iter()
+                    .map(|(name, arg)| {
+                        (name.clone(), convert_quarkdown_arg(source, arg, depth + 1))
+                    })
+                    .collect(),
                 body,
-                ..
-            } => {
-                let body_block = body.and_then(|b| match *b {
-                    crate::syntax::quarkdown::Directive::Value(
-                        crate::syntax::markdown::ast::Value::String(s),
-                    ) => {
-                        // Parse body content as inline nodes
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(Box::new(Block::Paragraph {
-                                content: parse_inlines(&s, 0, s.len(), 0),
-                                span: ByteSpan::new(line.text_start, line.end),
-                            }))
-                        }
-                    }
-                    crate::syntax::quarkdown::Directive::Call { .. } => {
-                        // Nested directive: wrap in a DirectiveCall block
-                        Some(Box::new(Block::DirectiveCall {
-                            name: String::new(), // placeholder
-                            positional_args: vec![],
-                            named_args: vec![],
-                            body: None,
-                            span: ByteSpan::new(line.text_start, line.end),
-                        }))
-                    }
-                    _ => None,
-                });
-
-                return Block::DirectiveCall {
-                    name,
-                    positional_args,
-                    named_args,
-                    body: body_block,
-                    span: ByteSpan::new(line.text_start, line.end),
-                };
-            }
-            crate::syntax::quarkdown::Directive::Variable { name, .. } => {
-                // A bare @name at block level becomes a directive call with no args
-                return Block::DirectiveCall {
-                    name,
-                    positional_args: vec![],
-                    named_args: vec![],
-                    body: None,
-                    span: ByteSpan::new(line.text_start, line.end),
-                };
-            }
-            _ => {}
+                span: call.span,
+            });
         }
     }
+    parsed.unwrap_or_else(|| parse_paragraph(source, lines, cursor))
+}
 
-    // Fallback: parse as paragraph
-    parse_paragraph(source, lines, cursor)
+/// Collect the indented body of a block call starting at the line right
+/// after the call (`*cursor`). Advances `*cursor` past the body.
+fn collect_directive_body(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    depth: usize,
+) -> Option<Vec<Block>> {
+    let mut start = *cursor;
+    while start < lines.len() && lines[start].is_blank() {
+        start += 1;
+    }
+    if start >= lines.len() {
+        return None;
+    }
+    let first = &lines[start];
+    let body_indented = first.indent() >= MIN_BODY_INDENT || first.raw.starts_with('\t');
+    if !body_indented {
+        return None;
+    }
+    let body_indent = first.indent();
+
+    let mut last = start;
+    let mut probe = start + 1;
+    while probe < lines.len() {
+        let ln = &lines[probe];
+        if ln.is_blank() {
+            probe += 1;
+            continue;
+        }
+        if ln.indent() >= body_indent {
+            last = probe;
+            probe += 1;
+            continue;
+        }
+        break;
+    }
+    let end = last + 1;
+
+    // Re-parse the body lines as blocks. `SourceLine` carries absolute
+    // offsets, so the resulting nodes keep accurate document spans and may
+    // themselves contain nested calls with their own bodies.
+    let mut local_cursor = 0usize;
+    let blocks = parse_blocks(source, &lines[start..end], &mut local_cursor, depth + 1);
+    *cursor = end;
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks)
+    }
+}
+
+/// Convert a Quarkdown-layer argument into a Markdown `Value`.
+///
+/// Scalars map directly; content fragments are run through the inline parser
+/// so that nested calls and inline markup inside the argument are preserved.
+fn convert_quarkdown_arg(source: &str, arg: &crate::syntax::quarkdown::Arg, depth: usize) -> Value {
+    match &arg.content {
+        crate::syntax::quarkdown::ArgContent::Scalar(value) => value.clone(),
+        crate::syntax::quarkdown::ArgContent::Content(span) => {
+            Value::Content(parse_inlines(source, span.start, span.end, depth))
+        }
+    }
 }
 fn parse_paragraph(source: &str, lines: &[SourceLine<'_>], cursor: &mut usize) -> Block {
     let first = &lines[*cursor];
@@ -580,14 +626,12 @@ fn is_list_marker(text: &str) -> Option<u8> {
     }
 }
 
-/// Whether the text starts a `@`-prefixed directive (block-level).
+/// Whether the text starts a Quarkdown function call (block-level).
 fn is_directive_line(text: &str) -> bool {
     let bytes = text.as_bytes();
-    if bytes.first() != Some(&b'@') {
-        return false;
-    }
-    // Must have a name character after @
-    bytes.len() > 1 && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_')
+    bytes.first() == Some(&b'.')
+        && bytes.len() > 1
+        && (bytes[1].is_ascii_alphabetic() || bytes[1] == b'_')
 }
 
 /// Whether the line starts a list item with the given marker.
@@ -631,7 +675,7 @@ impl<'a> InlineParser<'a> {
                     });
                     self.pos += 2;
                 }
-                b'@' => self.parse_directive_inline(&mut inlines),
+                b'.' => self.parse_dot_inline(&mut inlines),
                 _ => self.parse_text(&mut inlines),
             }
         }
@@ -660,71 +704,51 @@ impl<'a> InlineParser<'a> {
         }
     }
 
-    /// Parse an inline `@` directive (e.g. `@strong[text]`, `@fn()`).
-    fn parse_directive_inline(&mut self, inlines: &mut Vec<Inline>) {
+    /// Parse an inline Quarkdown function call (`.note {arg} ...`).
+    ///
+    /// Only a dot that can actually start a call is delegated here: the
+    /// following byte must be a valid name start and the preceding byte must
+    /// not be a word character or another dot (`3.14`, `foo.bar`, `...`).
+    fn parse_dot_inline(&mut self, inlines: &mut Vec<Inline>) {
         let start = self.pos;
-        let remaining = &self.source[self.pos..self.end];
-        if let Some((directive, consumed)) = crate::syntax::quarkdown::parser::parse_directive_at(
-            remaining,
-            0,
-            crate::source::SourceId(0),
-        ) {
-            let end_pos = self.pos + consumed;
-            match directive {
-                crate::syntax::quarkdown::Directive::Call {
-                    name,
-                    positional_args,
-                    named_args,
-                    body,
-                    ..
-                } => {
-                    let body_inlines = body.and_then(|b| match *b {
-                        crate::syntax::quarkdown::Directive::Value(
-                            crate::syntax::markdown::ast::Value::String(s),
-                        ) => {
-                            if s.is_empty() {
-                                None
-                            } else {
-                                Some(parse_inlines(&s, 0, s.len(), self.depth + 1))
-                            }
-                        }
-                        _ => None,
-                    });
-
-                    inlines.push(Inline::DirectiveCall {
-                        name,
-                        positional_args,
-                        named_args,
-                        body: body_inlines,
-                        span: ByteSpan::new(start, end_pos),
-                    });
-                    self.pos = end_pos;
-                }
-                crate::syntax::quarkdown::Directive::Variable { name, .. } => {
-                    inlines.push(Inline::DirectiveCall {
-                        name,
-                        positional_args: vec![],
-                        named_args: vec![],
-                        body: None,
-                        span: ByteSpan::new(start, end_pos),
-                    });
-                    self.pos = end_pos;
-                }
-                _ => {
-                    inlines.push(Inline::Text {
-                        content: self.source[start..end_pos].to_string(),
-                        span: ByteSpan::new(start, end_pos),
-                    });
-                    self.pos = end_pos;
-                }
-            }
-        } else {
-            inlines.push(Inline::Text {
-                content: "@".to_string(),
-                span: ByteSpan::new(start, start + 1),
-            });
-            self.pos += 1;
+        if start + 1 >= self.end || !is_call_dot(self.bytes(), self.pos, self.end) {
+            self.literal_dot(start, inlines);
+            return;
         }
+        match crate::syntax::quarkdown::parse_directive_at(self.source, start) {
+            Ok(Some((call, consumed))) => {
+                inlines.push(Inline::DirectiveCall {
+                    name: call.name,
+                    positional_args: call
+                        .positional_args
+                        .iter()
+                        .map(|arg| convert_quarkdown_arg(self.source, arg, self.depth + 1))
+                        .collect(),
+                    named_args: call
+                        .named_args
+                        .iter()
+                        .map(|(name, arg)| {
+                            (
+                                name.clone(),
+                                convert_quarkdown_arg(self.source, arg, self.depth + 1),
+                            )
+                        })
+                        .collect(),
+                    body: None,
+                    span: ByteSpan::new(start, consumed),
+                });
+                self.pos = consumed;
+            }
+            _ => self.literal_dot(start, inlines),
+        }
+    }
+
+    fn literal_dot(&mut self, start: usize, inlines: &mut Vec<Inline>) {
+        inlines.push(Inline::Text {
+            content: ".".to_string(),
+            span: ByteSpan::new(start, start + 1),
+        });
+        self.pos = start + 1;
     }
 
     /// Parse emphasis or strong delimiters, falling back to literal text.
@@ -863,7 +887,10 @@ impl<'a> InlineParser<'a> {
                 self.pos += 1;
                 continue;
             }
-            if b == b'*' || b == b'_' || b == b'\n' || b == b'@' {
+            if b == b'*' || b == b'_' || b == b'\n' {
+                break;
+            }
+            if b == b'.' && is_call_dot(bytes, self.pos, self.end) {
                 break;
             }
             if b == b'\\' && self.pos + 1 < self.end && bytes[self.pos + 1] == b'\n' {
@@ -894,6 +921,24 @@ impl<'a> InlineParser<'a> {
             });
         }
     }
+}
+
+/// Whether the dot at `pos` can start a function call: the byte after it is a
+/// valid name start, and the byte before it is not a word character or
+/// another dot (`3.14`, `foo.bar`, `...` do not start calls).
+fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
+    if pos + 1 >= end {
+        return false;
+    }
+    let next = bytes[pos + 1];
+    if !(next.is_ascii_alphabetic() || next == b'_') {
+        return false;
+    }
+    if pos == 0 {
+        return true;
+    }
+    let prev = bytes[pos - 1];
+    !(prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'-' || prev == b'.')
 }
 
 /// Parse inline nodes from the contiguous source slice `[start, end)`.
@@ -1625,5 +1670,377 @@ mod tests {
         assert!(doc.front_matter.is_some());
         let fm = doc.front_matter.unwrap();
         assert_eq!(fm.fields.len(), 0);
+    }
+
+    // ------------------------------------------------------------------
+    // Quarkdown dot-call syntax
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn block_call_no_arguments() {
+        let doc = parse(".note\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+            } => {
+                assert_eq!(name, "note");
+                assert!(positional_args.is_empty());
+                assert!(named_args.is_empty());
+                assert!(body.is_none());
+                assert_eq!(*span, ByteSpan::new(0, 5));
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_call_positional_args() {
+        let doc = parse(".range {1} {10}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                name,
+                positional_args,
+                body,
+                span,
+                ..
+            } => {
+                assert_eq!(name, "range");
+                assert_eq!(positional_args.len(), 2);
+                assert_eq!(positional_args[0], Value::Number(1.0));
+                assert_eq!(positional_args[1], Value::Number(10.0));
+                assert!(body.is_none());
+                assert_eq!(*span, ByteSpan::new(0, 15));
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_call_named_args() {
+        let doc = parse(".panel width:{320} align:{center}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                named_args,
+                positional_args,
+                ..
+            } => {
+                assert!(positional_args.is_empty());
+                assert_eq!(named_args.len(), 2);
+                assert_eq!(named_args[0].0, "width");
+                assert_eq!(named_args[0].1, Value::Number(320.0));
+                assert_eq!(named_args[1].0, "align");
+                assert_eq!(named_args[1].1, Value::Identifier("center".into()));
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_call_mixed_args() {
+        let doc = parse(".panel {Introduction} width:{320}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                positional_args,
+                named_args,
+                ..
+            } => {
+                assert_eq!(positional_args.len(), 1);
+                assert_eq!(positional_args[0], Value::Identifier("Introduction".into()));
+                assert_eq!(named_args.len(), 1);
+                assert_eq!(named_args[0].0, "width");
+                assert_eq!(named_args[0].1, Value::Number(320.0));
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_call_with_indented_body() {
+        let doc = parse(".panel {Intro}\n    Hello world\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { name, body, .. } => {
+                assert_eq!(name, "panel");
+                let body_blocks = body.as_ref().expect("body");
+                assert_eq!(body_blocks.len(), 1);
+                match &body_blocks[0] {
+                    Block::Paragraph { content, span } => {
+                        assert_text(&content[0], "Hello world");
+                        // Body text starts at the 4-column indentation (line 1, col 4);
+                        // paragraph span runs to the end of the body line.
+                        assert_eq!(*span, ByteSpan::new(19, 31));
+                    }
+                    other => panic!("expected body paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected directive call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_call_body_span_covers_indented_lines() {
+        let doc = parse(".note {A}\n  line one\n  line two\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { body, .. } => {
+                let body_blocks = body.as_ref().expect("body");
+                assert_eq!(body_blocks.len(), 1);
+                match &body_blocks[0] {
+                    Block::Paragraph { span, .. } => {
+                        // Body covers both lines: from first content byte to line end.
+                        assert_eq!(*span, ByteSpan::new(12, 32));
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_body_may_contain_markdown_and_nested_calls() {
+        let doc = parse(".panel {Outer}\n    Hello\n\n    .note {Nested}\n        Nested body\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { name, body, .. } => {
+                assert_eq!(name, "panel");
+                let body_blocks = body.as_ref().expect("body");
+                assert_eq!(body_blocks.len(), 2, "expected paragraph + nested call");
+                match &body_blocks[0] {
+                    Block::Paragraph { content, .. } => assert_text(&content[0], "Hello"),
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+                match &body_blocks[1] {
+                    Block::DirectiveCall {
+                        name,
+                        positional_args,
+                        body,
+                        span,
+                        ..
+                    } => {
+                        assert_eq!(name, "note");
+                        assert_eq!(positional_args.len(), 1);
+                        assert_eq!(positional_args[0], Value::Identifier("Nested".into()));
+                        // Nested call on its own line: starts after its indentation.
+                        assert_eq!(*span, ByteSpan::new(30, 44));
+                        let nested_body = body.as_ref().expect("nested body");
+                        assert_eq!(nested_body.len(), 1);
+                        match &nested_body[0] {
+                            Block::Paragraph { content, .. } => {
+                                assert_text(&content[0], "Nested body")
+                            }
+                            other => panic!("expected paragraph, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected nested call, got {other:?}"),
+                }
+            }
+            other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn body_requires_minimum_indentation() {
+        // A non-indented following line is not a body part.
+        let doc = parse(".note\nplain text\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { body, .. } => assert!(body.is_none()),
+            other => panic!("expected call, got {other:?}"),
+        }
+        assert!(matches!(doc.nodes[1], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn body_single_tab_counts_as_body() {
+        let doc = parse(".note\n\ttabbed body\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { body, .. } => {
+                let body_blocks = body.as_ref().expect("body");
+                assert_eq!(body_blocks.len(), 1);
+                match &body_blocks[0] {
+                    Block::Paragraph { content, .. } => assert_text(&content[0], "tabbed body"),
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn body_stops_at_less_indented_line() {
+        let doc = parse(".panel\n    indented\nnot indented\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall { body, .. } => {
+                let body_blocks = body.as_ref().expect("body");
+                assert_eq!(body_blocks.len(), 1);
+            }
+            other => panic!("expected call, got {other:?}"),
+        }
+        assert!(
+            matches!(doc.nodes[1], Block::Paragraph { .. }),
+            "second node"
+        );
+    }
+
+    #[test]
+    fn call_with_trailing_text_is_inline_call() {
+        let doc = parse(".note trailing text here\n");
+        // The call does not own the line, so the whole line is a paragraph
+        // containing an inline call.
+        match &doc.nodes[0] {
+            Block::Paragraph { content, .. } => {
+                match &content[0] {
+                    Inline::DirectiveCall { name, span, .. } => {
+                        assert_eq!(name, "note");
+                        assert_eq!(*span, ByteSpan::new(0, 5));
+                    }
+                    other => panic!("expected inline call, got {other:?}"),
+                }
+                assert_text(&content[1], " trailing text here");
+            }
+            other => panic!("expected paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inline_call_in_sentence() {
+        let doc = parse("See .note {x} for details.\n");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        assert_text(&content[0], "See ");
+        match &content[1] {
+            Inline::DirectiveCall {
+                name,
+                positional_args,
+                span,
+                ..
+            } => {
+                assert_eq!(name, "note");
+                assert_eq!(positional_args.len(), 1);
+                assert_eq!(positional_args[0], Value::Identifier("x".into()));
+                assert_eq!(*span, ByteSpan::new(4, 13));
+            }
+            other => panic!("expected inline call, got {other:?}"),
+        }
+        assert_text(&content[2], " for details.");
+    }
+
+    #[test]
+    fn inline_call_does_not_parse_in_numbers() {
+        let doc = parse("pi is 3.14 exactly\n");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "pi is 3.14 exactly");
+    }
+
+    #[test]
+    fn ellipsis_is_literal_text() {
+        let doc = parse("...and more\n");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "...and more");
+    }
+
+    #[test]
+    fn nested_call_inside_argument() {
+        let doc = parse(".outer {.inner {value}}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                positional_args, ..
+            } => {
+                assert_eq!(positional_args.len(), 1);
+                match &positional_args[0] {
+                    Value::Content(content) => {
+                        assert_eq!(content.len(), 1);
+                        match &content[0] {
+                            Inline::DirectiveCall {
+                                name,
+                                positional_args,
+                                span,
+                                ..
+                            } => {
+                                assert_eq!(name, "inner");
+                                assert_eq!(positional_args.len(), 1);
+                                assert_eq!(positional_args[0], Value::Identifier("value".into()));
+                                assert_eq!(*span, ByteSpan::new(8, 22));
+                            }
+                            other => panic!("expected nested call, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected content value, got {other:?}"),
+                }
+            }
+            other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn argument_with_markdown_is_content() {
+        let doc = parse(".fn {some *text* here}\n");
+        match &doc.nodes[0] {
+            Block::DirectiveCall {
+                positional_args, ..
+            } => match &positional_args[0] {
+                Value::Content(content) => {
+                    assert_eq!(content.len(), 3);
+                    assert_text(&content[0], "some ");
+                    assert!(matches!(content[1], Inline::Emphasis { .. }));
+                    assert_text(&content[2], " here");
+                }
+                other => panic!("expected content value, got {other:?}"),
+            },
+            other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_calls_do_not_panic_and_fall_back_to_paragraph() {
+        for input in [
+            ".foo {",
+            ".foo {value",
+            ".foo key:{",
+            ".foo key:{value",
+            ".foo width:{x} {y}",
+        ] {
+            let doc = parse(input);
+            // Recoverable: the line becomes a paragraph; no panic.
+            assert!(
+                matches!(doc.nodes[0], Block::Paragraph { .. }),
+                "input {input:?} should fall back to paragraph"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_unclosed_body_brace() {
+        let doc = parse(".foo {\ntext\n");
+        assert!(matches!(doc.nodes[0], Block::Paragraph { .. }));
+        let content = paragraph_inlines(&doc);
+        // The failed call is recovered as literal characters.
+        assert_eq!(content.len(), 4);
+        assert_text(&content[0], ".");
+        assert_text(&content[1], "foo {");
+        assert!(matches!(content[2], Inline::SoftBreak { .. }));
+        assert_text(&content[3], "text");
+    }
+
+    #[test]
+    fn dot_without_name_is_literal_text() {
+        let doc = parse("like . this\n");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(joined_text(content), "like . this");
+    }
+
+    #[test]
+    fn block_call_then_blank_then_text_not_body() {
+        let doc = parse(".note\n\nParagraph after\n");
+        assert!(matches!(doc.nodes[0], Block::DirectiveCall { .. }));
+        assert!(matches!(doc.nodes[1], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn block_call_underscore_name() {
+        let doc = parse(".my_call {v}\n");
+        assert!(matches!(
+            &doc.nodes[0],
+            Block::DirectiveCall { name, .. } if name == "my_call"
+        ));
     }
 }
