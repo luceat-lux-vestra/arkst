@@ -371,7 +371,7 @@ max_loop_iterations = 10000
 max_recursion_depth = 64
 
 [compatibility]
-profile = "quarkdown-v0.9"
+profile = "quarkdown-v2.5"
 strict = false
 ```
 
