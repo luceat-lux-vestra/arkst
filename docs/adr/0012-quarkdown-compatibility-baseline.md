@@ -21,11 +21,14 @@ further syntax and functionality, including:
 - new built-in functions (e.g. `.json` data loading, `.markdown`, `.llmstxt`,
   `.code` as a primitive)
 
-Even though the basic dot-prefixed call + brace-argument model is unchanged
-from 0.9.x through 2.5.0 (verified against the public wiki, accessed
-2026-08-08), keeping an ancient version as the reference baseline makes the
-reference for future semantic/evaluator work unclear, and misrepresents the
-Quarkdown syntax today's users actually write.
+The current v2.5.0 documentation (public wiki, accessed 2026-08-08)
+describes the same basic dot-prefixed call + brace-argument model on which
+Scribium's existing parser subset is based. Scribium's earlier compatibility
+baseline was 0.9.x; no claim is made that the upstream grammar was verified
+to be identical in every release in between. Keeping an ancient version as
+the reference baseline nonetheless makes the reference for future
+semantic/evaluator work unclear, and misrepresents the Quarkdown syntax
+today's users actually write.
 
 This ADR decides the *reference version*. The *approach* to compatibility
 (documented subset, clean-room implementation, per-feature compatibility

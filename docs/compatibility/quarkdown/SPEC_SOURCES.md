@@ -14,7 +14,7 @@ Quarkdown-compatible feature implementation.
 
 | Source                                        | Title / Citation                                   | Used For                                        | Date Accessed |
 |-----------------------------------------------|----------------------------------------------------|-------------------------------------------------|---------------|
-| GitHub release tag `v2.5.0`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.0 | Reference baseline identification; release notes confirm the dot-and-brace call grammar and document v2.5.0 additions (`.json` data loading, `.markdown`, `.llmstxt`) | 2026-08-08 |
+| GitHub release tag `v2.5.0`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.0 | Reference baseline identification and v2.5.0 release additions such as `.markdown`, `.llmstxt`, `.code` and `.json` | 2026-08-08 |
 | Quarkdown wiki (badged **2.5.0**)              | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Dot-prefixed calls; positional, named, and mixed arguments; nested calls; block vs inline calls; indented bodies | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call"  | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
 | Quarkdown wiki — "Lambda"                      | https://quarkdown.com/wiki/lambda/ | Implicit positional references (`.1`, `.2`, ...) in lambdas | 2026-08-08 |
@@ -25,16 +25,20 @@ Quarkdown-compatible feature implementation.
 The grammar implemented in Scribium is limited to the **function-call
 syntax** documented on the wiki page above, restricted to the scope in
 `docs/compatibility/quarkdown/README.md`, plus the **implicit positional
-references** (`.1`, `.2`, ...). The basic dot-and-braces call grammar is
-documented consistently across the wiki's release history; the reference
-baseline is the v2.5.0 wiki (badge `2.5.0`).
+references** (`.1`, `.2`, ...).
 
-The wiki pages carry a `2.5.0` version badge as of the access date. Where a
-documentation page or release notes describe behavior, the claim recorded in
-the compatibility matrix is limited to what the page states; no unverified
-v2.5.0 behaviors are assumed. The `docs/latest/…` API pages above are
-unversioned ("latest"); they are cited only for claims that the versioned
-wiki also confirms (implicit references).
+The reference baseline is the v2.5.0 wiki. Version provenance is recorded per
+source:
+
+- The **function-call syntax** page carries a `2.5.0` badge as of
+  2026-08-08.
+- The **Lambda** wiki page carries a `2.4.1` badge as of 2026-08-08 and is
+  used only as documentation for implicit positional references; it
+  documents already existing behavior and is not evidence that the feature
+  was introduced in v2.5.0.
+- The **`docs/latest/…` API pages** are unversioned and are corroborating
+  sources rather than evidence that a behavior was introduced in or
+  uniquely belongs to v2.5.0.
 
 URLs other than those listed above were not consulted for this feature set.
 

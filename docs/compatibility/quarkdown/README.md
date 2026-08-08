@@ -15,10 +15,13 @@ divergences.
 
 Scribium does **not** claim full Quarkdown v2.5.0 compatibility. The
 compatibility contract is the **documented subset** defined by this document:
-only the features listed in the Feature Matrix below, backed by the
-provenance records in `SPEC_SOURCES.md`, are part of the contract. Features
-that Quarkdown v2.5.0 documents but Scribium does not implement are not bugs;
-they are outside the contract until recorded in this matrix (see ADR 0012).
+only the **Implemented** rows in the Feature Matrix below — at the stated
+compatibility level and backed by conformance evidence recorded in
+`SPEC_SOURCES.md` — are part of the contract. The Feature Matrix also lists
+`Planned` and `Not implemented` rows; those are tracking entries and
+constitute **no** compatibility claim. Features that Quarkdown v2.5.0
+documents but Scribium does not implement are not bugs; they are outside the
+contract until implemented and recorded in this matrix (see ADR 0012).
 
 The Quarkdown function-call grammar is implemented clean-room from the public
 documentation, notably *"Syntax of a function call"* on the Quarkdown wiki.
@@ -121,7 +124,9 @@ independently_authored_input: |
 observed_reference_behavior: |
   Dot-prefixed names form function calls; each argument is wrapped in
   curly braces; named arguments use name:{value}; indented lines after
-  a block call form its body. Confirmed stable across 0.9.x — v2.5.0.
+  a block call form its body. The current v2.5.0 documentation describes the
+  same basic dot-prefixed, brace-argument model on which Scribium's existing
+  parser subset is based.
 scribium_behavior: |
   Parses dot calls, positional/named arguments, nested calls, and
   indented bodies into the shared DirectiveCall AST.
@@ -136,13 +141,13 @@ tests (clean-room policy, see `docs/adr/0007-quarkdown-compatibility-scope-and-c
 ## Provenance
 
 The call grammar was derived from the public documentation *"Syntax of a
-function call"* (wiki, currently badged `2.5.0`, accessed 2026-08-08).
-While the reference baseline is now **Quarkdown v2.5.0**, the basic
-dot-and-braces grammar need not be pinned to the most recent series: the same
-wiki page documents the constructs since earlier releases, and the
-`::` chaining / tight-brace-wrapped / line-continuation forms are documented
-there but deferred. `SPEC_SOURCES.md` documents the source list, version tags,
-and accessed dates.
+function call"* (wiki, badged `2.5.0`, accessed 2026-08-08). The current
+v2.5.0 documentation describes the same basic dot-prefixed, brace-argument
+model on which Scribium's parser subset is based. Scribium's previous
+compatibility baseline was 0.9.x, but no claim is made that the upstream
+grammar was verified to be identical across every version in between.
+`SPEC_SOURCES.md` documents the source list, per-source version badges, and
+accessed dates.
 
 ## Known Divergences
 
