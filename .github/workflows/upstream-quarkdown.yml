@@ -147,7 +147,7 @@ jobs:
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
           # Use gh api issues endpoint with explicit GET method, filter by body content
-          EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 --jq '.[] | select(.body | contains($MARKER)) | .number' -f MARKER="$MARKER" | head -1)
+          EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 --jq '.[] | select(.body | contains("<!-- scribium-upstream-drift:'"$ISSUE_KEY"'-->")) | .number' | head -1)
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
