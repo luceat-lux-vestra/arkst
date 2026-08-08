@@ -1,0 +1,12 @@
+name: Test Workflow
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/upstream-observer-foundation]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Hello World"
