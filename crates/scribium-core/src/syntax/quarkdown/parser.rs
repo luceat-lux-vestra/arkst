@@ -103,15 +103,48 @@ impl ParseError {
 
 /// Characters permitted in a function-call name (after the leading dot).
 fn is_function_name_char(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
+    is_normal_call_name_char(c)
 }
 
 /// The leading character of a *normal* name must be a letter or underscore.
-/// is `1..=9` are the separate `implicit-positional-reference` grammar
+/// `1..=9` are the separate `implicit-positional-reference` grammar
 /// (`.1`, `.2`, ...), which only accepts further digits. A leading `0`
 /// (e.g. `.0`) is neither and stays ordinary text.
 fn is_name_start(c: u8) -> bool {
+    is_normal_call_name_start(c)
+}
+
+/// Checks if a byte is a valid start character for a `normal-call-name`.
+/// Per Quarkdown grammar: `[A-Za-z_]` (ASCII letter or underscore).
+pub(crate) fn is_normal_call_name_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
+}
+
+/// Checks if a byte is a valid continuation character for a `normal-call-name`.
+/// Per Quarkdown grammar: `[A-Za-z0-9_-]` (ASCII alphanumeric, underscore, or hyphen).
+pub(crate) fn is_normal_call_name_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
+}
+
+/// Checks if a string is a valid `normal-call-name` per Quarkdown grammar:
+/// `[A-Za-z_][A-Za-z0-9_-]*`
+pub(crate) fn is_valid_normal_call_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' && c != '-' {
+            return false;
+        }
+    }
+    true
 }
 
 /// Characters that glue to an adjacent call, making the construct a single
@@ -819,5 +852,74 @@ mod tests {
         assert_eq!(d.positional_args.len(), 2);
         let d2 = call(".range{1}{ 14}");
         assert_eq!(d2.positional_args.len(), 2);
+    }
+
+    #[test]
+    fn grammar_parity_normal_call_name_valid() {
+        // These names should be accepted by both parser and evaluator
+        let valid = [
+            "a",
+            "name",
+            "Name",
+            "NAME",
+            "_",
+            "_name",
+            "name123",
+            "valid-name",
+            "valid_name",
+            "a-b-c",
+            "a_b_c",
+        ];
+        for name in valid {
+            assert!(
+                is_valid_normal_call_name(name),
+                "parser: {name} should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn grammar_parity_normal_call_name_invalid() {
+        // These names should be rejected by both parser and evaluator
+        let invalid = [
+            "", "1name", "-name", "name!", "name@", "name#", "name$", "name%", "name^", "name&",
+            "name*", "name(", "name)", "name+", "name=", "name[", "name]", "name{", "name}",
+            "name|", "name\\", "name:", "name;", "name\"", "name'", "name<", "name>", "name,",
+            "name.", "name?", "name/", "na me", "na\tme", "na\rme", "na\nme",
+        ];
+        for name in invalid {
+            assert!(
+                !is_valid_normal_call_name(name),
+                "parser: {name} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn grammar_parity_is_name_start() {
+        // is_name_start should match is_normal_call_name_start
+        for c in 0..=255 {
+            let expected = is_normal_call_name_start(c);
+            let actual = is_name_start(c);
+            assert_eq!(
+                actual, expected,
+                "is_name_start({}) should match is_normal_call_name_start",
+                c as char
+            );
+        }
+    }
+
+    #[test]
+    fn grammar_parity_is_function_name_char() {
+        // is_function_name_char should match is_normal_call_name_char
+        for c in 0..=255 {
+            let expected = is_normal_call_name_char(c);
+            let actual = is_function_name_char(c);
+            assert_eq!(
+                actual, expected,
+                "is_function_name_char({}) should match is_normal_call_name_char",
+                c as char
+            );
+        }
     }
 }

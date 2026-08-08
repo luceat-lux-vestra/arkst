@@ -544,4 +544,290 @@ mod tests {
             .collect();
         assert!(rendered.contains("inline"));
     }
+
+    #[test]
+    fn compile_variable_declaration_and_reference() {
+        let (result, _) = compile_source(".var {name} {Scribium}\nHello .name\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[1] else {
+            panic!()
+        };
+        assert_eq!(text, "Scribium");
+    }
+
+    #[test]
+    fn compile_variable_boolean_in_conditional() {
+        let (result, _) = compile_source(".var {enabled} {yes}\n.if {.enabled}\n    visible\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "visible");
+    }
+
+    #[test]
+    fn compile_variable_false_conditional() {
+        let (result, _) = compile_source(".var {enabled} {no}\n.if {.enabled}\n    hidden\n");
+        assert!(result.diagnostics.is_empty());
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_variable_ifnot() {
+        let (result, _) = compile_source(".var {enabled} {no}\n.ifnot {.enabled}\n    visible\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_variable_explicit_reassignment() {
+        let (result, _) = compile_source(".var {name} {A}\n.var {name} {B}\n.name\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "B");
+    }
+
+    #[test]
+    fn compile_variable_name_reassignment() {
+        let (result, _) = compile_source(".var {name} {A}\n.name\n.name {B}\n.name\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 2);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "A");
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[1] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "B");
+    }
+
+    #[test]
+    fn compile_variable_inline_use() {
+        let (result, _) = compile_source(".var {name} {world}\nHello **.name**\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Strong { content, .. } = &content[1] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "world");
+    }
+
+    #[test]
+    fn compile_variable_block_variable() {
+        let (result, _) = compile_source(".var {section}\n    # Title\n    body\n.section\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 2);
+        let IrNode::Heading { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "Title");
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[1] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "body");
+    }
+
+    #[test]
+    fn compile_variable_conditional_declaration() {
+        let (result, _) = compile_source(".if {false}\n    .var {x} {hidden}\n.x\n");
+        assert!(result.diagnostics.is_empty());
+        // x not declared, preserved as function call
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::FunctionCall { name, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        assert_eq!(name, "x");
+    }
+
+    #[test]
+    fn compile_variable_unknown_preserved() {
+        let (result, _) = compile_source(".unknown\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::FunctionCall { name, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        assert_eq!(name, "unknown");
+    }
+
+    #[test]
+    fn compile_variable_malformed_reports_e3002() {
+        let (result, source_id) = compile_source(".var\n");
+        assert_eq!(result.diagnostics.len(), 1);
+        let diag = &result.diagnostics[0];
+        assert_eq!(diag.code, "E3002");
+        assert!(matches!(diag.severity, Severity::Error));
+        assert_eq!(diag.primary.as_ref().map(|s| s.source_id), Some(source_id));
+    }
+
+    #[test]
+    fn compile_variable_nested_in_block() {
+        let (result, _) =
+            compile_source(".var {section}\n    .if {true}\n        nested\n.section\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "nested");
+    }
+
+    #[test]
+    fn compile_variable_immutable_and_deterministic() {
+        let source = ".var {name} {A}\n.name\n";
+        let project1 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let project2 = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result1 = super::compile(&project1, &CompileOptions::default());
+        let result2 = super::compile(&project2, &CompileOptions::default());
+        assert_eq!(result1.ir, result2.ir);
+    }
+
+    #[test]
+    fn compile_variable_rich_content_block_reference() {
+        // .var {x} {**hello**} should preserve the strong content through parser -> evaluator
+        let (result, _) = compile_source(".var {x} {**hello**}\n.x\n");
+        assert!(
+            result.diagnostics.is_empty(),
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected paragraph, got {:?}", result.ir.nodes[0])
+        };
+        let IrInline::Strong {
+            content: strong_content,
+            ..
+        } = &content[0]
+        else {
+            panic!("expected strong, got {:?}", content[0])
+        };
+        let IrInline::Text { content: text, .. } = &strong_content[0] else {
+            panic!("expected text, got {:?}", strong_content[0])
+        };
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn compile_variable_rich_content_inline_reference() {
+        // .var {x} {**world**} / Hello .x should preserve strong in inline context
+        let (result, _) = compile_source(".var {x} {**world**}\nHello .x\n");
+        assert!(
+            result.diagnostics.is_empty(),
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!()
+        };
+        assert_eq!(content.len(), 2); // "Hello ", strong("world")
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "Hello ");
+        let IrInline::Strong {
+            content: strong_content,
+            ..
+        } = &content[1]
+        else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &strong_content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "world");
+    }
+
+    #[test]
+    fn compile_variable_invalid_name_reports_e3002() {
+        // .var {"bad name"} {hello} should report E3002
+        let (result, source_id) = compile_source(r#".var {"bad name"} {hello}"#);
+        assert_eq!(result.diagnostics.len(), 1);
+        let diag = &result.diagnostics[0];
+        assert_eq!(diag.code, "E3002");
+        assert!(matches!(diag.severity, Severity::Error));
+        assert!(diag.message.contains("Invalid variable name"));
+        assert_eq!(diag.primary.as_ref().map(|s| s.source_id), Some(source_id));
+    }
+
+    #[test]
+    fn compile_variable_reference_with_body_preserved_as_call() {
+        // .var {foo} {value} / .foo { body } should preserve the call with body
+        let (result, _) = compile_source(".var {foo} {value}\n.foo\n    body\n");
+        assert!(
+            result.diagnostics.is_empty(),
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        // Should be preserved as function call, not variable reference
+        assert_eq!(result.ir.nodes.len(), 1);
+        let IrNode::FunctionCall {
+            name,
+            body: call_body,
+            ..
+        } = &result.ir.nodes[0]
+        else {
+            panic!("expected function call, got {:?}", result.ir.nodes[0])
+        };
+        assert_eq!(name, "foo");
+        assert!(call_body.is_some());
+        let body_nodes = call_body.as_ref().unwrap();
+        assert_eq!(body_nodes.len(), 1);
+        let IrNode::Paragraph { content, .. } = &body_nodes[0] else {
+            panic!()
+        };
+        let IrInline::Text { content: text, .. } = &content[0] else {
+            panic!()
+        };
+        assert_eq!(text, "body");
+    }
 }

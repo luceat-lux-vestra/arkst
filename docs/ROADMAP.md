@@ -26,6 +26,7 @@ Core uses `VirtualProject` for all I/O — no filesystem access.
 **Dependencies:** None
 
 ## M1 — Quarkdown-Compatible Vertical Slice
+**Status:** Completed
 
 **Objective:** First end-to-end `.qd → Typst → PDF` pipeline.
 
@@ -38,9 +39,15 @@ front matter, deterministic output.
 > to a later milestone and tracked separately.
 
 ## M2 — Quarkdown Core Language + Markdown MVP
+**Status:** In progress
 
 **Objective:** Production-ready Quarkdown core subset and Markdown baseline.
 v0.1.0 release.
+
+| Item                                | Status       |
+|-------------------------------------|--------------|
+| Document-scope variable evaluation  | Completed    |
+| Remaining M2 features               | In progress  |
 
 ## M3 — Programmable Documents
 

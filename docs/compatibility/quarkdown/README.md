@@ -43,14 +43,14 @@ provenance records.
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Implemented      |
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
 | Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`        | Error                    | Implemented      |
-| Variables                      | —                                | —                        | Planned          |
+| Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
 | Iteration                      | —                                | —                        | Planned          |
 | Functions/components            | —                                | —                        | Planned          |
 | Include/read                   | —                                | —                        | Planned          |
 | Metadata                       | —                                | —                        | Planned          |
 | Row/column/grid                | —                                | —                        | Planned          |
-| Semantic evaluation            | —                                | —                        | Planned          |
+| Semantic evaluation            | `.if`/`.ifnot` + variables       | Partial / In progress    | Planned          |
 | Call chaining (`::`)           | `.a {x}::b {y}`                  | Not implemented          | Planned          |
 | Line continuation (`\`)        | `\` at end of line               | Not implemented          | Planned          |
 | Tight / brace-wrapped calls    | `.x` wrapped in braces at adjacency | Not implemented       | Planned          |
@@ -87,6 +87,7 @@ are kept separate on purpose.
 | Tight-call boundaries           | `quarkdown/parser.rs::tight_word_adjacency_makes_call_ordinary_text`, `quarkdown/parser.rs::symbols_are_valid_call_boundaries`, `quarkdown/parser.rs::implicit_reference_does_not_consume_arguments`, `markdown/parser.rs::tight_call_boundary_rejects_trailing_word`, `markdown/parser.rs::tight_call_hyphen_boundaries_are_valid`, `markdown/parser.rs::unicode_word_characters_are_tight_adjacency`, `markdown/parser.rs::inline_call_does_not_parse_in_numbers` |
 | Malformed-call diagnostics      | `quarkdown/parser.rs::positional_after_named_is_rejected` (`E2001`), `quarkdown/parser.rs::named_argument_without_braces_is_error` (`E2002`), `quarkdown/parser.rs::unclosed_argument_is_error` (`E2003`), `markdown/parser.rs::malformed_calls_produce_structured_diagnostics`, `markdown/parser.rs::malformed_calls_do_not_panic_and_fall_back_to_paragraph` |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
+| Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 
 ## Compatibility Levels
 
@@ -101,9 +102,10 @@ are kept separate on purpose.
 
 Function calls are currently **Parsed**: `.name`, positional arguments
 `{arg}`, named arguments `name:{arg}`, nested calls, and indented block
-bodies are parsed into the Scribium AST/IR. **Basic conditional evaluation
-(`.if` / `.ifnot` with boolean-literal conditions) is implemented**; full
-semantic evaluation remains the next milestone (see `docs/SYNTAX.md` and
+bodies are parsed into the Scribium AST/IR. **Conditional evaluation
+(`.if` / `.ifnot`) with boolean literals and variable references
+(`.if {.name}`) is implemented**. Full semantic evaluation (functions,
+iteration, components) remains the next milestone (see `docs/SYNTAX.md` and
 `docs/ROADMAP.md`). Note that a feature which currently fails to parse
 (e.g. `E2xxx` syntax errors on some input forms) is still labeled by its
 documented support level in the matrix — an input-level parse error is
@@ -185,6 +187,11 @@ accessed dates.
   and claimed. Rows marked **Planned** are *not* implemented; anything
   documented in Quarkdown but absent from this matrix must not be assumed to
   work in Scribium.
+- **Block variable evaluation timing:** Scribium evaluates block variable
+  content at declaration time (source order). The cited Quarkdown public
+  documentation does not explicitly specify evaluation timing for stored
+  block content. This behavior may be refined if upstream semantics are
+  clarified. See `docs/SYNTAX.md` for details.
 
 ## Features Outside the Contract
 

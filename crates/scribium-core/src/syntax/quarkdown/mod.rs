@@ -21,4 +21,5 @@
 mod parser;
 
 pub(crate) use parser::has_valid_call_boundary;
+pub(crate) use parser::is_valid_normal_call_name;
 pub use parser::{parse_directive_at, Arg, ArgContent, ParseError, QuarkdownCall};

@@ -6,7 +6,7 @@
 toolchain powered by the official Typst compiler. Quarkdown compatibility is a
 first-class requirement — not a deferred milestone.
 
-- **Current milestone:** M1 Vertical Slice (first `.qd → PDF` via Typst subprocess)
+- **Current milestone:** M2 Core Language + Markdown MVP
 - **Stability:** Pre-alpha, experimental
 - **Rendering backend:** Official Typst compiler (subprocess, in-process TBD)
 - **Non-goals:** Custom PDF/HTML renderers, SaaS, package registry
