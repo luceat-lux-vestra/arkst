@@ -61,10 +61,30 @@ a `.` followed by a function name:
 .function {arg} option:{value}
 ```
 
+### Function-name grammar
+
+```text
+normal-call-name:
+    [A-Za-z_][A-Za-z0-9_-]*
+
+implicit-positional-reference:
+    .[1-9][0-9]*
+```
+
+`normal-call-name` may be followed by `{arg}` / `name:{value}` arguments;
+`implicit-positional-reference` is a bare token and does not consume
+arguments. An implicit reference followed by a name/word character
+(`[A-Za-z0-9_-]`) is not recognized as a reference at all.
+
 Call syntax has the following properties:
 
 - The function name follows the dot directly: alphanumeric, `_` and `-` are
   allowed, the first character must be a letter or `_`.
+- **Implicit positional references** (`.1`, `.2`, `.12`, ...) are a separate
+  grammar case from normal function names: digits only, no leading `0`, and
+  a following name/word character keeps the whole token ordinary text
+  (`.1abc` is not a reference). They are bare reference tokens — unlike
+  normal calls they never take arguments (`.1 {item}` does not form a call).
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`.
 - Positional and named arguments may be mixed, but every argument after a

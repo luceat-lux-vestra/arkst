@@ -6,4 +6,4 @@ pub mod ast;
 pub mod parser;
 
 pub use ast::{Block, Document, Inline, ListItem, Value};
-pub use parser::parse;
+pub use parser::{parse, parse_with_diagnostics, ParseOutput, ParserDiagnostic};

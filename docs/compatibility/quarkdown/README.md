@@ -22,7 +22,7 @@ provenance records.
 | Feature                     | Syntax                 | Compatibility | Status      |
 |-----------------------------|------------------------|---------------|-------------|
 | Dot-prefixed call           | `.note`                | Parsed        | Implemented |
-| Implicit positional refs   | `.1 {item}`            | Parsed        | Implemented |
+| Implicit positional refs   | `.1`, `.2`, ...        | Parsed        | Implemented |
 | Positional arguments        | `.range {1} {10}`      | Parsed        | Implemented |
 | Named arguments             | `.panel width:{320}`   | Parsed        | Implemented |
 | Mixed positional/named      | `.panel {Intro} width:{320}` | Parsed | Implemented |

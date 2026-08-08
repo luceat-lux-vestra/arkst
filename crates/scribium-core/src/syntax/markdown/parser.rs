@@ -2247,6 +2247,7 @@ mod tests {
             (".foo {value", "E2003"),
             (".foo key:{", "E2003"),
             (".foo key:{value", "E2003"),
+            (".foo key:", "E2002"),
             (".foo width:{x} {y}", "E2001"),
         ] {
             let output = parse_with_diagnostics(input);
@@ -2270,7 +2271,7 @@ mod tests {
 
     #[test]
     fn valid_calls_produce_no_diagnostics() {
-        for input in [".foo {bar}\n", ".foo key:{value}\n", ".1 {item}\n"] {
+        for input in [".foo {bar}\n", ".foo key:{value}\n", ".1\n"] {
             let output = parse_with_diagnostics(input);
             assert!(output.diagnostics.is_empty(), "input {input:?}");
             assert!(matches!(
@@ -2282,10 +2283,51 @@ mod tests {
 
     #[test]
     fn implicit_reference_call_at_block_level() {
-        let doc = parse(".1 {item}\n");
+        let doc = parse(".1\n");
         assert!(matches!(
             &doc.nodes[0],
             Block::DirectiveCall { name, .. } if name == "1"
+        ));
+    }
+
+    #[test]
+    fn implicit_reference_is_not_a_call_with_positional_argument() {
+        for input in [".1 {item}\n", ".12foo\n", ".1abc\n"] {
+            let doc = parse(input);
+            // Block level: the line must not become a directive block that
+            // turned `.1 {item}` into a call with a positional argument.
+            assert!(
+                matches!(&doc.nodes[0], Block::Paragraph { .. }),
+                "input {input:?} should stay a paragraph"
+            );
+            assert!(
+                !matches!(
+                    &doc.nodes[0],
+                    Block::DirectiveCall { positional_args, .. }
+                        if !positional_args.is_empty()
+                ),
+                "input {input:?} must not be a call with positional args"
+            );
+        }
+        // Inline level: `.1abc` / `.12foo` must not split into `ref + text`.
+        let doc = parse("see .1abc\n");
+        match &doc.nodes[0] {
+            Block::Paragraph { content, .. } => {
+                let joined = joined_text(content);
+                assert_eq!(joined, "see .1abc");
+            }
+            other => panic!("expected paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_reference_inline_boundaries() {
+        // Punctuation/whitespace after the reference keeps it a call.
+        let doc = parse("The value is .1.\n");
+        let content = paragraph_inlines(&doc);
+        assert!(content.iter().any(
+            |inline| matches!(inline, Inline::DirectiveCall { name, positional_args, .. }
+                if name == "1" && positional_args.is_empty())
         ));
     }
 }

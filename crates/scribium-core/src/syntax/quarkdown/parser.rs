@@ -151,6 +151,28 @@ pub fn parse_directive_at(
     }
     let name = source[name_start..name_end].to_string();
 
+    if matches!(bytes[name_start], b'1'..=b'9') {
+        // Implicit positional reference (`.1`, `.2`, `.12`, ...). It is a
+        // bare reference token, not a function call:
+        // - a following name/word character glues to the reference
+        //   (`.1abc`, `.12foo` are ordinary text, never `ref + text`);
+        // - it never enters the argument-consumption loop, so `.1 {item}`
+        //   is NOT a call with a positional argument.
+        if name_end < bytes.len() && is_name_char(bytes[name_end]) {
+            return Ok(None);
+        }
+        return Ok(Some((
+            QuarkdownCall {
+                name,
+                name_span: ByteSpan::new(start, name_end),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                span: ByteSpan::new(start, name_end),
+            },
+            name_end,
+        )));
+    }
+
     let mut cursor = skip_horizontal_whitespace(source, name_end);
     let mut positional_args: Vec<Arg> = Vec::new();
     let mut named_args: Vec<NamedArg> = Vec::new();
@@ -414,6 +436,44 @@ mod tests {
             assert!(d.positional_args.is_empty());
             assert!(d.named_args.is_empty());
             assert_eq!(d.name_span, ByteSpan::new(0, src.len()));
+        }
+    }
+
+    #[test]
+    fn implicit_reference_boundary_stops_at_word_characters() {
+        // A name/word character glued to the reference keeps the whole
+        // token ordinary text: it must never split into `ref + text`.
+        no_call(".1abc");
+        no_call(".12foo");
+        no_call(".1e5");
+        no_call(".1-1");
+
+        // Word boundaries (whitespace, punctuation, EOF) still form refs.
+        for src in [".1", ".1.", ".2 ", ".12\n"] {
+            match parse_directive_at(src, 0) {
+                Ok(Some((d, end))) => {
+                    assert!(d.name.starts_with(|c: char| c.is_ascii_digit()));
+                    assert_eq!(end, 2 + d.name.len().saturating_sub(1), "ref {src:?}");
+                    assert!(d.positional_args.is_empty(), "ref {src:?}");
+                }
+                other => panic!("expected implicit ref in {src:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn implicit_reference_does_not_consume_arguments() {
+        // `.1 {item}` is NOT a call with a positional argument: the
+        // reference token ends at the name, the rest stays ordinary text.
+        match parse_directive_at(".1 {item}", 0) {
+            Ok(Some((d, end))) => {
+                assert_eq!(d.name, "1");
+                assert!(d.positional_args.is_empty());
+                assert!(d.named_args.is_empty());
+                assert_eq!(d.span, ByteSpan::new(0, 2));
+                assert_eq!(end, 2);
+            }
+            other => panic!("expected bare implicit ref, got {other:?}"),
         }
     }
 

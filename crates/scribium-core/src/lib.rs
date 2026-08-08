@@ -64,12 +64,25 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
         };
     };
 
-    let doc = syntax::markdown::parse(source);
-    let ir = ast_to_ir::ast_to_ir(&doc, source_id, project.metadata());
-    CompileResult {
-        ir,
-        diagnostics: vec![],
-    }
+    let parsed = syntax::markdown::parse_with_diagnostics(source);
+    let ir = ast_to_ir::ast_to_ir(&parsed.document, source_id, project.metadata());
+    let diagnostics = parsed
+        .diagnostics
+        .into_iter()
+        .map(|d| Diagnostic {
+            code: d.code.to_string(),
+            severity: Severity::Error,
+            message: d.message,
+            primary: Some(SourceSpan {
+                source_id,
+                start: d.span.start,
+                end: d.span.end,
+            }),
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        })
+        .collect();
+    CompileResult { ir, diagnostics }
 }
 
 /// Options for the compilation pipeline.
@@ -87,7 +100,7 @@ pub struct CompileResult {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CompileOptions, VirtualPathBuf, VirtualProjectBuilder};
+    use crate::{CompileOptions, Severity, VirtualPathBuf, VirtualProjectBuilder};
     #[test]
     fn it_compiles_empty_document() {
         let project = VirtualProjectBuilder::new()
@@ -356,5 +369,50 @@ mod tests {
             // Nodes should have same SourceIds in their spans
             assert_eq!(span1, span2);
         }
+    }
+
+    fn compile_source(source: &str) -> (crate::CompileResult, crate::SourceId) {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let source_id = project.sources().get_id(project.entry()).unwrap();
+        (
+            super::compile(&project, &CompileOptions::default()),
+            source_id,
+        )
+    }
+
+    #[test]
+    fn compile_propagates_parser_diagnostics() {
+        for (input, expected_code) in [
+            (".foo {", "E2003"),
+            (".foo width:{x} {y}", "E2001"),
+            (".foo key:", "E2002"),
+        ] {
+            let (result, source_id) = compile_source(input);
+            assert_eq!(result.diagnostics.len(), 1, "input {input:?}");
+            let diag = &result.diagnostics[0];
+            assert_eq!(diag.code, expected_code, "input {input:?}");
+            assert!(matches!(diag.severity, Severity::Error), "input {input:?}");
+            assert!(!diag.message.is_empty(), "input {input:?}");
+            assert_eq!(
+                diag.primary.as_ref().map(|s| s.source_id),
+                Some(source_id),
+                "input {input:?}"
+            );
+            // Parser recovery is preserved: the IR is still produced.
+            assert_eq!(result.ir.nodes.len(), 1, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn compile_reports_no_diagnostics_for_valid_input() {
+        let (result, _) = compile_source(".foo {bar}\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.ir.nodes.len(), 1);
     }
 }
