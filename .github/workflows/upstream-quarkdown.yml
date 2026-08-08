@@ -147,7 +147,7 @@ jobs:
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
           # Write jq filter with embedded marker to avoid shell escaping issues
-          printf '%s\n' 'map(select(.body | contains("<!-- scribium-upstream-drift:'"$ISSUE_KEY"'-->"))) | .[0].number // empty' > /tmp/jq_filter.jq
+          printf '%s\n' 'map(select(.body | contains("<!-- scribium-upstream-drift:'"$ISSUE_KEY"' -->"))) | .[0].number // empty' > /tmp/jq_filter.jq
           EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 --jq "$(cat /tmp/jq_filter.jq)" | head -1)
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
