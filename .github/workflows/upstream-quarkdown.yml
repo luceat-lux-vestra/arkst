@@ -81,3 +81,15 @@ jobs:
             --observed-tag "$OBSERVED_TAG" \
             --observed-url "$OBSERVED_URL" \
             --output json
+
+      - name: Check if drift detected
+        id: check_drift
+        env:
+          DRIFT_RESULT: ${{ steps.drift.outputs.result }}
+        run: |
+          STATUS=$(echo "$DRIFT_RESULT" | jq -r '.status')
+          if [ "$STATUS" = "drift" ]; then
+            echo "drift=true" >> $GITHUB_OUTPUT
+          else
+            echo "drift=false" >> $GITHUB_OUTPUT
+          fi
