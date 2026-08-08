@@ -93,3 +93,37 @@ jobs:
           else
             echo "drift=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Print dry-run result
+        if: github.event.inputs.dry_run == 'true'
+        env:
+          DRIFT_RESULT: ${{ steps.drift.outputs.result }}
+        run: |
+          echo "=== DRY RUN ==="
+          echo "Supported baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
+          echo "Observed tag: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
+          echo "Status: $(echo "$DRIFT_RESULT" | jq -r '.status')"
+          echo "Issue key: $(echo "$DRIFT_RESULT" | jq -r '.issue_key // "none"')"
+          echo ""
+          echo "Issue payload that would be created:"
+          echo "$DRIFT_RESULT" | jq -r '"[upstream] Quarkdown \(.observed_tag) detected (baseline \(.supported_baseline))"'
+          echo ""
+          echo "Supported baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
+          echo "Observed stable release: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
+          echo "Upstream release URL: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag as $tag | "https://github.com/iamgio/quarkdown/releases/tag/" + $tag')"
+          echo "Detection source: scheduled upstream observer"
+          echo ""
+          echo "Checklist:"
+          echo "- [ ] Review permitted public specification changes"
+          echo "- [ ] Identify affected Scribium compatibility features"
+          echo "- [ ] Add independently authored conformance cases"
+          echo "- [ ] Perform black-box observations where necessary"
+          echo "- [ ] Document known divergences"
+          echo "- [ ] Implement required compatibility changes"
+          echo "- [ ] Run full conformance suite"
+          echo "- [ ] Update supported baseline only after verification"
+          echo ""
+          echo "Clean-room warning:"
+          echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
+          echo ""
+          echo "<!-- scribium-upstream-drift:quarkdown:$(echo "$DRIFT_RESULT" | jq -r '.observed_tag') -->"
