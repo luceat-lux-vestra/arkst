@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown Ordered Lists (M2)**: Ordered list parsing (`1. `, `2. `, `N. `) and
+  lowering to Typst with starting ordinal preservation, parentheses marker
+  (`1) `, `2) `) support, and ordered/unordered nesting in either direction.
+  - Ordered list AST node with `start` field in `Block::OrderedList`
+  - Ordered list IR node in `IrNode::OrderedList`
+  - Typst lowering to native Typst enumeration syntax; nested lists are
+    indented by two spaces per level and keep their hierarchy
+  - Content indentation is derived from each item's own marker width (no
+    fixed 3-space rule); only the first ordinal sets the list start, so
+    `3. A` then `9. B` is one list starting at 3
+  - Parser tests covering basic lists, non-1 start, nested lists, mixed
+    ordered/unordered nesting, source spans, and malformed prefixes
+  - IR conversion and lowering tests
 - **M2 Core Language**: Document-scope variable evaluation (`.var` declaration, parameterless reference, reassignment, block/content variables, conditional integration)
   - `.var {name} {value}` — scalar declarations (string, number, boolean, identifier)
   - `.var {name} {**content**}` — rich/content-valued declarations preserving strong/emphasis

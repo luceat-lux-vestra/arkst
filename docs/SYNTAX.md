@@ -11,6 +11,7 @@
 - Indentation: not semantically significant except in fenced code / verbatim
 - Whitespace: spaces and tabs; no NBSP or zero-width chars in identifiers
 - Comments: `// line comment` (Planned) or within Markdown HTML comment syntax
+
 ## Markdown Baseline (Partial)
 
 Scribium targets a CommonMark/GFM-compatible subset. The M1 parser implements
@@ -36,8 +37,23 @@ Known M1 divergences (deterministic, documented in the parser module):
 - Indentation inside code blocks nested in list items is normalized
 - Blank lines produce no AST nodes (round-trip support is deferred)
 
+Implemented (M2):
+
+- Ordered lists (`1. `, `2. `, etc.) with nested lists and indented items
+  - Starting ordinal preserved when source begins at a value other than 1
+  - Only the first item's ordinal sets the start: `3. A` followed by `9. B`
+    is one list starting at `3` (later ordinals do not renumber the list)
+  - Parentheses marker (`1) `, `2) `) also supported; a list keeps one
+    delimiter, so `1. A` followed by `2) B` is two lists
+  - Ordered/unordered nesting in either direction
+  - Continuation/nested content indentation is derived per item from its own
+    marker width (e.g. `9. ` vs `10. `), not a fixed column
+  - Markers allow 1 to 9 digits; longer digit runs (`1234567890. `) are
+    literal text
+
 Planned (M2+):
-- Ordered lists, task lists
+
+- Task lists
 - Links (`[text](url)`)
 - Images (`![alt](url)`)
 - Blockquotes (`> `)
