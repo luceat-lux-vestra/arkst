@@ -144,3 +144,42 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Create drift issue
+        if: steps.check_drift.outputs.drift == 'true' && steps.check_issue.outputs.exists != 'true' && github.event.inputs.dry_run != 'true'
+        env:
+          OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
+          DRIFT_RESULT: ${{ steps.drift.outputs.result }}
+        run: |
+          SUPPORTED_BASELINE=$(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')
+          URL="https://github.com/iamgio/quarkdown/releases/tag/$OBSERVED_TAG"
+          ISSUE_KEY="quarkdown:$OBSERVED_TAG"
+          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+
+          cat > "$RUNNER_TEMP/upstream-issue.md" <<EOF
+Supported baseline: $SUPPORTED_BASELINE
+Observed stable release: $OBSERVED_TAG
+Upstream release URL: $URL
+Detection source: scheduled upstream observer
+
+**Checklist:**
+- [ ] Review permitted public specification changes
+- [ ] Identify affected Scribium compatibility features
+- [ ] Add independently authored conformance cases
+- [ ] Perform black-box observations where necessary
+- [ ] Document known divergences
+- [ ] Implement required compatibility changes
+- [ ] Run full conformance suite
+- [ ] Update supported baseline only after verification
+
+**Clean-room warning:**
+Do not inspect or translate Quarkdown implementation source while resolving this issue.
+
+$MARKER
+EOF
+
+          gh issue create \
+            --repo ${{ github.repository }} \
+            --title "[upstream] Quarkdown $OBSERVED_TAG detected (baseline $SUPPORTED_BASELINE)" \
+            --body-file "$RUNNER_TEMP/upstream-issue.md" \
+            --label "area:compatibility,type:compatibility,status:needs-decision"
