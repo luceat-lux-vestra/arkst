@@ -27,8 +27,10 @@ syntax** documented on the wiki page above, restricted to the scope in
 `docs/compatibility/quarkdown/README.md`, plus the **implicit positional
 references** (`.1`, `.2`, ...).
 
-The reference baseline is the v2.5.0 wiki. Version provenance is recorded per
-source:
+The reference baseline is **Quarkdown v2.5.0**. The v2.5.0-badged *"Syntax of
+a function call"* wiki page is the primary public specification source for
+the currently implemented function-call syntax subset. Version provenance is
+recorded per source:
 
 - The **function-call syntax** page carries a `2.5.0` badge as of
   2026-08-08.

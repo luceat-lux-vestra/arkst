@@ -15,10 +15,11 @@ divergences.
 
 Scribium does **not** claim full Quarkdown v2.5.0 compatibility. The
 compatibility contract is the **documented subset** defined by this document:
-only the **Implemented** rows in the Feature Matrix below — at the stated
-compatibility level and backed by conformance evidence recorded in
-`SPEC_SOURCES.md` — are part of the contract. The Feature Matrix also lists
-`Planned` and `Not implemented` rows; those are tracking entries and
+only rows marked `Implemented`, at the stated compatibility level, and covered
+by Scribium conformance tests (see [Conformance Evidence](#conformance-evidence))
+are part of the current compatibility contract. `SPEC_SOURCES.md` records the
+upstream specification provenance for those claims. The Feature Matrix also
+lists `Planned` and `Not implemented` rows; those are tracking entries and
 constitute **no** compatibility claim. Features that Quarkdown v2.5.0
 documents but Scribium does not implement are not bugs; they are outside the
 contract until implemented and recorded in this matrix (see ADR 0012).
@@ -57,9 +58,34 @@ provenance records.
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
 | `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
-`Implemented` rows are covered by unit and golden tests. `Planned` means the
-syntax is not implemented yet, in whole or in part: it has no documented
-`Unsupported` diagnostic and must not be assumed to work.
+`Implemented` rows are covered by unit and golden tests (see
+[Conformance Evidence](#conformance-evidence)). `Planned` means the syntax is
+not implemented yet, in whole or in part: it has no documented `Unsupported`
+diagnostic and must not be assumed to work.
+
+## Conformance Evidence
+
+Each `Implemented` row is backed by at least one Scribium conformance test.
+The table maps every `Implemented` feature to the test(s) that verify it;
+`quarkdown/parser.rs` refers to
+`crates/scribium-core/src/syntax/quarkdown/parser.rs` and `markdown/parser.rs`
+to `crates/scribium-core/src/syntax/markdown/parser.rs`. A single test may
+cover multiple features. This table is the implementation-evidence
+counterpart of the upstream provenance recorded in `SPEC_SOURCES.md`; the two
+are kept separate on purpose.
+
+| Feature                         | Evidence (unit tests) |
+|---------------------------------|------------------------|
+| Dot-prefixed call               | `quarkdown/parser.rs::parse_call_no_args`, `quarkdown/parser.rs::parse_call_underscore_name`, `quarkdown/parser.rs::parse_call_hyphen_name`, `quarkdown/parser.rs::empty_and_plain_text_are_not_calls`, `markdown/parser.rs::block_call_no_arguments`, `markdown/parser.rs::valid_calls_produce_no_diagnostics` |
+| Implicit positional refs        | `quarkdown/parser.rs::implicit_positional_references`, `quarkdown/parser.rs::implicit_reference_boundary_stops_at_word_characters`, `quarkdown/parser.rs::implicit_reference_survives_symbol_boundaries`, `markdown/parser.rs::implicit_reference_call_at_block_level`, `markdown/parser.rs::implicit_reference_inline_boundaries` |
+| Positional arguments            | `quarkdown/parser.rs::parse_call_positional_scalar`, `quarkdown/parser.rs::parse_call_positional_string`, `quarkdown/parser.rs::parse_call_boolean_args`, `quarkdown/parser.rs::multiple_args_with_various_whitespace`, `markdown/parser.rs::block_call_positional_args` |
+| Named arguments                 | `quarkdown/parser.rs::parse_call_named_args`, `markdown/parser.rs::block_call_named_args` |
+| Mixed positional/named          | `quarkdown/parser.rs::parse_mixed_args`, `markdown/parser.rs::block_call_mixed_args` |
+| Indented body argument          | `markdown/parser.rs::block_call_with_indented_body`, `markdown/parser.rs::block_call_body_span_covers_indented_lines`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls`, `markdown/parser.rs::body_requires_minimum_indentation`, `markdown/parser.rs::body_single_tab_counts_as_body`, `markdown/parser.rs::body_stops_at_less_indented_line` |
+| Nested calls                    | `quarkdown/parser.rs::parse_nested_call_in_argument`, `markdown/parser.rs::nested_call_inside_argument`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls` |
+| Inline (mid-paragraph) call     | `markdown/parser.rs::inline_call_in_sentence`, `markdown/parser.rs::call_with_trailing_text_is_inline_call`, `markdown/parser.rs::inline_call_at_line_start_continues_paragraph`, `markdown/parser.rs::isolated_call_line_still_starts_block` |
+| Tight-call boundaries           | `quarkdown/parser.rs::tight_word_adjacency_makes_call_ordinary_text`, `quarkdown/parser.rs::symbols_are_valid_call_boundaries`, `quarkdown/parser.rs::implicit_reference_does_not_consume_arguments`, `markdown/parser.rs::tight_call_boundary_rejects_trailing_word`, `markdown/parser.rs::tight_call_hyphen_boundaries_are_valid`, `markdown/parser.rs::unicode_word_characters_are_tight_adjacency`, `markdown/parser.rs::inline_call_does_not_parse_in_numbers` |
+| Malformed-call diagnostics      | `quarkdown/parser.rs::positional_after_named_is_rejected` (`E2001`), `quarkdown/parser.rs::named_argument_without_braces_is_error` (`E2002`), `quarkdown/parser.rs::unclosed_argument_is_error` (`E2003`), `markdown/parser.rs::malformed_calls_produce_structured_diagnostics`, `markdown/parser.rs::malformed_calls_do_not_panic_and_fall_back_to_paragraph` |
 
 ## Compatibility Levels
 
