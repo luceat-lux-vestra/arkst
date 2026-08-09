@@ -340,6 +340,24 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                let before = self.output.len();
+                self.push_str("#link(");
+                self.push('"');
+                self.push_str(&escape_typst_string(destination));
+                self.push('"');
+                self.push(')');
+                self.push('[');
+                self.lower_inlines(content);
+                self.push(']');
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
         }
     }
 
@@ -347,7 +365,7 @@ impl LoweringContext {
         match value {
             IrValue::String(s) => {
                 // Escape Typst string characters
-                let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = escape_typst_string(s);
                 self.push('"');
                 self.push_str(&escaped);
                 self.push('"');
@@ -362,7 +380,7 @@ impl LoweringContext {
                 // A bare identifier argument is emitted as a string literal so
                 // the generated Typst always compiles. Semantic resolution
                 // against a function signature is the evaluator's job.
-                let escaped = id.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = escape_typst_string(id);
                 self.push('"');
                 self.push_str(&escaped);
                 self.push('"');
@@ -429,6 +447,12 @@ impl LoweringContext {
             _ => self.lower_node(node),
         }
     }
+}
+
+/// Escape characters that are special inside a double-quoted Typst string:
+/// backslashes and double quotes.
+fn escape_typst_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -521,6 +545,108 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "Hello *italic* and *bold*\n\n");
+    }
+
+    #[test]
+    fn lower_link() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Link {
+                    content: vec![text("Example")],
+                    destination: "https://example.com".into(),
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "#link(\"https://example.com\")[Example]\n\n");
+    }
+
+    #[test]
+    fn lower_link_with_rich_label() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Link {
+                    content: vec![IrInline::Strong {
+                        content: vec![text("Bold")],
+                        span: empty_span(),
+                    }],
+                    destination: "https://example.com".into(),
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "#link(\"https://example.com\")[*Bold*]\n\n");
+    }
+
+    #[test]
+    fn link_escapes_special_characters_in_destination() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Link {
+                    content: vec![text("x")],
+                    destination: "https://example.com/a\\b\"c".into(),
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "#link(\"https://example.com/a\\\\b\\\"c\")[x]\n\n");
+    }
+
+    #[test]
+    fn link_records_source_map_entry() {
+        use scribium_core::ir::SourceMapEntry;
+
+        let link_span = SourceSpan::new(scribium_core::SourceId(1), 6, 32);
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Link {
+                    content: vec![text("Example")],
+                    destination: "https://example.com".into(),
+                    span: link_span,
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let (code, map) = super::lower_to_typst(&doc);
+        assert_eq!(code, "#link(\"https://example.com\")[Example]\n\n");
+        assert_eq!(
+            map,
+            vec![SourceMapEntry {
+                generated_start: 0,
+                generated_end: 37,
+                original: link_span,
+            }]
+        );
+    }
+
+    #[test]
+    fn end_to_end_link_compiles_to_typst_link() {
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        let source =
+            "# Links\n\nVisit [Typst](https://typst.app).\n\nThis is a [**bold link**](https://example.com).\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty());
+        let code = super::lower_to_typst_code(&result.ir);
+        assert!(code.contains("#link(\"https://typst.app\")[Typst]"));
+        assert!(code.contains("#link(\"https://example.com\")[*bold link*]"));
     }
 
     #[test]
