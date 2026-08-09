@@ -1110,7 +1110,10 @@ impl<'a> InlineParser<'a> {
     ///   inline calls work inside it. Nested brackets in the label are not
     ///   supported.
     /// - The destination runs from `(` to the first matching `)`, allowing
-    ///   balanced parentheses inside (`[x](a(b)c)`).
+    ///   balanced parentheses inside (`[x](a(b)c)`). It must be non-empty
+    ///   and free of ASCII whitespace and control characters; destinations
+    ///   containing whitespace (such as `[text]( )` or a link title in
+    ///   `[text](url "title")`) are not links and fall back to literal text.
     /// - Link titles, reference links (`[x][id]`, `[id]: url`), autolinks,
     ///   and images are not part of the subset.
     ///
@@ -1156,7 +1159,12 @@ impl<'a> InlineParser<'a> {
             self.literal_bracket(start, inlines);
             return;
         };
-        if dest_end == dest_start {
+        let destination = &self.source[dest_start..dest_end];
+        if destination.is_empty()
+            || destination
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        {
             self.literal_bracket(start, inlines);
             return;
         }
@@ -1170,7 +1178,7 @@ impl<'a> InlineParser<'a> {
         .parse();
         inlines.push(Inline::Link {
             content,
-            destination: self.source[dest_start..dest_end].replace('\r', ""),
+            destination: destination.to_string(),
             span: ByteSpan::new(start, dest_end + 1),
         });
         self.pos = dest_end + 1;
@@ -1701,6 +1709,9 @@ mod tests {
         for (input, dest) in [
             ("[section](#intro)", "#intro"),
             ("[file](docs/page.html)", "docs/page.html"),
+            ("[guide](./guide.html)", "./guide.html"),
+            ("[up](../assets/x.pdf)", "../assets/x.pdf"),
+            ("[root](/absolute/path)", "/absolute/path"),
         ] {
             let doc = parse(input);
             let content = paragraph_inlines(&doc);
@@ -1717,6 +1728,59 @@ mod tests {
                 }
                 other => panic!("expected link, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn link_unicode_label() {
+        let input = "[문서](https://example.com)";
+        let doc = parse(input);
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Inline::Text { content, span } => {
+                        assert_eq!(content, "문서");
+                        assert_eq!(*span, ByteSpan::new(1, 7));
+                    }
+                    other => panic!("expected text, got {other:?}"),
+                }
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(*span, ByteSpan::new(0, input.len()));
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_links_keep_ordering() {
+        let doc = parse("[a](https://a.example) and [b](https://b.example)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        match &content[0] {
+            Inline::Link {
+                destination, span, ..
+            } => {
+                assert_eq!(destination, "https://a.example");
+                assert_eq!(*span, ByteSpan::new(0, 22));
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+        assert_text(&content[1], " and ");
+        match &content[2] {
+            Inline::Link {
+                destination, span, ..
+            } => {
+                assert_eq!(destination, "https://b.example");
+                assert_eq!(*span, ByteSpan::new(27, 49));
+            }
+            other => panic!("expected link, got {other:?}"),
         }
     }
 
@@ -1781,6 +1845,9 @@ mod tests {
             "[text]",
             "[](url)",
             "[text]()",
+            "[text]( )",
+            "[text](url \"title\")",
+            "[text](a b)",
             "[",
             "[text",
         ] {

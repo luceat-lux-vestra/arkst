@@ -59,11 +59,14 @@ Implemented (M2):
   - Destinations are preserved as-is: `https://` URLs, relative paths,
     and fragments (`#intro`) are passed through without normalization or
     resolution; `\` and `"` are escaped in generated Typst
+  - A destination must be non-empty and free of whitespace and control
+    characters; an empty or whitespace-only destination (`[]()`,
+    `[text]( )`) is not a link
   - Not supported: nested brackets in the label (the label ends at the
     first `]`), link titles (`[text](url "title")`), reference links
     (`[text][id]` / `[id]: url`), autolinks (`<https://...>`), and images
-  - Malformed links (`[text](`, `[text]`, `[](url)`, ...) recover as
-    literal text
+  - Malformed links (`[text](`, `[text]`, `[](url)`, `[text]( )`,
+    `[text](url "title")`, ...) recover as literal text
 
 Planned (M2+):
 
