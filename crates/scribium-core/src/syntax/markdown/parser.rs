@@ -14,10 +14,13 @@
 //! M2 additions:
 //!
 //! - Inline links (`[label](destination)`) with inline markup in the label
+//! - Inline code spans (`\`code\``, or any matching backtick-run length),
+//!   with opaque literal contents and CommonMark line-ending and
+//!   surrounding-space normalization
 //!
 //! Delimiter runs of three or more identical characters (`***x***`) are
-//! treated as literal text. Setext headings, images, blockquotes, and code
-//! spans are not part of the M1 subset, and reference-style links are not
+//! treated as literal text. Setext headings, images, and blockquotes are
+//! not part of the M1 subset, and reference-style links are not
 //! part of the M2 subset.
 
 use super::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
@@ -1003,6 +1006,7 @@ impl<'a> InlineParser<'a> {
                 }
                 b'.' => self.parse_dot_inline(&mut inlines),
                 b'[' => self.parse_link(&mut inlines),
+                b'`' => self.parse_code_span(&mut inlines),
                 _ => self.parse_text(&mut inlines),
             }
         }
@@ -1192,6 +1196,48 @@ impl<'a> InlineParser<'a> {
         self.pos = start + 1;
     }
 
+    /// Parse a Markdown code span (`` `code` ``), falling back to literal
+    /// text when the input is not a valid code span.
+    ///
+    /// The supported subset follows CommonMark:
+    ///
+    /// - The opening delimiter is a run of one or more backticks; the
+    ///   closing delimiter must be a run of *exactly* the same length.
+    ///   Runs of a different length do not close the span.
+    /// - The contents are opaque: no Markdown or Quarkdown syntax inside
+    ///   is parsed (no emphasis, strong text, links, calls, or breaks).
+    /// - Line endings inside the span become ordinary spaces.
+    /// - If the content begins and ends with an ASCII space but is not
+    ///   composed entirely of spaces, exactly one leading and one trailing
+    ///   space is removed.
+    ///
+    /// Malformed input (no closer of the same run length) is recovered
+    /// deterministically by emitting the whole opening run as literal
+    /// text; no diagnostic is produced.
+    fn parse_code_span(&mut self, inlines: &mut Vec<Inline>) {
+        let start = self.pos;
+        let bytes = self.bytes();
+        let opener_len = count_backticks(bytes, start, self.end);
+        match find_closing_run(bytes, start + opener_len, opener_len, self.end) {
+            Some(close_start) => {
+                let raw_content = &self.source[start + opener_len..close_start];
+                inlines.push(Inline::Code {
+                    content: normalize_code_content(raw_content),
+                    span: ByteSpan::new(start, close_start + opener_len),
+                });
+                self.pos = close_start + opener_len;
+            }
+            None => {
+                let run_end = start + opener_len;
+                inlines.push(Inline::Text {
+                    content: self.source[start..run_end].to_string(),
+                    span: ByteSpan::new(start, run_end),
+                });
+                self.pos = run_end;
+            }
+        }
+    }
+
     /// Parse emphasis or strong delimiters, falling back to literal text.
     fn parse_delimiter(&mut self, inlines: &mut Vec<Inline>) {
         let marker = self.bytes()[self.pos];
@@ -1342,7 +1388,7 @@ impl<'a> InlineParser<'a> {
                 self.pos += 1;
                 continue;
             }
-            if b == b'*' || b == b'_' || b == b'\n' || b == b'[' {
+            if b == b'*' || b == b'_' || b == b'\n' || b == b'[' || b == b'`' {
                 break;
             }
             if b == b'.' && is_call_dot(bytes, self.pos, self.end) {
@@ -1393,6 +1439,68 @@ fn is_call_dot(bytes: &[u8], pos: usize, end: usize) -> bool {
     crate::syntax::quarkdown::has_valid_call_boundary(bytes, pos)
 }
 
+/// Number of consecutive backticks starting at `from`.
+fn count_backticks(bytes: &[u8], from: usize, end: usize) -> usize {
+    let mut n = 0;
+    while from + n < end && bytes[from + n] == b'`' {
+        n += 1;
+    }
+    n
+}
+
+/// Find the start of a backtick run of *exactly* `len` at or after `from`.
+///
+/// Runs of a different length are skipped over without matching, so a
+/// candidate closer can never close a span opened with a different
+/// delimiter length. The scan is linear in the slice length.
+fn find_closing_run(bytes: &[u8], from: usize, len: usize, end: usize) -> Option<usize> {
+    let mut i = from;
+    while i < end {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let run = count_backticks(bytes, i, end);
+        if run == len {
+            return Some(i);
+        }
+        i += run;
+    }
+    None
+}
+
+/// Normalize the raw contents of a code span per CommonMark:
+///
+/// 1. Line endings (`\n`, `\r\n`, lone `\r`) become ordinary spaces.
+/// 2. If the content begins and ends with an ASCII space but is not
+///    composed entirely of spaces, exactly one leading and one trailing
+///    space is removed. NBSP and other Unicode whitespace are untouched.
+fn normalize_code_content(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => out.push(b' '),
+            b'\r' => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                    i += 1;
+                }
+                out.push(b' ');
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    let mut content = String::from_utf8(out).expect("code span content stays valid UTF-8");
+    let all_spaces = content.bytes().all(|b| b == b' ');
+    if !all_spaces && content.starts_with(' ') && content.ends_with(' ') {
+        content.remove(0);
+        content.pop();
+    }
+    content
+}
+
 /// Parse inline nodes from the contiguous source slice `[start, end)`.
 fn parse_inlines(
     source: &str,
@@ -1416,9 +1524,10 @@ mod tests {
     }
 
     /// Concatenate all text in a flat list of inline nodes, rendering
-    /// soft/hard breaks as `\n` and links in their source form
-    /// (`[label](destination)`). Panics when any other inline kind appears,
-    /// so tests can use it to assert that a span contains only prose.
+    /// soft/hard breaks as `\n`, links in their source form
+    /// (`[label](destination)`), and code spans as `` `content` ``.
+    /// Panics when any other inline kind appears, so tests can use it to
+    /// assert that a span contains only prose.
     fn joined_text(inlines: &[Inline]) -> String {
         let mut out = String::new();
         for inline in inlines {
@@ -1436,7 +1545,12 @@ mod tests {
                     out.push_str(destination);
                     out.push(')');
                 }
-                other => panic!("expected Text, break, or link, got {other:?}"),
+                Inline::Code { content, .. } => {
+                    out.push('`');
+                    out.push_str(content);
+                    out.push('`');
+                }
+                other => panic!("expected Text, break, link, or code span, got {other:?}"),
             }
         }
         out
@@ -2591,6 +2705,318 @@ mod tests {
         }
         let doc = parse(&input);
         assert_eq!(doc.nodes.len(), 1);
+    }
+
+    #[test]
+    fn code_span_basic() {
+        let doc = parse("`code`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "code");
+                assert_eq!(*span, ByteSpan::new(0, 6));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_embedded_in_prose() {
+        let doc = parse("Use `cargo test` before pushing.");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        assert_text(&content[0], "Use ");
+        match &content[1] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "cargo test");
+                assert_eq!(*span, ByteSpan::new(4, 16));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        assert_text(&content[2], " before pushing.");
+    }
+
+    #[test]
+    fn multiple_code_spans_keep_ordering() {
+        let doc = parse("`foo` and `bar`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "foo");
+                assert_eq!(*span, ByteSpan::new(0, 5));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        assert_text(&content[1], " and ");
+        match &content[2] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "bar");
+                assert_eq!(*span, ByteSpan::new(10, 15));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_empty_and_minimal_constructs() {
+        // A single backtick run without a closer stays literal.
+        let doc = parse("`");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "`");
+        // Two adjacent backticks form one maximal run; nothing closes it.
+        let doc = parse("``");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "``");
+        // A run followed only by a run of different length never closes.
+        let doc = parse("` ``");
+        assert_eq!(joined_text(paragraph_inlines(&doc)), "` ``");
+        // Content containing a backtick keeps it when the delimiters are
+        // longer; joined_text renders the node back with its delimiters.
+        let doc = parse("`` ` ``");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "`");
+                assert_eq!(*span, ByteSpan::new(0, 7));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        // A single space between same-length delimiters is preserved
+        // (all-space content keeps its spaces).
+        let doc = parse("`` ``");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, " "),
+            other => panic!("expected code span, got {other:?}"),
+        }
+        let doc = parse("` `");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, " "),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_variable_length_delimiters() {
+        let doc = parse("``foo ` bar``");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "foo ` bar");
+                assert_eq!(*span, ByteSpan::new(0, 13));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        // Longer delimiters protect runs of any other length. (Triple-backtick
+        // input must not start at line start, where it is a fenced code block.)
+        let doc = parse("x ```code ` `` ``` y");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        match &content[1] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "code ` `` ");
+                assert_eq!(*span, ByteSpan::new(2, 18));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_mismatched_delimiter_lengths_do_not_close() {
+        // `foo``bar`: the run of two backticks does not close the single
+        // backtick span; the final single backtick does.
+        let doc = parse("`foo``bar`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "foo``bar"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+        // ``foo`bar``: the single backtick inside is literal content.
+        let doc = parse("``foo`bar``");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "foo`bar"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_keeps_markdown_literal() {
+        let doc = parse("`**bold**`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "**bold**"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_keeps_link_literal() {
+        let doc = parse("`[link](https://example.com)`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => {
+                assert_eq!(content, "[link](https://example.com)")
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_keeps_quarkdown_call_literal() {
+        let doc = parse("`.strong {hello}`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, ".strong {hello}"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_backslashes_are_literal() {
+        let doc = parse("`a\\bc`");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "a\\bc"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+        // A backslash-space must not become an escape or a hard break.
+        let doc = parse("`a\\ b`");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "a\\ b"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_multiline_becomes_single_space() {
+        let doc = parse("`foo\nbar`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "foo bar");
+                assert_eq!(*span, ByteSpan::new(0, 9));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        let doc = parse("`foo\r\nbar`");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Code { content, .. } => assert_eq!(content, "foo bar"),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_surrounding_space_normalization() {
+        let cases = [
+            ("` foo `", "foo"),
+            ("`  foo  `", " foo "),
+            ("`  `", "  "),
+            ("` `", " "),
+            ("`foo `", "foo "),
+            ("` foo`", " foo"),
+            ("`\u{a0}foo\u{a0}`", "\u{a0}foo\u{a0}"),
+        ];
+        for (input, expected) in cases {
+            let doc = parse(input);
+            let content = paragraph_inlines(&doc);
+            assert_eq!(content.len(), 1, "input {input:?}");
+            match &content[0] {
+                Inline::Code { content, .. } => {
+                    assert_eq!(content, expected, "input {input:?}")
+                }
+                other => panic!("input {input:?}: expected code span, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn code_span_unicode_content_and_spans() {
+        let doc = parse("`한글 λ Rust 🦀`");
+        let content = paragraph_inlines(&doc);
+        match &content[0] {
+            Inline::Code { content, span } => {
+                assert_eq!(content, "한글 λ Rust 🦀");
+                assert_eq!(*span, ByteSpan::new(0, 1 + 6 + 1 + 2 + 1 + 4 + 1 + 4 + 1));
+            }
+            other => panic!("expected code span, got {other:?}"),
+        }
+        // UTF-8 offsets relative to surrounding text stay byte-exact:
+        // "abc " is 3 ASCII bytes + 1 space; 한글 occupies 6 bytes.
+        let doc = parse("abc `한글` def");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        match &content[1] {
+            Inline::Code { span, .. } => assert_eq!(*span, ByteSpan::new(4, 12)),
+            other => panic!("expected code span, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn code_span_in_heading() {
+        let doc = parse("# Run `cargo test`\n");
+        match &doc.nodes[0] {
+            Block::Heading { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match &content[1] {
+                    Inline::Code { content, .. } => assert_eq!(content, "cargo test"),
+                    other => panic!("expected code span, got {other:?}"),
+                }
+            }
+            other => panic!("expected heading, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unclosed_code_span_recovers_as_literal_without_loss() {
+        // The scope's examples: `` `foo `` and `` ``foo` `` have no matching
+        // closer and must stay literal text with no partial code node.
+        for input in ["`foo", "``foo`"] {
+            let output = parse_with_diagnostics(input);
+            assert!(output.diagnostics.is_empty(), "input {input:?}");
+            match &output.document.nodes[0] {
+                Block::Paragraph { content, .. } => {
+                    assert_eq!(joined_text(content), input, "input {input:?}");
+                    assert!(
+                        !content
+                            .iter()
+                            .any(|inline| matches!(inline, Inline::Code { .. })),
+                        "input {input:?} must not produce code nodes"
+                    );
+                }
+                other => panic!("input {input:?}: expected paragraph, got {other:?}"),
+            }
+        }
+
+        // A multi-line construct without a closer also stays literal,
+        // including when it spans a soft break.
+        let output = parse_with_diagnostics("`foo\nbar\n`` baz");
+        assert!(output.diagnostics.is_empty());
+        match &output.document.nodes[0] {
+            Block::Paragraph { content, .. } => {
+                assert_eq!(joined_text(content), "`foo\nbar\n`` baz");
+            }
+            other => panic!("expected paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn document_snapshot_code_spans() {
+        insta::assert_debug_snapshot!(
+            "code_spans",
+            parse("Run `cargo test` and ``foo ` bar``.\n\nLiteral: `**bold**` and `[x](y)` and `.s {v}`.\n\nUnclosed `oops.\n")
+        );
     }
 
     #[test]

@@ -114,6 +114,12 @@ pub enum IrInline {
         destination: String,
         span: SourceSpan,
     },
+    /// An inline code span (`monospace`).
+    ///
+    /// The content is opaque literal text and is never evaluated or recursed
+    /// into. The span covers the whole construct including the backtick
+    /// delimiters.
+    Code { content: String, span: SourceSpan },
 }
 
 /// An evaluated list item in the IR.
