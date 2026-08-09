@@ -11,9 +11,14 @@
 //! - Fenced code blocks (triple backtick, optional language)
 //! - Thematic breaks (`---`, `***`, `___`)
 //!
+//! M2 additions:
+//!
+//! - Inline links (`[label](destination)`) with inline markup in the label
+//!
 //! Delimiter runs of three or more identical characters (`***x***`) are
-//! treated as literal text. Setext headings, links, images, blockquotes,
-//! and code spans are not part of the M1 subset.
+//! treated as literal text. Setext headings, images, blockquotes, and code
+//! spans are not part of the M1 subset, and reference-style links are not
+//! part of the M2 subset.
 
 use super::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
 use crate::source::ByteSpan;
@@ -997,6 +1002,7 @@ impl<'a> InlineParser<'a> {
                     self.pos += 2;
                 }
                 b'.' => self.parse_dot_inline(&mut inlines),
+                b'[' => self.parse_link(&mut inlines),
                 _ => self.parse_text(&mut inlines),
             }
         }
@@ -1089,6 +1095,90 @@ impl<'a> InlineParser<'a> {
     fn literal_dot(&mut self, start: usize, inlines: &mut Vec<Inline>) {
         inlines.push(Inline::Text {
             content: ".".to_string(),
+            span: ByteSpan::new(start, start + 1),
+        });
+        self.pos = start + 1;
+    }
+
+    /// Parse a Markdown inline link (`[label](destination)`), falling back
+    /// to literal text when the input is not a valid link.
+    ///
+    /// The supported subset is deliberately small and deterministic:
+    ///
+    /// - The label runs from `[` to the *first* `]`; it is parsed with the
+    ///   regular inline parser, so emphasis, strong text, and Quarkdown
+    ///   inline calls work inside it. Nested brackets in the label are not
+    ///   supported.
+    /// - The destination runs from `(` to the first matching `)`, allowing
+    ///   balanced parentheses inside (`[x](a(b)c)`).
+    /// - Link titles, reference links (`[x][id]`, `[id]: url`), autolinks,
+    ///   and images are not part of the subset.
+    ///
+    /// Malformed input (`[text](`, `[text]`, `[](url)`, ...) is recovered
+    /// by emitting the `[` as literal text; no diagnostic is produced.
+    fn parse_link(&mut self, inlines: &mut Vec<Inline>) {
+        let start = self.pos;
+        let bytes = self.bytes();
+        if start > 0 && bytes[start - 1] == b'!' {
+            // `![...]` is image syntax, which is not supported: keep the
+            // whole thing as literal text.
+            self.literal_bracket(start, inlines);
+            return;
+        }
+        if self.depth >= MAX_INLINE_DEPTH {
+            self.literal_bracket(start, inlines);
+            return;
+        }
+        let Some(close) = bytes[start + 1..self.end].iter().position(|&b| b == b']') else {
+            self.literal_bracket(start, inlines);
+            return;
+        };
+        let close = start + 1 + close;
+        if close == start + 1 || close + 1 >= self.end || bytes[close + 1] != b'(' {
+            self.literal_bracket(start, inlines);
+            return;
+        }
+        let dest_start = close + 2;
+        let mut depth = 0usize;
+        let mut dest_end = None;
+        for (i, &b) in bytes.iter().enumerate().take(self.end).skip(dest_start) {
+            match b {
+                b'(' => depth += 1,
+                b')' if depth == 0 => {
+                    dest_end = Some(i);
+                    break;
+                }
+                b')' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(dest_end) = dest_end else {
+            self.literal_bracket(start, inlines);
+            return;
+        };
+        if dest_end == dest_start {
+            self.literal_bracket(start, inlines);
+            return;
+        }
+        let content = InlineParser::new(
+            self.source,
+            start + 1,
+            close,
+            self.depth + 1,
+            self.diagnostics,
+        )
+        .parse();
+        inlines.push(Inline::Link {
+            content,
+            destination: self.source[dest_start..dest_end].replace('\r', ""),
+            span: ByteSpan::new(start, dest_end + 1),
+        });
+        self.pos = dest_end + 1;
+    }
+
+    fn literal_bracket(&mut self, start: usize, inlines: &mut Vec<Inline>) {
+        inlines.push(Inline::Text {
+            content: "[".to_string(),
             span: ByteSpan::new(start, start + 1),
         });
         self.pos = start + 1;
@@ -1244,7 +1334,7 @@ impl<'a> InlineParser<'a> {
                 self.pos += 1;
                 continue;
             }
-            if b == b'*' || b == b'_' || b == b'\n' {
+            if b == b'*' || b == b'_' || b == b'\n' || b == b'[' {
                 break;
             }
             if b == b'.' && is_call_dot(bytes, self.pos, self.end) {
@@ -1318,7 +1408,8 @@ mod tests {
     }
 
     /// Concatenate all text in a flat list of inline nodes, rendering
-    /// soft/hard breaks as `\n`. Panics when any other inline kind appears,
+    /// soft/hard breaks as `\n` and links in their source form
+    /// (`[label](destination)`). Panics when any other inline kind appears,
     /// so tests can use it to assert that a span contains only prose.
     fn joined_text(inlines: &[Inline]) -> String {
         let mut out = String::new();
@@ -1326,10 +1417,36 @@ mod tests {
             match inline {
                 Inline::Text { content, .. } => out.push_str(content),
                 Inline::SoftBreak { .. } | Inline::HardBreak { .. } => out.push('\n'),
-                other => panic!("expected Text or break, got {other:?}"),
+                Inline::Link {
+                    content,
+                    destination,
+                    ..
+                } => {
+                    out.push('[');
+                    out.push_str(&joined_text(content));
+                    out.push_str("](");
+                    out.push_str(destination);
+                    out.push(')');
+                }
+                other => panic!("expected Text, break, or link, got {other:?}"),
             }
         }
         out
+    }
+
+    /// Whether a link node appears anywhere in the inline tree, including
+    /// inside emphasis/strong content and directive bodies.
+    fn contains_link(inlines: &[Inline]) -> bool {
+        inlines.iter().any(|inline| match inline {
+            Inline::Link { .. } => true,
+            Inline::Emphasis { content, .. } | Inline::Strong { content, .. } => {
+                contains_link(content)
+            }
+            Inline::DirectiveCall {
+                body: Some(body), ..
+            } => contains_link(body),
+            _ => false,
+        })
     }
 
     fn paragraph_inlines(doc: &Document) -> &[Inline] {
@@ -1482,6 +1599,224 @@ mod tests {
                 other => panic!("expected strong, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn link_basic() {
+        let doc = parse("[example](https://example.com)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_text(&content[0], "example");
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(*span, ByteSpan::new(0, 30));
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn link_inside_sentence() {
+        let doc = parse("See [example](https://example.com) now.");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        assert_text(&content[0], "See ");
+        match &content[1] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_text(&content[0], "example");
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(*span, ByteSpan::new(4, 34));
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+        assert_text(&content[2], " now.");
+    }
+
+    #[test]
+    fn label_with_strong_and_text() {
+        let doc = parse("[**bold** text](https://example.com)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(*span, ByteSpan::new(0, 36));
+                assert_eq!(content.len(), 2);
+                match &content[0] {
+                    Inline::Strong { content, .. } => assert_text(&content[0], "bold"),
+                    other => panic!("expected strong, got {other:?}"),
+                }
+                assert_text(&content[1], " text");
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn label_with_quarkdown_inline_call() {
+        let doc = parse("[.strong {hello}](https://example.com)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(*span, ByteSpan::new(0, 38));
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Inline::DirectiveCall {
+                        name,
+                        positional_args,
+                        ..
+                    } => {
+                        assert_eq!(name, "strong");
+                        assert_eq!(positional_args.len(), 1);
+                        assert_eq!(positional_args[0], Value::Identifier("hello".into()));
+                    }
+                    other => panic!("expected directive call, got {other:?}"),
+                }
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn link_fragment_and_relative_destinations() {
+        for (input, dest) in [
+            ("[section](#intro)", "#intro"),
+            ("[file](docs/page.html)", "docs/page.html"),
+        ] {
+            let doc = parse(input);
+            let content = paragraph_inlines(&doc);
+            assert_eq!(content.len(), 1, "input: {input}");
+            match &content[0] {
+                Inline::Link {
+                    content,
+                    destination,
+                    span,
+                } => {
+                    assert_text(&content[0], &input[1..input.len() - (dest.len() + 3)]);
+                    assert_eq!(destination, dest, "input: {input}");
+                    assert_eq!(*span, ByteSpan::new(0, input.len()), "input: {input}");
+                }
+                other => panic!("expected link, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn link_spans_preserve_inner_offsets() {
+        let doc = parse("before [hello **world**](https://example.com) after");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 3);
+        assert_text(&content[0], "before ");
+        match &content[1] {
+            Inline::Link {
+                content,
+                destination,
+                span,
+            } => {
+                assert_eq!(*span, ByteSpan::new(7, 45));
+                assert_eq!(destination, "https://example.com");
+                assert_eq!(content.len(), 2);
+                match &content[0] {
+                    Inline::Text { content, span } => {
+                        assert_eq!(content, "hello ");
+                        assert_eq!(*span, ByteSpan::new(8, 14));
+                    }
+                    other => panic!("expected text, got {other:?}"),
+                }
+                match &content[1] {
+                    Inline::Strong { content, span } => {
+                        assert_eq!(*span, ByteSpan::new(14, 23));
+                        assert_eq!(content.len(), 1);
+                        match &content[0] {
+                            Inline::Text { content, span } => {
+                                assert_eq!(content, "world");
+                                assert_eq!(*span, ByteSpan::new(16, 21));
+                            }
+                            other => panic!("expected text, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected strong, got {other:?}"),
+                }
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+        assert_text(&content[2], " after");
+    }
+
+    #[test]
+    fn link_destination_with_balanced_parens() {
+        let doc = parse("[x](a(b)c)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            Inline::Link { destination, .. } => assert_eq!(destination, "a(b)c"),
+            other => panic!("expected link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_links_recover_as_literal_text() {
+        for input in [
+            "[text](",
+            "[text](url",
+            "[text]",
+            "[](url)",
+            "[text]()",
+            "[",
+            "[text",
+        ] {
+            let doc = parse(input);
+            let content = paragraph_inlines(&doc);
+            assert_eq!(joined_text(content), input, "input: {input}");
+            assert!(!contains_link(content), "input: {input}");
+        }
+    }
+
+    #[test]
+    fn image_syntax_is_not_a_link() {
+        let input = "![alt](image.png)";
+        let doc = parse(input);
+        let content = paragraph_inlines(&doc);
+        assert_eq!(joined_text(content), input);
+        assert!(!contains_link(content));
+    }
+
+    #[test]
+    fn nested_bracket_label_ends_at_first_bracket() {
+        let doc = parse("[a [b](c)](d)");
+        let content = paragraph_inlines(&doc);
+        assert_eq!(content.len(), 2);
+        match &content[0] {
+            Inline::Link {
+                content,
+                destination,
+                ..
+            } => {
+                assert_eq!(destination, "c");
+                assert_eq!(joined_text(content), "a [b");
+            }
+            other => panic!("expected link, got {other:?}"),
+        }
+        assert_text(&content[1], "](d)");
     }
 
     #[test]
@@ -2204,6 +2539,14 @@ mod tests {
         insta::assert_debug_snapshot!(
             "code_and_break",
             parse("```rust\nlet x = 1;\n```\n\nEnd  \nof line.\n")
+        );
+    }
+
+    #[test]
+    fn document_snapshot_links() {
+        insta::assert_debug_snapshot!(
+            "links",
+            parse("Visit [Typst](https://typst.app).\n\nSee [**M2** docs](#intro) or [file](docs/page.html).\n")
         );
     }
 

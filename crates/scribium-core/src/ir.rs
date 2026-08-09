@@ -105,6 +105,15 @@ pub enum IrInline {
         body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
+    /// A Markdown inline link (`[label](destination)`).
+    ///
+    /// The label is kept as inline markup; the destination is preserved
+    /// as-is (no normalization or resolution).
+    Link {
+        content: Vec<IrInline>,
+        destination: String,
+        span: SourceSpan,
+    },
 }
 
 /// An evaluated list item in the IR.

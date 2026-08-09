@@ -107,6 +107,17 @@ pub enum Inline {
         body: Option<Vec<Inline>>,
         span: ByteSpan,
     },
+    /// A Markdown inline link (`[label](destination)`).
+    ///
+    /// The label is kept as inline markup so emphasis, strong text, and
+    /// Quarkdown inline calls work inside it. The `destination` is preserved
+    /// as-is (no normalization or resolution). The span covers the whole
+    /// link from `[` through the closing `)`.
+    Link {
+        content: Vec<Inline>,
+        destination: String,
+        span: ByteSpan,
+    },
     /// Hard line break (trailing two spaces + newline, or backslash at end of line).
     HardBreak { span: ByteSpan },
     /// Soft line break (adjacent lines without a blank line).

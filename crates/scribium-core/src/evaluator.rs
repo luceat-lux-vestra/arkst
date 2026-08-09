@@ -306,6 +306,15 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrInline::Link {
+                content,
+                destination,
+                span,
+            } => vec![IrInline::Link {
+                content: self.evaluate_inlines(content, diagnostics, context),
+                destination: destination.clone(),
+                span: *span,
+            }],
             IrInline::DirectiveCall {
                 name,
                 positional_args,
@@ -1131,6 +1140,45 @@ mod tests {
             })
             .collect();
         assert_eq!(rendered, vec!["before ", "kept", " after"]);
+    }
+
+    #[test]
+    fn link_evaluates_content_inside_label() {
+        let paragraph = IrNode::Paragraph {
+            content: vec![IrInline::Link {
+                content: vec![
+                    text_inline("before "),
+                    inline_if_call("if", IrValue::Boolean(true), vec![text_inline("kept")]),
+                    text_inline(" after"),
+                ],
+                destination: "https://example.com".to_string(),
+                span: span(0, 1),
+            }],
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![paragraph]);
+        let IrNode::Paragraph { content, .. } = &nodes[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(content.len(), 1);
+        let IrInline::Link {
+            content,
+            destination,
+            span: link_span,
+        } = &content[0]
+        else {
+            panic!("expected link");
+        };
+        assert_eq!(destination, "https://example.com");
+        assert_eq!(*link_span, span(0, 1));
+        assert_eq!(
+            content,
+            &vec![
+                text_inline("before "),
+                text_inline("kept"),
+                text_inline(" after")
+            ]
+        );
     }
 
     #[test]

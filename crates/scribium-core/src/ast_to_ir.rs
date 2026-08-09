@@ -224,6 +224,15 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Inline::Link {
+            content,
+            destination,
+            span,
+        } => Some(IrInline::Link {
+            content: inlines_to_ir(content, source_id),
+            destination: destination.clone(),
+            span: byte_to_source_span(span, source_id),
+        }),
     }
 }
 
@@ -282,6 +291,7 @@ fn inline_span_start(inline: &Inline) -> usize {
         | Inline::Emphasis { span, .. }
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
+        | Inline::Link { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.start,
     }
@@ -293,6 +303,7 @@ fn inline_span_end(inline: &Inline) -> usize {
         | Inline::Emphasis { span, .. }
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
+        | Inline::Link { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.end,
     }
@@ -392,6 +403,52 @@ mod tests {
                 assert_eq!(content.len(), 2);
                 assert!(matches!(content[0], IrInline::Text { .. }));
                 assert!(matches!(content[1], IrInline::Emphasis { .. }));
+            }
+            _ => panic!("expected Paragraph"),
+        }
+    }
+
+    #[test]
+    fn convert_paragraph_with_link() {
+        let doc = Document {
+            nodes: vec![Block::Paragraph {
+                content: vec![Inline::Link {
+                    content: vec![Inline::Text {
+                        content: "abc".into(),
+                        span: bs(1, 4),
+                    }],
+                    destination: "https://x".into(),
+                    span: bs(0, 20),
+                }],
+                span: bs(0, 20),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        assert_eq!(ir.nodes.len(), 1);
+        match &ir.nodes[0] {
+            IrNode::Paragraph { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    IrInline::Link {
+                        content,
+                        destination,
+                        span,
+                    } => {
+                        assert_eq!(destination, "https://x");
+                        assert_eq!(*span, SourceSpan::new(SourceId(42), 0, 20));
+                        assert_eq!(content.len(), 1);
+                        match &content[0] {
+                            IrInline::Text { content, span } => {
+                                assert_eq!(content, "abc");
+                                assert_eq!(*span, SourceSpan::new(SourceId(42), 1, 4));
+                            }
+                            other => panic!("expected Text, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected Link, got {other:?}"),
+                }
             }
             _ => panic!("expected Paragraph"),
         }
