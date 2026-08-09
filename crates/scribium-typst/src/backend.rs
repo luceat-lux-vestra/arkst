@@ -159,6 +159,17 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::fs;
+    use std::sync::Mutex;
+
+    /// Serializes write-then-spawn of the fake Typst executables.
+    ///
+    /// Cargo runs tests as threads in one process. Linux `execve(2)` returns
+    /// `ETXTBSY` ("Text file busy") when a file is executed while any task —
+    /// including a child forked by a parallel test's `Command::spawn` — still
+    /// holds it open for writing, which races the freshly written fake
+    /// scripts under CI load. macOS and Windows do not enforce this at exec
+    /// time.
+    static FAKE_TYPST_SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
     /// Writes a fake Typst executable to `dir` and returns its path.
     ///
@@ -215,6 +226,7 @@ mod tests {
     #[test]
     fn subprocess_backend_version() {
         let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake", "", 0);
         let backend = SubprocessBackend::new(fake);
         let version = backend.version().expect("version should succeed");
@@ -224,6 +236,7 @@ mod tests {
 
     #[test]
     fn subprocess_backend_missing_executable() {
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let backend = SubprocessBackend::new("/nonexistent/typst");
         let result = backend.version();
         assert!(result.is_err());
@@ -240,6 +253,7 @@ mod tests {
     #[test]
     fn subprocess_backend_compile_success() {
         let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake", "", 0);
         let output = compile_with(&fake).expect("compile should succeed");
         let pdf = output.pdf.expect("pdf output must be present");
@@ -252,6 +266,7 @@ mod tests {
     #[test]
     fn subprocess_backend_invalid_pdf_header_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         // The fake exits successfully but writes a non-PDF file.
         let fake = write_fake_typst(dir.path(), "garbage not a pdf", "", 0);
         let result = compile_with(&fake);
@@ -268,6 +283,7 @@ mod tests {
     #[test]
     fn subprocess_backend_compile_failure_surfaces_stderr() {
         let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let fake = write_fake_typst(dir.path(), "", "fake typst error: bad syntax", 1);
         let result = compile_with(&fake);
         assert!(result.is_err());

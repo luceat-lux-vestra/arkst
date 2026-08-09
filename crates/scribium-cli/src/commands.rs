@@ -792,6 +792,7 @@ pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     /// Test-only variant of [`super::build`] that keeps the pre-`--typst-path`
@@ -2116,6 +2117,15 @@ mod tests {
         );
     }
 
+    /// Serializes write-then-spawn of the fake Typst executables.
+    ///
+    /// Cargo runs tests as threads in one process. Linux `execve(2)` returns
+    /// `ETXTBSY` ("Text file busy") when a file is executed while any task —
+    /// including a child forked by a parallel test's `Command::spawn` — still
+    /// holds it open for writing, which races the freshly written fake scripts
+    /// under CI load. macOS and Windows do not enforce this at exec time.
+    static FAKE_TYPST_SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
     /// Writes a fake Typst executable into `dir` whose `compile` invocation
     /// writes `pdf_body` to the output PDF argument and exits successfully.
     /// Returns the executable's path; the tests never need a real Typst
@@ -2190,6 +2200,7 @@ mod tests {
     #[test]
     fn pdf_build_respects_custom_typst_path() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
@@ -2206,6 +2217,7 @@ mod tests {
     #[test]
     fn pdf_build_with_missing_executable_fails_cleanly() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
 
@@ -2232,6 +2244,7 @@ mod tests {
     #[test]
     fn pdf_compilation_failure_leaves_no_output_and_surfaces_diagnostic() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "original source\n").unwrap();
         let before = fs::read(&input).unwrap();
@@ -2260,6 +2273,7 @@ mod tests {
     #[test]
     fn pdf_invalid_header_is_rejected_without_writing_output() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         // The fake exits 0 but returns a non-PDF body.
@@ -2283,6 +2297,7 @@ mod tests {
     #[test]
     fn pdf_and_typst_formats_produce_both_outputs() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
@@ -2305,6 +2320,7 @@ mod tests {
     #[test]
     fn pdf_explicit_output_is_respected() {
         let dir = tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
         let input = dir.path().join("document.qd");
         fs::write(&input, "# Hello\n").unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
