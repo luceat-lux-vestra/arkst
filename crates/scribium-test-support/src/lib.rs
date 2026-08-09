@@ -216,8 +216,7 @@ mod tests {
         let upstream_toml = root.join("docs/compatibility/quarkdown/upstream.toml");
         let upstream_content = std::fs::read_to_string(&upstream_toml)
             .unwrap_or_else(|e| panic!("cannot read upstream.toml: {}", e));
-        let upstream: toml::Value = upstream_content
-            .parse()
+        let upstream: toml::Table = toml::from_str(&upstream_content)
             .unwrap_or_else(|e| panic!("cannot parse upstream.toml: {}", e));
         let baseline_from_toml = upstream["upstream"]["supported_baseline"]
             .as_str()
