@@ -201,7 +201,7 @@ impl SourceLine<'_> {
             || is_list_marker(self.text).is_some()
             || is_ordered_list_marker(self.text).is_some()
             || is_block_directive_line(self.text)
-            || is_blockquote_marker(self.text)
+            || is_blockquote_marker(self.raw)
     }
 }
 
@@ -309,7 +309,7 @@ fn parse_blocks(
             ));
             continue;
         }
-        if is_blockquote_marker(line.text) && depth < MAX_BLOCK_DEPTH {
+        if is_blockquote_marker(line.raw) && depth < MAX_BLOCK_DEPTH {
             blocks.push(parse_blockquote(source, lines, cursor, depth, diagnostics));
             continue;
         }
@@ -587,6 +587,14 @@ fn parse_paragraph(
 /// followed by a space. The `>` marker is stripped and the remaining content
 /// is parsed as nested blocks. Blank lines within a block quote (lines with
 /// only `>` or `> `) are preserved as blank lines in the content.
+///
+/// Per CommonMark:
+/// - Up to 3 spaces of indentation are allowed before the `>` marker.
+/// - A blank line containing only the block quote marker (or marker + space)
+///   does not end the block quote but separates paragraphs within it.
+/// - An unquoted blank line ends the block quote.
+/// - Lazy continuation: non-blockquote lines that follow a paragraph inside
+///   a block quote are treated as continuations of that paragraph.
 fn parse_blockquote(
     source: &str,
     lines: &[SourceLine<'_>],
@@ -598,43 +606,57 @@ fn parse_blockquote(
     let first = &lines[start_line];
     let mut content_lines = Vec::new();
     let mut end_span = first.end;
+    let mut in_paragraph = false;
 
-    // Collect all consecutive blockquote lines
+    // Collect all consecutive blockquote lines and lazy continuations
     while *cursor < lines.len() {
         let line = &lines[*cursor];
-        if is_blockquote_marker(line.text) {
-            // Strip the blockquote marker and optional space
-            let content = if line.text.len() > 1 && line.text.as_bytes()[1] == b' ' {
-                &line.text[2..]
-            } else if line.text.len() > 1 {
-                &line.text[1..]
+
+        // Check for blockquote marker in the raw line (including leading whitespace)
+        if let Some(marker_pos) = find_blockquote_marker(line.raw) {
+            // This is a blockquote marker line
+            in_paragraph = false;
+
+            // Calculate content start: after marker, skip optional single space
+            let content_start = marker_pos + 1;
+            let has_space_after_marker =
+                content_start < line.raw.len() && line.raw.as_bytes()[content_start] == b' ';
+            let content_raw = if has_space_after_marker {
+                &line.raw[content_start + 1..]
             } else {
-                ""
-            };
-            let raw_content = if line.raw.len() > 1 && line.raw.as_bytes()[1] == b' ' {
-                &line.raw[2..]
-            } else if line.raw.len() > 1 {
-                &line.raw[1..]
-            } else {
-                ""
+                &line.raw[content_start..]
             };
 
+            // Calculate absolute offsets in the original source
+            // If we skipped a space after marker, add 1 more to the offset
+            let content_raw_start =
+                line.raw_start + content_start + if has_space_after_marker { 1 } else { 0 };
+
+            // text is content_raw with leading whitespace stripped
+            let ws = content_raw
+                .bytes()
+                .take_while(|b| *b == b' ' || *b == b'\t')
+                .count();
+            let content_text = &content_raw[ws..];
+            let content_text_start = content_raw_start + ws;
+
             content_lines.push(SourceLine {
-                raw: raw_content,
-                text: content,
-                raw_start: line.text_start + (line.raw.len() - raw_content.len()),
-                text_start: line.text_start + (line.text.len() - content.len()),
+                raw: content_raw,
+                text: content_text,
+                raw_start: content_raw_start,
+                text_start: content_text_start,
                 term: line.term,
                 end: line.end,
             });
             end_span = line.end;
             *cursor += 1;
         } else if line.is_blank() {
-            // Blank line inside a block quote - check if next line continues the quote
-            let next_is_quote =
-                *cursor + 1 < lines.len() && is_blockquote_marker(lines[*cursor + 1].text);
-            if next_is_quote {
-                // Preserve the blank line as part of the quote
+            // Blank line - check if it's a quoted blank line (only > or > )
+            // or an unquoted blank line
+            let is_quoted_blank = find_blockquote_marker(line.raw).is_some();
+
+            if is_quoted_blank {
+                // Quoted blank line: preserve as blank line within the quote
                 content_lines.push(SourceLine {
                     raw: "",
                     text: "",
@@ -645,13 +667,38 @@ fn parse_blockquote(
                 });
                 end_span = line.end;
                 *cursor += 1;
+                in_paragraph = false;
             } else {
-                // Blank line ends the block quote
+                // Unquoted blank line: ends the block quote
                 break;
             }
+        } else if in_paragraph && !line.starts_block() {
+            // Lazy continuation: non-blockquote, non-blank line after a paragraph
+            // that does NOT start a new block. This continues the current paragraph
+            // inside the block quote.
+            content_lines.push(SourceLine {
+                raw: line.raw,
+                text: line.text,
+                raw_start: line.raw_start,
+                text_start: line.text_start,
+                term: line.term,
+                end: line.end,
+            });
+            end_span = line.end;
+            *cursor += 1;
         } else {
-            // Non-blockquote line ends the block quote
+            // Non-blockquote line and not in a paragraph (or starts a new block):
+            // ends the block quote
             break;
+        }
+
+        // Track if we're in a paragraph (for lazy continuation)
+        // A paragraph starts when we have non-blank content
+        if !content_lines.is_empty() {
+            let last_content = &content_lines[content_lines.len() - 1];
+            if !last_content.raw.is_empty() && !last_content.text.is_empty() {
+                in_paragraph = true;
+            }
         }
     }
 
@@ -667,7 +714,7 @@ fn parse_blockquote(
 
     Block::BlockQuote {
         content,
-        span: ByteSpan::new(first.text_start, end_span),
+        span: ByteSpan::new(first.raw_start, end_span),
     }
 }
 
@@ -1062,17 +1109,27 @@ fn is_item_start(text: &str, marker: u8) -> bool {
 }
 
 /// Whether the line starts a block quote (`>` followed by optional space).
-fn is_blockquote_marker(text: &str) -> bool {
+/// Returns the byte offset of the `>` marker in the original line text (including leading whitespace),
+/// or None if not a block quote marker.
+/// Per CommonMark, up to 3 spaces of indentation are allowed before the `>`.
+fn find_blockquote_marker(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
-    if bytes.first() == Some(&b'>') {
-        // Valid if it's just ">" or "> " or ">text"
-        bytes.len() == 1
-            || bytes
-                .get(1)
-                .is_some_and(|&b| b == b' ' || !b.is_ascii_whitespace())
-    } else {
-        false
+    // Check up to 3 leading spaces
+    let mut i = 0;
+    while i < bytes.len() && i < 3 && bytes[i] == b' ' {
+        i += 1;
     }
+    if i < bytes.len() && bytes[i] == b'>' {
+        Some(i)
+    } else {
+        None
+    }
+}
+
+/// Whether the line starts a block quote (`>` followed by optional space).
+/// Uses `find_blockquote_marker` to check the raw line text (with leading whitespace).
+fn is_blockquote_marker(text: &str) -> bool {
+    find_blockquote_marker(text).is_some()
 }
 
 /// The starting ordinal and delimiter if the line starts an ordered list item (N. or N)).
@@ -3957,6 +4014,339 @@ mod tests {
                 }
             }
             other => panic!("expected outer call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_basic() {
+        // Basic blockquote with > marker
+        let doc = parse("> foo\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline() {
+        // Multiple consecutive quoted lines form a single blockquote
+        let doc = parse("> foo\n> bar\n> baz\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo\nbar\nbaz");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_marker_with_space() {
+        // > with optional space
+        let doc = parse("> foo\n>bar\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo\nbar");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_indented_0_to_3_spaces() {
+        // CommonMark allows 0-3 spaces before >
+        for (input, desc) in [
+            ("> foo\n", "0 spaces"),
+            (" > foo\n", "1 space"),
+            ("  > foo\n", "2 spaces"),
+            ("   > foo\n", "3 spaces"),
+        ] {
+            let doc = parse(input);
+            assert_eq!(doc.nodes.len(), 1, "failed for {desc}");
+            match &doc.nodes[0] {
+                Block::BlockQuote { content, .. } => {
+                    assert_eq!(content.len(), 1, "failed for {desc}");
+                    match &content[0] {
+                        Block::Paragraph { content, .. } => {
+                            assert_eq!(joined_text(content), "foo", "failed for {desc}");
+                        }
+                        other => panic!("failed for {desc}: expected paragraph, got {other:?}"),
+                    }
+                }
+                other => panic!("failed for {desc}: expected blockquote, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn blockquote_not_indented_4_spaces() {
+        // 4 spaces before > is NOT a blockquote marker (indented code/paragraph)
+        let doc = parse("    > foo\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::Paragraph { content, .. } => {
+                assert_eq!(joined_text(content), "> foo");
+            }
+            other => panic!("expected paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation() {
+        // Non-quoted line after quoted paragraph continues the paragraph (lazy continuation)
+        let doc = parse("> foo\nbar\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo\nbar");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_quoted_blank_line_separates_paragraphs() {
+        // Quoted blank line (> or > ) separates paragraphs within same blockquote
+        let doc = parse("> foo\n>\n> bar\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::Paragraph { content: c1, .. },
+                        Block::Paragraph { content: c2, .. },
+                    ) => {
+                        assert_eq!(joined_text(c1), "foo");
+                        assert_eq!(joined_text(c2), "bar");
+                    }
+                    other => panic!("expected two paragraphs, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_unquoted_blank_line_terminates() {
+        // Unquoted blank line ends the blockquote
+        let doc = parse("> foo\n\n> bar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content: c1, .. }, Block::BlockQuote { content: c2, .. }) => {
+                assert_eq!(c1.len(), 1);
+                assert_eq!(c2.len(), 1);
+                match (&c1[0], &c2[0]) {
+                    (
+                        Block::Paragraph { content: p1, .. },
+                        Block::Paragraph { content: p2, .. },
+                    ) => {
+                        assert_eq!(joined_text(p1), "foo");
+                        assert_eq!(joined_text(p2), "bar");
+                    }
+                    other => panic!("expected paragraphs, got {other:?}"),
+                }
+            }
+            other => panic!("expected two blockquotes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested() {
+        // Nested blockquotes with >> marker
+        let doc = parse("> outer\n>> inner\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::Paragraph { content: c1, .. },
+                        Block::BlockQuote { content: c2, .. },
+                    ) => {
+                        assert_eq!(joined_text(c1), "outer");
+                        assert_eq!(c2.len(), 1);
+                        match &c2[0] {
+                            Block::Paragraph { content: c3, .. } => {
+                                assert_eq!(joined_text(c3), "inner");
+                            }
+                            _ => panic!("expected paragraph"),
+                        }
+                    }
+                    _ => panic!("expected paragraph + blockquote"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_inline_parsing() {
+        // Inline parsing works inside blockquotes
+        let doc = parse("> **bold** and `code` and [link](url)\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        // Should have Strong, Code, Link inlines
+                        let has_strong = content.iter().any(|i| matches!(i, Inline::Strong { .. }));
+                        let has_code = content.iter().any(|i| matches!(i, Inline::Code { .. }));
+                        let has_link = content.iter().any(|i| matches!(i, Inline::Link { .. }));
+                        assert!(has_strong, "missing strong");
+                        assert!(has_code, "missing code");
+                        assert!(has_link, "missing link");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_with_list() {
+        // Lists work inside blockquotes
+        let doc = parse("> - one\n> - two\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::UnorderedList { items, .. } => {
+                        assert_eq!(items.len(), 2);
+                    }
+                    other => panic!("expected unordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_with_ordered_list() {
+        // Ordered lists work inside blockquotes
+        let doc = parse("> 1. one\n> 2. two\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::OrderedList { items, .. } => {
+                        assert_eq!(items.len(), 2);
+                    }
+                    other => panic!("expected ordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_source_spans_correct() {
+        // Source spans should be correct for indented blockquotes
+        let doc = parse(" > foo\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, span, .. } => {
+                // Blockquote span should cover the entire line including marker
+                assert!(span.start <= span.end);
+                // Content paragraph span should point to "foo" (after marker)
+                if let Block::Paragraph { span: p_span, .. } = &content[0] {
+                    assert!(p_span.start >= 2); // after " >"
+                    assert!(p_span.end <= 7); // "foo" ends at 7
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_utf8_content() {
+        // UTF-8 content in blockquotes
+        let doc = parse("> 한글 테스트\n> hello 😀 world\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        let text = joined_text(content);
+                        assert!(text.contains("한글"));
+                        assert!(text.contains("😀"));
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_crlf() {
+        // CRLF line endings
+        let doc = parse("> foo\r\n> bar\r\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo\nbar");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_transition_to_heading() {
+        // Blockquote ends before a heading
+        let doc = parse("> foo\n# heading\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Heading { .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote + heading, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_transition_to_list() {
+        // Blockquote ends before a list
+        let doc = parse("> foo\n- item\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::UnorderedList { .. }) => {
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected blockquote + list, got {other:?}"),
         }
     }
 }
