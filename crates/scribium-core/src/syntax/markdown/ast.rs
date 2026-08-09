@@ -118,6 +118,17 @@ pub enum Inline {
         destination: String,
         span: ByteSpan,
     },
+    /// An inline code span (`monospace`), delimited by one or more backticks.
+    ///
+    /// The content is literal: no Markdown or Quarkdown syntax is parsed
+    /// inside it. The span covers the whole construct including the opening
+    /// and closing backtick delimiters.
+    Code {
+        /// Normalized literal content (line endings turned into spaces,
+        /// CommonMark surrounding-space rule applied).
+        content: String,
+        span: ByteSpan,
+    },
     /// Hard line break (trailing two spaces + newline, or backslash at end of line).
     HardBreak { span: ByteSpan },
     /// Soft line break (adjacent lines without a blank line).

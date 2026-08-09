@@ -382,6 +382,14 @@ impl Evaluator {
                     }]
                 }
             }
+            IrInline::Code { content, span } => {
+                // Code spans are opaque: the content is never resolved,
+                // recursed into, or evaluated. It passes straight through.
+                vec![IrInline::Code {
+                    content: content.clone(),
+                    span: *span,
+                }]
+            }
             other => vec![other.clone()],
         }
     }

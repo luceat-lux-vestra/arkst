@@ -67,13 +67,24 @@ Implemented (M2):
     (`[text][id]` / `[id]: url`), autolinks (`<https://...>`), and images
   - Malformed links (`[text](`, `[text]`, `[](url)`, `[text]( )`,
     `[text](url "title")`, ...) recover as literal text
+- Code spans (`` `code` ``)
+  - A code span opens with a run of one or more backticks and closes with a
+    backtick run of exactly the same length (``foo` bar`` stays inside a
+    double-backtick span); runs of other lengths do not close the span
+  - Contents are opaque: no Markdown or Quarkdown syntax inside a code span
+    is parsed (`**bold**`, `[link](url)`, and `.strong {x}` stay literal)
+  - Line endings inside a code span become ordinary spaces
+  - Per CommonMark: if the content starts and ends with an ASCII space and
+    is not composed entirely of spaces, exactly one leading and one trailing
+    space is removed (`  code  ` keeps one space each side)
+  - An opener with no matching closer recovers deterministically as literal
+    text with no character loss and no diagnostic
 
 Planned (M2+):
 
 - Task lists
 - Images (`![alt](url)`)
 - Blockquotes (`> `)
-- Code spans (`` `code` ``)
 - Tables (GFM pipe tables)
 - Footnotes
 - Strikethrough (`~~text~~`)

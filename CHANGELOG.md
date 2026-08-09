@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown Inline Code Spans (M2)**: Inline code span parsing (`` `code` ``)
+  and lowering to Typst `#raw(...)`.
+  - Opening and closing backtick runs of any length (``foo` bar`` stays
+    inside a double-backtick span); only a run of exactly the same length
+    closes the span
+  - Contents are opaque: no Markdown or Quarkdown syntax inside a code span
+    is parsed (emphasis, links, and dot calls stay literal); backslashes are
+    literal
+  - CommonMark normalization: line endings become single spaces; content
+    starting and ending with ASCII spaces (but not all-space) loses exactly
+    one space on each side
+  - Unmatched opening runs recover deterministically as literal text with no
+    character loss and no diagnostic
+  - `Inline::Code` AST node and `IrInline::Code` IR node; the evaluator
+    passes code spans through unchanged (never resolves variables, never
+    recurses); spans cover the delimiters
+  - Typst lowering to `#raw("...")` with safe string escaping (source-map
+    entries recorded); parser, IR conversion, lowering, source-map, and
+    end-to-end tests
 - **Markdown Inline Links (M2)**: Inline link parsing (`[text](url)`) and
   lowering to Typst `#link(...)`.
   - `Inline::Link` AST node and `IrInline::Link` IR node with the label kept

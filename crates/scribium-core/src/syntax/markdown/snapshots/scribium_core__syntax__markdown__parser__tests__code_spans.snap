@@ -1,0 +1,140 @@
+---
+source: crates/scribium-core/src/syntax/markdown/parser.rs
+assertion_line: 3016
+expression: "parse(\"Run `cargo test` and ``foo ` bar``.\\n\\nLiteral: `**bold**` and `[x](y)` and `.s {v}`.\\n\\nUnclosed `oops.\\n\")"
+---
+Document {
+    nodes: [
+        Paragraph {
+            content: [
+                Text {
+                    content: "Run ",
+                    span: ByteSpan {
+                        start: 0,
+                        end: 4,
+                    },
+                },
+                Code {
+                    content: "cargo test",
+                    span: ByteSpan {
+                        start: 4,
+                        end: 16,
+                    },
+                },
+                Text {
+                    content: " and ",
+                    span: ByteSpan {
+                        start: 16,
+                        end: 21,
+                    },
+                },
+                Code {
+                    content: "foo ` bar",
+                    span: ByteSpan {
+                        start: 21,
+                        end: 34,
+                    },
+                },
+                Text {
+                    content: ".",
+                    span: ByteSpan {
+                        start: 34,
+                        end: 35,
+                    },
+                },
+            ],
+            span: ByteSpan {
+                start: 0,
+                end: 36,
+            },
+        },
+        Paragraph {
+            content: [
+                Text {
+                    content: "Literal: ",
+                    span: ByteSpan {
+                        start: 37,
+                        end: 46,
+                    },
+                },
+                Code {
+                    content: "**bold**",
+                    span: ByteSpan {
+                        start: 46,
+                        end: 56,
+                    },
+                },
+                Text {
+                    content: " and ",
+                    span: ByteSpan {
+                        start: 56,
+                        end: 61,
+                    },
+                },
+                Code {
+                    content: "[x](y)",
+                    span: ByteSpan {
+                        start: 61,
+                        end: 69,
+                    },
+                },
+                Text {
+                    content: " and ",
+                    span: ByteSpan {
+                        start: 69,
+                        end: 74,
+                    },
+                },
+                Code {
+                    content: ".s {v}",
+                    span: ByteSpan {
+                        start: 74,
+                        end: 82,
+                    },
+                },
+                Text {
+                    content: ".",
+                    span: ByteSpan {
+                        start: 82,
+                        end: 83,
+                    },
+                },
+            ],
+            span: ByteSpan {
+                start: 37,
+                end: 84,
+            },
+        },
+        Paragraph {
+            content: [
+                Text {
+                    content: "Unclosed ",
+                    span: ByteSpan {
+                        start: 85,
+                        end: 94,
+                    },
+                },
+                Text {
+                    content: "`",
+                    span: ByteSpan {
+                        start: 94,
+                        end: 95,
+                    },
+                },
+                Text {
+                    content: "oops.",
+                    span: ByteSpan {
+                        start: 95,
+                        end: 100,
+                    },
+                },
+            ],
+            span: ByteSpan {
+                start: 85,
+                end: 101,
+            },
+        },
+    ],
+    front_matter: None,
+    line_count: 6,
+}

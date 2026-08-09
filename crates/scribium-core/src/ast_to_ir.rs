@@ -233,6 +233,10 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
             destination: destination.clone(),
             span: byte_to_source_span(span, source_id),
         }),
+        Inline::Code { content, span } => Some(IrInline::Code {
+            content: content.clone(),
+            span: byte_to_source_span(span, source_id),
+        }),
     }
 }
 
@@ -292,6 +296,7 @@ fn inline_span_start(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.start,
     }
@@ -304,6 +309,7 @@ fn inline_span_end(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.end,
     }
@@ -448,6 +454,36 @@ mod tests {
                         }
                     }
                     other => panic!("expected Link, got {other:?}"),
+                }
+            }
+            _ => panic!("expected Paragraph"),
+        }
+    }
+
+    #[test]
+    fn convert_paragraph_with_code_span() {
+        let doc = Document {
+            nodes: vec![Block::Paragraph {
+                content: vec![Inline::Code {
+                    content: "a ` b".into(),
+                    span: bs(4, 13),
+                }],
+                span: bs(4, 13),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        assert_eq!(ir.nodes.len(), 1);
+        match &ir.nodes[0] {
+            IrNode::Paragraph { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    IrInline::Code { content, span } => {
+                        assert_eq!(content, "a ` b");
+                        assert_eq!(*span, SourceSpan::new(SourceId(42), 4, 13));
+                    }
+                    other => panic!("expected Code, got {other:?}"),
                 }
             }
             _ => panic!("expected Paragraph"),

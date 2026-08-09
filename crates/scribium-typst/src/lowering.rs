@@ -358,6 +358,17 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::Code { content, span } => {
+                let before = self.output.len();
+                self.push_str("#raw(");
+                self.push('"');
+                self.push_str(&escape_typst_string(content));
+                self.push('"');
+                self.push(')');
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
         }
     }
 
@@ -647,6 +658,95 @@ mod tests {
         let code = super::lower_to_typst_code(&result.ir);
         assert!(code.contains("#link(\"https://typst.app\")[Typst]"));
         assert!(code.contains("#link(\"https://example.com\")[*bold link*]"));
+    }
+
+    #[test]
+    fn lower_code_span() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![
+                    text("Run "),
+                    IrInline::Code {
+                        content: "cargo test".into(),
+                        span: empty_span(),
+                    },
+                    text(" now"),
+                ],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "Run #raw(\"cargo test\") now\n\n");
+    }
+
+    #[test]
+    fn code_span_keeps_typst_sensitive_characters_literal() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Code {
+                    content: "a\"b\\c ` backtick #hash $dollar [b] {x} 한글".into(),
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        // Only `\` and `"` need escaping inside the string argument; the
+        // rest stays literal inside #raw(...).
+        assert_eq!(
+            code,
+            "#raw(\"a\\\"b\\\\c ` backtick #hash $dollar [b] {x} 한글\")\n\n"
+        );
+    }
+
+    #[test]
+    fn code_span_records_source_map_entry() {
+        use scribium_core::ir::SourceMapEntry;
+
+        let code_span = SourceSpan::new(scribium_core::SourceId(1), 7, 13);
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Code {
+                    content: "foo".into(),
+                    span: code_span,
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let (code, map) = super::lower_to_typst(&doc);
+        assert_eq!(code, "#raw(\"foo\")\n\n");
+        assert_eq!(
+            map,
+            vec![SourceMapEntry {
+                generated_start: 0,
+                generated_end: 11,
+                original: code_span,
+            }]
+        );
+    }
+
+    #[test]
+    fn end_to_end_code_span_compiles_to_typst_raw() {
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        let source = "# Code\n\nRun `cargo run`.\n\nUse ``foo ` bar`` when discussing backticks.\n\nLiteral syntax: `**not bold**`.\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty());
+        let code = super::lower_to_typst_code(&result.ir);
+        assert!(code.contains("#raw(\"cargo run\")"));
+        assert!(code.contains("#raw(\"foo ` bar\")"));
+        assert!(code.contains("#raw(\"**not bold**\")"));
+        assert!(!code.contains("#link("));
     }
 
     #[test]
