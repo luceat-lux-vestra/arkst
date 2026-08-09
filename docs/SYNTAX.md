@@ -50,11 +50,24 @@ Implemented (M2):
     marker width (e.g. `9. ` vs `10. `), not a fixed column
   - Markers allow 1 to 9 digits; longer digit runs (`1234567890. `) are
     literal text
+- Links (`[text](url)`)
+  - The label runs from `[` to the first `]` and keeps full inline markup:
+    emphasis, strong text, and Quarkdown inline calls work inside it
+    (`[**bold** text](https://example.com)`, `[.strong {hello}](...)`)
+  - The destination runs from `(` to the first matching `)`; balanced
+    parentheses inside are allowed (`[x](a(b)c)`)
+  - Destinations are preserved as-is: `https://` URLs, relative paths,
+    and fragments (`#intro`) are passed through without normalization or
+    resolution; `\` and `"` are escaped in generated Typst
+  - Not supported: nested brackets in the label (the label ends at the
+    first `]`), link titles (`[text](url "title")`), reference links
+    (`[text][id]` / `[id]: url`), autolinks (`<https://...>`), and images
+  - Malformed links (`[text](`, `[text]`, `[](url)`, ...) recover as
+    literal text
 
 Planned (M2+):
 
 - Task lists
-- Links (`[text](url)`)
 - Images (`![alt](url)`)
 - Blockquotes (`> `)
 - Code spans (`` `code` ``)

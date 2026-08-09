@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown Inline Links (M2)**: Inline link parsing (`[text](url)`) and
+  lowering to Typst `#link(...)`.
+  - `Inline::Link` AST node and `IrInline::Link` IR node with the label kept
+    as inline markup (emphasis, strong, Quarkdown inline calls) and the
+    destination preserved as-is (no normalization, no resolution)
+  - Typst lowering to `#link("destination")[label]` with safe escaping of
+    `\` and `"` in destinations; source map entries for link spans
+  - Deterministic subset: labels end at the first `]`, balanced parentheses
+    allowed in destinations; titles, reference links, autolinks, and images
+    are not supported
+  - Malformed links (`[text](`, `[text]`, `[](url)`) recover as literal text
+  - Parser, IR conversion, evaluator, lowering, and source-map tests
 - **Markdown Ordered Lists (M2)**: Ordered list parsing (`1. `, `2. `, `N. `) and
   lowering to Typst with starting ordinal preservation, parentheses marker
   (`1) `, `2) `) support, and ordered/unordered nesting in either direction.

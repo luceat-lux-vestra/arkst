@@ -141,6 +141,7 @@ author: Alice
 | Markdown heading, paragraph             | Experimental |
 | Emphasis, strong                        | Experimental |
 | Lists                                   | Experimental |
+| Inline links (`[text](url)`)         | Experimental |
 | Dot-prefixed function calls             | Experimental / Parsed |
 | Positional/named/body arguments         | Experimental / Parsed |
 | Variables and conditionals              | Experimental / Implemented |
