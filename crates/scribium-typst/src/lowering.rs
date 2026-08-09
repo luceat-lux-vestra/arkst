@@ -20,10 +20,25 @@ pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {
 pub fn lower_to_typst_code(doc: &IrDocument) -> String {
     lower_to_typst(doc).0
 }
-
 struct LoweringContext {
     output: String,
     source_map: Vec<SourceMapEntry>,
+    /// Current list nesting level (0 = top-level, 1 = nested, etc.)
+    list_nesting: usize,
+    /// Indentation string for the current list level (used for nested items)
+    list_indent: String,
+    /// Continuation indent for the list item currently being emitted.
+    ///
+    /// While non-empty, every newly started line is prefixed with this
+    /// string so that all blocks of the current `IrListItem` stay contained
+    /// in that item in the generated Typst (Typst list items own every line
+    /// indented to at least the item's content column).
+    list_item_indent: String,
+    /// Whether line starts get the item continuation indent.
+    at_line_start: bool,
+    /// Whether the raw pushed text must not receive the continuation
+    /// indent (verbatim code/raw content inside a list item).
+    verbatim: bool,
 }
 
 impl LoweringContext {
@@ -31,6 +46,11 @@ impl LoweringContext {
         Self {
             output: String::new(),
             source_map: Vec::new(),
+            list_nesting: 0,
+            list_indent: String::new(),
+            list_item_indent: String::new(),
+            at_line_start: false,
+            verbatim: false,
         }
     }
 
@@ -92,12 +112,48 @@ impl LoweringContext {
             }
             IrNode::UnorderedList { items, span } => {
                 let before = self.output.len();
+                let was_nested = self.list_nesting > 0;
+                if was_nested {
+                    self.list_indent.push_str("  ");
+                }
+                self.list_nesting += 1;
                 for item in items {
-                    self.push_str("- ");
-                    for child in &item.nodes {
-                        self.lower_node(child);
-                    }
-                    self.push('\n');
+                    let marker_prefix = if was_nested {
+                        format!("{} - ", self.list_indent)
+                    } else {
+                        "- ".to_string()
+                    };
+                    self.lower_list_item(&marker_prefix, &item.nodes);
+                }
+                self.list_nesting -= 1;
+                if was_nested {
+                    self.list_indent
+                        .truncate(self.list_indent.len().saturating_sub(2));
+                }
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrNode::OrderedList { items, start, span } => {
+                let before = self.output.len();
+                let was_nested = self.list_nesting > 0;
+                if was_nested {
+                    self.list_indent.push_str("  ");
+                }
+                self.list_nesting += 1;
+                for (i, item) in items.iter().enumerate() {
+                    let counter = start + i;
+                    let marker_prefix = if was_nested {
+                        format!("{}{}. ", self.list_indent, counter)
+                    } else {
+                        format!("{}. ", counter)
+                    };
+                    self.lower_list_item(&marker_prefix, &item.nodes);
+                }
+                self.list_nesting -= 1;
+                if was_nested {
+                    self.list_indent
+                        .truncate(self.list_indent.len().saturating_sub(2));
                 }
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
@@ -114,10 +170,12 @@ impl LoweringContext {
                     self.push_str(lang);
                 }
                 self.push('\n');
+                let was_verbatim = std::mem::replace(&mut self.verbatim, true);
                 self.push_str(source);
                 if !source.ends_with('\n') {
                     self.push('\n');
                 }
+                self.verbatim = was_verbatim;
                 self.push_str("```\n");
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
@@ -125,10 +183,12 @@ impl LoweringContext {
             }
             IrNode::RawTypst { source, span } => {
                 let before = self.output.len();
+                let was_verbatim = std::mem::replace(&mut self.verbatim, true);
                 self.push_str(source);
                 if !source.ends_with('\n') {
                     self.push('\n');
                 }
+                self.verbatim = was_verbatim;
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -166,9 +226,11 @@ impl LoweringContext {
                 }
                 if let Some(body_nodes) = body {
                     self.push('[');
+                    let saved_item = std::mem::take(&mut self.list_item_indent);
                     for node in body_nodes {
                         self.lower_node(node);
                     }
+                    self.list_item_indent = saved_item;
                     self.push(']');
                 }
                 self.push('\n');
@@ -307,20 +369,65 @@ impl LoweringContext {
             }
             IrValue::Content(nodes) => {
                 self.push('[');
+                let saved_item = std::mem::take(&mut self.list_item_indent);
                 for node in nodes {
                     self.lower_node(node);
                 }
+                self.list_item_indent = saved_item;
                 self.push(']');
             }
         }
     }
 
     fn push(&mut self, ch: char) {
+        if ch != '\n' {
+            self.inject_item_indent();
+        }
         self.output.push(ch);
+        if ch == '\n' {
+            self.at_line_start = true;
+        }
     }
 
     fn push_str(&mut self, s: &str) {
+        self.inject_item_indent();
         self.output.push_str(s);
+        if s.ends_with('\n') {
+            self.at_line_start = true;
+        }
+    }
+
+    fn inject_item_indent(&mut self) {
+        if self.at_line_start && !self.verbatim && !self.list_item_indent.is_empty() {
+            self.output.push_str(&self.list_item_indent);
+            self.at_line_start = false;
+        }
+    }
+
+    /// Lower every block of the current `IrListItem` so the item's
+    /// continuation indent is applied at each block boundary.
+    fn lower_list_item(&mut self, marker_prefix: &str, nodes: &[IrNode]) {
+        let saved = std::mem::replace(&mut self.list_item_indent, " ".repeat(marker_prefix.len()));
+        self.at_line_start = false;
+        self.push_str(marker_prefix);
+        for child in nodes {
+            self.lower_item_block(child);
+        }
+        self.list_item_indent = saved;
+        self.push('\n');
+    }
+
+    fn lower_item_block(&mut self, node: &IrNode) {
+        match node {
+            // Nested lists carry their own indentation (`list_indent`), so
+            // the item continuation indent must not be re-applied to them.
+            IrNode::UnorderedList { .. } | IrNode::OrderedList { .. } => {
+                let saved = std::mem::take(&mut self.list_item_indent);
+                self.lower_node(node);
+                self.list_item_indent = saved;
+            }
+            _ => self.lower_node(node),
+        }
     }
 }
 
@@ -456,6 +563,332 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "- Item one\n\n- Item two\n\n\n");
+    }
+
+    #[test]
+    fn lower_ordered_list() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("Item one")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("Item two")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                start: 1,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "1. Item one\n\n2. Item two\n\n\n");
+    }
+
+    #[test]
+    fn lower_ordered_list_non_one_start() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("Item three")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("Item four")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                start: 3,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "3. Item three\n\n4. Item four\n\n\n");
+    }
+
+    #[test]
+    fn lower_nested_ordered_list() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![IrListItem {
+                    nodes: vec![
+                        IrNode::Paragraph {
+                            content: vec![text("Outer")],
+                            span: empty_span(),
+                        },
+                        IrNode::OrderedList {
+                            items: vec![IrListItem {
+                                nodes: vec![IrNode::Paragraph {
+                                    content: vec![text("Inner")],
+                                    span: empty_span(),
+                                }],
+                                span: empty_span(),
+                            }],
+                            start: 1,
+                            span: empty_span(),
+                        },
+                    ],
+                    span: empty_span(),
+                }],
+                start: 1,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        // Paragraph "Outer" produces "Outer\n", nested list is indented with 2 spaces
+        assert_eq!(code, "1. Outer\n  1. Inner\n\n\n\n");
+    }
+
+    #[test]
+    fn lower_ordered_list_with_nested_unordered() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![IrListItem {
+                    nodes: vec![
+                        IrNode::Paragraph {
+                            content: vec![text("ordered")],
+                            span: empty_span(),
+                        },
+                        IrNode::UnorderedList {
+                            items: vec![
+                                IrListItem {
+                                    nodes: vec![IrNode::Paragraph {
+                                        content: vec![text("unordered")],
+                                        span: empty_span(),
+                                    }],
+                                    span: empty_span(),
+                                },
+                                IrListItem {
+                                    nodes: vec![IrNode::Paragraph {
+                                        content: vec![text("another")],
+                                        span: empty_span(),
+                                    }],
+                                    span: empty_span(),
+                                },
+                            ],
+                            span: empty_span(),
+                        },
+                    ],
+                    span: empty_span(),
+                }],
+                start: 1,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        // The nested unordered list stays inside the ordered item, indented
+        // (marker format for nested items is `indent + " - "`)
+        assert_eq!(code, "1. ordered\n   - unordered\n\n   - another\n\n\n\n");
+    }
+
+    #[test]
+    fn lower_unordered_list_with_nested_ordered() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::UnorderedList {
+                items: vec![IrListItem {
+                    nodes: vec![
+                        IrNode::Paragraph {
+                            content: vec![text("unordered")],
+                            span: empty_span(),
+                        },
+                        IrNode::OrderedList {
+                            items: vec![
+                                IrListItem {
+                                    nodes: vec![IrNode::Paragraph {
+                                        content: vec![text("ordered")],
+                                        span: empty_span(),
+                                    }],
+                                    span: empty_span(),
+                                },
+                                IrListItem {
+                                    nodes: vec![IrNode::Paragraph {
+                                        content: vec![text("ordered two")],
+                                        span: empty_span(),
+                                    }],
+                                    span: empty_span(),
+                                },
+                            ],
+                            start: 1,
+                            span: empty_span(),
+                        },
+                    ],
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        // Nested ordered list stays inside the parent item, indented by 2 spaces
+        assert_eq!(
+            code,
+            "- unordered\n  1. ordered\n\n  2. ordered two\n\n\n\n"
+        );
+    }
+
+    #[test]
+    fn end_to_end_nested_ordered_list() {
+        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+        // Real Markdown source with a nested ordered list inside a parent item.
+        // The inner list uses the parent's content column, the second item
+        // "2. sibling" is a top-level sibling of the first one.
+        let source = "1. parent\n    1. child\n    2. child2\n2. sibling\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty());
+        let code = super::lower_to_typst_code(&result.ir);
+        // The nested list must be indented inside the first item and must not
+        // be flattened into top-level items.
+        assert_eq!(
+            code,
+            "1. parent\n  1. child\n\n  2. child2\n\n\n2. sibling\n\n\n"
+        );
+    }
+
+    // Regression: a list item may contain several block nodes, and every
+    // block must stay structurally inside its item in the generated Typst.
+    // The fence lines of the code block must be emitted at the item's
+    // content column (marker width), while the verbatim body must not be
+    // re-indented.
+
+    #[test]
+    fn lower_ordered_list_item_with_code_block() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                start: 1,
+                items: vec![
+                    IrListItem {
+                        nodes: vec![
+                            IrNode::Paragraph {
+                                content: vec![text("item")],
+                                span: empty_span(),
+                            },
+                            IrNode::CodeBlock {
+                                language: None,
+                                source: "code".into(),
+                                span: empty_span(),
+                            },
+                        ],
+                        span: empty_span(),
+                    },
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("next")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "1. item\n   ```\ncode\n   ```\n\n2. next\n\n\n");
+    }
+
+    #[test]
+    fn lower_unordered_list_item_with_code_block() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::UnorderedList {
+                items: vec![
+                    IrListItem {
+                        nodes: vec![
+                            IrNode::Paragraph {
+                                content: vec![text("item")],
+                                span: empty_span(),
+                            },
+                            IrNode::CodeBlock {
+                                language: None,
+                                source: "code".into(),
+                                span: empty_span(),
+                            },
+                        ],
+                        span: empty_span(),
+                    },
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("next")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "- item\n  ```\ncode\n  ```\n\n- next\n\n\n");
+    }
+
+    #[test]
+    fn lower_list_item_with_many_blocks_stays_contained() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                start: 1,
+                items: vec![
+                    IrListItem {
+                        nodes: vec![
+                            IrNode::Paragraph {
+                                content: vec![text("one")],
+                                span: empty_span(),
+                            },
+                            IrNode::CodeBlock {
+                                language: None,
+                                source: "code".into(),
+                                span: empty_span(),
+                            },
+                            IrNode::Paragraph {
+                                content: vec![text("two")],
+                                span: empty_span(),
+                            },
+                        ],
+                        span: empty_span(),
+                    },
+                    IrListItem {
+                        nodes: vec![IrNode::Paragraph {
+                            content: vec![text("three")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(
+            code,
+            "1. one\n   ```\ncode\n   ```\n   two\n\n2. three\n\n\n"
+        );
     }
 
     #[test]

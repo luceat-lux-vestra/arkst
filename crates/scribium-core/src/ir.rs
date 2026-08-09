@@ -48,6 +48,13 @@ pub enum IrNode {
         items: Vec<IrListItem>,
         span: SourceSpan,
     },
+    /// Ordered list with one or more items.
+    OrderedList {
+        items: Vec<IrListItem>,
+        /// The starting ordinal of the list (typically 1).
+        start: usize,
+        span: SourceSpan,
+    },
     /// A fenced code block with an optional language tag.
     CodeBlock {
         language: Option<String>,

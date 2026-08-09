@@ -24,7 +24,6 @@ pub struct FrontMatter {
     pub fields: Vec<(String, String)>,
     pub span: ByteSpan,
 }
-
 /// Block-level AST nodes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
@@ -42,6 +41,12 @@ pub enum Block {
     /// Unordered list.
     UnorderedList {
         items: Vec<ListItem>,
+        span: ByteSpan,
+    },
+    /// Ordered list.
+    OrderedList {
+        items: Vec<ListItem>,
+        start: usize,
         span: ByteSpan,
     },
     /// Fenced code block (triple backtick).
@@ -72,7 +77,7 @@ pub enum Block {
     },
 }
 
-/// An item in an unordered list.
+/// An item in a list (ordered or unordered).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListItem {
     pub content: Vec<Block>,

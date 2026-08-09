@@ -7,12 +7,13 @@
 //! - Paragraphs with soft/hard line breaks
 //! - Emphasis (`*text*`, `_text_`) and strong (`**text**`, `__text__`)
 //! - Unordered lists (`- `, `* `, `+ `) with nested lists and code blocks
+//! - Ordered lists (`1. `, `1) `) with nested lists
 //! - Fenced code blocks (triple backtick, optional language)
 //! - Thematic breaks (`---`, `***`, `___`)
 //!
 //! Delimiter runs of three or more identical characters (`***x***`) are
 //! treated as literal text. Setext headings, links, images, blockquotes,
-//! code spans, and ordered lists are not part of the M1 subset.
+//! and code spans are not part of the M1 subset.
 
 use super::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
 use crate::source::ByteSpan;
@@ -190,6 +191,7 @@ impl SourceLine<'_> {
             || fence_length(self.text).is_some()
             || is_thematic_break(self.text)
             || is_list_marker(self.text).is_some()
+            || is_ordered_list_marker(self.text).is_some()
             || is_block_directive_line(self.text)
     }
 }
@@ -269,6 +271,19 @@ fn parse_blocks(
                     lines,
                     cursor,
                     marker,
+                    depth,
+                    diagnostics,
+                ));
+                continue;
+            }
+        }
+        if let Some((start, _delimiter)) = is_ordered_list_marker(line.text) {
+            if depth < MAX_BLOCK_DEPTH {
+                blocks.push(parse_ordered_list(
+                    source,
+                    lines,
+                    cursor,
+                    start,
                     depth,
                     diagnostics,
                 ));
@@ -468,6 +483,7 @@ fn block_span(block: &Block) -> ByteSpan {
         Block::Heading { span, .. } => *span,
         Block::Paragraph { span, .. } => *span,
         Block::UnorderedList { span, .. } => *span,
+        Block::OrderedList { span, .. } => *span,
         Block::CodeBlock { span, .. } => *span,
         Block::ThematicBreak { span } => *span,
         Block::BlankLine { span } => *span,
@@ -689,6 +705,113 @@ fn parse_list(
     }
 }
 
+/// Parse an ordered list starting at the cursor.
+/// `start` is the ordinal of the first item.
+/// The delimiter ('.' or ')') must be consistent across all items.
+fn parse_ordered_list(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    start: usize,
+    depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Block {
+    let mut items = Vec::new();
+    // Get the delimiter from the first item
+    let first = &lines[*cursor];
+    let first_marker = is_ordered_list_marker(first.text).expect("first item must have marker");
+    let delimiter = first_marker.1;
+
+    while *cursor < lines.len() {
+        let line = &lines[*cursor];
+        // Check if this line starts an ordered list item with the same delimiter
+        let Some((_ordinal, marker)) = is_ordered_list_marker(line.text) else {
+            break;
+        };
+        if marker != delimiter {
+            // Different delimiter - end of this ordered list
+            break;
+        }
+        // Allow any ordinal - only first item's ordinal determines start
+        // (Markdown doesn't require sequential source ordinals)
+        let item_start = line.raw_start;
+        let mut item_lines = Vec::new();
+        // Find marker position for this line
+        let line_marker_pos = line.text.bytes().position(|b| b == delimiter).unwrap_or(0);
+        let ws_after_marker = line.text[line_marker_pos + 1..]
+            .bytes()
+            .take_while(|b| *b == b' ' || *b == b'\t')
+            .count();
+        // Calculate content column for THIS item based on its marker width
+        let item_content_col = line.indent() + line_marker_pos + 1 + ws_after_marker;
+        item_lines.push(SourceLine {
+            raw: &line.text[line_marker_pos + 1 + ws_after_marker..],
+            text: &line.text[line_marker_pos + 1 + ws_after_marker..],
+            raw_start: line.text_start + line_marker_pos + 1 + ws_after_marker,
+            text_start: line.text_start + line_marker_pos + 1 + ws_after_marker,
+            term: line.term,
+            end: line.end,
+        });
+        *cursor += 1;
+        loop {
+            if *cursor >= lines.len() {
+                break;
+            }
+            let next = &lines[*cursor];
+            // Use the current item's content column for continuation/nested content
+            if next.indent() >= item_content_col {
+                item_lines.push(strip_indent(next, item_content_col));
+                *cursor += 1;
+            } else if next.is_blank() {
+                let mut lookahead = *cursor + 1;
+                while lookahead < lines.len() && lines[lookahead].is_blank() {
+                    lookahead += 1;
+                }
+                if lookahead < lines.len()
+                    && (lines[lookahead].indent() >= item_content_col
+                        || is_ordered_list_marker(lines[lookahead].text)
+                            .map(|(_, m)| m == delimiter)
+                            .unwrap_or(false)
+                        || is_list_marker(lines[lookahead].text).is_some())
+                {
+                    item_lines.push(SourceLine {
+                        raw: "",
+                        text: "",
+                        raw_start: next.raw_start,
+                        text_start: next.raw_start,
+                        term: next.term,
+                        end: next.end,
+                    });
+                    *cursor += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        let mut inner_cursor = 0;
+        let content = parse_blocks(
+            source,
+            &item_lines,
+            &mut inner_cursor,
+            depth + 1,
+            diagnostics,
+        );
+        let last_line = &item_lines[item_lines.len() - 1];
+        items.push(ListItem {
+            content,
+            span: ByteSpan::new(item_start, last_line.end),
+        });
+    }
+    let span_start = items[0].span.start;
+    let span_end = items[items.len() - 1].span.end;
+    Block::OrderedList {
+        items,
+        start,
+        span: ByteSpan::new(span_start, span_end),
+    }
+}
 /// Build an inner line with the first `content_col` whitespace columns removed.
 fn strip_indent<'a>(line: &SourceLine<'a>, content_col: usize) -> SourceLine<'a> {
     let strip = content_col.min(line.raw.len());
@@ -793,6 +916,41 @@ fn is_block_directive_line(text: &str) -> bool {
 fn is_item_start(text: &str, marker: u8) -> bool {
     let bytes = text.as_bytes();
     bytes.first() == Some(&marker) && bytes.len() > 1 && matches!(bytes[1], b' ' | b'\t')
+}
+
+/// The starting ordinal and delimiter if the line starts an ordered list item (N. or N)).
+/// Returns (ordinal, delimiter_byte) if valid, None otherwise.
+/// Enforces 1-9 digit limit per CommonMark.
+fn is_ordered_list_marker(text: &str) -> Option<(usize, u8)> {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+        return None;
+    }
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 || i >= bytes.len() {
+        return None;
+    }
+    // Enforce 1-9 digit limit
+    if i > 9 {
+        return None;
+    }
+    // Must be followed by '.' or ')' and then space or tab
+    let marker = bytes[i];
+    if marker != b'.' && marker != b')' {
+        return None;
+    }
+    if i + 1 >= bytes.len() {
+        return None;
+    }
+    if !matches!(bytes[i + 1], b' ' | b'\t') {
+        return None;
+    }
+    // Parse the ordinal
+    let ordinal_str = std::str::from_utf8(&bytes[..i]).ok()?;
+    ordinal_str.parse::<usize>().ok().map(|ord| (ord, marker))
 }
 
 /// A byte-oriented inline parser over a contiguous source slice.
@@ -1503,6 +1661,345 @@ mod tests {
                 other => panic!("expected code block, got {other:?}"),
             },
             other => panic!("expected list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_single_item() {
+        let doc = parse("1. item");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, span } => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(*start, 1);
+                assert_eq!(items[0].content.len(), 1);
+                assert_eq!(items[0].span, ByteSpan::new(0, 7));
+                assert_eq!(*span, ByteSpan::new(0, 7));
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_multiple_items() {
+        let doc = parse("1. one\n2. two\n3. three");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(*start, 1);
+                for (i, item) in items.iter().enumerate() {
+                    match &item.content[0] {
+                        Block::Paragraph { content, .. } => {
+                            assert_text(&content[0], ["one", "two", "three"][i]);
+                        }
+                        other => panic!("expected paragraph, got {other:?}"),
+                    }
+                }
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_non_one_start() {
+        let doc = parse("3. three\n4. four");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(*start, 3);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_parentheses_marker() {
+        let doc = parse("1) one\n2) two");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(*start, 1);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_without_space_is_paragraph() {
+        let doc = parse("1.item\n2.item");
+        assert_text(&paragraph_inlines(&doc)[0], "1.item");
+    }
+
+    #[test]
+    fn nested_ordered_list() {
+        // Content column is derived from each item's own marker; "1. " puts
+        // content at column 4, so the nested item needs 4 leading spaces
+        let doc = parse("1. outer\n   1. inner");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => {
+                assert_eq!(items.len(), 1);
+                match &items[0].content[1] {
+                    Block::OrderedList { items, .. } => assert_eq!(items.len(), 1),
+                    other => panic!("expected nested ordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_then_unordered_nested() {
+        // Content column is derived from each item's own marker; "1. " puts
+        // content at column 4, so the nested items need 4 leading spaces
+        let doc = parse("1. ordered\n    - unordered\n    - another");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => {
+                assert_eq!(items.len(), 1);
+                match &items[0].content[1] {
+                    Block::UnorderedList { items, .. } => assert_eq!(items.len(), 2),
+                    other => panic!("expected nested unordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+    #[test]
+    fn unordered_then_ordered_nested() {
+        // Content column is derived from each item's own marker; "- " puts
+        // content at column 2, so 2+ spaces suffice for the nested items
+        let doc = parse("- unordered\n  1. ordered\n  2. ordered");
+        match &doc.nodes[0] {
+            Block::UnorderedList { items, .. } => {
+                assert_eq!(items.len(), 1);
+                match &items[0].content[1] {
+                    Block::OrderedList { items, .. } => assert_eq!(items.len(), 2),
+                    other => panic!("expected nested ordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected unordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn number_followed_by_text_is_paragraph() {
+        let doc = parse("123abc");
+        assert_text(&paragraph_inlines(&doc)[0], "123abc");
+    }
+
+    #[test]
+    fn decimal_number_is_paragraph() {
+        let doc = parse("1.23");
+        assert_text(&paragraph_inlines(&doc)[0], "1.23");
+    }
+
+    #[test]
+    fn blank_lines_between_ordered_items() {
+        let doc = parse("1. one\n\n2. two");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => assert_eq!(items.len(), 2),
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_item_continuation() {
+        // Content column is 3 for ordered lists
+        let doc = parse("1. first line\n   second line");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => match &items[0].content[0] {
+                Block::Paragraph { content, .. } => {
+                    assert_eq!(content.len(), 3);
+                    assert_text(&content[0], "first line");
+                    assert!(matches!(content[1], Inline::SoftBreak { .. }));
+                    assert_text(&content[2], "second line");
+                }
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_with_code_block() {
+        // Content column is 3 for ordered lists
+        let doc = parse("1. item\n   ```\n   code\n   ```");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => match &items[0].content[1] {
+                Block::CodeBlock { source, .. } => assert_eq!(source, "code"),
+                other => panic!("expected code block, got {other:?}"),
+            },
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_source_spans() {
+        let doc = parse("1. first\n2. second");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, span, .. } => {
+                // First item "1. first" (8 bytes) + newline (1 byte) = 0..9
+                // Second item "2. second" (9 bytes) = 9..18
+                assert_eq!(items[0].span, ByteSpan::new(0, 9));
+                assert_eq!(items[1].span, ByteSpan::new(9, 18));
+                assert_eq!(*span, ByteSpan::new(0, 18));
+                assert_eq!(items[0].span, ByteSpan::new(0, 9));
+                assert_eq!(items[1].span, ByteSpan::new(9, 18));
+                assert_eq!(*span, ByteSpan::new(0, 18));
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_repeated_marker_numbers() {
+        // Repeated marker numbers form one list; only first ordinal determines start
+        let doc = parse("1. A\n1. B\n1. C");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(*start, 1);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_arbitrary_subsequent_numbers() {
+        // Non-sequential source ordinals form one list; only first ordinal determines start
+        let doc = parse("3. A\n8. B\n42. C");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(*start, 3);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_delimiter_boundary_dot_then_paren() {
+        // Different delimiters break the list
+        let doc = parse("1. A\n2) B");
+        assert_eq!(doc.nodes.len(), 2);
+        assert!(matches!(doc.nodes[0], Block::OrderedList { .. }));
+        assert!(matches!(doc.nodes[1], Block::OrderedList { .. }));
+    }
+
+    #[test]
+    fn ordered_list_delimiter_boundary_paren_then_dot() {
+        // Different delimiters break the list (reverse)
+        let doc = parse("1) A\n2. B");
+        assert_eq!(doc.nodes.len(), 2);
+        assert!(matches!(doc.nodes[0], Block::OrderedList { .. }));
+        assert!(matches!(doc.nodes[1], Block::OrderedList { .. }));
+    }
+
+    #[test]
+    fn ordered_list_same_parenthesis_delimiter() {
+        // Same parenthesis delimiter forms one list
+        let doc = parse("3) A\n9) B");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, start, .. } => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(*start, 3);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_marker_width_transition() {
+        // 9. and 10. have different marker widths; continuation content uses item's own column
+        // Continuation lines are joined into the same paragraph with soft breaks
+        let doc = parse("9. parent\n10. second\n    nested content");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => {
+                assert_eq!(items.len(), 2);
+                // Second item should have "second" and "nested content" in same paragraph with soft break
+                match &items[1].content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(content.len(), 3);
+                        assert_text(&content[0], "second");
+                        assert!(matches!(content[1], Inline::SoftBreak { .. }));
+                        assert_text(&content[2], "nested content");
+                    }
+                    other => panic!("expected paragraph with soft break, got {other:?}"),
+                }
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_list_digit_limit_9_digits() {
+        // 9 digits should be recognized as ordered list marker
+        let doc = parse("123456789. item");
+        assert!(matches!(doc.nodes[0], Block::OrderedList { .. }));
+    }
+
+    #[test]
+    fn ordered_list_digit_limit_10_digits() {
+        // 10 digits should NOT be recognized as ordered list marker (paragraph)
+        let doc = parse("1234567890. item");
+        assert_text(&paragraph_inlines(&doc)[0], "1234567890. item");
+    }
+
+    #[test]
+    fn nested_ordered_list_hierarchy() {
+        // 1. parent
+        //    1. child
+        //    2. child
+        // 2. sibling
+        let doc = parse("1. parent\n   1. child\n   2. child\n2. sibling");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => {
+                assert_eq!(items.len(), 2);
+                // First item has nested ordered list with 2 items
+                match &items[0].content[1] {
+                    Block::OrderedList { items, .. } => assert_eq!(items.len(), 2),
+                    other => panic!("expected nested ordered list, got {other:?}"),
+                }
+                // Second item is sibling
+                assert_eq!(items[1].content.len(), 1);
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mixed_nesting_ordered_then_unordered() {
+        // 1. ordered
+        //    - unordered
+        //    - another
+        // 2. ordered
+        let doc = parse("1. ordered\n   - unordered\n   - another\n2. ordered");
+        match &doc.nodes[0] {
+            Block::OrderedList { items, .. } => {
+                assert_eq!(items.len(), 2);
+                match &items[0].content[1] {
+                    Block::UnorderedList { items, .. } => assert_eq!(items.len(), 2),
+                    other => panic!("expected nested unordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mixed_nesting_unordered_then_ordered() {
+        // - unordered
+        //   1. ordered
+        //   2. ordered
+        // - unordered
+        let doc = parse("- unordered\n  1. ordered\n  2. ordered\n- unordered");
+        match &doc.nodes[0] {
+            Block::UnorderedList { items, .. } => {
+                assert_eq!(items.len(), 2);
+                match &items[0].content[1] {
+                    Block::OrderedList { items, .. } => assert_eq!(items.len(), 2),
+                    other => panic!("expected nested ordered list, got {other:?}"),
+                }
+            }
+            other => panic!("expected unordered list, got {other:?}"),
         }
     }
 

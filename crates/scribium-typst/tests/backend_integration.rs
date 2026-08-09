@@ -130,6 +130,40 @@ fn integration_configured_path_is_respected() {
 }
 
 #[test]
+fn integration_multi_block_list_item_compiles() {
+    // Scribium source whose first list item contains a paragraph followed by
+    // a fenced code block; the generated Typst must keep the code block
+    // inside the item (fences on the item's content column).
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+    let source = "1. item\n\n    ```\n    code\n    ```\n\n2. next\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(result.diagnostics.is_empty());
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("   ```\n code\n   ```"),
+        "code block must be inside the first item: {:?}",
+        typst_code
+    );
+
+    with_typst("multi-block-list", |backend| {
+        let input = TypstInput {
+            source: typst_code,
+            entry_path: "test.qd".to_string(),
+        };
+        let output = backend.compile(&input).expect("compile should succeed");
+        let pdf = output.pdf.expect("pdf output must be present");
+        assert!(pdf.starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_variable_evaluation_before_lowering() {
     // This test validates that variable evaluation happens before Typst lowering.
     // It uses the core compile path directly since the backend doesn't expose
