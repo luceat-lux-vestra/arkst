@@ -79,12 +79,19 @@ Implemented (M2):
     space is removed (`  code  ` keeps one space each side)
   - An opener with no matching closer recovers deterministically as literal
     text with no character loss and no diagnostic
+- Blockquotes (`> `)
+  - Standard block quote marker `>` optionally followed by a space
+  - Consecutive quoted lines form a single block quote
+  - Blank quoted lines (`>` or `> `) separate paragraphs within the quote
+  - Nested block quotes with `>>` markers
+  - Full Markdown parsing continues inside block quotes: emphasis, strong,
+    links, code spans, lists (ordered/unordered), code blocks, headings
+  - Lowered to Typst's native `#quote(block: true)[...]` element
 
 Planned (M2+):
 
 - Task lists
 - Images (`![alt](url)`)
-- Blockquotes (`> `)
 - Tables (GFM pipe tables)
 - Footnotes
 - Strikethrough (`~~text~~`)

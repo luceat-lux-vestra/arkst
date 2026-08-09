@@ -143,6 +143,7 @@ author: Alice
 | Lists                                   | Experimental |
 | Inline links (`[text](url)`)               | Experimental |
 | Inline code spans (`` `code` ``)           | Experimental |
+| Blockquotes (`> `)                       | Experimental |
 | Dot-prefixed function calls               | Experimental / Parsed |
 | Positional/named/body arguments           | Experimental / Parsed |
 | Variables and conditionals              | Experimental / Implemented |

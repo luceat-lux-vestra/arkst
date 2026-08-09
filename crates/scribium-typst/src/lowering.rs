@@ -264,6 +264,19 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrNode::BlockQuote { content, span } => {
+                let before = self.output.len();
+                self.push_str("#quote(block: true)[");
+                self.push('\n');
+                for node in content {
+                    self.lower_node(node);
+                    self.push('\n');
+                }
+                self.push_str("]\n");
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
         }
     }
 

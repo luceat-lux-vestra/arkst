@@ -75,6 +75,8 @@ pub enum Block {
         fields: Vec<(String, String)>,
         span: ByteSpan,
     },
+    /// Block quote (`> text`).
+    BlockQuote { content: Vec<Block>, span: ByteSpan },
 }
 
 /// An item in a list (ordered or unordered).

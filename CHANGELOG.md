@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown Blockquotes (M2)**: Standard block quote parsing (`> text`) and
+  lowering to Typst `#quote(block: true)[...]`.
+  - Block quote marker `>` optionally followed by a space
+  - Consecutive quoted lines form a single block quote
+  - Blank quoted lines (`>` or `> `) separate paragraphs within the quote
+  - Nested block quotes with `>>` markers
+  - Full Markdown parsing continues inside block quotes: emphasis, strong,
+    links, code spans, lists (ordered/unordered), code blocks, headings
+  - `Block::BlockQuote` AST node with `content: Vec<Block>` and `span: ByteSpan`
+  - `IrNode::BlockQuote` IR node with `content: Vec<IrNode>` and `span: SourceSpan`
+  - Evaluator recursively evaluates block quote content
+  - Typst lowering to native `#quote(block: true)[...]` with source-map entries
+  - Parser, IR conversion, evaluator, lowering, source-map, and end-to-end tests
 - **Markdown Inline Code Spans (M2)**: Inline code span parsing (`` `code` ``)
   and lowering to Typst `#raw(...)`.
   - Opening and closing backtick runs of any length (``foo` bar`` stays

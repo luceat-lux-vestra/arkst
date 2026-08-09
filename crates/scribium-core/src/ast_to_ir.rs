@@ -159,6 +159,16 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Block::BlockQuote { content, span } => {
+            let ir_content: Vec<IrNode> = content
+                .iter()
+                .filter_map(|b| block_to_ir(b, source_id))
+                .collect();
+            Some(IrNode::BlockQuote {
+                content: ir_content,
+                span: byte_to_source_span(span, source_id),
+            })
+        }
         Block::Metadata { .. } => {
             // Metadata is handled via front_matter on the Document; skip as a block node.
             None

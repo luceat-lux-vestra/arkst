@@ -272,6 +272,10 @@ impl Evaluator {
                     .collect();
                 vec![IrNode::UnorderedList { items, span: *span }]
             }
+            IrNode::BlockQuote { content, span } => vec![IrNode::BlockQuote {
+                content: self.evaluate_nodes(content, diagnostics, context),
+                span: *span,
+            }],
             other => vec![other.clone()],
         }
     }

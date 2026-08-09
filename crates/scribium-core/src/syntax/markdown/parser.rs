@@ -201,6 +201,7 @@ impl SourceLine<'_> {
             || is_list_marker(self.text).is_some()
             || is_ordered_list_marker(self.text).is_some()
             || is_block_directive_line(self.text)
+            || is_blockquote_marker(self.text)
     }
 }
 
@@ -306,6 +307,10 @@ fn parse_blocks(
                 depth,
                 diagnostics,
             ));
+            continue;
+        }
+        if is_blockquote_marker(line.text) && depth < MAX_BLOCK_DEPTH {
+            blocks.push(parse_blockquote(source, lines, cursor, depth, diagnostics));
             continue;
         }
         blocks.push(parse_paragraph(source, lines, cursor, diagnostics));
@@ -497,6 +502,7 @@ fn block_span(block: &Block) -> ByteSpan {
         Block::BlankLine { span } => *span,
         Block::DirectiveCall { span, .. } => *span,
         Block::Metadata { span, .. } => *span,
+        Block::BlockQuote { span, .. } => *span,
     }
 }
 
@@ -521,18 +527,147 @@ fn parse_paragraph(
     cursor: &mut usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Block {
-    let first = &lines[*cursor];
+    let start_idx = *cursor;
+    let first = &lines[start_idx];
+    let mut last_idx = start_idx;
     loop {
         *cursor += 1;
         if *cursor >= lines.len() || lines[*cursor].is_blank() || lines[*cursor].starts_block() {
             break;
         }
+        last_idx = *cursor;
     }
-    let last = &lines[*cursor - 1];
-    let content = parse_inlines(source, first.text_start, last.content_end(), 0, diagnostics);
+    let last = &lines[last_idx];
+
+    // Check if the paragraph lines are contiguous in the source.
+    // For regular paragraphs, consecutive lines are contiguous (line[i].end == line[i+1].raw_start).
+    // For blockquote content (after stripping '>' markers), lines are NOT contiguous.
+    // In the non-contiguous case, parse each line's inlines separately and join with soft breaks.
+    let mut contiguous = true;
+    for i in start_idx..last_idx {
+        let current_end = lines[i].end;
+        let next_start = lines[i + 1].raw_start;
+        if current_end != next_start {
+            contiguous = false;
+            break;
+        }
+    }
+
+    let content = if contiguous {
+        // Fast path: lines are contiguous in source, parse as single inline span.
+        parse_inlines(source, first.text_start, last.content_end(), 0, diagnostics)
+    } else {
+        // Slow path: lines are not contiguous (e.g., blockquote content).
+        // Parse each line's inlines separately and join with soft breaks.
+        let mut combined = Vec::new();
+        for i in start_idx..=last_idx {
+            let line = &lines[i];
+            let mut line_inlines =
+                parse_inlines(source, line.text_start, line.content_end(), 0, diagnostics);
+            combined.append(&mut line_inlines);
+            if i < last_idx {
+                // Add soft break between lines
+                combined.push(Inline::SoftBreak {
+                    span: ByteSpan::new(line.end, lines[i + 1].raw_start),
+                });
+            }
+        }
+        combined
+    };
+
     Block::Paragraph {
         content,
         span: ByteSpan::new(first.text_start, last.end),
+    }
+}
+
+/// Parse a block quote starting at the cursor.
+///
+/// A block quote consists of consecutive lines starting with `>` optionally
+/// followed by a space. The `>` marker is stripped and the remaining content
+/// is parsed as nested blocks. Blank lines within a block quote (lines with
+/// only `>` or `> `) are preserved as blank lines in the content.
+fn parse_blockquote(
+    source: &str,
+    lines: &[SourceLine<'_>],
+    cursor: &mut usize,
+    depth: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Block {
+    let start_line = *cursor;
+    let first = &lines[start_line];
+    let mut content_lines = Vec::new();
+    let mut end_span = first.end;
+
+    // Collect all consecutive blockquote lines
+    while *cursor < lines.len() {
+        let line = &lines[*cursor];
+        if is_blockquote_marker(line.text) {
+            // Strip the blockquote marker and optional space
+            let content = if line.text.len() > 1 && line.text.as_bytes()[1] == b' ' {
+                &line.text[2..]
+            } else if line.text.len() > 1 {
+                &line.text[1..]
+            } else {
+                ""
+            };
+            let raw_content = if line.raw.len() > 1 && line.raw.as_bytes()[1] == b' ' {
+                &line.raw[2..]
+            } else if line.raw.len() > 1 {
+                &line.raw[1..]
+            } else {
+                ""
+            };
+
+            content_lines.push(SourceLine {
+                raw: raw_content,
+                text: content,
+                raw_start: line.text_start + (line.raw.len() - raw_content.len()),
+                text_start: line.text_start + (line.text.len() - content.len()),
+                term: line.term,
+                end: line.end,
+            });
+            end_span = line.end;
+            *cursor += 1;
+        } else if line.is_blank() {
+            // Blank line inside a block quote - check if next line continues the quote
+            let next_is_quote =
+                *cursor + 1 < lines.len() && is_blockquote_marker(lines[*cursor + 1].text);
+            if next_is_quote {
+                // Preserve the blank line as part of the quote
+                content_lines.push(SourceLine {
+                    raw: "",
+                    text: "",
+                    raw_start: line.raw_start,
+                    text_start: line.text_start,
+                    term: line.term,
+                    end: line.end,
+                });
+                end_span = line.end;
+                *cursor += 1;
+            } else {
+                // Blank line ends the block quote
+                break;
+            }
+        } else {
+            // Non-blockquote line ends the block quote
+            break;
+        }
+    }
+
+    // Parse the content lines as blocks
+    let mut content_cursor = 0;
+    let content = parse_blocks(
+        source,
+        &content_lines,
+        &mut content_cursor,
+        depth + 1,
+        diagnostics,
+    );
+
+    Block::BlockQuote {
+        content,
+        span: ByteSpan::new(first.text_start, end_span),
     }
 }
 
@@ -924,6 +1059,20 @@ fn is_block_directive_line(text: &str) -> bool {
 fn is_item_start(text: &str, marker: u8) -> bool {
     let bytes = text.as_bytes();
     bytes.first() == Some(&marker) && bytes.len() > 1 && matches!(bytes[1], b' ' | b'\t')
+}
+
+/// Whether the line starts a block quote (`>` followed by optional space).
+fn is_blockquote_marker(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.first() == Some(&b'>') {
+        // Valid if it's just ">" or "> " or ">text"
+        bytes.len() == 1
+            || bytes
+                .get(1)
+                .is_some_and(|&b| b == b' ' || !b.is_ascii_whitespace())
+    } else {
+        false
+    }
 }
 
 /// The starting ordinal and delimiter if the line starts an ordered list item (N. or N)).

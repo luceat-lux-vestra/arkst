@@ -80,6 +80,11 @@ pub enum IrNode {
         display: bool,
         span: SourceSpan,
     },
+    /// Block quote with evaluated content.
+    BlockQuote {
+        content: Vec<IrNode>,
+        span: SourceSpan,
+    },
 }
 
 /// An inline fragment within a block-level IR node.
