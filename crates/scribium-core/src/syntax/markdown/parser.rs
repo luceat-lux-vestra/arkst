@@ -17,10 +17,12 @@
 //! - Inline code spans (`\`code\``, or any matching backtick-run length),
 //!   with opaque literal contents and CommonMark line-ending and
 //!   surrounding-space normalization
+//! - Block quotes (`> text`, nested via `>>`), with lazy continuation of
+//!   open paragraphs and inline elements spanning multiple quoted lines
 //!
 //! Delimiter runs of three or more identical characters (`***x***`) are
-//! treated as literal text. Setext headings, images, and blockquotes are
-//! not part of the M1 subset, and reference-style links are not
+//! treated as literal text. Setext headings and images are not part of the
+//! M1/M2 subset, and reference-style links are not
 //! part of the M2 subset.
 
 use super::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
@@ -189,6 +191,24 @@ struct SourceLine<'a> {
     end: usize,
 }
 
+/// Whether `text` (with `indent` leading whitespace columns) starts a new
+/// block rather than continuing a paragraph. Blockquote markers are already
+/// stripped before this check.
+fn text_starts_block(text: &str, indent: usize) -> bool {
+    if indent >= MIN_BLOCK_INDENT {
+        // A line indented at least four columns cannot start a block.
+        // It is always paragraph text / continuation (no indented code
+        // blocks in this parser).
+        return false;
+    }
+    is_heading_text(text).is_some()
+        || fence_length(text).is_some()
+        || is_thematic_break(text)
+        || is_list_marker(text).is_some()
+        || is_ordered_list_marker(text).is_some()
+        || is_block_directive_line(text)
+}
+
 impl SourceLine<'_> {
     /// Byte offset of the line's final content byte.
     fn content_end(&self) -> usize {
@@ -206,19 +226,7 @@ impl SourceLine<'_> {
 
     /// Whether the line starts a new block rather than continuing a paragraph.
     fn starts_block(&self) -> bool {
-        if self.indent() >= MIN_BLOCK_INDENT {
-            // A line indented at least four columns cannot start a block.
-            // It is always paragraph text / continuation (no indented code
-            // blocks in this parser).
-            return false;
-        }
-        is_heading_text(self.text).is_some()
-            || fence_length(self.text).is_some()
-            || is_thematic_break(self.text)
-            || is_list_marker(self.text).is_some()
-            || is_ordered_list_marker(self.text).is_some()
-            || is_block_directive_line(self.text)
-            || is_blockquote_marker(self.raw)
+        text_starts_block(self.text, self.indent()) || is_blockquote_marker(self.raw)
     }
 }
 
@@ -538,6 +546,76 @@ fn block_span_with_body(header: &ByteSpan, body: &Option<Vec<Block>>) -> ByteSpa
         None => *header,
     }
 }
+/// Map an offset in the logical (joined) paragraph buffer onto the original
+/// source. Each collected line maps onto segment `(buffer_start,
+/// source_start)`; the offset must lie within the buffer. Span *starts* are
+/// inclusive of the byte at the offset, so a start on a segment boundary
+/// belongs to the following segment.
+fn translate_start(offset: usize, segments: &[(usize, usize)]) -> usize {
+    let idx = segments.partition_point(|&(buffer_start, _)| buffer_start <= offset) - 1;
+    segments[idx].1 + (offset - segments[idx].0)
+}
+
+/// Map a span *end* offset: exclusive, so an end falling on a segment
+/// boundary terminates the byte before that boundary, i.e. the preceding
+/// segment (a soft/hard break ending at a line terminator stays inside the
+/// terminator's own segment).
+fn translate_end(offset: usize, segments: &[(usize, usize)]) -> usize {
+    let idx = segments.partition_point(|&(buffer_start, _)| buffer_start < offset);
+    let idx = idx.saturating_sub(1);
+    segments[idx].1 + (offset - segments[idx].0)
+}
+
+/// Translate a span over the logical buffer into original source offsets.
+fn translate_span(span: ByteSpan, segments: &[(usize, usize)]) -> ByteSpan {
+    ByteSpan::new(
+        translate_start(span.start, segments),
+        translate_end(span.end, segments),
+    )
+}
+
+/// Recursively translate every inline span (including spans inside emphasis,
+/// strong, directive bodies/arguments, and link labels) into original source
+/// offsets.
+fn remap_inline_spans(inlines: &mut [Inline], segments: &[(usize, usize)]) {
+    for inline in inlines {
+        match inline {
+            Inline::Text { span, .. }
+            | Inline::HardBreak { span }
+            | Inline::SoftBreak { span }
+            | Inline::Code { span, .. } => *span = translate_span(*span, segments),
+            Inline::Emphasis { content, span } | Inline::Strong { content, span } => {
+                remap_inline_spans(content, segments);
+                *span = translate_span(*span, segments);
+            }
+            Inline::Link { content, span, .. } => {
+                remap_inline_spans(content, segments);
+                *span = translate_span(*span, segments);
+            }
+            Inline::DirectiveCall {
+                positional_args,
+                named_args,
+                body,
+                span,
+                ..
+            } => {
+                for arg in positional_args
+                    .iter_mut()
+                    .chain(named_args.iter_mut().map(|(_, value)| value))
+                {
+                    if let Value::Content(inlines) = arg {
+                        remap_inline_spans(inlines, segments);
+                    }
+                }
+                if let Some(body) = body {
+                    remap_inline_spans(body, segments);
+                }
+                *span = translate_span(*span, segments);
+            }
+        }
+    }
+}
+
 fn parse_paragraph(
     source: &str,
     lines: &[SourceLine<'_>],
@@ -575,22 +653,34 @@ fn parse_paragraph(
         parse_inlines(source, first.text_start, last.content_end(), 0, diagnostics)
     } else {
         // Slow path: lines are not contiguous (e.g., blockquote content).
-        // Each line is parsed including its real line terminator, so the
-        // inline parser sees the same newline semantics (two-space HardBreak,
-        // backslash HardBreak, SoftBreak) and produces the same source spans
-        // as an unquoted paragraph. The final line excludes the terminator,
-        // otherwise a trailing soft break would be emitted.
-        let mut combined = Vec::new();
+        // The fragments are joined into a single logical buffer so the
+        // inline parser sees the same newline semantics as an unquoted
+        // paragraph (two-space HardBreak, backslash HardBreak, SoftBreak)
+        // and inline elements may span multiple lines: code spans,
+        // emphasis/strong, and link labels behave exactly as in a plain
+        // paragraph. The final line excludes the terminator, otherwise a
+        // trailing soft break would be emitted. Every resulting span, and
+        // any diagnostic raised during this synthetic parse, is translated
+        // back onto the original source via the segment table so public
+        // spans never reference the buffer.
+        let mut buffer = String::new();
+        let mut segments = Vec::with_capacity(last_idx + 1 - start_idx);
         for (i, line) in lines.iter().enumerate().take(last_idx + 1).skip(start_idx) {
             let end = if i < last_idx {
                 line.end
             } else {
                 line.content_end()
             };
-            let mut line_inlines = parse_inlines(source, line.text_start, end, 0, diagnostics);
-            combined.append(&mut line_inlines);
+            segments.push((buffer.len(), line.text_start));
+            buffer.push_str(&source[line.text_start..end]);
         }
-        combined
+        let diag_start = diagnostics.len();
+        let mut content = parse_inlines(&buffer, 0, buffer.len(), 0, diagnostics);
+        for diagnostic in &mut diagnostics[diag_start..] {
+            diagnostic.span = translate_span(diagnostic.span, &segments);
+        }
+        remap_inline_spans(&mut content, &segments);
+        content
     };
 
     Block::Paragraph {
@@ -599,31 +689,12 @@ fn parse_paragraph(
     }
 }
 
-/// Depth of the trailing container chain inside `blocks` when it ends in a
-/// `Paragraph`: the number of `BlockQuote` levels wrapping that trailing
-/// paragraph. Returns `None` when the chain ends in any other block (heading,
-/// fence, list, ...) or in nothing.
-///
-/// The chain is followed through the *last* child of each trailing
-/// `BlockQuote` only: any sibling block (even a paragraph) after the deepest
-/// container means a marker-less candidate line targets that sibling instead,
-/// which the caller classifies via the raw collected lines.
-fn trailing_paragraph_depth(blocks: &[Block]) -> Option<usize> {
-    match blocks.last() {
-        Some(Block::Paragraph { .. }) => Some(0),
-        Some(Block::BlockQuote { content, .. }) => {
-            trailing_paragraph_depth(content).map(|depth| depth + 1)
-        }
-        _ => None,
-    }
-}
-
-/// Marker depth of a collected content line (number of leading block quote
+/// Marker depth of a stripped content line (number of leading block quote
 /// markers, mirroring how `parse_blockquote` strips one `>` marker plus the
-/// optional single space after it per nesting level) and whether the line is
-/// effectively a blank line at that depth: remaining content after all
-/// markers are stripped is whitespace-only.
-fn content_marker_info(raw: &str) -> (usize, bool) {
+/// optional single space after it per nesting level), whether the line is
+/// effectively a blank line at that depth, and the remaining content after
+/// all markers are stripped.
+fn split_markers(raw: &str) -> (usize, bool, &str) {
     let mut depth = 0;
     let mut rest = raw;
     while let Some(pos) = find_blockquote_marker(rest) {
@@ -638,50 +709,108 @@ fn content_marker_info(raw: &str) -> (usize, bool) {
     (
         depth,
         rest.trim_matches(|b| b == ' ' || b == '\t').is_empty(),
+        rest,
     )
 }
 
-/// Whether the accumulated quote content can still accept a marker-less line
-/// as a lazy paragraph continuation.
-///
-/// Runs the real block parser over the provided lines (with scratch
-/// diagnostics) and then walks the trailing container chain: the active open
-/// container chain ends in a `Paragraph` accepted for continuation iff
-///
-/// * the trailing chain ends in a `Paragraph` (`trailing_paragraph_depth`),
-/// * that deepest paragraph is still being fed by the collected lines: the
-///   last non-blank line reaching at least the chain depth must exist, and
-///   no blank line may follow it.
-///
-/// The blank/termination check runs on the raw collected lines precisely so a
-/// quoted blank inside any active container (e.g. `> > foo` followed by
-/// `> >`) seeds off laziness, which a plain recursive AST tail check would
-/// miss because `parse_blocks` discards blank lines.
-fn content_ends_in_paragraph(source: &str, content_lines: &[SourceLine<'_>]) -> bool {
-    let mut cursor = 0;
-    let mut diagnostics = Vec::new();
-    let blocks = parse_blocks(source, content_lines, &mut cursor, 0, &mut diagnostics);
-    let Some(leaf_depth) = trailing_paragraph_depth(&blocks) else {
-        return false;
-    };
+/// Whether the stripped content of a collected line starts a new block at
+/// its effective depth rather than being paragraph continuation text.
+fn remainder_starts_block(raw: &str) -> bool {
+    let (_, _, rest) = split_markers(raw);
+    let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+    text_starts_block(rest, indent)
+}
 
-    // The deepest paragraph is fed by the last line reaching at least
-    // `leaf_depth` markers whose content (after all markers are stripped) is
-    // non-blank; a shallower line only feeds a shallower block.
-    let Some(last_feed) = content_lines.iter().rposition(|line| {
-        let (depth, blank) = content_marker_info(line.raw);
-        !blank && depth >= leaf_depth
-    }) else {
-        return false;
-    };
+/// Incremental lazy-continuation state for the `parse_blockquote` collection
+/// loop, maintained purely from the collected content lines.
+///
+/// A marker-less candidate line is accepted as a lazy paragraph continuation
+/// iff the trailing container chain ends in an open paragraph that is still
+/// being fed by the collected lines:
+///
+/// * at least one non-blank content line has been collected (`has_feed`),
+/// * the last collected line is not blank at any depth (`trailing_blank`),
+/// * the trailing leaf is a paragraph: the deepest content line either
+///   reaches the deepest active depth and is plain text, or is depth-0 line
+///   joining an open chain as lazy continuation rather than starting a fresh
+///   sibling block (`leaf_starts_block`),
+/// * no fenced code block is open: fence content lines look like plain text
+///   but never carry a paragraph (`fence_open`).
+#[derive(Default)]
+struct QuoteContinuation {
+    has_feed: bool,
+    leaf_depth: usize,
+    leaf_starts_block: bool,
+    trailing_blank: bool,
+    fence_open: Option<(usize, usize)>,
+}
 
-    // Any blank line after the last feed line terminates the paragraph at
-    // the affected depth (a blank at depth < leaf closes that container).
-    // Blank-ness is judged after stripping all markers of the collected
-    // line, so a deeper quoted blank (e.g. "> " left from "> >") is seen.
-    content_lines[last_feed + 1..]
-        .iter()
-        .all(|line| !content_marker_info(line.raw).1)
+impl QuoteContinuation {
+    fn record(&mut self, raw: &str) {
+        let (depth, blank, rest) = split_markers(raw);
+        let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+        let text = &rest[indent..];
+
+        // While a fence is open, every following line is fence content
+        // (blanks included) and opens no paragraph: the continuation state
+        // stays frozen until a structural closer ends the fence. A closer
+        // is itself the trailing block, so it leaves no open paragraph.
+        if let Some((fence_len, fence_depth)) = self.fence_open {
+            if indent < MIN_BLOCK_INDENT
+                && depth == fence_depth
+                && is_closing_fence(text, fence_len)
+            {
+                self.fence_open = None;
+                self.leaf_depth = depth;
+                self.leaf_starts_block = true;
+                self.has_feed = true;
+                self.trailing_blank = false;
+            }
+            return;
+        }
+
+        if blank {
+            self.trailing_blank = true;
+            return;
+        }
+        let after_blank = self.trailing_blank;
+        self.trailing_blank = false;
+        self.has_feed = true;
+
+        // A fence-opener line replaces whatever came before: the fence is
+        // now the trailing block and absorbs all following lines.
+        if indent < MIN_BLOCK_INDENT {
+            if let Some(fence_len) = fence_length(text) {
+                self.fence_open = Some((fence_len, depth));
+            }
+        }
+
+        if depth >= 1 {
+            // A deeper line redefines the trailing container chain: it opens
+            // (or feeds) a container one level below the deepest quote.
+            self.leaf_depth = depth;
+            self.leaf_starts_block = remainder_starts_block(raw);
+        } else {
+            let starts = remainder_starts_block(raw);
+            if !after_blank && self.leaf_depth > 0 && !starts {
+                // Continuation text of an open deeper paragraph: the leaf
+                // chain is fed deeper, not redefined.
+            } else {
+                // After a blank (chain terminated), after a non-paragraph
+                // leaf, or on a flat chain: the line opens a paragraph or
+                // other sibling block at the current depth.
+                self.leaf_depth = 0;
+                self.leaf_starts_block = starts;
+            }
+        }
+    }
+
+    fn can_lazy_continue(&self) -> bool {
+        self.has_feed
+            && !self.trailing_blank
+            && !self.leaf_starts_block
+            && self.fence_open.is_none()
+    }
 }
 
 /// Parse a block quote starting at the cursor.
@@ -710,13 +839,10 @@ fn parse_blockquote(
     let first = &lines[start_line];
     let mut content_lines = Vec::new();
     let mut end_span = first.end;
-    // The last block parsed from the quoted content. Lazy continuation is
-    // allowed only while the currently open block is a Paragraph and no
-    // quoted blank line has been seen since that paragraph opened. The real
-    // parser is probed over the accumulated content lines, so an open or
-    // closed fenced code block, heading, or list never reports a paragraph
-    // state even when its content lines look like plain text.
-    let mut ends_with_blank = false;
+    // Incremental state over the collected content lines deciding whether a
+    // marker-less candidate line may still lazily continue the open
+    // paragraph chain (see `QuoteContinuation`).
+    let mut continuation = QuoteContinuation::default();
 
     // Collect all consecutive blockquote lines and lazy continuations
     while *cursor < lines.len() {
@@ -728,9 +854,9 @@ fn parse_blockquote(
             // the optional single space after it, then classify the
             // remaining content: a quoted blank line (marker whose
             // remaining content is empty or whitespace-only) is recorded
-            // as a blank line inside the quote and sets `ends_with_blank`
-            // so no marker-less line may lazily continue across it, while
-            // real content lines reset that state.
+            // as a blank line inside the quote so no marker-less line may
+            // lazily continue across it, while real content lines feed the
+            // continuation state.
 
             // Calculate content start: after marker, skip optional single space
             let content_start = marker_pos + 1;
@@ -767,12 +893,10 @@ fn parse_blockquote(
                     term: line.term,
                     end: line.end,
                 });
-                ends_with_blank = true;
+                continuation.record("");
             } else {
-                // Real content line: if it can actually start a block it
-                // ends any open paragraph state; the next decision point
-                // re-probes the parser.
-                ends_with_blank = false;
+                // Real content line feeds the continuation state.
+                continuation.record(content_raw);
                 content_lines.push(SourceLine {
                     raw: content_raw,
                     text: content_text,
@@ -788,9 +912,8 @@ fn parse_blockquote(
             // Unquoted blank line: ends the block quote. A quoted blank
             // line always carries a marker and is handled above.
             break;
-        } else if !ends_with_blank
+        } else if continuation.can_lazy_continue()
             && (line.indent() >= MIN_BLOCK_INDENT || !line.starts_block())
-            && content_ends_in_paragraph(source, &content_lines)
         {
             // Lazy continuation: a non-blockquote, non-blank line is kept
             // inside the quote only when the currently open block is a real
@@ -807,6 +930,7 @@ fn parse_blockquote(
                 term: line.term,
                 end: line.end,
             });
+            continuation.record(line.raw);
             end_span = line.end;
             *cursor += 1;
         } else {
@@ -1889,6 +2013,49 @@ mod tests {
             } => contains_link(body),
             _ => false,
         })
+    }
+
+    /// Flattened inline tree where each element is the source slice of the
+    /// element's own span (absolute in its document's source), tagged with
+    /// its kind, so two documents can be compared structurally and
+    /// span-wise at once.
+    fn inline_span_profile(inlines: &[Inline], source: &str) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        for inline in inlines {
+            match inline {
+                Inline::Text { span, .. } => {
+                    out.push(("text", source[span.start..span.end].to_string()));
+                }
+                Inline::SoftBreak { span } => {
+                    out.push(("soft", source[span.start..span.end].to_string()));
+                }
+                Inline::HardBreak { span } => {
+                    out.push(("hard", source[span.start..span.end].to_string()));
+                }
+                Inline::Code { span, .. } => {
+                    out.push(("code", source[span.start..span.end].to_string()));
+                }
+                Inline::Emphasis { content, span } => {
+                    out.push(("em", source[span.start..span.end].to_string()));
+                    out.extend(inline_span_profile(content, source));
+                }
+                Inline::Strong { content, span } => {
+                    out.push(("strong", source[span.start..span.end].to_string()));
+                    out.extend(inline_span_profile(content, source));
+                }
+                Inline::Link { content, span, .. } => {
+                    out.push(("link", source[span.start..span.end].to_string()));
+                    out.extend(inline_span_profile(content, source));
+                }
+                Inline::DirectiveCall { body, span, .. } => {
+                    out.push(("directive", source[span.start..span.end].to_string()));
+                    if let Some(body) = body {
+                        out.extend(inline_span_profile(body, source));
+                    }
+                }
+            }
+        }
+        out
     }
 
     fn paragraph_inlines(doc: &Document) -> &[Inline] {
@@ -4776,6 +4943,166 @@ mod tests {
                 other => panic!("expected paragraph, got {other:?}"),
             },
             other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline_code_span_joins_and_source_span_exact() {
+        // A code span delimited inside a block quote may span quoted lines:
+        // the fragments are joined into one logical inline run, so the span
+        // covers the whole `..`..`` construct in the original source.
+        let source = "> a ``x\n> y``\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => {
+                    assert_eq!(content.len(), 2);
+                    match &content[1] {
+                        Inline::Code { content, span } => {
+                            assert_eq!(content, "x y");
+                            // The source span of a multi-line element covers
+                            // the whole construct, including the `> ` marker
+                            // of the referenced quoted lines.
+                            assert_eq!(&source[span.start..span.end], "``x\n> y``");
+                        }
+                        other => panic!("expected code span, got {other:?}"),
+                    }
+                }
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline_emphasis_source_span_exact() {
+        let source = "> *foo\n> bar*\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => match &content[0] {
+                    Inline::Emphasis {
+                        content: inner,
+                        span,
+                    } => {
+                        assert_eq!(joined_text(inner), "foo\nbar");
+                        assert_eq!(&source[span.start..span.end], "*foo\n> bar*");
+                    }
+                    other => panic!("expected emphasis, got {other:?}"),
+                },
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline_strong_source_span_exact() {
+        let source = "> **foo\n> bar**\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => match &content[0] {
+                    Inline::Strong {
+                        content: inner,
+                        span,
+                    } => {
+                        assert_eq!(joined_text(inner), "foo\nbar");
+                        assert_eq!(&source[span.start..span.end], "**foo\n> bar**");
+                    }
+                    other => panic!("expected strong, got {other:?}"),
+                },
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline_link_label_source_span_exact() {
+        let source = "> [foo\n> bar](https://example.com)\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => match &content[0] {
+                    Inline::Link {
+                        content: inner,
+                        destination,
+                        span,
+                    } => {
+                        assert_eq!(joined_text(inner), "foo\nbar");
+                        assert_eq!(destination, "https://example.com");
+                        assert_eq!(
+                            &source[span.start..span.end],
+                            "[foo\n> bar](https://example.com)"
+                        );
+                    }
+                    other => panic!("expected link, got {other:?}"),
+                },
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_multiline_inlines_match_unquoted_paragraph() {
+        // Differential check: quoting a paragraph must not change its inline
+        // structure (kinds and joined text), and the source span of every
+        // inline element must slice to the same bytes as in the unquoted
+        // paragraph once the quote markers are skipped.
+        for (quoted, plain) in [
+            ("> a *b* c\n> d\n", "a *b* c\nd\n"),
+            ("> a ``x\n> y`` z\n", "a ``x\ny`` z\n"),
+            ("> *x y\n> z*\n", "*x y\nz*\n"),
+            ("> [a\n> b](u)\n", "[a\nb](u)\n"),
+            ("> x  \n> y\n", "x  \ny\n"),
+            ("> x\\\n> y\n", "x\\\ny\n"),
+        ] {
+            let plain_doc = parse(plain);
+            let quoted_doc = parse(quoted);
+            let plain_inlines = match &plain_doc.nodes[0] {
+                Block::Paragraph { content, .. } => content,
+                other => panic!("expected paragraph, got {other:?}"),
+            };
+            let quoted_paragraph = match &quoted_doc.nodes[0] {
+                Block::BlockQuote { content, .. } => &content[0],
+                other => panic!("expected blockquote, got {other:?}"),
+            };
+            let Block::Paragraph {
+                content: quoted_inlines,
+                ..
+            } = quoted_paragraph
+            else {
+                panic!("expected paragraph, got {quoted_paragraph:?}");
+            };
+
+            let plain_profile = inline_span_profile(plain_inlines, plain);
+            // Multi-line elements spliced across quoted lines carry the
+            // `> ` marker bytes of the joined lines inside their source
+            // span; stripping those per-line prefixes reproduces the plain
+            // fragment the element covers in the unquoted paragraph.
+            let quoted_profile = inline_span_profile(quoted_inlines, quoted)
+                .into_iter()
+                .map(|(kind, slice)| (kind, slice.replace("\r\n> ", "\r\n").replace("\n> ", "\n")))
+                .collect::<Vec<_>>();
+            assert_eq!(quoted_profile, plain_profile, "source: {quoted:?}");
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_line_flips_leaf_after_deeper_list() {
+        // A depth-0 line starting a sibling block (a list) ends the deeper
+        // open paragraph: a marker-less line after it must stay outside the
+        // quote, mirroring the trailing-chain classification.
+        let doc = parse("> > foo\n> x\n> - a\nbar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 2);
+                assert_eq!(joined_text(p), "bar");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
         }
     }
 

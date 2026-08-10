@@ -139,6 +139,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and deterministic false treatment.
 ### Fixed
 
+- Inline elements inside block quotes may now span multiple quoted lines:
+  code spans (`> ``a\n> b```), emphasis/strong, and link labels are joined
+  into one logical parse with the same break semantics as unquoted
+  paragraphs, and their source spans cover the full construct. Previously
+  each quoted line was parsed separately, so a span delimited across lines
+  silently fell back to literal text.
+- Block quote lazy continuation is now decided incrementally from the
+  collected lines instead of re-parsing the accumulated content from
+  scratch at every line, and the trailing classification follows the real
+  parse result (including fenced code blocks staying non-paragraph across
+  plain-looking content lines and depth-0 lines starting sibling blocks).
 - `build` with multiple formats and `--output` now returns a clear validation error
   instead of silently using the output path for only one format.
 - `build` never overwrites the input source file: an output that resolves to
