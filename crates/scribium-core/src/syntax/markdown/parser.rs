@@ -666,13 +666,24 @@ fn parse_paragraph(
         let mut buffer = String::new();
         let mut segments = Vec::with_capacity(last_idx + 1 - start_idx);
         for (i, line) in lines.iter().enumerate().take(last_idx + 1).skip(start_idx) {
+            // The paragraph head starts at `text_start`: its indentation is
+            // block syntax, not inline content. Continuation lines may carry
+            // whitespace that *is* inline content (e.g. the text of a code
+            // span opening on an earlier line): the container parser only
+            // stripped the container syntax, so later segments must start at
+            // `raw_start` to preserve that whitespace.
+            let segment_start = if i == start_idx {
+                line.text_start
+            } else {
+                line.raw_start
+            };
             let end = if i < last_idx {
                 line.end
             } else {
                 line.content_end()
             };
-            segments.push((buffer.len(), line.text_start));
-            buffer.push_str(&source[line.text_start..end]);
+            segments.push((buffer.len(), segment_start));
+            buffer.push_str(&source[segment_start..end]);
         }
         let diag_start = diagnostics.len();
         let mut content = parse_inlines(&buffer, 0, buffer.len(), 0, diagnostics);
@@ -746,14 +757,39 @@ fn remainder_starts_block(raw: &str) -> bool {
 ///   ended in a non-paragraph block (heading, list, fence), the line leaves
 ///   the deeper containers and opens a paragraph at the shallower depth,
 /// * a fence is owned by the container at its marker depth: a shallower
-///   line ends that container and the fence state dies with it.
+///   line ends that container and the fence state dies with it,
+/// * a trailing list item is tracked separately: lines at or beyond the
+///   item's content column are item content (the list parsers absorb them
+///   as continuation, whether or not they start a new marker), while
+///   lines shallower than the content column end the list and start a
+///   fresh block at their own depth.
 #[derive(Default)]
 struct QuoteContinuation {
     has_feed: bool,
     leaf_depth: usize,
-    leaf_starts_block: bool,
+    leaf_paragraph: bool,
     trailing_blank: bool,
     fence_open: Option<(usize, usize)>,
+    list_item: Option<ListItemTrailing>,
+}
+
+/// The trailing open list item of the collected content, mirroring the
+/// list parsers: for unordered lists the content column is fixed on the
+/// first item, for ordered lists it is recomputed per item.
+#[derive(Default)]
+struct ListItemTrailing {
+    /// Unordered marker (`-`/`*`/`+`) or the ordered delimiter (`.`/`)`).
+    marker: u8,
+    /// Whether the item belongs to an ordered list (the content column
+    /// is recomputed per item in that case).
+    ordered: bool,
+    /// Column (relative to the quote content) at which item content
+    /// starts; continuation lines must be indented at least to this
+    /// column.
+    content_col: usize,
+    /// Length of a fence opened by the item's blocks, if any; while set,
+    /// item content is fence content and never opens a paragraph.
+    fence: Option<usize>,
 }
 
 impl QuoteContinuation {
@@ -780,7 +816,7 @@ impl QuoteContinuation {
             {
                 self.fence_open = None;
                 self.leaf_depth = depth;
-                self.leaf_starts_block = true;
+                self.leaf_paragraph = false;
                 self.has_feed = true;
                 self.trailing_blank = false;
                 return;
@@ -797,11 +833,123 @@ impl QuoteContinuation {
         self.trailing_blank = false;
         self.has_feed = true;
 
-        // A fence-opener line replaces whatever came before: the fence is
-        // now the trailing block and absorbs all following lines.
+        // Structural lines that start a list item. Only lines with fewer
+        // than `MIN_BLOCK_INDENT` columns of indent are candidates,
+        // exactly as in the block classification behind the list parsers.
+        let list_kind = if indent < MIN_BLOCK_INDENT {
+            is_ordered_list_marker(text)
+                .map(|(_, delimiter)| (true, delimiter))
+                .or_else(|| is_list_marker(text).map(|marker| (false, marker)))
+        } else {
+            None
+        };
+
+        if let Some((ordered, marker)) = list_kind {
+            // Marker position and the whitespace after it, mirroring the
+            // content-column rules of `parse_list` / `parse_ordered_list`
+            // (for unordered lists the marker sits at column 0).
+            let marker_pos = if ordered {
+                text.bytes().position(|b| b == marker).unwrap_or(0)
+            } else {
+                0
+            };
+            let ws_after = text[marker_pos + 1..]
+                .bytes()
+                .take_while(|b| *b == b' ' || *b == b'\t')
+                .count();
+            let content_col = indent + marker_pos + 1 + ws_after;
+            let remainder = &text[marker_pos + 1 + ws_after..];
+
+            if let Some(item) = &self.list_item {
+                if indent >= item.content_col {
+                    // At or beyond the content column the list parsers
+                    // consume the line as content of the *current* item
+                    // (even when it carries a marker and starts a nested
+                    // block inside the item), so the item stays open and
+                    // the leaf follows the line's remainder.
+                    self.leaf_depth = depth;
+                    let item = self.list_item.as_mut().unwrap();
+                    if let Some(fence_len) = item.fence {
+                        if is_closing_fence(text, fence_len) {
+                            item.fence = None;
+                        }
+                        self.leaf_paragraph = false;
+                    } else {
+                        item.fence = fence_length(remainder);
+                        self.leaf_paragraph =
+                            item.fence.is_none() && !text_starts_block(remainder, 0);
+                    }
+                    return;
+                }
+                if item.marker == marker && item.ordered == ordered {
+                    // A new item of the same list. Unordered lists keep
+                    // the first item's content column, ordered lists
+                    // recompute it per item.
+                    let content_col = if ordered {
+                        content_col
+                    } else {
+                        item.content_col
+                    };
+                    let fence = fence_length(remainder);
+                    self.list_item = Some(ListItemTrailing {
+                        marker,
+                        ordered,
+                        content_col,
+                        fence,
+                    });
+                    self.leaf_depth = depth;
+                    self.leaf_paragraph = fence.is_none() && !text_starts_block(remainder, 0);
+                    return;
+                }
+            }
+
+            // No trailing list, or a different marker at a sibling
+            // position: a fresh list opens at this line and becomes the
+            // trailing leaf (a non-paragraph block unless the item's own
+            // first block is an open paragraph).
+            let fence = fence_length(remainder);
+            self.list_item = Some(ListItemTrailing {
+                marker,
+                ordered,
+                content_col,
+                fence,
+            });
+            self.leaf_depth = depth;
+            self.leaf_paragraph = fence.is_none() && !text_starts_block(remainder, 0);
+            return;
+        }
+
+        // Plain (marker-less) line.
+        if let Some(item) = &self.list_item {
+            if indent >= item.content_col {
+                // Item content: the leaf follows the item's trailing
+                // block. While the item carries an open fence, only the
+                // structural closer (an indented fence line) ends it.
+                self.leaf_depth = depth;
+                let item = self.list_item.as_mut().unwrap();
+                if let Some(fence_len) = item.fence {
+                    if is_closing_fence(text, fence_len) {
+                        item.fence = None;
+                    }
+                    self.leaf_paragraph = false;
+                } else {
+                    self.leaf_paragraph = !remainder_starts_block(raw);
+                }
+                return;
+            }
+            // Too shallow for the item: the list ends here and the line
+            // opens a fresh block at its own depth.
+            self.list_item = None;
+        }
+
+        // A fence-opening line replaces whatever came before: the fence
+        // is now the trailing block and absorbs all following lines.
+        // Fences opened inside a list item are tracked on the item
+        // itself and handled above.
         if indent < MIN_BLOCK_INDENT {
             if let Some(fence_len) = fence_length(text) {
                 self.fence_open = Some((fence_len, depth));
+                self.leaf_paragraph = false;
             }
         }
 
@@ -815,14 +963,14 @@ impl QuoteContinuation {
             // ended, always redefines the active leaf: a marker-carrying
             // line can never lazily omit the markers of the chain below it.
             self.leaf_depth = depth;
-            self.leaf_starts_block = remainder_starts_block(raw);
+            self.leaf_paragraph = !remainder_starts_block(raw);
         } else {
             // Marker-less line: it is either lazy continuation text of the
             // deeper chain or the head of a new block at the top of the
             // quote.
             let starts = remainder_starts_block(raw);
             let continue_deeper =
-                !after_blank && self.leaf_depth > 0 && !self.leaf_starts_block && !starts;
+                !after_blank && self.leaf_depth > 0 && self.leaf_paragraph && !starts;
             if continue_deeper {
                 // The deeper leaf is still an open paragraph being fed, no
                 // blank line terminated the chain, and this line cannot
@@ -835,16 +983,19 @@ impl QuoteContinuation {
                 // the current (shallower) depth, discarding the stale
                 // deeper leaf.
                 self.leaf_depth = 0;
-                self.leaf_starts_block = starts;
+                self.leaf_paragraph = !starts;
             }
         }
     }
 
-    fn can_lazy_continue(&self) -> bool {
-        self.has_feed
-            && !self.trailing_blank
-            && !self.leaf_starts_block
-            && self.fence_open.is_none()
+    fn can_lazy_continue(&self, indent: usize) -> bool {
+        if !self.has_feed || self.trailing_blank || self.fence_open.is_some() {
+            return false;
+        }
+        match &self.list_item {
+            Some(item) => self.leaf_paragraph && indent >= item.content_col,
+            None => self.leaf_paragraph,
+        }
     }
 }
 
@@ -947,7 +1098,7 @@ fn parse_blockquote(
             // Unquoted blank line: ends the block quote. A quoted blank
             // line always carries a marker and is handled above.
             break;
-        } else if continuation.can_lazy_continue()
+        } else if continuation.can_lazy_continue(line.indent())
             && (line.indent() >= MIN_BLOCK_INDENT || !line.starts_block())
         {
             // Lazy continuation: a non-blockquote, non-blank line is kept
@@ -5215,6 +5366,15 @@ mod tests {
             ("> [a\n> b](u)\n", "[a\nb](u)\n"),
             ("> x  \n> y\n", "x  \ny\n"),
             ("> x\\\n> y\n", "x\\\ny\n"),
+            // Leading whitespace on continuation lines is inline content
+            // (e.g. the text of a code span that spans lines), not block
+            // syntax: the quoted paragraph must carry it exactly like the
+            // unquoted one.
+            ("> `foo\n>   bar`\n", "`foo\n  bar`\n"),
+            ("> **foo\n>   bar**\n", "**foo\n  bar**\n"),
+            ("> foo\n>   bar\n", "foo\n  bar\n"),
+            ("> *a\n>     b*\n", "*a\n    b*\n"),
+            ("> `코드\n>   이모지 😀`\n", "`코드\n  이모지 😀`\n"),
         ] {
             let plain_doc = parse(plain);
             let quoted_doc = parse(quoted);
@@ -5244,6 +5404,225 @@ mod tests {
                 .map(|(kind, slice)| (kind, slice.replace("\r\n> ", "\r\n").replace("\n> ", "\n")))
                 .collect::<Vec<_>>();
             assert_eq!(quoted_profile, plain_profile, "source: {quoted:?}");
+        }
+    }
+
+    #[test]
+    fn blockquote_code_span_multiline_whitespace_content() {
+        // Differential content check: the code text of a span that crosses
+        // quoted lines must equal the unquoted one - the whitespace after the
+        // stripped quote markers is inline content (code text), not paragraph
+        // indentation, and must survive quoting exactly once.
+        for (quoted, plain, expected) in [
+            ("> `foo\n>   bar`\n", "`foo\n  bar`\n", "foo   bar"),
+            (
+                "> `코드\n>   이모지 😀`\n",
+                "`코드\n  이모지 😀`\n",
+                "코드   이모지 😀",
+            ),
+        ] {
+            let quoted_doc = parse(quoted);
+            let quoted_code = match &quoted_doc.nodes[0] {
+                Block::BlockQuote { content, .. } => &content[0],
+                other => panic!("expected blockquote, got {other:?}"),
+            };
+            let Block::Paragraph { content, .. } = quoted_code else {
+                panic!("expected paragraph, got {quoted_code:?}");
+            };
+            let [Inline::Code { content: c1, .. }] = &content[..] else {
+                panic!("expected single code span, got {content:?}");
+            };
+            let plain_doc = parse(plain);
+            let Block::Paragraph { content, .. } = &plain_doc.nodes[0] else {
+                panic!("expected paragraph, got {:?}", plain_doc.nodes[0]);
+            };
+            let [Inline::Code { content: c2, .. }] = &content[..] else {
+                panic!("expected single code span, got {content:?}");
+            };
+            assert_eq!(c1, expected, "source: {quoted:?}");
+            assert_eq!(c2, expected, "source: {plain:?}");
+        }
+    }
+
+    #[test]
+    fn blockquote_list_item_lazy_continuation_absorbed() {
+        // A marker-less line at (or beyond) the item's content column is
+        // valid paragraph continuation text for the item paragraph and is
+        // absorbed; the content column itself is stripped by the list parser.
+        let doc = parse("> - foo\n  bar\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::UnorderedList { items, .. } => {
+                    assert_eq!(items.len(), 1);
+                    match &items[0].content[0] {
+                        Block::Paragraph { content, .. } => {
+                            assert_eq!(joined_text(content), "foo\nbar");
+                        }
+                        other => panic!("expected item paragraph, got {other:?}"),
+                    }
+                }
+                other => panic!("expected list, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_sibling_list_item_lazy_rejected() {
+        // A marker-less line that starts a sibling list block is not valid
+        // paragraph continuation text: it stays outside the quote.
+        let doc = parse("> - foo\n- bar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::UnorderedList { items, .. }) => {
+                assert_eq!(content.len(), 1);
+                assert_eq!(items.len(), 1);
+            }
+            other => panic!("expected blockquote + list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_sibling_ordered_item_lazy_rejected() {
+        // "  2. bar" after "> 1. foo" starts a new ordered-list
+        // item/block candidate (not paragraph continuation text) and stays
+        // outside the quote as its own ordered list with start = 2.
+        let doc = parse("> 1. foo\n  2. bar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::OrderedList { items, start, .. }) => {
+                assert_eq!(content.len(), 1);
+                assert_eq!(*start, 2);
+                assert_eq!(items.len(), 1);
+            }
+            other => panic!("expected blockquote + ordered list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested_quote_list_item_lazy_continuation_absorbed() {
+        // The content-column rule holds across quote nesting: a marker-less
+        // line at the item column continues the item inside the nested quote.
+        let doc = parse("> > - foo\n  bar\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::BlockQuote { content: inner, .. } => match &inner[0] {
+                    Block::UnorderedList { items, .. } => {
+                        assert_eq!(items.len(), 1);
+                        match &items[0].content[0] {
+                            Block::Paragraph { content, .. } => {
+                                assert_eq!(joined_text(content), "foo\nbar");
+                            }
+                            other => panic!("expected item paragraph, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected list, got {other:?}"),
+                },
+                other => panic!("expected nested quote, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_list_item_non_paragraph_leaf_lazy_rejected() {
+        // When the trailing item's leaf is not an open paragraph (here: a
+        // heading), a marker-less line is not valid continuation text and
+        // stays outside the quote.
+        let doc = parse("> - # h\nbar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::UnorderedList { items, .. } => {
+                        assert_eq!(items.len(), 1);
+                        match &items[0].content[0] {
+                            Block::Heading { level, .. } => assert_eq!(*level, 1),
+                            other => panic!("expected heading, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected list, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "bar");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_list_different_marker_structural_sibling() {
+        // A quoted line with a different marker ends the trailing list and
+        // opens a fresh list block at the quote level.
+        let doc = parse("> - a\n> * b\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::UnorderedList { items: i0, .. },
+                        Block::UnorderedList { items: i1, .. },
+                    ) => {
+                        assert_eq!(i0.len(), 1);
+                        assert_eq!(i1.len(), 1);
+                        let joined = |items: &[ListItem]| match &items[0].content[0] {
+                            Block::Paragraph { content, .. } => joined_text(content),
+                            other => panic!("expected paragraph, got {other:?}"),
+                        };
+                        assert_eq!(joined(i0), "a");
+                        assert_eq!(joined(i1), "b");
+                    }
+                    other => panic!("expected two lists, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_ordered_list_same_delimiter_structural_items() {
+        // Quoted marker lines with the same delimiter continue the same
+        // ordered list; the item ordinals may differ from the start.
+        let doc = parse("> 1. a\n> 9. b\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::OrderedList { items, start, .. } => {
+                    assert_eq!(*start, 1);
+                    assert_eq!(items.len(), 2);
+                }
+                other => panic!("expected ordered list, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_list_item_fenced_block() {
+        // A fence opened by the item's first block is owned by the item:
+        // item content lines are fence content until the indented structural
+        // closer, and a plain item line after the fence reopens a paragraph.
+        let doc = parse("> - ```\n>   x\n>   ```\n>   y\n");
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::UnorderedList { items, .. } => {
+                    assert_eq!(items.len(), 1);
+                    assert_eq!(items[0].content.len(), 2);
+                    match &items[0].content[0] {
+                        Block::CodeBlock { source, .. } => assert_eq!(source, "x"),
+                        other => panic!("expected code block, got {other:?}"),
+                    }
+                    match &items[0].content[1] {
+                        Block::Paragraph { content, .. } => {
+                            assert_eq!(joined_text(content), "y");
+                        }
+                        other => panic!("expected paragraph, got {other:?}"),
+                    }
+                }
+                other => panic!("expected list, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
         }
     }
 
