@@ -32,6 +32,17 @@ use crate::source::ByteSpan;
 /// nested list markers.
 const MAX_BLOCK_DEPTH: usize = 64;
 
+/// Minimum indentation (in leading spaces/tabs) at which a line can no
+/// longer start a new block.
+///
+/// Per CommonMark, block-starting constructs (headings, fenced code,
+/// thematic breaks, list items, block quotes, directives) may begin with at
+/// most three leading spaces of indentation. A line indented by at least
+/// four columns therefore can only be paragraph continuation text in this
+/// parser (which has no indented code blocks). `trimmed text alone` never
+/// decides block interruption here; the raw/text offset difference does.
+const MIN_BLOCK_INDENT: usize = 4;
+
 /// Maximum inline-nesting depth before delimiters are treated as literal text.
 const MAX_INLINE_DEPTH: usize = 64;
 /// Parse flat key-value front matter at document start.
@@ -195,6 +206,12 @@ impl SourceLine<'_> {
 
     /// Whether the line starts a new block rather than continuing a paragraph.
     fn starts_block(&self) -> bool {
+        if self.indent() >= MIN_BLOCK_INDENT {
+            // A line indented at least four columns cannot start a block.
+            // It is always paragraph text / continuation (no indented code
+            // blocks in this parser).
+            return false;
+        }
         is_heading_text(self.text).is_some()
             || fence_length(self.text).is_some()
             || is_thematic_break(self.text)
@@ -558,20 +575,20 @@ fn parse_paragraph(
         parse_inlines(source, first.text_start, last.content_end(), 0, diagnostics)
     } else {
         // Slow path: lines are not contiguous (e.g., blockquote content).
-        // Parse each line's inlines separately and join with soft breaks.
+        // Each line is parsed including its real line terminator, so the
+        // inline parser sees the same newline semantics (two-space HardBreak,
+        // backslash HardBreak, SoftBreak) and produces the same source spans
+        // as an unquoted paragraph. The final line excludes the terminator,
+        // otherwise a trailing soft break would be emitted.
         let mut combined = Vec::new();
         for (i, line) in lines.iter().enumerate().take(last_idx + 1).skip(start_idx) {
-            let mut line_inlines =
-                parse_inlines(source, line.text_start, line.content_end(), 0, diagnostics);
+            let end = if i < last_idx {
+                line.end
+            } else {
+                line.content_end()
+            };
+            let mut line_inlines = parse_inlines(source, line.text_start, end, 0, diagnostics);
             combined.append(&mut line_inlines);
-            if i < last_idx {
-                // Add soft break between lines.
-                // The span should point to the actual line terminator in the original source
-                // (line.term .. line.end), not across stripped marker boundaries.
-                combined.push(Inline::SoftBreak {
-                    span: ByteSpan::new(line.term, line.end),
-                });
-            }
         }
         combined
     };
@@ -580,6 +597,21 @@ fn parse_paragraph(
         content,
         span: ByteSpan::new(first.text_start, last.end),
     }
+}
+
+/// Whether the accumulated quote content currently ends with an open
+/// `Paragraph` block.
+///
+/// Runs the real block parser over the provided lines (with scratch
+/// diagnostics) so that lazy-continuation decisions follow the actual open
+/// container state instead of the shape of the last line. `parse_blocks`
+/// skips blank lines, so paragraph separation by a quoted blank line is
+/// tracked separately by the caller.
+fn content_ends_in_paragraph(source: &str, content_lines: &[SourceLine<'_>]) -> bool {
+    let mut cursor = 0;
+    let mut diagnostics = Vec::new();
+    let blocks = parse_blocks(source, content_lines, &mut cursor, 0, &mut diagnostics);
+    matches!(blocks.last(), Some(Block::Paragraph { .. }))
 }
 
 /// Parse a block quote starting at the cursor.
@@ -607,22 +639,13 @@ fn parse_blockquote(
     let first = &lines[start_line];
     let mut content_lines = Vec::new();
     let mut end_span = first.end;
-    // Track if we're in a paragraph context for lazy continuation.
-    // A paragraph context exists when the last parsed block inside the quote is a Paragraph.
-    // We track this by checking if the last marker line's content would form a paragraph
-    // (i.e., it doesn't start with a block marker like #, ```, -, 1., etc.)
-    let mut last_was_paragraph = false;
-
-    // Helper to check if content starts a block construct (heading, code fence, list, etc.)
-    fn content_starts_block(content: &str) -> bool {
-        let trimmed = content.trim_start();
-        is_heading_text(trimmed).is_some()
-            || fence_length(trimmed).is_some()
-            || is_thematic_break(trimmed)
-            || is_list_marker(trimmed).is_some()
-            || is_ordered_list_marker(trimmed).is_some()
-            || is_block_directive_line(trimmed)
-    }
+    // The last block parsed from the quoted content. Lazy continuation is
+    // allowed only while the currently open block is a Paragraph and no
+    // quoted blank line has been seen since that paragraph opened. The real
+    // parser is probed over the accumulated content lines, so an open or
+    // closed fenced code block, heading, or list never reports a paragraph
+    // state even when its content lines look like plain text.
+    let mut ends_with_blank = false;
 
     // Collect all consecutive blockquote lines and lazy continuations
     while *cursor < lines.len() {
@@ -655,9 +678,9 @@ fn parse_blockquote(
             let content_text = &content_raw[ws..];
             let content_text_start = content_raw_start + ws;
 
-            // Update paragraph state: a paragraph context exists if this line's content
-            // doesn't start a block construct (heading, code fence, list, etc.)
-            last_was_paragraph = !content_starts_block(content_text);
+            // A content line that can actually start a block ends any open
+            // paragraph state; the next decision point re-probes the parser.
+            ends_with_blank = false;
 
             content_lines.push(SourceLine {
                 raw: content_raw,
@@ -686,16 +709,24 @@ fn parse_blockquote(
                 });
                 end_span = line.end;
                 *cursor += 1;
-                // Quoted blank line separates paragraphs - reset paragraph state
-                last_was_paragraph = false;
+                // A quoted blank line separates paragraphs: no lazy
+                // continuation may cross it.
+                ends_with_blank = true;
             } else {
                 // Unquoted blank line: ends the block quote
                 break;
             }
-        } else if last_was_paragraph && !line.starts_block() {
-            // Lazy continuation: non-blockquote, non-blank line after a paragraph
-            // that does NOT start a new block. This continues the current paragraph
-            // inside the block quote.
+        } else if !ends_with_blank
+            && (line.indent() >= MIN_BLOCK_INDENT || !line.starts_block())
+            && content_ends_in_paragraph(source, &content_lines)
+        {
+            // Lazy continuation: a non-blockquote, non-blank line is kept
+            // inside the quote only when the currently open block is a real
+            // Paragraph and the line cannot start a new block. Indentation
+            // participates in the classification: at least `MIN_BLOCK_INDENT`
+            // leading spaces means the line cannot interrupt the paragraph
+            // (CommonMark Example 238 preserves "    - bar" as text), even
+            // though its trimmed text looks like a list marker.
             content_lines.push(SourceLine {
                 raw: line.raw,
                 text: line.text,
@@ -4313,14 +4344,17 @@ mod tests {
 
     #[test]
     fn blockquote_crlf() {
-        // CRLF line endings
+        // CRLF line endings. The quoted result must be structurally identical
+        // to the unquoted CRLF paragraph: the `\r` byte of the terminator is
+        // folded into the preceding text node, and the SoftBreak spans the
+        // `\n` byte alone (differential parity with unquoted input).
         let doc = parse("> foo\r\n> bar\r\n");
         match &doc.nodes[0] {
             Block::BlockQuote { content, .. } => {
                 assert_eq!(content.len(), 1);
                 match &content[0] {
                     Block::Paragraph { content, .. } => {
-                        assert_eq!(joined_text(content), "foo\nbar");
+                        assert_eq!(joined_text(content), "foo\r\nbar");
                     }
                     other => panic!("expected paragraph, got {other:?}"),
                 }
@@ -4523,5 +4557,195 @@ mod tests {
             },
             other => panic!("expected blockquote, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn blockquote_fenced_code_multiline_lazy_negative() {
+        // CommonMark Example 237 family: content lines inside an open quoted
+        // fenced code block must not flip the parser back into paragraph
+        // state, so a marker-less line after them stays outside the quote.
+        let doc = parse("> ```\n> code\noutside\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::CodeBlock { source, .. } => assert_eq!(source, "code"),
+                    other => panic!("expected code block inside blockquote, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "outside");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_fenced_code_closed_lazy_negative() {
+        // A closed quoted fence still leaves FencedCodeBlock open when a
+        // marker-less line follows: the trailer must not be absorbed.
+        let doc = parse("> ```\n> code\n> ```\noutside\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::CodeBlock { source, .. } => assert_eq!(source, "code"),
+                    other => panic!("expected code block inside blockquote, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "outside");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_commonmark_example_238() {
+        // CommonMark Example 238: indentation participates in continuation
+        // classification. "    - bar" is indented four columns, so it cannot
+        // start a new block and continues the quoted "foo" paragraph as
+        // plain text instead of beginning a list item.
+        let doc = parse("> foo\n    - bar\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), "foo\n- bar");
+                    }
+                    other => panic!("expected paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_hardbreak_two_spaces_span_exact() {
+        // Two trailing spaces in a quoted line must yield a HardBreak whose
+        // span covers exactly the trailing spaces and the LF (CommonMark
+        // paragraph semantics, unquoted contract).
+        let source = "> foo  \n> bar\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => {
+                    assert_eq!(content.len(), 3);
+                    assert_text(&content[0], "foo");
+                    match &content[1] {
+                        Inline::HardBreak { span } => {
+                            assert_eq!(&source[span.start..span.end], "  \n");
+                        }
+                        other => panic!("expected HardBreak, got {other:?}"),
+                    }
+                    assert_text(&content[2], "bar");
+                }
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_hardbreak_backslash_span_exact() {
+        // A trailing backslash in a quoted line must yield a HardBreak whose
+        // span covers exactly the backslash and the LF.
+        let source = "> foo\\\n> bar\n";
+        let doc = parse(source);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => {
+                    assert_eq!(content.len(), 3);
+                    assert_text(&content[0], "foo");
+                    match &content[1] {
+                        Inline::HardBreak { span } => {
+                            assert_eq!(&source[span.start..span.end], "\\\n");
+                        }
+                        other => panic!("expected HardBreak, got {other:?}"),
+                    }
+                    assert_text(&content[2], "bar");
+                }
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    /// Normalize an inline sequence to (kind, text) labels so quoted and
+    /// unquoted paragraphs can be compared structurally.
+    fn break_kinds(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text { content, .. } => format!("T({content})"),
+                Inline::HardBreak { .. } => "HB".to_string(),
+                Inline::SoftBreak { .. } => "SB".to_string(),
+                other => panic!("unexpected inline for differential comparison: {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blockquote_break_differential_unquoted_quoted() {
+        // Quoted multiline paragraphs must produce the same inline node
+        // sequence as their unquoted twins (two-space HardBreak, backslash
+        // HardBreak, plain SoftBreak); only source span offsets differ.
+        for (unquoted, quoted) in [
+            ("foo  \nbar\n", "> foo  \n> bar\n"),
+            ("foo\\\nbar\n", "> foo\\\n> bar\n"),
+            ("foo\nbar\n", "> foo\n> bar\n"),
+        ] {
+            let unquoted_doc = parse(unquoted);
+            let unquoted_content = paragraph_inlines(&unquoted_doc);
+            let quoted_doc = parse(quoted);
+            match &quoted_doc.nodes[0] {
+                Block::BlockQuote { content, .. } => {
+                    let quoted_content = match &content[0] {
+                        Block::Paragraph { content, .. } => content,
+                        other => panic!("expected paragraph, got {other:?}"),
+                    };
+                    assert_eq!(
+                        break_kinds(quoted_content),
+                        break_kinds(unquoted_content),
+                        "mismatch for unquoted={unquoted:?} quoted={quoted:?}"
+                    );
+                }
+                other => panic!("expected blockquote, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn blockquote_crlf_differs_only_in_span_offsets() {
+        // CRLF multiline quotes follow the unquoted CRLF contract exactly:
+        // the `\r` byte is folded into the preceding text node and the
+        // SoftBreak spans only the `\n` byte (items 13 and 16).
+        let unquoted = parse("foo\r\nbar\r\n");
+        let quoted = parse("> foo\r\n> bar\r\n");
+
+        let unquoted_content = paragraph_inlines(&unquoted);
+        assert_eq!(joined_text(unquoted_content), "foo\r\nbar");
+
+        let quoted_content = match &quoted.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => content,
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        };
+        assert_eq!(joined_text(quoted_content), "foo\r\nbar");
+        assert_eq!(break_kinds(quoted_content), break_kinds(unquoted_content));
+
+        // Both SoftBreak spans point at the single LF byte.
+        let unquoted_sb = match &unquoted_content[1] {
+            Inline::SoftBreak { span } => *span,
+            other => panic!("expected SoftBreak in unquoted paragraph, got {other:?}"),
+        };
+        let quoted_sb = match &quoted_content[1] {
+            Inline::SoftBreak { span } => *span,
+            other => panic!("expected SoftBreak in quoted paragraph, got {other:?}"),
+        };
+        assert_eq!(&"foo\r\nbar\r\n"[unquoted_sb.start..unquoted_sb.end], "\n");
+        assert_eq!(&"> foo\r\n> bar\r\n"[quoted_sb.start..quoted_sb.end], "\n");
     }
 }

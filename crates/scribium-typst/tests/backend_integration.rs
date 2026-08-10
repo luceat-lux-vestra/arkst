@@ -319,3 +319,46 @@ fn blockquote_nested_integration() {
         assert!(pdf.starts_with(b"%PDF-"), "output should be a valid PDF");
     });
 }
+
+#[test]
+fn blockquote_hardbreak_integration() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+    // End-to-end: two-space HardBreak inside blockquote -> Typst -> PDF
+    let source = "> foo  \n> bar\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#quote(block: true)["));
+    assert!(typst_code.contains("foo"));
+    assert!(typst_code.contains("bar"));
+    assert!(
+        typst_code.matches("foo").count() == 1,
+        "lowered text should not duplicate foo: {}",
+        typst_code
+    );
+
+    with_typst("blockquote_hardbreak", |backend| {
+        let input = TypstInput {
+            source: typst_code,
+            entry_path: "test.qd".to_string(),
+        };
+        let output = backend
+            .compile(&input)
+            .expect("Typst compilation should succeed");
+        let pdf = output.pdf.expect("pdf output must be present");
+        assert!(!pdf.is_empty(), "PDF output should not be empty");
+        assert!(pdf.starts_with(b"%PDF-"), "output should be a valid PDF");
+    });
+}
