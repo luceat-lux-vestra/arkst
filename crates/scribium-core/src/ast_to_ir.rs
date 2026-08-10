@@ -669,4 +669,86 @@ mod tests {
             _ => panic!("expected UnorderedList"),
         }
     }
+
+    #[test]
+    fn convert_blockquote() {
+        // Test AST -> IR conversion for BlockQuote
+        let doc = Document {
+            nodes: vec![Block::BlockQuote {
+                content: vec![Block::Paragraph {
+                    content: vec![Inline::Text {
+                        content: "hello".into(),
+                        span: bs(2, 7),
+                    }],
+                    span: bs(2, 7),
+                }],
+                span: bs(0, 7),
+            }],
+            front_matter: None,
+            line_count: 1,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        assert_eq!(ir.nodes.len(), 1);
+        match &ir.nodes[0] {
+            IrNode::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    IrNode::Paragraph { .. } => {}
+                    other => panic!("expected Paragraph inside BlockQuote, got {other:?}"),
+                }
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_blockquote_nested() {
+        // Test AST -> IR conversion for nested BlockQuote
+        let doc = Document {
+            nodes: vec![Block::BlockQuote {
+                content: vec![
+                    Block::Paragraph {
+                        content: vec![Inline::Text {
+                            content: "outer".into(),
+                            span: bs(2, 7),
+                        }],
+                        span: bs(2, 7),
+                    },
+                    Block::BlockQuote {
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                content: "inner".into(),
+                                span: bs(5, 10),
+                            }],
+                            span: bs(5, 10),
+                        }],
+                        span: bs(3, 10),
+                    },
+                ],
+                span: bs(0, 10),
+            }],
+            front_matter: None,
+            line_count: 2,
+        };
+        let ir = ast_to_ir(&doc, source_id(), &empty_project_metadata());
+        assert_eq!(ir.nodes.len(), 1);
+        match &ir.nodes[0] {
+            IrNode::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (IrNode::Paragraph { .. }, IrNode::BlockQuote { content: inner, .. }) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            IrNode::Paragraph { .. } => {}
+                            other => {
+                                panic!("expected Paragraph inside nested BlockQuote, got {other:?}")
+                            }
+                        }
+                    }
+                    other => panic!("expected Paragraph + BlockQuote, got {other:?}"),
+                }
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
 }

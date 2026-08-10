@@ -1959,4 +1959,80 @@ mod tests {
         assert_eq!(diagnostics[0].code, "E3002");
         assert!(diagnostics[0].message.contains("Invalid variable name"));
     }
+
+    #[test]
+    fn evaluate_blockquote() {
+        // Test that evaluator recursively evaluates BlockQuote content
+        let bq = IrNode::BlockQuote {
+            content: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "hello".into(),
+                    span: span(0, 5),
+                }],
+                span: span(0, 5),
+            }],
+            span: span(0, 5),
+        };
+        let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![bq]));
+        assert!(diagnostics.is_empty());
+        assert_eq!(result.nodes.len(), 1);
+        match &result.nodes[0] {
+            IrNode::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    IrNode::Paragraph { .. } => {}
+                    other => panic!("expected Paragraph inside BlockQuote, got {other:?}"),
+                }
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn evaluate_blockquote_nested() {
+        // Test nested BlockQuote evaluation preserves structure
+        let bq = IrNode::BlockQuote {
+            content: vec![
+                IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content: "outer".into(),
+                        span: span(0, 5),
+                    }],
+                    span: span(0, 5),
+                },
+                IrNode::BlockQuote {
+                    content: vec![IrNode::Paragraph {
+                        content: vec![IrInline::Text {
+                            content: "inner".into(),
+                            span: span(0, 5),
+                        }],
+                        span: span(0, 5),
+                    }],
+                    span: span(0, 5),
+                },
+            ],
+            span: span(0, 10),
+        };
+        let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![bq]));
+        assert!(diagnostics.is_empty());
+        assert_eq!(result.nodes.len(), 1);
+        match &result.nodes[0] {
+            IrNode::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (IrNode::Paragraph { .. }, IrNode::BlockQuote { content: inner, .. }) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            IrNode::Paragraph { .. } => {}
+                            other => {
+                                panic!("expected Paragraph inside nested BlockQuote, got {other:?}")
+                            }
+                        }
+                    }
+                    other => panic!("expected Paragraph + BlockQuote, got {other:?}"),
+                }
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
 }

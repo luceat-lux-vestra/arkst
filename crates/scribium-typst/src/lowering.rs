@@ -1311,4 +1311,52 @@ mod tests {
         assert!(typst.contains("after"));
         assert!(!typst.contains("#if"));
     }
+
+    #[test]
+    fn lower_blockquote() {
+        // Test Typst lowering for BlockQuote
+        let doc = IrDocument {
+            nodes: vec![IrNode::BlockQuote {
+                content: vec![IrNode::Paragraph {
+                    content: vec![text("hello")],
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let typst = super::lower_to_typst_code(&doc);
+        // BlockQuote should lower to #quote(block: true)[...]
+        assert!(typst.contains("#quote(block: true)["));
+        assert!(typst.contains("hello"));
+    }
+
+    #[test]
+    fn lower_blockquote_nested() {
+        // Test Typst lowering for nested BlockQuote
+        let doc = IrDocument {
+            nodes: vec![IrNode::BlockQuote {
+                content: vec![
+                    IrNode::Paragraph {
+                        content: vec![text("outer")],
+                        span: empty_span(),
+                    },
+                    IrNode::BlockQuote {
+                        content: vec![IrNode::Paragraph {
+                            content: vec![text("inner")],
+                            span: empty_span(),
+                        }],
+                        span: empty_span(),
+                    },
+                ],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let typst = super::lower_to_typst_code(&doc);
+        // Nested blockquotes should produce nested #quote
+        assert!(typst.contains("#quote(block: true)["));
+        assert!(typst.contains("outer"));
+        assert!(typst.contains("inner"));
+    }
 }

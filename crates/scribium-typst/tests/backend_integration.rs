@@ -240,3 +240,82 @@ fn integration_variable_evaluation_before_lowering() {
         typst_code
     );
 }
+
+#[test]
+fn blockquote_integration() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+    // End-to-end integration test: Markdown blockquote -> Typst -> PDF
+    let source = "> hello\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    // BlockQuote should lower to #quote(block: true)[...]
+    assert!(typst_code.contains("#quote(block: true)["));
+    assert!(typst_code.contains("hello"));
+
+    // Actually compile to PDF with real Typst
+    with_typst("blockquote", |backend| {
+        let input = TypstInput {
+            source: typst_code,
+            entry_path: "test.qd".to_string(),
+        };
+        let output = backend
+            .compile(&input)
+            .expect("Typst compilation should succeed");
+        let pdf = output.pdf.expect("pdf output must be present");
+        assert!(!pdf.is_empty(), "PDF output should not be empty");
+        assert!(pdf.starts_with(b"%PDF-"), "output should be a valid PDF");
+    });
+}
+
+#[test]
+fn blockquote_nested_integration() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+    // End-to-end integration test: nested blockquote -> Typst -> PDF
+    let source = "> outer\n>> inner\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    // Nested blockquotes should produce nested #quote
+    assert!(typst_code.contains("#quote(block: true)["));
+    assert!(typst_code.contains("outer"));
+    assert!(typst_code.contains("inner"));
+
+    // Actually compile to PDF with real Typst
+    with_typst("blockquote_nested", |backend| {
+        let input = TypstInput {
+            source: typst_code,
+            entry_path: "test.qd".to_string(),
+        };
+        let output = backend
+            .compile(&input)
+            .expect("Typst compilation should succeed");
+        let pdf = output.pdf.expect("pdf output must be present");
+        assert!(!pdf.is_empty(), "PDF output should not be empty");
+        assert!(pdf.starts_with(b"%PDF-"), "output should be a valid PDF");
+    });
+}
