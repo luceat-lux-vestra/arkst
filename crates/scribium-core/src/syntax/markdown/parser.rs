@@ -653,7 +653,13 @@ fn parse_blockquote(
 
         // Check for blockquote marker in the raw line (including leading whitespace)
         if let Some(marker_pos) = find_blockquote_marker(line.raw) {
-            // This is a blockquote marker line
+            // This is a blockquote marker line. Strip the `>` marker and
+            // the optional single space after it, then classify the
+            // remaining content: a quoted blank line (marker whose
+            // remaining content is empty or whitespace-only) is recorded
+            // as a blank line inside the quote and sets `ends_with_blank`
+            // so no marker-less line may lazily continue across it, while
+            // real content lines reset that state.
 
             // Calculate content start: after marker, skip optional single space
             let content_start = marker_pos + 1;
@@ -678,44 +684,39 @@ fn parse_blockquote(
             let content_text = &content_raw[ws..];
             let content_text_start = content_raw_start + ws;
 
-            // A content line that can actually start a block ends any open
-            // paragraph state; the next decision point re-probes the parser.
-            ends_with_blank = false;
-
-            content_lines.push(SourceLine {
-                raw: content_raw,
-                text: content_text,
-                raw_start: content_raw_start,
-                text_start: content_text_start,
-                term: line.term,
-                end: line.end,
-            });
-            end_span = line.end;
-            *cursor += 1;
-        } else if line.is_blank() {
-            // Blank line - check if it's a quoted blank line (only > or > )
-            // or an unquoted blank line
-            let is_quoted_blank = find_blockquote_marker(line.raw).is_some();
-
-            if is_quoted_blank {
-                // Quoted blank line: preserve as blank line within the quote
+            if content_text.is_empty() {
+                // Quoted blank line (e.g. ">", "> ", ">   "): keep the
+                // quote open but record that its content currently ends
+                // with a blank line.
                 content_lines.push(SourceLine {
                     raw: "",
                     text: "",
-                    raw_start: line.raw_start,
-                    text_start: line.text_start,
+                    raw_start: content_raw_start,
+                    text_start: content_text_start,
                     term: line.term,
                     end: line.end,
                 });
-                end_span = line.end;
-                *cursor += 1;
-                // A quoted blank line separates paragraphs: no lazy
-                // continuation may cross it.
                 ends_with_blank = true;
             } else {
-                // Unquoted blank line: ends the block quote
-                break;
+                // Real content line: if it can actually start a block it
+                // ends any open paragraph state; the next decision point
+                // re-probes the parser.
+                ends_with_blank = false;
+                content_lines.push(SourceLine {
+                    raw: content_raw,
+                    text: content_text,
+                    raw_start: content_raw_start,
+                    text_start: content_text_start,
+                    term: line.term,
+                    end: line.end,
+                });
             }
+            end_span = line.end;
+            *cursor += 1;
+        } else if line.is_blank() {
+            // Unquoted blank line: ends the block quote. A quoted blank
+            // line always carries a marker and is handled above.
+            break;
         } else if !ends_with_blank
             && (line.indent() >= MIN_BLOCK_INDENT || !line.starts_block())
             && content_ends_in_paragraph(source, &content_lines)
@@ -4214,6 +4215,57 @@ mod tests {
             }
             other => panic!("expected two blockquotes, got {other:?}"),
         }
+    }
+
+    /// Assert that `source` parses to exactly one blockquote containing a
+    /// single paragraph (`quoted_text`), followed by one outside paragraph
+    /// (`outside_text`). Used by the quoted-blank lazy-continuation tests.
+    fn assert_quote_with_single_paragraph_then_paragraph(
+        source: &str,
+        quoted_text: &str,
+        outside_text: &str,
+    ) {
+        let doc = parse(source);
+        assert_eq!(doc.nodes.len(), 2, "expected 2 top-level nodes");
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (
+                Block::BlockQuote { content, .. },
+                Block::Paragraph {
+                    content: outside, ..
+                },
+            ) => {
+                assert_eq!(content.len(), 1, "expected single quoted block");
+                match &content[0] {
+                    Block::Paragraph { content, .. } => {
+                        assert_eq!(joined_text(content), quoted_text);
+                    }
+                    other => panic!("expected quoted paragraph, got {other:?}"),
+                }
+                assert_eq!(joined_text(outside), outside_text);
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_quoted_blank_negative() {
+        // CommonMark Example 249: a quoted blank line (">") inside the
+        // blockquote forbids lazy continuation of the following
+        // marker-less line, so "baz" is a paragraph outside the quote.
+        assert_quote_with_single_paragraph_then_paragraph("> bar\n>\nbaz\n", "bar", "baz");
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_quoted_blank_space_variant() {
+        // "> " (marker + one space) is also a quoted blank line.
+        assert_quote_with_single_paragraph_then_paragraph("> bar\n> \nbaz\n", "bar", "baz");
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_quoted_blank_spaces_variant() {
+        // ">   " (marker + whitespace-only content) is also a quoted blank
+        // line and forbids lazy continuation the same way.
+        assert_quote_with_single_paragraph_then_paragraph("> bar\n>   \nbaz\n", "bar", "baz");
     }
 
     #[test]
