@@ -599,19 +599,89 @@ fn parse_paragraph(
     }
 }
 
-/// Whether the accumulated quote content currently ends with an open
-/// `Paragraph` block.
+/// Depth of the trailing container chain inside `blocks` when it ends in a
+/// `Paragraph`: the number of `BlockQuote` levels wrapping that trailing
+/// paragraph. Returns `None` when the chain ends in any other block (heading,
+/// fence, list, ...) or in nothing.
+///
+/// The chain is followed through the *last* child of each trailing
+/// `BlockQuote` only: any sibling block (even a paragraph) after the deepest
+/// container means a marker-less candidate line targets that sibling instead,
+/// which the caller classifies via the raw collected lines.
+fn trailing_paragraph_depth(blocks: &[Block]) -> Option<usize> {
+    match blocks.last() {
+        Some(Block::Paragraph { .. }) => Some(0),
+        Some(Block::BlockQuote { content, .. }) => {
+            trailing_paragraph_depth(content).map(|depth| depth + 1)
+        }
+        _ => None,
+    }
+}
+
+/// Marker depth of a collected content line (number of leading block quote
+/// markers, mirroring how `parse_blockquote` strips one `>` marker plus the
+/// optional single space after it per nesting level) and whether the line is
+/// effectively a blank line at that depth: remaining content after all
+/// markers are stripped is whitespace-only.
+fn content_marker_info(raw: &str) -> (usize, bool) {
+    let mut depth = 0;
+    let mut rest = raw;
+    while let Some(pos) = find_blockquote_marker(rest) {
+        depth += 1;
+        let after_marker = pos + 1;
+        rest = if after_marker < rest.len() && rest.as_bytes()[after_marker] == b' ' {
+            &rest[after_marker + 1..]
+        } else {
+            &rest[after_marker..]
+        };
+    }
+    (
+        depth,
+        rest.trim_matches(|b| b == ' ' || b == '\t').is_empty(),
+    )
+}
+
+/// Whether the accumulated quote content can still accept a marker-less line
+/// as a lazy paragraph continuation.
 ///
 /// Runs the real block parser over the provided lines (with scratch
-/// diagnostics) so that lazy-continuation decisions follow the actual open
-/// container state instead of the shape of the last line. `parse_blocks`
-/// skips blank lines, so paragraph separation by a quoted blank line is
-/// tracked separately by the caller.
+/// diagnostics) and then walks the trailing container chain: the active open
+/// container chain ends in a `Paragraph` accepted for continuation iff
+///
+/// * the trailing chain ends in a `Paragraph` (`trailing_paragraph_depth`),
+/// * that deepest paragraph is still being fed by the collected lines: the
+///   last non-blank line reaching at least the chain depth must exist, and
+///   no blank line may follow it.
+///
+/// The blank/termination check runs on the raw collected lines precisely so a
+/// quoted blank inside any active container (e.g. `> > foo` followed by
+/// `> >`) seeds off laziness, which a plain recursive AST tail check would
+/// miss because `parse_blocks` discards blank lines.
 fn content_ends_in_paragraph(source: &str, content_lines: &[SourceLine<'_>]) -> bool {
     let mut cursor = 0;
     let mut diagnostics = Vec::new();
     let blocks = parse_blocks(source, content_lines, &mut cursor, 0, &mut diagnostics);
-    matches!(blocks.last(), Some(Block::Paragraph { .. }))
+    let Some(leaf_depth) = trailing_paragraph_depth(&blocks) else {
+        return false;
+    };
+
+    // The deepest paragraph is fed by the last line reaching at least
+    // `leaf_depth` markers whose content (after all markers are stripped) is
+    // non-blank; a shallower line only feeds a shallower block.
+    let Some(last_feed) = content_lines.iter().rposition(|line| {
+        let (depth, blank) = content_marker_info(line.raw);
+        !blank && depth >= leaf_depth
+    }) else {
+        return false;
+    };
+
+    // Any blank line after the last feed line terminates the paragraph at
+    // the affected depth (a blank at depth < leaf closes that container).
+    // Blank-ness is judged after stripping all markers of the collected
+    // line, so a deeper quoted blank (e.g. "> " left from "> >") is seen.
+    content_lines[last_feed + 1..]
+        .iter()
+        .all(|line| !content_marker_info(line.raw).1)
 }
 
 /// Parse a block quote starting at the cursor.
@@ -626,8 +696,9 @@ fn content_ends_in_paragraph(source: &str, content_lines: &[SourceLine<'_>]) -> 
 /// - A blank line containing only the block quote marker (or marker + space)
 ///   does not end the block quote but separates paragraphs within it.
 /// - An unquoted blank line ends the block quote.
-/// - Lazy continuation: non-blockquote lines that follow a paragraph inside
-///   a block quote are treated as continuations of that paragraph.
+/// - Lazy continuation: non-blockquote lines that follow an open paragraph
+///   inside a block quote (including paragraphs nested in deeper quotes) are
+///   treated as continuations of that paragraph.
 fn parse_blockquote(
     source: &str,
     lines: &[SourceLine<'_>],
@@ -4266,6 +4337,103 @@ mod tests {
         // ">   " (marker + whitespace-only content) is also a quoted blank
         // line and forbids lazy continuation the same way.
         assert_quote_with_single_paragraph_then_paragraph("> bar\n>   \nbaz\n", "bar", "baz");
+    }
+
+    /// Assert that `source` parses to exactly one top-level block whose
+    /// structure is `levels` nested `BlockQuote`s wrapping a single
+    /// `Paragraph` whose logical text equals `expected`.
+    fn assert_nested_blockquote_paragraph(source: &str, levels: usize, expected: &str) {
+        let doc = parse(source);
+        assert_eq!(doc.nodes.len(), 1, "expected one top-level node");
+        let mut node = &doc.nodes[0];
+        for _ in 0..levels {
+            match node {
+                Block::BlockQuote { content, .. } => {
+                    assert_eq!(content.len(), 1, "expected single block at each level");
+                    node = &content[0];
+                }
+                other => panic!("expected blockquote, got {other:?}"),
+            }
+        }
+        match node {
+            Block::Paragraph { content, .. } => assert_eq!(joined_text(content), expected),
+            other => panic!("expected paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_nested_example_250() {
+        // CommonMark Example 250: a marker-less line after three nested
+        // markers continues the deepest open paragraph, so "bar" must not
+        // escape to a top-level paragraph.
+        assert_nested_blockquote_paragraph("> > > foo\nbar\n", 3, "foo\nbar");
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_nested_example_251() {
+        // CommonMark Example 251: once a nested paragraph is open, markers
+        // are optional on each line regardless of which container depth the
+        // line actually carries; all three lines join the deepest paragraph.
+        assert_nested_blockquote_paragraph(">>> foo\n> bar\n>>baz\n", 3, "foo\nbar\nbaz");
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_nested_blank_negative() {
+        // A quoted blank inside the inner quote (`> >`) ends the inner
+        // paragraph, so the marker-less "bar" cannot lazily continue it and
+        // becomes a top-level paragraph.
+        let doc = parse("> > foo\n> >\nbar\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content: quote, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(quote.len(), 1);
+                match &quote[0] {
+                    Block::BlockQuote { content, .. } => {
+                        assert_eq!(content.len(), 1);
+                        match &content[0] {
+                            Block::Paragraph { content, .. } => {
+                                assert_eq!(joined_text(content), "foo");
+                            }
+                            other => panic!("expected inner paragraph, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected inner blockquote, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "bar");
+            }
+            other => panic!("expected quote + outside paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_lazy_continuation_partial_container() {
+        // "> > foo\n> >\n> bar": the inner quote ends after its blank line
+        // while the outer quote stays open and owns "bar" as its own
+        // paragraph (deeper containers are not implicitly re-fed).
+        let doc = parse("> > foo\n> >\n> bar\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::BlockQuote { content: inner, .. },
+                        Block::Paragraph { content: p, .. },
+                    ) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            Block::Paragraph { content, .. } => {
+                                assert_eq!(joined_text(content), "foo");
+                            }
+                            other => panic!("expected inner paragraph, got {other:?}"),
+                        }
+                        assert_eq!(joined_text(p), "bar");
+                    }
+                    other => panic!("expected inner quote + outer paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
     }
 
     #[test]
