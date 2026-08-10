@@ -736,6 +736,17 @@ fn remainder_starts_block(raw: &str) -> bool {
 ///   sibling block (`leaf_starts_block`),
 /// * no fenced code block is open: fence content lines look like plain text
 ///   but never carry a paragraph (`fence_open`).
+///
+/// Container-depth transitions:
+///
+/// * lines deeper than the active leaf enter a deeper container and
+///   redefine the leaf (`depth >= 1`),
+/// * a marker-less line preserves the deeper chain only while the deeper
+///   leaf is an open paragraph (CommonMark 250/251); when the deeper leaf
+///   ended in a non-paragraph block (heading, list, fence), the line leaves
+///   the deeper containers and opens a paragraph at the shallower depth,
+/// * a fence is owned by the container at its marker depth: a shallower
+///   line ends that container and the fence state dies with it.
 #[derive(Default)]
 struct QuoteContinuation {
     has_feed: bool,
@@ -755,8 +766,15 @@ impl QuoteContinuation {
         // (blanks included) and opens no paragraph: the continuation state
         // stays frozen until a structural closer ends the fence. A closer
         // is itself the trailing block, so it leaves no open paragraph.
+        //
+        // The fence is owned by the container at its marker depth: a line
+        // at a shallower depth means that container has ended, and the
+        // unclosed fence dies with it instead of blocking the shallower
+        // chain (leaving a container never leaves an open paragraph).
         if let Some((fence_len, fence_depth)) = self.fence_open {
-            if indent < MIN_BLOCK_INDENT
+            if depth < fence_depth {
+                self.fence_open = None;
+            } else if indent < MIN_BLOCK_INDENT
                 && depth == fence_depth
                 && is_closing_fence(text, fence_len)
             {
@@ -765,8 +783,10 @@ impl QuoteContinuation {
                 self.leaf_starts_block = true;
                 self.has_feed = true;
                 self.trailing_blank = false;
+                return;
+            } else {
+                return;
             }
-            return;
         }
 
         if blank {
@@ -785,20 +805,35 @@ impl QuoteContinuation {
             }
         }
 
+        // Container-depth transitions of the active leaf. `depth` is the
+        // marker depth of the current line relative to the quote being
+        // collected.
         if depth >= 1 {
-            // A deeper line redefines the trailing container chain: it opens
-            // (or feeds) a container one level below the deepest quote.
+            // The line is structurally anchored to the container at
+            // `depth` (it still carries markers). Entering a deeper
+            // container, or a deeper-or-equal line after the previous leaf
+            // ended, always redefines the active leaf: a marker-carrying
+            // line can never lazily omit the markers of the chain below it.
             self.leaf_depth = depth;
             self.leaf_starts_block = remainder_starts_block(raw);
         } else {
+            // Marker-less line: it is either lazy continuation text of the
+            // deeper chain or the head of a new block at the top of the
+            // quote.
             let starts = remainder_starts_block(raw);
-            if !after_blank && self.leaf_depth > 0 && !starts {
-                // Continuation text of an open deeper paragraph: the leaf
-                // chain is fed deeper, not redefined.
+            let continue_deeper =
+                !after_blank && self.leaf_depth > 0 && !self.leaf_starts_block && !starts;
+            if continue_deeper {
+                // The deeper leaf is still an open paragraph being fed, no
+                // blank line terminated the chain, and this line cannot
+                // start a block: keep the deeper chain (CommonMark 250/251).
             } else {
-                // After a blank (chain terminated), after a non-paragraph
-                // leaf, or on a flat chain: the line opens a paragraph or
-                // other sibling block at the current depth.
+                // Leaving the deeper containers: the deeper leaf ended in a
+                // non-paragraph block (heading/list/fence), a blank line
+                // terminated the chain, or the line starts a block of its
+                // own. Either way the line opens a fresh block/paragraph at
+                // the current (shallower) depth, discarding the stale
+                // deeper leaf.
                 self.leaf_depth = 0;
                 self.leaf_starts_block = starts;
             }
@@ -4595,6 +4630,128 @@ mod tests {
                             other => panic!("expected inner paragraph, got {other:?}"),
                         }
                         assert_eq!(joined_text(p), "bar");
+                    }
+                    other => panic!("expected inner quote + outer paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested_heading_outer_paragraph_transition() {
+        // Container-depth transition: the nested quote ends in a heading
+        // (non-paragraph leaf), so the shallower marker line "outer" opens
+        // a fresh paragraph at the outer depth and the marker-less
+        // "outside" lazily continues it.
+        let doc = parse("> > # h\n> outer\noutside\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::BlockQuote { content: inner, .. },
+                        Block::Paragraph { content: p, .. },
+                    ) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            Block::Heading {
+                                level, content: h, ..
+                            } => {
+                                assert_eq!(*level, 1);
+                                assert_eq!(joined_text(h), "h");
+                            }
+                            other => panic!("expected inner heading, got {other:?}"),
+                        }
+                        assert_eq!(joined_text(p), "outer\noutside");
+                    }
+                    other => panic!("expected inner quote + outer paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested_open_fence_outer_paragraph_transition() {
+        // The inner quote's unclosed fence is owned by the inner container:
+        // "outer" ends that container, so the fence must not keep blocking
+        // the outer paragraph chain.
+        let doc = parse("> > ```\n> > code\n> outer\noutside\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::BlockQuote { content: inner, .. },
+                        Block::Paragraph { content: p, .. },
+                    ) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            Block::CodeBlock { source, .. } => assert_eq!(source, "code"),
+                            other => panic!("expected inner code block, got {other:?}"),
+                        }
+                        assert_eq!(joined_text(p), "outer\noutside");
+                    }
+                    other => panic!("expected inner quote + outer paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested_closed_fence_outer_paragraph_transition() {
+        // The nested quote ends in a closed fenced code block; the closing
+        // fence leaves a non-paragraph leaf that must not swallow the outer
+        // paragraph.
+        let doc = parse("> > ```\n> > code\n> > ```\n> outer\noutside\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::BlockQuote { content: inner, .. },
+                        Block::Paragraph { content: p, .. },
+                    ) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            Block::CodeBlock { source, .. } => assert_eq!(source, "code"),
+                            other => panic!("expected inner code block, got {other:?}"),
+                        }
+                        assert_eq!(joined_text(p), "outer\noutside");
+                    }
+                    other => panic!("expected inner quote + outer paragraph, got {other:?}"),
+                }
+            }
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_nested_list_outer_paragraph_transition() {
+        // Generic non-paragraph transition: the nested quote ends in a
+        // list, and the shallower line must start an outer paragraph
+        // instead of continuing the list chain.
+        let doc = parse("> > - item\n> outer\noutside\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match (&content[0], &content[1]) {
+                    (
+                        Block::BlockQuote { content: inner, .. },
+                        Block::Paragraph { content: p, .. },
+                    ) => {
+                        assert_eq!(inner.len(), 1);
+                        match &inner[0] {
+                            Block::UnorderedList { items, .. } => assert_eq!(items.len(), 1),
+                            other => panic!("expected inner list, got {other:?}"),
+                        }
+                        assert_eq!(joined_text(p), "outer\noutside");
                     }
                     other => panic!("expected inner quote + outer paragraph, got {other:?}"),
                 }

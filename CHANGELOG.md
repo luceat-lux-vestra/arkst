@@ -150,6 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scratch at every line, and the trailing classification follows the real
   parse result (including fenced code blocks staying non-paragraph across
   plain-looking content lines and depth-0 lines starting sibling blocks).
+- Container-depth transitions in block quote continuation: a marker-less
+  line preserves the deeper chain only while the deeper leaf is still an
+  open paragraph (CommonMark 250/251); once the nested quote ends in a
+  heading, list, or fence, a shallower line opens a fresh paragraph at the
+  outer depth. An open fence is owned by its container depth and dies when
+  that container ends, so a nested unclosed fence no longer blocks outer
+  paragraph continuation.
 - `build` with multiple formats and `--output` now returns a clear validation error
   instead of silently using the output path for only one format.
 - `build` never overwrites the input source file: an output that resolves to
