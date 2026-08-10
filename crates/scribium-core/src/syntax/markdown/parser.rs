@@ -191,9 +191,14 @@ struct SourceLine<'a> {
     end: usize,
 }
 
-/// Whether `text` (with `indent` leading whitespace columns) starts a new
-/// block rather than continuing a paragraph. Blockquote markers are already
-/// stripped before this check.
+/// Whether `text` starts a new block rather than continuing a paragraph.
+///
+/// The contract matches what `SourceLine::starts_block` classifies: `text`
+/// has the `indent` columns of leading whitespace already removed, and
+/// `indent` is the effective indentation of the line. Passing a
+/// whitespace-bearing `text` together with its indent would misclassify
+/// indented headings (e.g. `"  # h"` with indent 2) as paragraph text.
+/// Blockquote markers are already stripped before this check.
 fn text_starts_block(text: &str, indent: usize) -> bool {
     if indent >= MIN_BLOCK_INDENT {
         // A line indented at least four columns cannot start a block.
@@ -724,12 +729,40 @@ fn split_markers(raw: &str) -> (usize, bool, &str) {
     )
 }
 
+/// Effective classified view of a collected content remainder: `strip_cols`
+/// columns are removed from its front (mirroring how the list parsers strip
+/// item-content lines via `strip_indent`), then the remaining leading
+/// whitespace is stripped. The result is the `(text, indent)` pair that
+/// `text_starts_block` classifies, identical to what `SourceLine` derives
+/// for the same content.
+fn effective_remainder_view(rest: &str, strip_cols: usize) -> (&str, usize) {
+    let strip = strip_cols.min(rest.len());
+    let after = &rest[strip..];
+    let ws = after.len() - after.trim_start_matches([' ', '\t']).len();
+    (&after[ws..], ws)
+}
+
 /// Whether the stripped content of a collected line starts a new block at
 /// its effective depth rather than being paragraph continuation text.
+///
+/// The classification receives exactly what `SourceLine::starts_block` sees
+/// for the same line: leading whitespace is stripped from the remainder and
+/// the stripped column count becomes the effective indentation.
 fn remainder_starts_block(raw: &str) -> bool {
     let (_, _, rest) = split_markers(raw);
-    let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-    text_starts_block(rest, indent)
+    let (text, indent) = effective_remainder_view(rest, 0);
+    text_starts_block(text, indent)
+}
+
+/// Item-relative classification of a collected content line at or beyond
+/// the trailing list item's content column: `content_col` columns of raw
+/// are removed exactly like the list parsers strip item-content lines
+/// (`strip_indent`), and the stripped line is classified with the same
+/// rules the nested `parse_blocks` pass applies (including a block-quote
+/// marker for nested quotes opened inside the item).
+fn item_relative_starts_block(raw: &str, content_col: usize) -> bool {
+    let (text, indent) = effective_remainder_view(raw, content_col);
+    text_starts_block(text, indent) || is_blockquote_marker(&raw[content_col.min(raw.len())..])
 }
 
 /// Incremental lazy-continuation state for the `parse_blockquote` collection
@@ -760,9 +793,10 @@ fn remainder_starts_block(raw: &str) -> bool {
 ///   line ends that container and the fence state dies with it,
 /// * a trailing list item is tracked separately: lines at or beyond the
 ///   item's content column are item content (the list parsers absorb them
-///   as continuation, whether or not they start a new marker), while
-///   lines shallower than the content column end the list and start a
-///   fresh block at their own depth.
+///   as continuation, whether or not they start a new marker), classified
+///   in item-relative coordinates with fences opened by such lines tracked
+///   on the item, while lines shallower than the content column end the
+///   list and start a fresh block at their own depth.
 #[derive(Default)]
 struct QuoteContinuation {
     has_feed: bool,
@@ -863,22 +897,13 @@ impl QuoteContinuation {
             if let Some(item) = &self.list_item {
                 if indent >= item.content_col {
                     // At or beyond the content column the list parsers
-                    // consume the line as content of the *current* item
-                    // (even when it carries a marker and starts a nested
-                    // block inside the item), so the item stays open and
-                    // the leaf follows the line's remainder.
-                    self.leaf_depth = depth;
-                    let item = self.list_item.as_mut().unwrap();
-                    if let Some(fence_len) = item.fence {
-                        if is_closing_fence(text, fence_len) {
-                            item.fence = None;
-                        }
-                        self.leaf_paragraph = false;
-                    } else {
-                        item.fence = fence_length(remainder);
-                        self.leaf_paragraph =
-                            item.fence.is_none() && !text_starts_block(remainder, 0);
-                    }
+                    // consume the line as content of the *current* item in
+                    // item-relative coordinates: `strip_indent` removes the
+                    // item's content column and the nested parse
+                    // classifies the rest. The item stays open and the leaf
+                    // follows the stripped line (fences it opens are
+                    // tracked on the item).
+                    self.record_item_content_line(raw, depth);
                     return;
                 }
                 if item.marker == marker && item.ordered == ordered {
@@ -922,19 +947,10 @@ impl QuoteContinuation {
         // Plain (marker-less) line.
         if let Some(item) = &self.list_item {
             if indent >= item.content_col {
-                // Item content: the leaf follows the item's trailing
-                // block. While the item carries an open fence, only the
-                // structural closer (an indented fence line) ends it.
-                self.leaf_depth = depth;
-                let item = self.list_item.as_mut().unwrap();
-                if let Some(fence_len) = item.fence {
-                    if is_closing_fence(text, fence_len) {
-                        item.fence = None;
-                    }
-                    self.leaf_paragraph = false;
-                } else {
-                    self.leaf_paragraph = !remainder_starts_block(raw);
-                }
+                // Item content in item-relative coordinates (see above): a
+                // fence this line opens is tracked on the item and the
+                // leaf follows the stripped line.
+                self.record_item_content_line(raw, depth);
                 return;
             }
             // Too shallow for the item: the list ends here and the line
@@ -995,6 +1011,28 @@ impl QuoteContinuation {
         match &self.list_item {
             Some(item) => self.leaf_paragraph && indent >= item.content_col,
             None => self.leaf_paragraph,
+        }
+    }
+
+    /// Advance the trailing list item on a line the list parsers absorb as
+    /// item content (indent at or beyond the item's content column). The
+    /// line is classified in item-relative coordinates (exactly like the
+    /// nested `parse_blocks` pass sees it after `strip_indent`): fences it
+    /// opens are tracked on the item, and fence content never opens a
+    /// paragraph.
+    fn record_item_content_line(&mut self, raw: &str, depth: usize) {
+        self.leaf_depth = depth;
+        let item = self.list_item.as_mut().unwrap();
+        let (relative_text, _) = effective_remainder_view(raw, item.content_col);
+        if let Some(fence_len) = item.fence {
+            if is_closing_fence(relative_text, fence_len) {
+                item.fence = None;
+            }
+            self.leaf_paragraph = false;
+        } else {
+            item.fence = fence_length(relative_text);
+            self.leaf_paragraph =
+                item.fence.is_none() && !item_relative_starts_block(raw, item.content_col);
         }
     }
 }
@@ -5830,5 +5868,235 @@ mod tests {
         };
         assert_eq!(&"foo\r\nbar\r\n"[unquoted_sb.start..unquoted_sb.end], "\n");
         assert_eq!(&"> foo\r\n> bar\r\n"[quoted_sb.start..quoted_sb.end], "\n");
+    }
+
+    #[test]
+    fn blockquote_indented_heading_lazy_rejected() {
+        // A heading indented 1-3 spaces inside the quote still starts a
+        // block (the same classification `SourceLine::starts_block` gives
+        // its content line), so a following marker-less line is not
+        // paragraph continuation text and stays outside the quote.
+        for spaces in 0..=3usize {
+            let source = format!("> foo\n> {}# h\nbar\n", " ".repeat(spaces));
+            let doc = parse(&source);
+            assert_eq!(
+                doc.nodes.len(),
+                2,
+                "indent {spaces}: expected blockquote + outside paragraph for {source:?}"
+            );
+            match (&doc.nodes[0], &doc.nodes[1]) {
+                (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                    assert_eq!(content.len(), 2);
+                    match (&content[0], &content[1]) {
+                        (Block::Paragraph { content: p0, .. }, Block::Heading { level, .. }) => {
+                            assert_eq!(joined_text(p0), "foo");
+                            assert_eq!(*level, 1);
+                        }
+                        other => panic!("expected foo paragraph + heading, got {other:?}"),
+                    }
+                    assert_eq!(joined_text(p), "bar");
+                }
+                other => panic!("expected blockquote + paragraph, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn blockquote_indented_heading_four_spaces_stays_paragraph() {
+        // At four spaces of indent the content line cannot start a block
+        // (this parser has no indented code blocks), so the marker-less
+        // line stays a valid paragraph continuation, exactly as in the
+        // unquoted equivalent (CommonMark 238).
+        let unquoted = parse("foo\n    # h\nbar\n");
+        let quoted = parse("> foo\n>     # h\nbar\n");
+        let quoted_paragraph = match &quoted.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::Paragraph { content, .. } => content,
+                other => panic!("expected paragraph, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        };
+        assert_eq!(
+            joined_text(quoted_paragraph),
+            joined_text(paragraph_inlines(&unquoted))
+        );
+        assert_eq!(quoted_paragraph.len(), paragraph_inlines(&unquoted).len());
+    }
+
+    #[test]
+    fn blockquote_list_item_fence_opened_after_paragraph_lazy_rejected() {
+        // A fence opened by a later item-content line is tracked on the
+        // item: the following line is fence content (never a paragraph),
+        // and the marker-less candidate cannot lazily continue it.
+        let doc = parse("> - foo\n>   ```\n>   code\n  outside\n");
+        assert_eq!(doc.nodes.len(), 2);
+        match (&doc.nodes[0], &doc.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::UnorderedList { items, .. } => {
+                        assert_eq!(items.len(), 1);
+                        assert_eq!(items[0].content.len(), 2);
+                        match (&items[0].content[0], &items[0].content[1]) {
+                            (
+                                Block::Paragraph { content: p0, .. },
+                                Block::CodeBlock { source, .. },
+                            ) => {
+                                assert_eq!(joined_text(p0), "foo");
+                                assert_eq!(*source, "code");
+                            }
+                            other => panic!("expected paragraph + code block, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected list, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "outside");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blockquote_list_item_indented_heading_lazy_rejected() {
+        // Item content is classified in item-relative coordinates: after
+        // the item's content column is stripped, "  # h" keeps two columns
+        // of indent and is a heading inside the item (exactly what the
+        // global list parser produces for the unquoted input), so the
+        // marker-less line is not a paragraph continuation.
+        let unquoted = parse("- foo\n    # h\n");
+        let quoted = parse("> - foo\n>     # h\n  outside\n");
+        assert_eq!(quoted.nodes.len(), 2);
+        match (&quoted.nodes[0], &quoted.nodes[1]) {
+            (Block::BlockQuote { content, .. }, Block::Paragraph { content: p, .. }) => {
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    Block::UnorderedList { items, .. } => {
+                        assert_eq!(items.len(), 1);
+                        assert_eq!(items[0].content.len(), 2);
+                        match (&items[0].content[0], &items[0].content[1]) {
+                            (
+                                Block::Paragraph { content: p0, .. },
+                                Block::Heading { level, .. },
+                            ) => {
+                                assert_eq!(joined_text(p0), "foo");
+                                assert_eq!(*level, 1);
+                            }
+                            other => panic!("expected paragraph + heading, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected list, got {other:?}"),
+                }
+                assert_eq!(joined_text(p), "outside");
+            }
+            other => panic!("expected blockquote + paragraph, got {other:?}"),
+        }
+        // The quote content must match the unquoted global list parse
+        // heading-for-heading (blockquote-specific semantics are not
+        // introduced).
+        let unquoted_list = match &unquoted.nodes[0] {
+            Block::UnorderedList { items, .. } => items,
+            other => panic!("expected list, got {other:?}"),
+        };
+        let quoted_list = match &quoted.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::UnorderedList { items, .. } => items,
+                other => panic!("expected list, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        };
+        assert_eq!(unquoted_list[0].content.len(), quoted_list[0].content.len());
+    }
+
+    #[test]
+    fn blockquote_ordered_list_item_lazy_continuation_absorbed() {
+        // "   bar" (three spaces) reaches the ordered content column of
+        // "1. foo" (indent 0 + delimiter at 1 + 1 + 1 space = 3), so the
+        // marker-less line is valid paragraph continuation text and is
+        // absorbed, matching the global ordered-list parser.
+        let doc = parse("> 1. foo\n   bar\n");
+        assert_eq!(doc.nodes.len(), 1);
+        match &doc.nodes[0] {
+            Block::BlockQuote { content, .. } => match &content[0] {
+                Block::OrderedList { items, start, .. } => {
+                    assert_eq!(*start, 1);
+                    assert_eq!(items.len(), 1);
+                    match &items[0].content[0] {
+                        Block::Paragraph { content, .. } => {
+                            assert_eq!(joined_text(content), "foo\nbar");
+                        }
+                        other => panic!("expected item paragraph, got {other:?}"),
+                    }
+                }
+                other => panic!("expected ordered list, got {other:?}"),
+            },
+            other => panic!("expected blockquote, got {other:?}"),
+        }
+    }
+
+    /// Feed collected content lines through `QuoteContinuation` exactly as
+    /// `parse_blockquote` does and decide whether a marker-less candidate
+    /// at the trailing item's content column would be absorbed.
+    fn continuation_would_absorb(lines: &[&str]) -> bool {
+        let mut continuation = QuoteContinuation::default();
+        for line in lines {
+            continuation.record(line);
+        }
+        match &continuation.list_item {
+            Some(item) => continuation.can_lazy_continue(item.content_col),
+            None => continuation.can_lazy_continue(0),
+        }
+    }
+
+    /// Deepest trailing block of a block tree (peeling block quotes and
+    /// list items), as the parser oracle for continuation-state parity.
+    fn trailing_leaf_block(node: &Block) -> &Block {
+        match node {
+            Block::BlockQuote { content, .. } => trailing_leaf_block(content.last().unwrap()),
+            Block::UnorderedList { items, .. } | Block::OrderedList { items, .. } => {
+                trailing_leaf_block(items.last().unwrap().content.last().unwrap())
+            }
+            other => other,
+        }
+    }
+
+    #[test]
+    fn blockquote_continuation_classifier_parity() {
+        // For every fixture the incremental continuation state must
+        // classify the trailing leaf exactly like the actual block parser:
+        // a marker-less lazy candidate is accepted iff the parser's
+        // trailing block after the same collected lines is an open
+        // paragraph.
+        let fixtures: &[&[&str]] = &[
+            &["> foo"],
+            &["> # h"],
+            &[">  # h"],
+            &[">   # h"],
+            &["> foo", ">   # h"],
+            &["> ```"],
+            &["> ```", "> code"],
+            &["> ```", "> code", "> ```"],
+            &["> ---"],
+            &["> - foo"],
+            &["> - # h"],
+            &["> - foo", ">   # h"],
+            &["> - foo", ">   ```"],
+            &["> - foo", ">   ```", ">   code"],
+            &["> - foo", ">   ```", ">   code", ">   ```", ">   y"],
+            &["> 1. foo"],
+            &["> .note {x}"],
+        ];
+        for lines in fixtures {
+            let source = lines.join("\n");
+            let doc = parse(&source);
+            let trailing_is_paragraph = matches!(
+                trailing_leaf_block(doc.nodes.last().unwrap()),
+                Block::Paragraph { .. }
+            );
+            assert_eq!(
+                continuation_would_absorb(lines),
+                trailing_is_paragraph,
+                "continuation state diverges from the parser for {lines:?}",
+            );
+        }
     }
 }
