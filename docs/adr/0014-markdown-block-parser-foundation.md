@@ -106,7 +106,9 @@ Source abstraction
   → frontend AST
 ```
 
-No architecture layer may be documented unless it exists in the implementation.
+- architecture documentation must clearly distinguish current implementation from accepted/proposed target architecture;
+- proposed target layers may be documented before physical extraction when they are explicitly identified as design targets;
+- documentation must never claim that a proposed crate or layer already exists when it does not.
 
 ## Decision 3: one authoritative `BlockParser` state
 
@@ -275,7 +277,7 @@ The foundation PR is behavior-preserving for `main`. It does not:
 - redesign AST/IR/evaluator/Typst;
 - physically create or move crates;
 - add a public parser trait;
-- define target ownership beyond the Markdown and Quarkdown frontends;
+- this ADR does not decide the remaining compiler boundaries owned by ADR-0015, including diagnostics, IR, evaluation, compatibility, and backend/lowering responsibilities.
 - treat crate extraction as complete before the architecture is accepted and
   the migration is performed; or
 - special-case CommonMark examples outside the centralized state rules.
