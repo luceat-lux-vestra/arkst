@@ -29,7 +29,7 @@ scribium-test-support = { path = "crates/scribium-test-support" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 anyhow = "1"
 thiserror = "2"
 same-file = "1.0.6"
