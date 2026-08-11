@@ -103,16 +103,25 @@ network I/O.
 ## Decision 4: `scribium-core` is the composition and orchestration layer
 
 The long-term role of `scribium-core` is a stable Scribium compiler facade and
-composition layer. Its top-level workflow is conceptually:
+composition layer. It owns:
+
+- the public compiler facade;
+- `CompileOptions`;
+- `CompileResult`; and
+- top-level composition and orchestration.
+
+Its top-level workflow is conceptually:
 
 ```text
 VirtualProject
     ↓
 select entry source
     ↓
-frontend parse
+scribium-markdown
     ↓
-later compiler/evaluation stages
+scribium-engine
+    ↓
+normalized IrDocument
     ↓
 CompileResult
 ```
@@ -129,7 +138,129 @@ CompileResult
 crates to preserve a convenient user-facing API. Re-exporting a type does not
 make `scribium-core` the implementation owner of that type.
 
-## Decision 5: dependency direction
+`scribium-core` remains responsible for selecting the entry source from
+`VirtualProject` and invoking the frontend and engine stages. Project metadata
+provides defaults, and document front matter overrides those defaults. The
+metadata behavior remains unchanged by this target ownership decision.
+
+The target interaction is conceptually:
+
+```text
+scribium-core
+    |
+    | project metadata defaults
+    | source text + SourceId
+    v
+scribium-markdown
+    |
+    | frontend AST
+    v
+scribium-engine
+    |
+    | normalized IrDocument
+    v
+scribium-core / backend boundary
+```
+
+The exact Rust function signatures are not decided in this ADR.
+
+## Decision 5: `scribium-ir` owns the backend-neutral document IR
+
+The target architecture contains a dedicated `scribium-ir` crate. It owns only
+the backend-neutral document IR:
+
+- `IrDocument`;
+- `IrMetadata`;
+- `IrNode`;
+- `IrInline`;
+- `IrListItem`; and
+- `IrValue`.
+
+`scribium-ir` depends on `scribium-source` for `SourceSpan`.
+
+`scribium-ir` must not own:
+
+- Markdown AST;
+- parser implementation;
+- Quarkdown grammar;
+- evaluation logic;
+- built-ins;
+- `VirtualProject`, `SourceStore`, or `AssetStore`;
+- compiler orchestration; or
+- Typst lowering.
+
+`SourceMapEntry` and source-map generation are not assigned to
+`scribium-ir`. Source-map ownership remains unresolved.
+
+### One IR model, not separate HIR/MIR
+
+The target pipeline uses one `IrDocument` model:
+
+```text
+Markdown frontend AST
+        ↓
+initial IrDocument
+        ↓
+semantic / evaluation passes
+        ↓
+normalized IrDocument
+        ↓
+backend lowering
+```
+
+The same `IrDocument` model may exist before and after evaluation. Architecture
+documentation must not claim that every `IrDocument` is already fully
+evaluated merely because it is IR. The evaluator progressively resolves
+constructs such as variables and conditionals.
+
+This correction does not introduce separate pre-evaluation and post-evaluation
+IR crates or types. A future requirement may justify another IR level, but PR
+#46 does not introduce one.
+
+## Decision 6: `scribium-engine` owns semantic analysis and evaluation
+
+The target architecture contains a dedicated `scribium-engine` crate. It owns
+compiler semantics after parsing and before backend lowering:
+
+- Markdown AST → Scribium IR lowering;
+- semantic analysis;
+- evaluation passes;
+- variable scope and environment handling;
+- conditional evaluation;
+- built-in Scribium and Quarkdown functions; and
+- normalization of IR for backend consumption.
+
+The architectural ownership of the current concepts is:
+
+```text
+ast_to_ir    -> scribium-engine
+evaluator    -> scribium-engine
+builtins     -> scribium-engine
+```
+
+This is ownership only. The concepts are not physically moved by this ADR.
+
+`scribium-engine` depends on:
+
+- `scribium-markdown` for the frontend AST;
+- `scribium-ir`;
+- `scribium-source`;
+- `scribium-quarkdown` only where Quarkdown grammar-level rules, such as
+  valid identifiers, are required; and
+- the future shared diagnostics owner once that boundary is decided.
+
+`scribium-engine` must not depend on:
+
+- `VirtualProject`;
+- `SourceStore`;
+- `AssetStore`;
+- filesystem or network I/O; or
+- Typst backend implementation.
+
+The engine does not own the compilation project. Project metadata must not
+require the engine to consume an entire `VirtualProject`.
+
+## Decision 7: dependency direction
 
 In the following diagram, `A -> B` means that A depends on B:
 
@@ -140,6 +271,13 @@ scribium-markdown --------> scribium-source
 scribium-markdown --------> scribium-quarkdown
 scribium-core ------------> scribium-project
 scribium-core ------------> scribium-markdown
+scribium-ir --------------> scribium-source
+scribium-engine ----------> scribium-source
+scribium-engine ----------> scribium-ir
+scribium-engine ----------> scribium-markdown
+scribium-engine ----------> scribium-quarkdown (only for required grammar rules)
+scribium-core ------------> scribium-engine
+scribium-core ------------> scribium-ir
 ```
 
 The frontend dependency rules are mandatory: `scribium-markdown` and
@@ -170,11 +308,6 @@ ADR-0015 does not decide ownership of:
 
 - diagnostics;
 - source map generation;
-- AST → IR lowering;
-- IR;
-- evaluator;
-- built-ins;
-- semantic analysis;
 - compatibility layer; or
 - Typst lowering/backend.
 
