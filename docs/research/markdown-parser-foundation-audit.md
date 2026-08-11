@@ -5,6 +5,11 @@
 - **Related work:** closed PR #45; retained branch `feat/m2-blockquotes`
 - **Scope:** parser architecture and migration design only
 
+The responsibility table below records the pre-refactor `main` baseline. The
+foundation implementation now lives in `syntax/markdown/block/` and
+`syntax/markdown/inline/`; the baseline remains the behavior contract that the
+migration must preserve.
+
 ## Executive conclusion
 
 The current parser is a recursive block parser over a source-line slice, not a
@@ -92,6 +97,25 @@ exists in the implementation. The actual first lexical unit is `SourceLine`.
    nested argument content. That recursion is different from block-container
    reparsing and should be isolated rather than removed indiscriminately.
 
+## Foundation implementation checkpoint
+
+The first behavior-preserving migration is now represented by the foundation
+branch:
+
+- `block/line.rs` owns physical lines, offsets, CRLF normalization, and
+  container-relative `LineView` construction.
+- `block/classify.rs` owns the single pure `BlockStart` classification path for
+  Markdown and standalone Quarkdown calls.
+- `block/parser.rs` owns the cursor, open-container stack, open leaf, state
+  transitions, interruption/continuation decisions, diagnostics, and AST
+  emission.
+- `inline/parser.rs` owns inline recursion over original contiguous source
+  ranges; blockquote remains absent from the AST and parser behavior.
+
+The old `parse_blocks` and synthetic list/directive body reparsing paths were
+removed. Existing parser, snapshot, AST-to-IR, evaluator, and backend-facing
+tests remain the regression gate; no PR #45 blockquote expectation is enabled.
+
 ## Decisions for review
 
 ### Crate boundary
@@ -170,7 +194,6 @@ dependency direction is proven. No public API changes are planned.
 ## Main baseline evidence
 
 An extracted `main` snapshot passed `cargo fmt --all --check` and
-`cargo test --workspace --all-features`: 58 CLI, 292 core, 8 test-support, 21
-Typst unit, 5 backend integration, and 7 upstream-watch tests passed. This is
+`cargo test --workspace --all-features`: 58 CLI, 335 core, 8 test-support, 36
+Typst unit, 6 backend integration, and 7 upstream-watch tests passed. This is
 the behavior-freeze starting point for the foundation migration.
-
