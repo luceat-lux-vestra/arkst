@@ -1,9 +1,11 @@
 # ADR-0002: Rust Workspace and Crate Boundaries
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-02
 - **Owners:** Scribium maintainers
 - **Related issues:** #1
+
+Superseded by ADR-0015.
 
 ## Context
 

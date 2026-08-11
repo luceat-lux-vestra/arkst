@@ -1,9 +1,9 @@
 # ADR-0015: Compiler Crate Boundaries
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-12
 - **Owners:** Scribium maintainers
-- **Related ADRs:** 0002, 0014
+- **Related ADRs:** 0002, 0005, 0006, 0014
 - **Related work:** PR #46; `refactor/markdown-parser-foundation`
 
 ## Context
@@ -16,8 +16,10 @@ step.
 
 This ADR records the next target boundaries after the frontend ownership
 decision in ADR-0014. This architecture correction resolves the remaining
-crate-ownership questions for source maps and the Typst backend. The ADR
-remains Proposed while a later whole-topology consistency pass is pending.
+crate-ownership questions for source maps and the Typst backend. ADR-0015
+supersedes ADR-0002's workspace/crate-boundary decision. It does not supersede
+the behavioral or backend-strategy decisions in ADR-0005 or ADR-0006; it only
+refines their crate ownership.
 
 ## Decision 1: frontend ownership established by Architecture Correction 1
 
@@ -62,6 +64,13 @@ types, including:
 
 The future segment-aware inline-input design may build on these types. The API
 for that design is not defined by this ADR.
+
+`scribium-source` owns the backend-neutral source-map representation, which
+may support generated ranges. This ownership decision does not require M1 to
+use byte-precise mappings: M1 may populate the representation at line
+granularity according to ADR-0006. Backend lowering owns creation of mapping
+entries, and the planned finer-grained mapping upgrade remains governed by
+ADR-0006.
 
 `scribium-source` must not own:
 
@@ -419,6 +428,8 @@ scribium-typst -----------> scribium-source
 scribium-typst -----------> scribium-diagnostics
 scribium-typst-subprocess -> scribium-typst
 scribium-typst-subprocess -> scribium-diagnostics
+scribium-cli -------------> scribium-core
+scribium-cli -------------> scribium-typst
 scribium-cli -------------> scribium-typst-subprocess
 ```
 
@@ -525,18 +536,27 @@ types. Lowering must be usable without constructing or selecting a compiler
 backend. Conceptually:
 
 ```text
-IrDocument
-    ↓
+scribium-cli
+    |
+    | build VirtualProject / CompileOptions
+    v
+scribium-core
+    |
+    | normalized IrDocument + diagnostics
+    v
 scribium-typst
-    ↓
-Typst source + source map + lowering diagnostics
-    ↓
-optional native adapter
-    ↓
+    |
+    | Typst source + source map + lowering diagnostics
+    v
 scribium-typst-subprocess
-    ↓
-PDF / other Typst compiler output
+    |
+    v
+Typst compiler output
 ```
+
+This is a host-level composition flow, not a dependency from
+`scribium-core` to `scribium-typst`. The core facade stops at the normalized IR
+and shared diagnostics; the CLI composes it with lowering and native execution.
 
 Exact Rust structs and trait signatures are not defined in this ADR.
 
@@ -550,14 +570,15 @@ ADR-0015 has no remaining crate-ownership questions:
   diagnostics; and
 - `scribium-typst-subprocess` owns only native Typst subprocess execution.
 
-ADR-0015 remains Proposed. ADR-0002 is not marked Superseded. The next
-architecture correction will perform the final whole-topology consistency
-pass before changing ADR status or history.
+ADR-0015 is Accepted and supersedes ADR-0002's workspace/crate-boundary
+decision. It refines the physical ownership surrounding ADR-0005 and ADR-0006
+without replacing their behavioral, backend-strategy, or source-map fidelity
+decisions.
 
 ## Migration and ADR history
 
 This ADR records target ownership only. It does not add workspace members,
 create crate directories, move Rust modules, change imports or public APIs, or
-change tests and CI. ADR-0002 is not rewritten or marked Superseded here.
-Once the complete replacement workspace architecture is settled, a later
-correction may finalize ADR-0015 and decide the status of ADR-0002.
+change tests and CI. ADR-0002 remains readable as the historical architecture
+that was previously accepted; its workspace/crate-boundary decision is
+superseded by this ADR.

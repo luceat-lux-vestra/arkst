@@ -1,10 +1,13 @@
 # ADR-0014: Markdown Block Parser Foundation
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-11
 - **Owners:** Scribium maintainers
 - **Related ADRs:** 0002, 0006, 0007, 0012, 0015
 - **Related work:** closed PR #45; `refactor/markdown-parser-foundation`
+
+ADR-0015 is the authority for the final crate ownership surrounding this
+parser design.
 
 ## Context
 
@@ -321,5 +324,5 @@ cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown
 cargo deny check
 ```
 
-This ADR remains Proposed until the architecture review accepts the state
-model, line-processing order, Quarkdown boundary, and Option B terminology.
+This ADR is Accepted after review of the state model, line-processing order,
+Quarkdown boundary, and Option B terminology.
