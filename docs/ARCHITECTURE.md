@@ -65,10 +65,12 @@ Source Text (String)
 Source Abstraction (SourceId + SourceText)
   │
   ▼
-Lexer / Tokenizer
+Physical-line scanner / classifier
+  (SourceLine + source/span primitives)
   │
   ▼
-Parser (Markdown baseline + Quarkdown-compatible syntax)
+Markdown block parser
+  (current recursive parser; BlockParser state proposed in ADR-0014)
   ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
   ├── Quarkdown directives: .function, .function {arg} name:{value}
       (indented block bodies)
@@ -109,6 +111,45 @@ Typst Backend (trait)
   └── Subprocess adapter → typst compile
       └── PDF / HTML / SVG / PNG + diagnostics
 ```
+
+## Markdown Frontend Boundary
+
+The Markdown frontend uses a physical-line scanner/classifier as its lexical
+layer. The implementation currently provides this through `SourceLine` and
+`split_lines` in `syntax/markdown/parser.rs`; there is no separate generic
+tokenizer or token stream.
+
+ADR-0014 proposes the following internal target without changing the crate
+boundary or public parser API:
+
+```text
+source/span primitives
+        ↓
+markdown::block::line
+        ↓
+markdown::block::parser::BlockParser
+  ├── one source position
+  ├── one open-container stack
+  ├── one open-leaf state
+  └── one diagnostic/source-mapping sink
+        ↓
+pure Markdown + Quarkdown block candidates
+        ↓
+Markdown AST
+        ↓
+ast_to_ir → evaluator → IR
+```
+
+The target `BlockParser` owns container continuation, block interruption,
+paragraph/lazy continuation, fence lifecycle, body collection, and source
+mapping. Markdown and Quarkdown recognizers classify candidates but do not own
+parser state. Quarkdown call grammar remains in `syntax/quarkdown`; standalone
+call/body ownership remains in the block parser. Quarkdown syntax is part of
+Scribium core, not a plugin.
+
+The target module layout and migration status are design work under
+`docs/adr/0014-markdown-block-parser-foundation.md`; blockquote behavior is
+intentionally not enabled by the foundation refactor.
 
 ## Crate Boundaries
 
