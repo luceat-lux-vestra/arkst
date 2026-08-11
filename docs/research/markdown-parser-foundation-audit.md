@@ -14,10 +14,13 @@ lazy continuation. PR #45 made the missing ownership visible: the blockquote
 collector acquired a second state machine that replays list, quote, fence, and
 leaf rules while the real parser still owns those rules elsewhere.
 
-The foundation should therefore keep `scribium-core` as the crate boundary and
-move block parsing behind one internal `BlockParser` state. Blockquote remains
-out of the foundation implementation; it is a later container migration using
-the same state machinery.
+The foundation should therefore move the Markdown frontend to the future
+`scribium-markdown` crate, with block parsing behind one authoritative
+`BlockParser` state. Quarkdown-specific grammar belongs in the future
+`scribium-quarkdown` crate, which `scribium-markdown` may call. Blockquote
+remains out of the foundation implementation; it is a later container
+migration using the same state machinery. PR #46 defines this ownership but
+does not physically create or move either crate.
 
 ## Current pipeline
 
@@ -94,13 +97,15 @@ exists in the implementation. The actual first lexical unit is `SourceLine`.
 
 ## Decisions for review
 
-### Crate boundary
+### Frontend crate ownership
 
-Do not create a Markdown crate. `scribium-core` already owns the language, AST,
-diagnostics, source spans, Quarkdown syntax, and WASM-compatible frontend. A
-new crate would add a public/lifecycle/dependency boundary without an
-independent frontend or package contract. This retains ADR-0002's minimal
-workspace decision.
+The target frontend split is `scribium-markdown` for the Markdown frontend and
+`scribium-quarkdown` for Quarkdown-specific grammar. The Markdown crate owns
+line scanning, `LineView`, `BlockParser`, container lifecycle, Markdown
+recognizers, inline parsing, front-matter framing, block-layer recovery, and
+the frontend AST. The Quarkdown crate owns call and argument grammar only; it
+does not own Markdown parser state or AST types. Extraction is deferred until
+after the architecture is accepted.
 
 ### Lexer/tokenizer terminology
 
@@ -112,29 +117,26 @@ then `BlockParser`.
 
 ### Markdown/Quarkdown boundary
 
-Markdown block infrastructure owns line consumption, containers, leaves,
-interruption, continuation, spans, and recovery. Quarkdown grammar owns only
-dot-call names, arguments, scalar/content classification, and grammar errors.
-The internal extension point is an enum/function dispatch (`BlockStart`), not a
-public plugin trait. Quarkdown remains part of Scribium core.
+`scribium-markdown` owns line consumption, containers, leaves, interruption,
+continuation, spans, and recovery. `scribium-quarkdown` owns only dot-call
+names, arguments, scalar/content classification, and grammar errors. The
+first-party frontend integration uses enum/function dispatch
+(`BlockStart`), not a public plugin trait.
 
 ## Target dependency direction
 
 ```text
-source/span primitives
-        ↓
-markdown::block::line
-        ↓
-markdown::block::state + parser
-        ↓
-markdown block recognizers ───────→ syntax::quarkdown call grammar
-        ↓
-markdown AST
-        ↓
-ast_to_ir → evaluator → IR
-
-source/span primitives → markdown::inline (segment-aware input)
+scribium-markdown
+        |
+        v
+scribium-quarkdown
 ```
+
+`scribium-markdown` depends on `scribium-quarkdown`, may invoke it for block or
+inline calls, and normalizes the result into its frontend AST.
+`scribium-quarkdown` must never depend on Markdown parser or AST types. Any
+shared source/span dependency is a lower-level owner whose final crate
+boundary is resolved separately.
 
 Recognizers may classify a candidate but may not advance the cursor, mutate the
 container stack, collect a body, or start a lazy continuation. Those operations
@@ -143,8 +145,8 @@ belong only to `BlockParser`.
 ## Proposed module structure
 
 ```text
-crates/scribium-core/src/syntax/markdown/
-├── mod.rs
+crates/scribium-markdown/src/
+├── lib.rs
 ├── ast.rs
 ├── block/
 │   ├── mod.rs
@@ -173,4 +175,3 @@ An extracted `main` snapshot passed `cargo fmt --all --check` and
 `cargo test --workspace --all-features`: 58 CLI, 292 core, 8 test-support, 21
 Typst unit, 5 backend integration, and 7 upstream-watch tests passed. This is
 the behavior-freeze starting point for the foundation migration.
-

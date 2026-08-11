@@ -119,15 +119,15 @@ layer. The implementation currently provides this through `SourceLine` and
 `split_lines` in `syntax/markdown/parser.rs`; there is no separate generic
 tokenizer or token stream.
 
-ADR-0014 proposes the following internal target without changing the crate
-boundary or public parser API:
+ADR-0014 proposes the following frontend ownership target. PR #46 does not
+change the physical crate layout or public parser API:
 
 ```text
 source/span primitives
         ↓
-markdown::block::line
+scribium-markdown frontend
         ↓
-markdown::block::parser::BlockParser
+scribium-markdown::BlockParser
   ├── one source position
   ├── one open-container stack
   ├── one open-leaf state
@@ -140,12 +140,15 @@ Markdown AST
 ast_to_ir → evaluator → IR
 ```
 
-The target `BlockParser` owns container continuation, block interruption,
-paragraph/lazy continuation, fence lifecycle, body collection, and source
-mapping. Markdown and Quarkdown recognizers classify candidates but do not own
-parser state. Quarkdown call grammar remains in `syntax/quarkdown`; standalone
-call/body ownership remains in the block parser. Quarkdown syntax is part of
-Scribium core, not a plugin.
+The target `BlockParser` in `scribium-markdown` owns container continuation,
+block interruption, paragraph/lazy continuation, fence lifecycle, body
+collection, and source mapping. `scribium-markdown` recognizers classify
+Markdown candidates and may invoke `scribium-quarkdown` for call grammar, but
+neither recognizer owns parser state. `scribium-markdown` decides whether a
+Quarkdown call participates as block or inline and owns any following body;
+`scribium-quarkdown` owns only Quarkdown grammar and must not depend on
+Markdown parser or AST types. This is a first-party Scribium integration, not
+a plugin API or generic extension framework.
 
 The target module layout and migration status are design work under
 `docs/adr/0014-markdown-block-parser-foundation.md`; blockquote behavior is

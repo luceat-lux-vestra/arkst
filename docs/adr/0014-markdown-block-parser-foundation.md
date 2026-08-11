@@ -8,9 +8,9 @@
 
 ## Context
 
-Scribium's Markdown implementation is a custom, span-preserving subset parser
-inside `scribium-core`. The current implementation represents physical lines
-and recursively reparses transformed line slices for list items and Quarkdown
+Scribium's Markdown implementation is a custom, span-preserving subset parser,
+currently housed in `scribium-core`. It represents physical lines and
+recursively reparses transformed line slices for list items and Quarkdown
 bodies. Block-start checks are repeated between the main dispatcher and
 paragraph termination.
 
@@ -21,21 +21,75 @@ that mirrored the real parser. The PR is closed without merge; its tests and
 failure cases are retained as future regression fixtures. This ADR defines the
 foundation before blockquote is implemented again.
 
-## Decision 1: retain the crate boundary
+## Decision 1: dedicated frontend crate ownership
 
-Do not split Markdown into a new crate now. `scribium-core` owns the Scribium
-language, AST, source spans, diagnostics, Quarkdown-compatible grammar, and
-WASM-compatible frontend. A crate split is justified only by a demonstrated
-independent frontend, public API, dependency isolation, lifecycle, or
-fuzz/benchmark/package boundary. File size alone is not sufficient.
+The long-term parser implementation is not owned by `scribium-core`. After
+this architecture is accepted, frontend extraction targets two first-party
+crates. The current implementation may remain physically under `scribium-core`
+during that migration; that transitional location does not change the target
+ownership.
 
-This decision preserves ADR-0002. The foundation is an internal module
-boundary, with no new public parser API.
+### `scribium-markdown`
+
+`scribium-markdown` will own the Scribium Markdown frontend:
+
+- physical-line scanning and classification;
+- `LineView`;
+- `BlockParser`;
+- block and container lifecycle;
+- Markdown block recognizers;
+- the Markdown inline parser;
+- front-matter framing;
+- parser recovery at the Markdown/block layer; and
+- the frontend AST produced by this parser.
+
+The frontend AST may contain Scribium or Quarkdown extension nodes, including
+directive and function-call nodes. `scribium-markdown` does not implement
+Quarkdown argument grammar itself.
+
+### `scribium-quarkdown`
+
+`scribium-quarkdown` will own only Quarkdown-specific grammar:
+
+- dot-prefixed function/call name grammar;
+- call-boundary recognition;
+- positional argument parsing;
+- named argument parsing;
+- scalar/content argument classification;
+- nested Quarkdown argument grammar;
+- Quarkdown grammar parse errors; and
+- grammar-level intermediate call and argument types.
+
+It must not own physical-line iteration, Markdown paragraph state,
+list/container lifecycle, block interruption, indented-body collection,
+Markdown AST construction, or `BlockParser` state.
+
+### Dependency direction
+
+The dependency direction is architectural and must not be reversed:
+
+```text
+scribium-markdown
+        |
+        v
+scribium-quarkdown
+```
+
+`scribium-markdown` depends on `scribium-quarkdown`. `scribium-quarkdown` must
+never depend on `scribium-markdown`.
+
+`scribium-markdown` may invoke the Quarkdown grammar when recognizing block or
+inline calls and then normalize the result into the frontend AST.
+`scribium-quarkdown` must not depend on Markdown parser or Markdown AST types.
+
+If the frontend split requires shared source/span types, the frontend crates
+must depend on a lower-level source/span owner; that owner's final crate
+boundary is resolved separately.
 
 ## Decision 2: physical-line scanning is the lexer layer
 
 Choose Option B from the design review: the physical-line scanner and
-classifier are the Markdown frontend's lexical layer. `SourceLine` already
+classifier are `scribium-markdown`'s lexical layer. `SourceLine` already
 provides the needed raw slice, content slice, indentation, line terminator,
 and absolute byte offsets. A generic token stream would add no value for the
 current block grammar and would not solve container ownership.
@@ -44,9 +98,9 @@ current block grammar and would not solve container ownership.
 
 ```text
 Source abstraction
-  → physical-line scanner/classifier
-  → BlockParser (Markdown baseline + Quarkdown extension dispatch)
-  → AST
+  → scribium-markdown physical-line scanner/classifier
+  → scribium-markdown BlockParser (Markdown baseline + Quarkdown extension dispatch)
+  → frontend AST
 ```
 
 No architecture layer may be documented unless it exists in the implementation.
@@ -57,7 +111,7 @@ All physical lines are processed by one state owner. Feature recognizers are
 pure candidate classifiers; they do not own a cursor, container stack,
 paragraph state, body collector, or diagnostic sink.
 
-The target internal model is conceptually:
+The target frontend model is conceptually:
 
 ```text
 BlockParser
@@ -142,27 +196,20 @@ container, collect following lines, or invoke `BlockParser` recursively.
 
 ## Markdown and Quarkdown boundary
 
-Markdown infrastructure owns:
+`scribium-quarkdown` recognizes and parses Quarkdown grammar. `scribium-markdown`
+decides how that grammar participates in a Markdown document.
 
-- physical lines, indentation, source positions, and line endings;
-- block candidate ordering and interruption;
-- paragraph/lazy continuation;
-- list/container lifecycle;
-- fenced leaf lifecycle;
-- body/container spans and parser recovery.
+For example, Quarkdown grammar can recognize `.foo {bar}` and return parsed
+call data. Markdown decides whether a recognized call is block or inline in
+the current document context, owns an indented body/container following a
+block call, and converts the Quarkdown grammar result into the frontend AST.
 
-The Quarkdown grammar module owns:
-
-- dot-prefixed name and boundary grammar;
-- positional/named argument scanning;
-- scalar versus content argument classification;
-- nested argument grammar and Quarkdown parse errors.
-
-Standalone-call recognition is an internal `BlockStart::QuarkdownCall`
-candidate. The block parser owns whether the call is a block or inline and
-owns the indented body as an `ExtensionBody` container. Inline parsing may call
-the Quarkdown grammar parser for inline calls, but it does not own block state.
-This is an internal core-language extension point, not a plugin architecture.
+Standalone-call recognition is a `BlockStart::QuarkdownCall` candidate. The
+`BlockParser` owns whether the call is a block or inline and owns the indented
+body as an `ExtensionBody` container. Inline parsing may call the Quarkdown
+grammar parser for inline calls, but Quarkdown grammar does not own block
+state. This remains a first-party Scribium frontend integration, not a plugin
+API or generic extension framework.
 
 Front matter remains a document-start framing operation. It uses the same
 physical-line primitives and consumes its prologue before `BlockParser` starts;
@@ -183,11 +230,11 @@ translation with one reusable source-mapping boundary.
 
 ## Module boundary
 
-The initial target layout is:
+The future `scribium-markdown` frontend target layout is:
 
 ```text
-syntax/markdown/
-├── mod.rs
+crates/scribium-markdown/src/
+├── lib.rs
 ├── ast.rs
 ├── block/
 │   ├── mod.rs
@@ -206,12 +253,13 @@ syntax/markdown/
     └── link.rs
 ```
 
+This target layout is design-only in PR #46; no crate is created or moved here.
 The layout is introduced only where it expresses a real dependency boundary;
 it is not a requirement to split every function immediately. Dependencies
 flow from source/span primitives to line views, from line views to block state,
 from state to pure recognizers, and from parser output to AST. Inline parsing
-depends on source/span primitives and grammar helpers, not on `BlockParser`'s
-semantic state.
+depends on source/span primitives and Quarkdown grammar helpers, not on
+`BlockParser`'s semantic state.
 
 ## Compatibility and non-goals
 
@@ -221,8 +269,16 @@ The foundation PR is behavior-preserving for `main`. It does not:
 - cherry-pick or structurally reuse PR #45's implementation;
 - expand Quarkdown compatibility;
 - redesign AST/IR/evaluator/Typst;
-- add a Markdown crate or a public parser trait;
+- physically create or move crates;
+- add a public parser trait;
+- define target ownership beyond the Markdown and Quarkdown frontends;
+- treat crate extraction as complete before the architecture is accepted and
+  the migration is performed; or
 - special-case CommonMark examples outside the centralized state rules.
+
+PR #46 defines the target frontend ownership. Crate extraction is a
+prerequisite migration after the architecture is accepted and before the new
+`BlockParser` implementation is treated as complete.
 
 The foundation must freeze and preserve paragraphs, soft/hard breaks, headings,
 thematic breaks, unordered/ordered/nested lists, list continuation, fenced
@@ -261,4 +317,3 @@ cargo deny check
 
 This ADR remains Proposed until the architecture review accepts the state
 model, line-processing order, Quarkdown boundary, and Option B terminology.
-
