@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-08-11
 - **Owners:** Scribium maintainers
-- **Related ADRs:** 0002, 0006, 0007, 0012
+- **Related ADRs:** 0002, 0006, 0007, 0012, 0015
 - **Related work:** closed PR #45; `refactor/markdown-parser-foundation`
 
 ## Context
@@ -82,9 +82,12 @@ never depend on `scribium-markdown`.
 inline calls and then normalize the result into the frontend AST.
 `scribium-quarkdown` must not depend on Markdown parser or Markdown AST types.
 
-If the frontend split requires shared source/span types, the frontend crates
-must depend on a lower-level source/span owner; that owner's final crate
-boundary is resolved separately.
+If the frontend split requires shared source/span types, `scribium-markdown`
+depends on `scribium-source`; `scribium-quarkdown` may do so when its grammar
+result requires those low-level types. `scribium-source` is the lower-level
+owner of source identity and source-location primitives. ADR-0015 records the
+broader source, project, and core crate ownership details; it does not design
+the future segment-aware inline-input API.
 
 ## Decision 2: physical-line scanning is the lexer layer
 
@@ -107,8 +110,9 @@ No architecture layer may be documented unless it exists in the implementation.
 
 ## Decision 3: one authoritative `BlockParser` state
 
-All physical lines are processed by one state owner. Feature recognizers are
-pure candidate classifiers; they do not own a cursor, container stack,
+All physical lines are processed by one state owner:
+`scribium-markdown::BlockParser`. Feature recognizers are pure candidate
+classifiers; they do not own a cursor, container stack,
 paragraph state, body collector, or diagnostic sink.
 
 The target frontend model is conceptually:

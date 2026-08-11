@@ -27,5 +27,6 @@ This directory contains Architecture Decision Records (ADRs) for Scribium.
 | 0011 | In-process Typst backend feasibility           | Accepted  |
 | 0012 | Quarkdown compatibility baseline               | Accepted  |
 | 0014 | Markdown block parser foundation               | Proposed  |
+| 0015 | Compiler crate boundaries                       | Proposed  |
 
 Template: `0000-template.md`
