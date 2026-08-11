@@ -106,8 +106,10 @@ The long-term role of `scribium-core` is a stable Scribium compiler facade and
 composition layer. It owns:
 
 - the public compiler facade;
-- `CompileOptions`;
-- `CompileResult`; and
+- `CompileOptions`, including selection and configuration of the compatibility
+  policy;
+- `CompileResult`, including aggregation of shared diagnostics produced by
+  compiler stages; and
 - top-level composition and orchestration.
 
 Its top-level workflow is conceptually:
@@ -132,11 +134,15 @@ CompileResult
 - project, source, or asset stores;
 - virtual paths or `VirtualProject`;
 - Markdown parser implementation; or
-- Quarkdown grammar implementation.
+- Quarkdown grammar implementation;
+- shared diagnostic representation; or
+- compatibility policy implementation.
 
-`scribium-core` may later re-export selected stable public types from lower
-crates to preserve a convenient user-facing API. Re-exporting a type does not
-make `scribium-core` the implementation owner of that type.
+`scribium-core` may re-export selected stable lower-level compatibility and
+diagnostic types for API convenience. Re-exporting a type does not make
+`scribium-core` the implementation owner of that type.
+
+The exact `CompileOptions` fields are not decided in this ADR.
 
 `scribium-core` remains responsible for selecting the entry source from
 `VirtualProject` and invoking the frontend and engine stages. Project metadata
@@ -150,6 +156,7 @@ scribium-core
     |
     | project metadata defaults
     | source text + SourceId
+    | selected compatibility policy
     v
 scribium-markdown
     |
@@ -245,9 +252,10 @@ This is ownership only. The concepts are not physically moved by this ADR.
 - `scribium-markdown` for the frontend AST;
 - `scribium-ir`;
 - `scribium-source`;
+- `scribium-diagnostics`;
+- `scribium-compat` for compatibility policy;
 - `scribium-quarkdown` only where Quarkdown grammar-level rules, such as
-  valid identifiers, are required; and
-- the future shared diagnostics owner once that boundary is decided.
+  valid identifiers, are required.
 
 `scribium-engine` must not depend on:
 
@@ -260,7 +268,102 @@ This is ownership only. The concepts are not physically moved by this ADR.
 The engine does not own the compilation project. Project metadata must not
 require the engine to consume an entire `VirtualProject`.
 
-## Decision 7: dependency direction
+## Decision 7: `scribium-diagnostics` owns the shared diagnostic representation
+
+The target architecture contains a dedicated `scribium-diagnostics` crate. It
+owns the shared compiler diagnostic model:
+
+- `Diagnostic`;
+- `Severity`; and
+- common diagnostic value and representation types required across compiler
+  stages.
+
+`scribium-diagnostics` depends on `scribium-source` for source-location types
+such as `SourceSpan`.
+
+`scribium-diagnostics` must remain:
+
+- independent of `scribium-project`;
+- independent of all frontends;
+- independent of `scribium-engine`;
+- independent of backends;
+- filesystem- and network-free; and
+- compatible with WASM.
+
+`scribium-diagnostics` owns the common representation, not every compiler
+error definition. The stage that detects a problem owns the meaning and
+construction of that diagnostic:
+
+```text
+Markdown/parser diagnostics      -> frontend owner
+evaluation/semantic diagnostics  -> scribium-engine
+compatibility diagnostics       -> scribium-compat
+backend diagnostics              -> backend owner
+```
+
+There is no central registry containing all parser, evaluator, compatibility,
+and backend logic. `scribium-core` aggregates diagnostics from the stages but
+does not become their implementation owner.
+
+The target frontend should eventually emit or normalize its recoverable parser
+errors into the shared `Diagnostic` representation using the source context
+supplied to the parse. The exact parser API and conversion API are not decided
+in this ADR.
+
+## Decision 8: `scribium-compat` owns compatibility policy
+
+The target architecture contains a dedicated `scribium-compat` crate. It owns
+Scribium's Quarkdown compatibility policy and tracking concepts, including
+architectural ownership of:
+
+- `CompatibilityProfile`;
+- `CompatibilityDivergence`;
+- `CompatibilitySource`;
+- compatibility feature and capability descriptors such as `SyntaxExtension`;
+- compatibility-profile selection and policy;
+- known divergence tracking; and
+- compatibility-specific unsupported-feature reporting and E8xxx diagnostic
+  construction.
+
+`scribium-compat` represents compatibility policy across the language. It does
+not implement the language feature itself.
+
+`scribium-compat` must not own:
+
+- Markdown parsing;
+- Quarkdown grammar parsing;
+- AST construction;
+- semantic evaluation;
+- built-in implementation;
+- IR;
+- project or source stores;
+- compiler orchestration; or
+- backend lowering.
+
+Existing ADR-0007 and ADR-0012 remain the policy authority for what Scribium
+claims as Quarkdown-compatible. They are not rewritten by this correction.
+
+### Compatibility is cross-cutting policy, not a frontend or engine implementation
+
+The compatibility profile may affect behavior in more than one compiler stage:
+
+```text
+                 scribium-compat
+                   /        \
+                  v          v
+        frontend behavior   engine behavior
+```
+
+A frontend may consult compatibility policy when deciding whether a syntax
+feature belongs to the supported compatibility subset. The engine may consult
+the same policy for semantic or built-in behavior. Neither frontend nor engine
+owns the compatibility profile definition.
+
+`scribium-core` owns top-level compilation options and passes the selected
+compatibility policy or profile to the stages that require it. The exact Rust
+function signatures are not decided in this ADR.
+
+## Decision 9: dependency direction
 
 In the following diagram, `A -> B` means that A depends on B:
 
@@ -269,6 +372,11 @@ scribium-project ---------> scribium-source
 scribium-quarkdown -------> scribium-source   (only if source primitives are needed)
 scribium-markdown --------> scribium-source
 scribium-markdown --------> scribium-quarkdown
+scribium-diagnostics -----> scribium-source
+scribium-compat ----------> scribium-diagnostics
+scribium-quarkdown -------> scribium-compat
+scribium-markdown --------> scribium-compat
+scribium-engine ----------> scribium-compat
 scribium-core ------------> scribium-project
 scribium-core ------------> scribium-markdown
 scribium-ir --------------> scribium-source
@@ -278,7 +386,15 @@ scribium-engine ----------> scribium-markdown
 scribium-engine ----------> scribium-quarkdown (only for required grammar rules)
 scribium-core ------------> scribium-engine
 scribium-core ------------> scribium-ir
+scribium-markdown --------> scribium-diagnostics
+scribium-engine ----------> scribium-diagnostics
+scribium-core ------------> scribium-compat
+scribium-core ------------> scribium-diagnostics
 ```
+
+`scribium-compat` may depend directly on `scribium-source` only if its
+compatibility APIs require source-location primitives directly. Otherwise it
+uses its dependency on `scribium-diagnostics`.
 
 The frontend dependency rules are mandatory: `scribium-markdown` and
 `scribium-quarkdown` do not depend on `scribium-project`, and neither frontend
@@ -297,6 +413,14 @@ scribium-markdown -X-> scribium-core
 scribium-quarkdown -X-> scribium-markdown
 scribium-quarkdown -X-> scribium-project
 scribium-quarkdown -X-> scribium-core
+scribium-engine -X-> scribium-project
+scribium-engine -X-> scribium-core
+scribium-compat -X-> scribium-markdown
+scribium-compat -X-> scribium-quarkdown
+scribium-compat -X-> scribium-engine
+scribium-compat -X-> scribium-project
+scribium-compat -X-> scribium-core
+scribium-compat -X-> rendering backend
 ```
 
 This keeps the frontends usable without constructing an entire compilation
@@ -306,9 +430,7 @@ project and prevents cyclic compiler dependencies.
 
 ADR-0015 does not decide ownership of:
 
-- diagnostics;
-- source map generation;
-- compatibility layer; or
+- source-map generation; or
 - Typst lowering/backend.
 
 These boundaries will be filled in by subsequent architecture corrections.
