@@ -1,0 +1,13 @@
+[package]
+name = "rushdown-safety-gate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+invalid-cases = []
+
+[dependencies]
+rushdown = { version = "=0.18.0", default-features = false, features = ["std", "html-entities"] }
