@@ -1,0 +1,11 @@
+[package]
+name = "markdown-final-feasibility"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+markdown = { version = "=1.0.0", default-features = false }
+markdown-it = { version = "=0.6.1", default-features = false }
