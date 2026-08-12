@@ -29,5 +29,6 @@ This directory contains Architecture Decision Records (ADRs) for Scribium.
 | 0013 | Upstream compatibility observation and baseline promotion | Accepted  |
 | 0014 | Markdown block parser foundation               | Accepted  |
 | 0015 | Compiler crate boundaries                       | Accepted  |
+| 0016 | Full Quarkdown compatibility and upstream evolution | Accepted  |
 
 Template: `0000-template.md`

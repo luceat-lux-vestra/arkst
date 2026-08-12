@@ -1,9 +1,18 @@
 # ADR-0012: Quarkdown Compatibility Baseline
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-08
 - **Owners:** Scribium maintainers
 - **Related issues:** #25
+- **Superseded by:** ADR-0016
+
+## Supersession note
+
+ADR-0016 replaces the permanent selected-subset policy and replaces optional
+adoption of new stable releases with automatic adaptation targeting. The
+Quarkdown v2.5.0 baseline and evidence accumulated under this ADR remain
+historical/current verified-baseline evidence until separately promoted.
+Evidence-gated compatibility claims remain a valid principle.
 
 ## Context
 

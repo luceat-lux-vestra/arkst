@@ -2,9 +2,13 @@
 
 ## Purpose
 
-Scribium provides Quarkdown-compatible syntax and semantics. This policy
-governs how that compatibility is achieved without using or referencing the
-original Quarkdown implementation code.
+Scribium targets complete compatibility with the publicly documented Quarkdown
+document language and document-observable semantics of the tracked stable
+release. This policy governs how that target is achieved without using or
+referencing the original Quarkdown implementation code. Clean-room
+independence is an implementation constraint; it does not turn public language
+features into permanent exclusions. Current claims still require evidence in
+the compatibility matrix.
 
 ## Permitted Sources
 

@@ -3,7 +3,7 @@ name = "scribium-upstream-watch"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Upstream release drift detector for Scribium Quarkdown compatibility"
+description = "Quarkdown stable-release adaptation-target observer for Scribium"
 repository = "https://github.com/luceat-lux-vestra/scribium"
 categories = ["command-line-utilities", "development-tools"]
 

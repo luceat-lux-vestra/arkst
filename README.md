@@ -6,7 +6,7 @@
 
 **Scribium is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 
-> This project targets a documented subset of Quarkdown, currently referenced against Quarkdown v2.5.0. Full Quarkdown compatibility is not claimed. See `docs/compatibility/quarkdown/` for the supported feature subset.
+> Scribium targets complete compatibility with the publicly documented Quarkdown document language while tracking stable upstream evolution. Current verified compatibility is partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.0. See `docs/compatibility/quarkdown/` for the matrix, evidence, and compatibility debt.
 
 > Scribium is an independent project. It is not affiliated with, endorsed by, or
 > sponsored by Typst GmbH or the Quarkdown project.
@@ -15,23 +15,27 @@
 
 ## What is Scribium?
 
-Scribium independently implements the Quarkdown syntax and core execution semantics,
-connecting them to the official Typst compiler for high-quality typesetting.
+Scribium independently implements the Quarkdown syntax and document-observable
+semantics, connecting them to the official Typst compiler for high-quality
+typesetting.
 
 ```
 Quarkdown-compatible source (.qd / .scrib)
-or Markdown / native Typst
+or Markdown
 → clean-room parser and evaluator
 → Quarkdown-compatible semantic model
-→ Typst-oriented IR
-→ Typst lowering
+→ backend-neutral IR
+→ scribium-typst lowering
+→ concrete Typst compiler adapter
 → official Typst compiler
 → PDF / HTML / SVG / PNG
 ```
 
-Quarkdown compatibility is a first-class requirement — not a deferred milestone.
-Scribium reimplements the language independently from public documentation and
-black-box behavior. No Quarkdown source code is copied or translated.
+Quarkdown compatibility is a correctness contract and long-term product target,
+not a deferred optional plugin. Current claims remain limited to behavior backed
+by conformance evidence. Scribium reimplements the language independently from
+public documentation and permitted black-box behavior. No Quarkdown source code,
+tests, or fixtures are copied or translated.
 
 ## Quickstart
 
@@ -149,8 +153,8 @@ author: Alice
 | Iteration and components                | Planned      |
 | Tables, math, footnotes                 | Planned      |
 | Include/read, data loading              | Planned      |
-| Typst escape blocks                     | Planned      |
-| Quarkdown compatibility                 | Partial / In progress |
+| Native `.typ` passthrough (host-level)  | Planned      |
+| Quarkdown compatibility                 | Partial / evidence-based |
 | `watch` mode, source maps               | Planned      |
 | LSP integration                         | Planned      |
 | WASM support                            | Deferred     |
@@ -166,18 +170,17 @@ author: Alice
                        │
 ┌──────────────────────▼─────────────────────────────┐
 │                   scribium-core                     │
-│  Markdown + Quarkdown-compatible syntax             │
-│  → Parse → Semantic → Eval → IR → Lower → SourceMap│
-│  ┌──────────────────────────────────────────────┐   │
-│  │ compatibility/ (profile, divergence, diag)   │   │
-│  └──────────────────────────────────────────────┘   │
+│  facade/orchestration → frontend → engine → IR      │
+│  (current physical code may still be consolidated)  │
 └──────────────────────┬─────────────────────────────┘
                        │
-┌──────────────────────▼─────────────────────────────┐
+                       ▼ normalized backend-neutral IR
+┌────────────────────────────────────────────────────┐
 │                   scribium-typst                    │
-│  TypstBackend trait → Subprocess/InProcess adapter │
-│  → Typst Compiler → PDF / HTML / SVG / PNG         │
-└────────────────────────────────────────────────────┘
+│  pure IR → Typst lowering + source maps             │
+└──────────────────────┬─────────────────────────────┘
+                       ▼ host-selected concrete adapter
+              official Typst compiler
 ```
 
 ## Roadmap
@@ -187,7 +190,7 @@ author: Alice
 - **M2 Core Language** — Quarkdown core + Markdown MVP (v0.1.0)
 - **M3 Programmable Documents** — Components, data loading, iteration
 - **M4 Developer Experience** — Watch, inspect, source maps
-- **M5 Quarkdown Compatibility** — Expanded subset, matrix, conformance
+- **M5 Quarkdown Compatibility Convergence** — Public-language coverage, matrix, conformance, and verified-baseline promotion
 - **M6 Library, LSP, WASM** — Embedding and tooling
 - **M7 Hardening** — Fuzzing, benchmarks, 1.0 release
 

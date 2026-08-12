@@ -1107,7 +1107,8 @@ impl<'a> InlineParser<'a> {
     /// Parse a Markdown inline link (`[label](destination)`), falling back
     /// to literal text when the input is not a valid link.
     ///
-    /// The supported subset is deliberately small and deterministic:
+    /// The currently implemented link forms are deliberately small and
+    /// deterministic:
     ///
     /// - The label runs from `[` to the *first* `]`; it is parsed with the
     ///   regular inline parser, so emphasis, strong text, and Quarkdown
@@ -1199,7 +1200,7 @@ impl<'a> InlineParser<'a> {
     /// Parse a Markdown code span (`` `code` ``), falling back to literal
     /// text when the input is not a valid code span.
     ///
-    /// The supported subset follows CommonMark:
+    /// The implemented code-span behavior follows these CommonMark rules:
     ///
     /// - The opening delimiter is a run of one or more backticks; the
     ///   closing delimiter must be a run of *exactly* the same length.

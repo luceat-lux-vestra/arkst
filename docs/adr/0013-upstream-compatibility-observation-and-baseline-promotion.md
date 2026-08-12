@@ -5,7 +5,16 @@
 - **Owners:** Scribium maintainers
 - **Related issues:** M0.5 Upstream Observer Foundation
 - **Supersedes:**
-- **Superseded by:**
+- **Superseded by:** ADR-0016 for the final upstream evolution model
+
+## Supersession note
+
+ADR-0013 remains authoritative for the currently implemented observer
+foundation. ADR-0016 supersedes it only as the final upstream-evolution model;
+the current implementation remains valid. Future automation may extend the
+observer with public delta/evidence collection, impact analysis, independent
+conformance work, adaptation PR preparation, verification, and baseline
+promotion.
 
 ## Context
 

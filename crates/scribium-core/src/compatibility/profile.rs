@@ -29,7 +29,7 @@ mod tests {
     use super::*;
 
     /// Guards the default compatibility-profile label: it must track the
-    /// current reference baseline (see ADR-0012) and must not regress to an
+    /// current verified compatibility baseline (see ADR-0016) and must not regress to an
     /// earlier Quarkdown value.
     #[test]
     fn default_profile_matches_reference_baseline() {

@@ -120,6 +120,12 @@ expected_level: output-equivalent
 notes: basic case, single positional argument
 ```
 
+The latest stable upstream release is the tracked adaptation target; the
+reference/verified version is the last baseline supported by reviewed evidence.
+Those values must remain distinguishable. A public feature documented upstream
+but not yet implemented is compatibility debt, not evidence of support and not
+a permanent exclusion.
+
 Compatibility levels:
 - `Unsupported` — produces explicit diagnostic
 - `Parsed` — syntactically accepted

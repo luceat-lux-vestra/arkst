@@ -57,6 +57,19 @@ docs(adr): decide Typst backend strategy
 - Errors are structured with diagnostic codes
 - Source spans preserved through the pipeline
 
+## Engineering standard
+
+All human and AI-assisted contributions are held to
+[`docs/ENGINEERING.md`](docs/ENGINEERING.md). That standard covers correctness,
+accepted architecture, invariants, provenance, diagnostics, testing,
+performance, dependencies, and security. AI-generated implementation is not
+exempt from those requirements or from architecture review.
+
+In particular, compatibility changes require public-specification provenance,
+independently authored conformance evidence, documented compatibility levels,
+and review of any deliberate divergence. Current physical code is migration
+state and does not override ADR-0014/0015 ownership.
+
 ## ADR Process
 
 Significant architecture decisions require an Architecture Decision Record:
@@ -96,3 +109,6 @@ AI-assisted code generation is permitted under these rules:
 - All generated code follows the same quality and test standards
 - AI-generated contributions are subject to the same review process
 - Provenance of AI-generated compatibility code must be documented
+- AI agents must stop and request architecture review rather than inventing
+  crate ownership, dependency direction, semantic/IR layers, compatibility
+  exceptions, security capabilities, plugin systems, or backend escape hatches

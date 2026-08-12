@@ -40,15 +40,43 @@ and Typst-quality output.
 
 ## Product Principles
 
-1. **Quarkdown compatibility is a first-class requirement** — not a deferred
-   milestone or optional plugin
+1. **Complete documented Quarkdown compatibility is the long-term target** —
+   current verified compatibility remains partial and evidence-based
 2. **Typst is the rendering backend** — no custom PDF/HTML renderers
 3. **One CLI, one config, one project model** — users don't juggle tools
 4. **Semantic parity, not pixel parity** — PDF and HTML serve different purposes
-5. **Escape hatch** — users can insert native Typst when needed
+5. **Backend neutrality** — any future native `.typ` passthrough is a
+   host-level capability, not a generic raw-Typst escape hatch in backend-neutral IR
 6. **Safe by default** — no shell execution, no network, scoped filesystem
 7. **Deterministic** — same input always produces same output
 8. **Diagnostics first** — clear error messages with source locations
+
+## Quarkdown compatibility target
+
+Scribium aims for complete compatibility with the publicly documented
+Quarkdown document language and document-observable semantics of the tracked
+stable upstream release. This includes documented syntax, calls and argument
+forms, variables and scopes, functions/lambdas/components, conditionals,
+iteration, built-ins and standard-library document behavior, include/read/data
+operations subject to the accepted security/project model, Quarkdown Markdown
+extensions, and other public language constructs.
+
+This is a clean-room target, not implementation identity. Scribium does not
+need to reproduce Quarkdown internals, private APIs, undocumented bugs, data
+structures, or private plugin ABI. Public-language gaps are compatibility debt,
+not permanent product exclusions. The compatibility matrix records only
+currently verified claims and their evidence.
+
+The latest stable Quarkdown release automatically becomes the tracked upstream
+adaptation target. The verified compatibility baseline advances only after
+public evidence review, independent conformance fixtures, implementation and
+regression verification, and documented divergences. ADR-0016 defines the
+evolution policy.
+
+Typst is tracked separately as a generated-source and compiler-adapter
+compatibility contract; Scribium does not reimplement Typst grammar. Markdown
+remains specification-driven, HTML remains isolated behind `scribium-html`, and
+Pandoc remains an optional development/compatibility oracle.
 
 ## User Journeys
 
@@ -102,7 +130,8 @@ scribium check src/ --format json
 - Custom package registry
 - Unlimited network access from documents
 - Shell execution from documents
-- 100% Quarkdown compatibility at v0.1
+- Complete Quarkdown compatibility in the v0.1 release — v0.1 may be partial;
+  complete verified compatibility is a major pre-1.0 quality objective
 
 ## Success Metrics
 

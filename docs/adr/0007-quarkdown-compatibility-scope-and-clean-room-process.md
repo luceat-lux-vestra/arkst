@@ -4,6 +4,13 @@
 - **Date:** 2026-08-02
 - **Owners:** Scribium maintainers
 - **Related issues:** #1, #4
+- **Superseded by:** ADR-0016 for the compatibility-target scope only
+
+## Supersession note
+
+ADR-0016 supersedes this ADR's documented-subset product-target decision. The
+clean-room process, provenance requirements, and explicit compatibility
+evidence requirements remain accepted.
 
 ## Context
 
