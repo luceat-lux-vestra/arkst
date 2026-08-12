@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Compatibility policy:** ADR-0016 establishes complete compatibility with
+  the publicly documented Quarkdown language and document-observable semantics
+  as the long-term target while keeping current verified claims partial and
+  evidence-based. It also defines stable-release adaptation tracking, the
+  separate Typst backend compatibility policy, and the engineering quality
+  contract.
+
 - **Markdown Inline Code Spans (M2)**: Inline code span parsing (`` `code` ``)
   and lowering to Typst `#raw(...)`.
   - Opening and closing backtick runs of any length (``foo` bar`` stays
@@ -178,15 +185,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on non-unix platforms).
 
 ### Changed
-- Compatibility baseline: Scribium's Quarkdown compatibility contract is now
-  the **documented subset** referenced against Quarkdown **v2.5.0** (see
-  ADR-0012). Full Quarkdown compatibility is not claimed. The compatibility
-  matrix and provenance records in `docs/compatibility/quarkdown/` were
-  updated. No parser, evaluator, lowering, or compiler semantic behavior
-  changed. The default compatibility-profile label was updated from
-  `quarkdown-v0.9` to `quarkdown-v2.5` to reflect the new reference
-  baseline. `::` chaining, line continuation, tight/brace-wrapped calls, and
-  new builtins remain out of scope for M1.
+- Historical compatibility baseline: the then-current Quarkdown evidence
+  policy was referenced against **v2.5.0** (see superseded ADR-0012). The
+  compatibility matrix and provenance records were updated at that time; no
+  parser, evaluator, lowering, or compiler semantic behavior changed. The
+  default compatibility-profile label was updated from `quarkdown-v0.9` to
+  `quarkdown-v2.5`. `::` chaining, line continuation, tight/brace-wrapped
+  calls, and new builtins remained unimplemented at that release.
 - Supported output formats are now `typst` and `pdf`; `html`, `svg`, `png` remain
   explicitly unsupported with actionable error messages.
 - CLI help text updated: `--output` documents the format-dependent default

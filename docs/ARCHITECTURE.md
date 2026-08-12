@@ -1,7 +1,8 @@
 # Architecture — Scribium
 
-This document describes the accepted target architecture defined by ADR-0014
-and ADR-0015. Some target crates are not yet physically extracted from
+This document describes the accepted target architecture defined by ADR-0014,
+ADR-0015, and the compatibility policy in ADR-0016. Some target crates are not
+yet physically extracted from
 `scribium-core`; their current physical location during migration does not
 change their architectural ownership. Implementation and migration status
 must not be confused with target ownership.
@@ -121,6 +122,43 @@ optional scribium-typst-subprocess
   ▼
 Typst compiler output
 ```
+
+## Compatibility and upstream evolution
+
+ADR-0016 defines Scribium's compatibility policy. The product target is
+complete compatibility with the publicly documented Quarkdown document
+language and document-observable semantics of the tracked stable release.
+Current physical implementation and current verified claims may be partial;
+they do not redefine the target architecture or language scope.
+
+The compatibility state has two independent versions:
+
+- **Tracked upstream target:** the latest stable Quarkdown release, which
+  automatically becomes adaptation work.
+- **Verified compatibility baseline:** the release for which permitted public
+  evidence, independent conformance fixtures, implementation changes,
+  regression/conformance tests, and known-divergence documentation are
+  complete. The existing `supported_baseline` manifest field retains this
+  meaning for schema compatibility.
+
+The current observer is an early-stage release detector and drift-issue
+foundation. The intended mature flow is release detection → permitted public
+evidence and delta collection → structured impact analysis → independent
+conformance updates → adaptation PR → verification → review → verified
+baseline promotion. Automation must stop for architecture review when an
+upstream change requires new ownership, dependency direction, public
+abstraction, semantic/IR redesign, security capability, intentional
+divergence, weakened invariant, generic plugin architecture, or backend escape
+hatch. Human review and merge remain authoritative.
+
+Typst evolution is tracked separately. `scribium-typst` lowers the single
+backend-neutral IR to generated Typst source and the selected official Typst
+compiler owns Typst grammar. The latest stable Typst release is the automatic
+backend adaptation target; the last corpus-and-compiler-validated version is
+the verified backend baseline. The target validation flow is generated-source
+corpus compilation against the new stable compiler, followed by lowering or
+adapter adaptation when it fails. Scribium does not add a Typst parser to
+follow Typst releases. See `docs/compatibility/typst/README.md`.
 
 ## Markdown Frontend Boundary
 

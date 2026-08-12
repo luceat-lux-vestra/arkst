@@ -24,7 +24,7 @@ permissions:
   issues: write
 jobs:
   watch:
-    name: Check Quarkdown upstream drift
+    name: Check Quarkdown adaptation target
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -106,28 +106,30 @@ jobs:
           DRIFT_RESULT: ${{ steps.drift.outputs.result }}
         run: |
           echo "=== DRY RUN ==="
-          echo "Supported baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
-          echo "Observed tag: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
+          echo "Verified compatibility baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
+          echo "Tracked stable target: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
           echo "Status: $(echo "$DRIFT_RESULT" | jq -r '.status')"
           echo "Issue key: $(echo "$DRIFT_RESULT" | jq -r '.issue_key // "none"')"
           echo ""
           echo "Issue payload that would be created:"
-          echo "$DRIFT_RESULT" | jq -r '"[upstream] Quarkdown \(.observed_tag) detected (baseline \(.supported_baseline))"'
+          echo "$DRIFT_RESULT" | jq -r '"[upstream] Quarkdown adaptation target \(.observed_tag) detected (verified baseline \(.supported_baseline))"'
           echo ""
-          echo "Supported baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
-          echo "Observed stable release: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
+          echo "Verified compatibility baseline: $(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')"
+          echo "Tracked stable adaptation target: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag')"
           echo "Upstream release URL: $(echo "$DRIFT_RESULT" | jq -r '.observed_tag as $tag | "https://github.com/iamgio/quarkdown/releases/tag/" + $tag')"
           echo "Detection source: scheduled upstream observer"
           echo ""
           echo "Checklist:"
-          echo "- [ ] Review permitted public specification changes"
+          echo "- [ ] Collect permitted public documentation/release-note deltas"
+          echo "- [ ] Produce a structured impact report"
           echo "- [ ] Identify affected Scribium compatibility features"
           echo "- [ ] Add independently authored conformance cases"
           echo "- [ ] Perform black-box observations where necessary"
           echo "- [ ] Document known divergences"
           echo "- [ ] Implement required compatibility changes"
+          echo "- [ ] Prepare an adaptation PR"
           echo "- [ ] Run full conformance suite"
-          echo "- [ ] Update supported baseline only after verification"
+          echo "- [ ] Promote the verified baseline only after review and verification"
           echo ""
           echo "Clean-room warning:"
           echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
@@ -167,16 +169,16 @@ jobs:
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
           DRIFT_RESULT: ${{ steps.drift.outputs.result }}
         run: |
-          SUPPORTED_BASELINE=$(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')
+          VERIFIED_BASELINE=$(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')
           URL="https://github.com/iamgio/quarkdown/releases/tag/$OBSERVED_TAG"
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
 
           # Write issue body using printf to avoid heredoc issues
-          printf 'Supported baseline: %s\nObserved stable release: %s\nUpstream release URL: %s\nDetection source: scheduled upstream observer\n\n**Checklist:**\n- [ ] Review permitted public specification changes\n- [ ] Identify affected Scribium compatibility features\n- [ ] Add independently authored conformance cases\n- [ ] Perform black-box observations where necessary\n- [ ] Document known divergences\n- [ ] Implement required compatibility changes\n- [ ] Run full conformance suite\n- [ ] Update supported baseline only after verification\n\n**Clean-room warning:**\nDo not inspect or translate Quarkdown implementation source while resolving this issue.\n\n%s\n' "$SUPPORTED_BASELINE" "$OBSERVED_TAG" "$URL" "$MARKER" > "$RUNNER_TEMP/upstream-issue.md"
+          printf 'Verified compatibility baseline: %s\nTracked stable adaptation target: %s\nUpstream release URL: %s\nDetection source: scheduled upstream observer\n\n**Checklist:**\n- [ ] Collect permitted public documentation/release-note deltas\n- [ ] Produce a structured impact report\n- [ ] Identify affected Scribium compatibility features\n- [ ] Add independently authored conformance cases\n- [ ] Perform black-box observations where necessary\n- [ ] Document known divergences\n- [ ] Implement required compatibility changes\n- [ ] Prepare an adaptation PR\n- [ ] Run full conformance suite\n- [ ] Promote the verified baseline only after review and verification\n\n**Clean-room warning:**\nDo not inspect or translate Quarkdown implementation source while resolving this issue.\n\n%s\n' "$VERIFIED_BASELINE" "$OBSERVED_TAG" "$URL" "$MARKER" > "$RUNNER_TEMP/upstream-issue.md"
 
           gh issue create \
             --repo ${{ github.repository }} \
-            --title "[upstream] Quarkdown $OBSERVED_TAG detected (baseline $SUPPORTED_BASELINE)" \
+            --title "[upstream] Quarkdown adaptation target $OBSERVED_TAG detected (verified baseline $VERIFIED_BASELINE)" \
             --body-file "$RUNNER_TEMP/upstream-issue.md" \
             --label "area:compatibility,type:compatibility,status:needs-decision"

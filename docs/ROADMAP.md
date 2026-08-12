@@ -14,7 +14,7 @@ Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 | Name due diligence             | Completed    |
 | Typst integration spike        | Completed    |
 | Markdown parser spike          | Completed    |
-| ADR 0001–0010                  | Completed    |
+| ADR 0001–0016                  | Completed    |
 | GitHub templates/CI            | Completed    |
 | WASM build in CI               | Completed    |
 | VirtualProject abstraction     | Completed    |
@@ -27,14 +27,19 @@ Core uses `VirtualProject` for all I/O — no filesystem access.
 
 ## M0.5 — Upstream Compatibility Infrastructure
 
-**Objective:** Detect Quarkdown upstream drift before compatibility implementation continues.
+**Objective:** Detect Quarkdown upstream drift and create actionable
+compatibility-adaptation work.
 
 | Item                                | Status       |
 |-------------------------------------|--------------|
 | Machine-readable upstream baseline  | Completed    |
 | Stable release observer             | Completed    |
-| Drift issue automation              | Completed    |
+| Drift issue automation foundation   | Completed    |
 | Conformance corpus foundation       | Completed    |
+
+The current observer is the first stage only: latest stable release detection
+→ deduplicated drift issue. It does not yet collect public deltas, classify
+impact, prepare fixtures, or create adaptation PRs.
 
 **Dependencies:** M0
 
@@ -56,13 +61,16 @@ front matter, deterministic output.
 
 **Status:** In progress
 
-**Objective:** Production-ready Quarkdown core subset and Markdown baseline.
-v0.1.0 release.
+**Objective:** Quarkdown core language + Markdown MVP for v0.1.0, with honest
+partial compatibility claims and a growing evidence-backed baseline.
 
 | Item                                | Status       |
 |-------------------------------------|--------------|
 | Document-scope variable evaluation  | Completed    |
 | Remaining M2 features               | In progress  |
+
+Public Quarkdown features not yet implemented are tracked compatibility debt;
+they are not permanent product exclusions. v0.1 may be partial.
 
 ## M3 — Programmable Documents
 
@@ -72,9 +80,22 @@ v0.1.0 release.
 
 **Objective:** Watch mode, inspect commands, source maps, structured diagnostics.
 
-## M5 — Quarkdown Compatibility Expansion
+## M5 — Quarkdown Compatibility Convergence
 
-**Objective:** Expand compatibility coverage and conformance corpus.
+**Objective:** Converge toward complete verified compatibility with the
+publicly documented Quarkdown language as the stable upstream target advances.
+
+| Item | Status |
+|------|--------|
+| Public-language gap inventory and impact reports | Not started |
+| Independently authored conformance expansion | Not started |
+| Human-reviewed verified-baseline promotion procedure | Completed |
+| Adaptation PR preparation and verification automation | Not started |
+| Typst generated-source compatibility corpus | Not started |
+
+Full verified compatibility with the selected baseline is a major pre-1.0
+quality objective. It is not complete merely because a release is detected or
+because a feature is documented upstream.
 
 ## M6 — Library API, LSP, WASM Bindings
 
@@ -96,4 +117,5 @@ M6 delivers the `scribium-wasm` bindings crate and WASM CI coverage.
 - Package registry (not planned)
 - Web editor / SaaS (not planned)
 - JavaScript plugin runtime (not planned)
-- Full Quarkdown 100% compatibility (not a goal)
+- Mature automated Quarkdown adaptation pipeline (future M5 work)
+- Automated Typst compatibility watcher and adaptation PRs (future work)

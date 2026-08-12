@@ -7,8 +7,8 @@ Quarkdown-compatible feature implementation.
 
 - **Reference version:** Quarkdown **v2.5.0** (released 2026-08-04;
   `iamgio/quarkdown` tag `v2.5.0`)
-- **Compatibility model:** documented feature subset (ADR 0012)
-- **Full compatibility claim:** none
+- **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)
+- **Current verified baseline:** v2.5.0; current implementation is partial
 
 ## Primary Sources
 
@@ -25,16 +25,17 @@ Quarkdown-compatible feature implementation.
 | Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
 
-The grammar implemented in Scribium is limited to the **function-call
-syntax** documented on the wiki page above, plus the **conditional
-constructs** (`.if` / `.ifnot`) and **implicit positional references**
-(`.1`, `.2`, ...), restricted to the scope in
-`docs/compatibility/quarkdown/README.md`.
+The current evidence set covers the function-call syntax documented on the wiki
+page above, plus the conditional constructs (`.if` / `.ifnot`) and implicit
+positional references (`.1`, `.2`, ...), at the levels recorded in
+`docs/compatibility/quarkdown/README.md`. This is the current verified evidence
+baseline, not a permanent restriction on the complete public-language target.
+Public features not yet covered remain compatibility debt.
 
-The reference baseline is **Quarkdown v2.5.0**. The v2.5.0-badged *"Syntax of
-a function call"* wiki page is the primary public specification source for
-the currently implemented function-call syntax subset. Version provenance is
-recorded per source:
+The current verified baseline is **Quarkdown v2.5.0**. The v2.5.0-badged
+*"Syntax of a function call"* wiki page is the primary public specification
+source for the currently evidenced function-call behavior. Version provenance
+is recorded per source:
 
 - The **function-call syntax** page carries a `2.5.0` badge as of
   2026-08-08.
@@ -55,7 +56,7 @@ URLs other than those listed above were not consulted for this feature set.
 ## Observational Method
 
 - Implemented from public documentation only (no interactive reference
-  sessions were run for this subset)
+  sessions were run for the current evidence set)
 - No Quarkdown source code is read or copied
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs

@@ -65,4 +65,6 @@ to the official Typst compiler.
 
 ## References
 
-- SCRIBIUM_MASTER_EXECUTION_BRIEF.md
+- `docs/PRODUCT.md`
+- `docs/ARCHITECTURE.md`
+- `docs/adr/0016-full-quarkdown-compatibility-and-upstream-evolution.md`

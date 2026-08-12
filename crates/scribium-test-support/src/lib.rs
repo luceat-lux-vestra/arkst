@@ -206,8 +206,8 @@ mod tests {
 
     #[test]
     fn test_baseline_consistency() {
-        // Verify that the supported baseline in upstream.toml matches
-        // the explicitly declared reference baseline in documentation files.
+        // Verify that the verified baseline in upstream.toml matches
+        // the explicitly declared reference version in documentation files.
         // This test extracts the declared baseline from specific patterns
         // to avoid false positives from historical version references.
         let root = workspace_root();

@@ -7,7 +7,7 @@ use thiserror::Error;
 #[command(
     name = "scribium-upstream-watch",
     version,
-    about = "Upstream release drift detector for Scribium"
+    about = "Quarkdown stable-release adaptation-target observer for Scribium"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -16,12 +16,12 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Check if an observed release differs from the supported baseline
+    /// Check if the tracked stable target differs from the verified baseline
     CheckRelease {
         /// Path to the upstream manifest TOML file
         #[arg(long, value_name = "PATH")]
         manifest: PathBuf,
-        /// Observed release tag (e.g., v2.6.0)
+        /// Latest stable release tag used as the tracked target (e.g., v2.6.0)
         #[arg(long, value_name = "TAG")]
         observed_tag: String,
         /// Observed release URL
@@ -52,6 +52,8 @@ struct UpstreamInfo {
     repository: String,
     #[allow(dead_code)]
     release_channel: String,
+    // Retained serialized field name; semantically this is the verified
+    // compatibility baseline. The latest stable target is `observed_tag`.
     supported_baseline: String,
 }
 
@@ -143,8 +145,11 @@ fn main() -> Result<(), WatchError> {
                 }
                 OutputFormat::Text => {
                     println!("Upstream: {}", result.upstream);
-                    println!("Supported baseline: {}", result.supported_baseline);
-                    println!("Observed tag: {}", result.observed_tag);
+                    println!(
+                        "Verified compatibility baseline: {}",
+                        result.supported_baseline
+                    );
+                    println!("Tracked stable target: {}", result.observed_tag);
                     println!("Status: {:?}", result.status);
                     if let Some(key) = result.issue_key {
                         println!("Issue key: {}", key);
@@ -369,10 +374,10 @@ release_channel = "stable"
                 let mut output = String::new();
                 output.push_str(&format!("Upstream: {}\n", result.upstream));
                 output.push_str(&format!(
-                    "Supported baseline: {}\n",
+                    "Verified compatibility baseline: {}\n",
                     result.supported_baseline
                 ));
-                output.push_str(&format!("Observed tag: {}\n", result.observed_tag));
+                output.push_str(&format!("Tracked stable target: {}\n", result.observed_tag));
                 output.push_str(&format!("Status: {:?}\n", result.status));
                 if let Some(key) = result.issue_key {
                     output.push_str(&format!("Issue key: {}\n", key));

@@ -1,10 +1,12 @@
 # Quarkdown Upstream Manifest
-# This file declares the supported baseline version for Scribium's Quarkdown compatibility.
+# This file declares the verified compatibility baseline for Scribium's Quarkdown evidence.
 # It is used by automated tooling to detect upstream drift.
 # 
-# IMPORTANT: This file declares the SUPPORTED BASELINE, not the latest observed release.
-# The latest observed release is tracked separately by the upstream observer workflow.
-# Changing supported_baseline requires human-reviewed conformance evidence (see ADR-0013).
+# IMPORTANT: `supported_baseline` is the historical serialized field name for
+# the VERIFIED COMPATIBILITY BASELINE, not the tracked upstream target.
+# The latest stable release is fetched by the observer as `observed_tag` and
+# automatically becomes the adaptation target. Changing this field requires
+# human-reviewed conformance evidence (see ADR-0016).
 
 schema_version = 1
 

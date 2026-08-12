@@ -29,7 +29,7 @@ Clean but breaks expectations — users already have `.md` and `.qd` files.
 - `.scrib` — alias for `.qd`
 - `.md` — Markdown-only (no Scribium directives; or directives are an opt-in
   front-matter flag)
-- `.typ` — passthrough to Typst compiler
+- `.typ` — host-level passthrough to the selected official Typst compiler
 
 ### Option 3: Only `.scrib`, convert external formats
 
@@ -49,7 +49,8 @@ Support three input paths:
 > **Implementation status:** `.typ` passthrough is not implemented yet. The
 > CLI currently accepts `.qd`, `.scrib`, and `.md` and rejects `.typ` inputs
 > with a clear "unsupported input format" error. The `.typ` row of this ADR
-> applies once passthrough lands.
+> applies once passthrough lands. This is a host input path, not a raw Typst
+> node or generic backend-code escape hatch in Scribium's backend-neutral IR.
 
 ## Consequences
 

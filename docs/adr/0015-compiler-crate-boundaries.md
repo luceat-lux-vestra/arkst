@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-12
 - **Owners:** Scribium maintainers
-- **Related ADRs:** 0002, 0005, 0006, 0014
+- **Related ADRs:** 0002, 0005, 0006, 0014, 0016
 - **Related work:** PR #46; `refactor/markdown-parser-foundation`
 
 ## Context
@@ -383,8 +383,11 @@ not implement the language feature itself.
 - compiler orchestration; or
 - backend lowering.
 
-Existing ADR-0007 and ADR-0012 remain the policy authority for what Scribium
-claims as Quarkdown-compatible. They are not rewritten by this correction.
+ADR-0016 is now the policy authority for the compatibility target, tracked
+upstream release, verified baseline, and current evidence claims. ADR-0007's
+clean-room portions remain valid, and ADR-0012's evidence/baseline concepts
+are retained only as redefined by ADR-0016. This crate-ownership ADR does not
+redesign those policies.
 
 ### Compatibility is cross-cutting policy, not a frontend or engine implementation
 
@@ -398,8 +401,8 @@ The compatibility profile may affect behavior in more than one compiler stage:
 ```
 
 A stage using Quarkdown grammar may consult compatibility policy when deciding
-whether a syntax or semantic feature belongs to the supported compatibility
-subset. The Quarkdown grammar crate itself remains independent of that policy;
+whether a syntax or semantic feature has current verified compatibility
+evidence. The Quarkdown grammar crate itself remains independent of that policy;
 neither the grammar nor the engine owns the compatibility profile definition.
 
 `scribium-core` owns top-level compilation options and passes the selected

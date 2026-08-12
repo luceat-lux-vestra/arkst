@@ -2,10 +2,10 @@
 
 ## Status
 
-- **Specification version:** 0.3 (reference baseline v2.5.0)
+- **Specification version:** 0.4 (verified baseline v2.5.0)
 - **Reference upstream:** Quarkdown v2.5.0
-- **Compatibility model:** documented feature subset
-- **Full Quarkdown compatibility:** not claimed
+- **Compatibility target:** complete public-language/document-semantics compatibility
+- **Current verified compatibility:** partial; only evidence-backed matrix rows are claims
 
 ## Scope
 
@@ -13,16 +13,24 @@ This document defines Scribium's Quarkdown-compatible syntax and semantics.
 Each feature records its specification source, compatibility level, and known
 divergences.
 
-Scribium does **not** claim full Quarkdown v2.5.0 compatibility. The
-compatibility contract is the **documented subset** defined by this document:
-only rows marked `Implemented`, at the stated compatibility level, and covered
-by Scribium conformance tests (see [Conformance Evidence](#conformance-evidence))
-are part of the current compatibility contract. `SPEC_SOURCES.md` records the
-upstream specification provenance for those claims. The Feature Matrix also
-lists `Planned` and `Not implemented` rows; those are tracking entries and
-constitute **no** compatibility claim. Features that Quarkdown v2.5.0
-documents but Scribium does not implement are not bugs; they are outside the
-contract until implemented and recorded in this matrix (see ADR 0012).
+Scribium's long-term target is complete compatibility with the publicly
+documented Quarkdown document language and document-observable semantics of the
+tracked stable upstream release. The Feature Matrix records current verified
+claims, not a permanent selected language scope: rows marked `Implemented` are
+claims only at their stated compatibility level and only with the listed
+conformance evidence. `SPEC_SOURCES.md` records upstream provenance. Rows
+marked `Planned` or `Not implemented` are explicit compatibility gaps/debt and
+must not be treated as supported.
+
+The current implementation is partial. A feature being documented upstream is
+not evidence that Scribium supports it, while a feature not yet implemented is
+not thereby outside the long-term language target. The tracked target and
+verified baseline are distinct; see [Upstream Evolution](#upstream-evolution).
+
+“Full compatibility” means public document-language behavior and
+document-observable semantics for the tracked release. It does not require
+Quarkdown implementation identity, private APIs, undocumented bugs, internal
+data structures, private plugin ABI, or internal compiler architecture.
 
 The Quarkdown function-call grammar is implemented clean-room from the public
 documentation, notably *"Syntax of a function call"* on the Quarkdown wiki.
@@ -58,10 +66,11 @@ provenance records.
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
 | `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
-`Implemented` rows are covered by unit and golden tests (see
-[Conformance Evidence](#conformance-evidence)). `Planned` means the syntax is
-not implemented yet, in whole or in part: it has no documented `Unsupported`
-diagnostic and must not be assumed to work.
+`Implemented` rows are current claims only at their stated compatibility level
+and are covered by the listed unit/golden/conformance evidence (see
+[Conformance Evidence](#conformance-evidence)). `Planned` means the behavior is
+not implemented yet, in whole or in part. It must not be assumed to work, and
+its absence is tracked compatibility debt against the complete target.
 
 ## Conformance Evidence
 
@@ -106,10 +115,11 @@ bodies are parsed into the Scribium AST/IR. **Conditional evaluation
 (`.if` / `.ifnot`) with boolean literals and variable references
 (`.if {.name}`) is implemented**. Full semantic evaluation (functions,
 iteration, components) remains the next milestone (see `docs/SYNTAX.md` and
-`docs/ROADMAP.md`). Note that a feature which currently fails to parse
-(e.g. `E2xxx` syntax errors on some input forms) is still labeled by its
-documented support level in the matrix — an input-level parse error is
-not an `Unsupported` marker.
+`docs/ROADMAP.md`). A matrix row can therefore represent only the evidenced
+forms at its stated level; an input form that currently fails to parse (for
+example with an `E2xxx` diagnostic) is a compatibility gap, not evidence of
+support for that form. `Unsupported` is reserved for the explicit compatibility
+diagnostic state.
 
 ### Tight-call boundaries
 
@@ -128,15 +138,16 @@ boundary requirement, is a documented v2.5.0 behavior but is **not
 implemented** here; the inner call parses, but the wrapping braces are kept
 as literal text.
 
-### v2.5.0 additions outside the contract
+### v2.5.0 public-language compatibility debt
 
-Quarkdown has documented features that are part of the v2.5.0 baseline but are
-outside Scribium's current contract. These are listed in the Feature Matrix as
-`Planned` and are **not** claimed as compatible. They do not produce `E8xxx`
-diagnostics today and their current behavior is undefined for the purposes of
-this contract; examples: line continuation (`\` at EOL), `::` chaining, tight
-brace-wrapped calls, multi-line arguments spanning raw lines, and the new
-v2.5.0 builtins (data loading, `.markdown`).
+Quarkdown has documented features represented in the v2.5.0 evidence set that
+Scribium has not implemented yet. They are listed in the Feature Matrix as
+`Planned`, are **not** current compatibility claims, and remain compatibility
+debt against the complete target. They do not produce `E8xxx` diagnostics today
+and their current behavior is undefined for the purposes of a claim; examples
+include line continuation (`\` at EOL), `::` chaining, tight brace-wrapped
+calls, multi-line arguments, and v2.5.0 built-ins such as data loading and
+`.markdown`.
 
 ## Specification Record Format
 
@@ -174,7 +185,8 @@ tests (clean-room policy, see `docs/adr/0007-quarkdown-compatibility-scope-and-c
 The call grammar was derived from the public documentation *"Syntax of a
 function call"* (wiki, badged `2.5.0`, accessed 2026-08-08). The current
 v2.5.0 documentation describes the same basic dot-prefixed, brace-argument
-model on which Scribium's parser subset is based. Scribium's previous
+model on which Scribium's currently evidenced parser behavior is based.
+Scribium's previous
 compatibility baseline was 0.9.x, but no claim is made that the upstream
 grammar was verified to be identical across every version in between.
 `SPEC_SOURCES.md` documents the source list, per-source version badges, and
@@ -182,57 +194,72 @@ accessed dates.
 
 ## Known Divergences
 
-- (None yet for the implemented call-syntax subset)
-- Scope note: only the features listed in the matrix above are implemented
-  and claimed. Rows marked **Planned** are *not* implemented; anything
-  documented in Quarkdown but absent from this matrix must not be assumed to
-  work in Scribium.
+- (None yet for the currently implemented call-syntax rows)
+- Scope note: the matrix is an evidence register, not a permanent language
+  boundary. Rows marked **Planned** are *not* implemented and must not be
+  claimed; any public Quarkdown behavior absent from the matrix is still a gap
+  to investigate against the complete target.
 - **Block variable evaluation timing:** Scribium evaluates block variable
   content at declaration time (source order). The cited Quarkdown public
   documentation does not explicitly specify evaluation timing for stored
   block content. This behavior may be refined if upstream semantics are
   clarified. See `docs/SYNTAX.md` for details.
 
-## Upstream Baseline Management
+## Upstream Evolution
 
-Scribium's Quarkdown compatibility is tracked against a **supported baseline** version,
-which is distinct from the **latest observed upstream release**.
-
-### Baseline vs. Observed
+Scribium tracks two distinct Quarkdown versions:
 
 | Concept | Description | Authority |
 |---------|-------------|-----------|
-| **Supported baseline** | The Quarkdown version Scribium claims compatibility with. Recorded in `upstream.toml`. | Human-reviewed PR only |
-| **Latest observed** | The latest stable Quarkdown release detected by the automated observer. | Automated daily check |
+| **Tracked upstream target** | The latest stable Quarkdown release. It automatically becomes the release Scribium must investigate and adapt toward. | Stable-release observer |
+| **Verified compatibility baseline** | The release for which permitted evidence, independent fixtures, implementation, regression/conformance tests, and known-divergence records are complete. The existing `supported_baseline` manifest field names this value. | Human-reviewed promotion PR |
 
-The automated observer (`.github/workflows/upstream-quarkdown.yml`) runs daily and compares the latest stable release against the supported baseline:
+The observer (`.github/workflows/upstream-quarkdown.yml`) runs daily, obtains
+the latest stable release, and compares it with the verified baseline:
 
-- If they match → `current` status, no action
-- If they differ → `drift` status, a GitHub Issue is created with a checklist for compatibility investigation
+- If they match → no target/baseline lag is detected.
+- If they differ → `drift` status and a deduplicated adaptation issue.
 
-**Crucially:** The observer **never** updates the supported baseline. A baseline change requires:
-1. Review of permitted public specification changes
-2. Independently authored conformance cases
-3. Black-box observations where necessary
-4. Implementation of required compatibility changes
-5. Full conformance suite pass
-6. Documentation of known divergences
-7. Human-reviewed PR updating `upstream.toml` and this compatibility matrix
+A new stable release is never an optional product-adoption question. The issue
+asks what changed and what work is required to restore verified compatibility.
+The current observer is only the early foundation of the intended pipeline:
 
-See `docs/adr/0013-upstream-compatibility-observation-and-baseline-promotion.md` for the full decision record.
+```text
+release detection
+    -> permitted public evidence and release-note delta
+    -> structured impact report
+    -> independently authored conformance updates
+    -> implementation/adaptation PR
+    -> conformance and regression verification
+    -> review gate
+    -> verified baseline promotion
+```
 
-### Why the Compatibility Matrix Does Not Auto-Update
+The observer does not yet implement this complete pipeline. Future automation
+may prepare evidence, fixtures, impact reports, adaptation PRs, validation, and
+baseline-promotion changes, but must stop for architecture review when a change
+requires new ownership, dependency direction, public abstractions, semantic/IR
+redesign, security capabilities, a permanent divergence, weakened invariants,
+generic plugins, or backend escape hatches. Human review and merge remain the
+authority boundary.
 
-A new upstream release may add, change, or remove features. The compatibility matrix reflects only what Scribium has **independently verified** through:
-- Public specification review
-- Independently authored conformance tests
-- Black-box behavioral observation (where permitted)
+The verified baseline advances only after:
 
-Automatic updates would conflate "upstream released something" with "Scribium implements it correctly" — which violates the clean-room policy and the principle that compatibility claims require evidence.
+1. permitted public specification/release evidence is reviewed;
+2. affected behavior is identified;
+3. independent conformance cases exist;
+4. required implementation changes are complete;
+5. the relevant regression and conformance suites pass; and
+6. known divergences are documented and reviewed.
 
-## Features Outside the Contract
+See `docs/adr/0016-full-quarkdown-compatibility-and-upstream-evolution.md` and
+`docs/adr/0013-upstream-compatibility-observation-and-baseline-promotion.md`.
 
-The following are not part of the documented subset and are not claimed:
+## Outside the language-compatibility target
+
+The complete target concerns the public document language and observable
+document semantics. The following are implementation/product surfaces rather
+than public language claims:
 
 - Quarkdown interactive slide runtime
 - Quarkdown internal plugin ABI
@@ -240,7 +267,13 @@ The following are not part of the documented subset and are not claimed:
 - Quarkdown HTML post-processing
 - Quarkdown line click interactivity
 
+These exclusions do not create a general escape hatch for publicly documented
+language features. If a public-language behavior is deliberately divergent, it
+requires the rationale, compatibility documentation, appropriate diagnostics,
+and an ADR when substantial.
+
 New v2.5.0 builtins (data loading via `.json`, `.markdown`, `.llmstxt`,
 stdlib `foreach`/iterables) are tracked as `Planned` above; they do not belong
-here because none produces an `E8xxx` diagnostic today. As features are
-implemented, they move from this section into the Feature Matrix.
+to the non-language exclusions above. As features are implemented, their matrix
+status and evidence are promoted; until then they remain explicit gaps against
+the complete target.
