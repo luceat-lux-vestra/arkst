@@ -122,6 +122,31 @@ non-negotiable summary is:
 - maintain host/security boundaries and resource limits; and
 - test behavior/invariants, not implementation structure.
 
+## Rust and library implementation discipline
+
+See `docs/ENGINEERING.md` for the full standard. Forward-looking Rust work
+must also preserve these non-negotiables:
+
+- `unsafe` is prohibited by default; any exception requires an accepted
+  architecture/security decision or maintainer approval, a narrow boundary,
+  documented safety invariants, justification, tests, and review.
+- Do not use production/library `unwrap` or `expect` for user input, malformed
+  documents, recoverable failures, or normal compiler/backend failure paths.
+  Tests, bootstrap infrastructure, and trivially guaranteed invariants are
+  the limited exceptions.
+- Do not introduce hidden global mutable state. Pass compiler state through
+  explicit ownership/context and preserve deterministic behavior.
+- Keep platform-neutral compiler/project abstractions free of native
+  `PathBuf`/filesystem assumptions; native paths belong in CLI/host/adapters.
+- Libraries do not call `process::exit`; use structured errors, diagnostics,
+  no silent fallback, and no user-facing panic.
+
+## ADR history discipline
+
+Do not rewrite historical ADR decisions, considered options, consequences, or
+rationale to make them agree with newer architecture. Use explicit
+supersession/addendum relationships and preserve the original record.
+
 ## Required checks
 
 ```bash

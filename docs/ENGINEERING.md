@@ -25,6 +25,36 @@ Current physical code does not override accepted target architecture. A
 temporary physical location, migration artifact, or compatibility alias is
 not evidence of target ownership.
 
+## ADR history discipline
+
+Accepted ADRs are historical decision records. Later decisions supersede or
+amend them through explicit metadata, addenda, or new ADRs; they do not
+silently rewrite the original decision, considered options, consequences, or
+rationale.
+
+## Rust and library implementation discipline
+
+The following forward-looking rules apply to Rust implementation work:
+
+- `unsafe` is prohibited by default. Introducing it requires an accepted
+  architecture or security decision, or equivalent maintainer approval, and a
+  narrowly localized boundary with documented safety invariants, justification
+  for why safe Rust is insufficient, and appropriate tests and review.
+- Production/library code must not use `unwrap` or `expect` for
+  user-controlled input, malformed documents, recoverable operational failures,
+  or normal compiler/backend failure paths. They are permitted in tests,
+  bootstrap/test infrastructure, or where an invariant is statically or
+  trivially guaranteed and the reason is obvious or documented.
+- Hidden global mutable state is prohibited. Compiler behavior remains
+  explicit and deterministic; state is passed through explicit ownership and
+  context unless an accepted architecture decision says otherwise.
+- Platform-independent compiler and project abstractions must not leak native
+  `PathBuf` or filesystem assumptions across their accepted boundaries. Native
+  paths belong in CLI, host, and native-adapter layers where appropriate.
+- Libraries do not call `process::exit`. Use structured errors and
+  user-facing diagnostics as separate concepts, with no silent fallback and no
+  user-facing panic.
+
 ## Correctness over velocity
 
 Correctness comes before shortcut implementation. Work must account for valid,

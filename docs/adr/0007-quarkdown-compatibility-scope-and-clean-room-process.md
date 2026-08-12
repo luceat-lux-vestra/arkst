@@ -6,6 +6,12 @@
 - **Related issues:** #1, #4
 - **Superseded by:** ADR-0016 for the compatibility-target scope only
 
+## Supersession note
+
+ADR-0016 supersedes this ADR's documented-subset product-target decision. The
+clean-room process, provenance requirements, and explicit compatibility
+evidence requirements remain accepted.
+
 ## Context
 
 Scribium implements Quarkdown-compatible syntax without using Quarkdown source
@@ -19,18 +25,16 @@ code. The scope and process for this clean-room implementation must be defined.
 
 ## Considered Options
 
-### Option 1: Implementation identity at all costs (rejected)
+### Option 1: Full compatibility at all costs (rejected)
 
-Would require reproducing private implementation details and undocumented
-behavior. That is neither required for public-language compatibility nor
-permitted by the clean-room constraint.
+Would require reversing non-public behavior. Impossible without source access
+and creates legal risk.
 
-### Option 2: Public-specification clean-room process (chosen)
+### Option 2: Documented subset with clean-room process (chosen)
 
-Implement public language behavior from permitted evidence only. Each feature
-records its specification source, independently authored fixture, evidence,
-compatibility level, and known divergence. Unsupported behavior produces an
-explicit diagnostic where the owning contract requires one.
+Implement features based on public documentation only. Each feature records
+its specification source and compatibility level. Unsupported features produce
+explicit diagnostics.
 
 ### Option 3: No Quarkdown compatibility (rejected by product definition)
 
@@ -38,17 +42,9 @@ Scribium identity IS Quarkdown compatibility. Not optional.
 
 ## Decision
 
-Adopt a clean-room process for the complete public-language compatibility target
-now defined by ADR-0016. Public documentation, release notes, public
-reference/API documentation, independently authored fixtures, and permitted
-black-box observations are allowed evidence. Quarkdown implementation source,
-tests, and fixtures are not inputs to the process. Each compatibility claim
-tracks provenance and evidence; unsupported behavior uses `E8xxx` diagnostics
-when appropriate.
-
-The earlier documented-subset wording described the initial evidence boundary,
-not a permanent product limitation. ADR-0016 supersedes that target-scope
-decision while leaving this clean-room process accepted.
+Adopt document subset approach. Core features (dot-calls, arguments, conditionals,
+iteration, variables, components, include) are M1-M2 targets. Each feature
+tracks provenance. Unsupported Quarkdown features produce `E8xxx` diagnostics.
 
 ## Consequences
 
@@ -60,17 +56,15 @@ decision while leaving this clean-room process accepted.
 
 ### Negative
 
-- Some edge cases may remain documented divergences from public behavior
+- Some edge cases will diverge from reference implementation
 - Compatibility matrix maintenance is ongoing work
 
 ### Risks
 
-- User expects current full compatibility before the evidence exists
-- Mitigation: explicit target/baseline distinction, matrix evidence, and
-  compatibility-debt tracking
+- User expects "Quarkdown compiler" and finds missing features
+- Mitigation: explicit README status table, clear feature tracking
 
 ## References
 
 - `docs/legal/CLEAN_ROOM_POLICY.md`
-- `docs/adr/0016-full-quarkdown-compatibility-and-upstream-evolution.md`
 - `docs/compatibility/quarkdown/`

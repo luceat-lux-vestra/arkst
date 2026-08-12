@@ -6,11 +6,19 @@
 - **Related issues:** #25
 - **Superseded by:** ADR-0016
 
+## Supersession note
+
+ADR-0016 replaces the permanent selected-subset policy and replaces optional
+adoption of new stable releases with automatic adaptation targeting. The
+Quarkdown v2.5.0 baseline and evidence accumulated under this ADR remain
+historical/current verified-baseline evidence until separately promoted.
+Evidence-gated compatibility claims remain a valid principle.
+
 ## Context
 
 The compatibility documentation (see `docs/compatibility/quarkdown/README.md`)
-had fixed the Quarkdown compatibility target at **0.9.x**. The upstream stable
-release selected for the then-current evidence baseline was **Quarkdown v2.5.0** (released 2026-08-04;
+has fixed the Quarkdown compatibility target at **0.9.x**. The current
+upstream *stable* release is **Quarkdown v2.5.0** (released 2026-08-04;
 `iamgio/quarkdown` tag `v2.5.0`). Since 0.9.x, upstream has added or documented
 further syntax and functionality, including:
 
@@ -31,33 +39,36 @@ the reference baseline nonetheless makes the reference for future
 semantic/evaluator work unclear, and misrepresents the Quarkdown syntax
 today's users actually write.
 
-This ADR recorded a reference version for the earlier compatibility policy.
-ADR-0016 now defines the product target, automatic stable-release adaptation
-target, and verified-baseline promotion policy. The v2.5.0 selection and its
-evidence discipline remain useful as historical/current baseline data.
+This ADR decides the *reference version*. The *approach* to compatibility
+(documented subset, clean-room implementation, per-feature compatibility
+levels) remains governed by ADR-0007.
 
-## Historical decision and retained evidence
+## Decision
 
-The following decisions were made under the superseded fixed-baseline policy:
+Adopt the following compatibility policy:
 
-1. The reference baseline for the then-current Scribium evidence was
+1. The reference baseline for Scribium's Quarkdown compatibility is
    **Quarkdown v2.5.0**.
-2. Feature-by-feature support was recorded in the compatibility matrix.
-3. Claims required independent evidence rather than documentation alone.
-4. Moving the reference baseline required an explicit review and documentation
-   pass:
+2. Scribium's compatibility contract is the **documented subset**: only the
+   features explicitly listed in the compatibility matrix
+   (`docs/compatibility/quarkdown/README.md`) and verified by conformance
+   tests are part of the contract.
+3. Feature-by-feature support is recorded in the compatibility matrix.
+4. Implementing every upstream feature is **not** a goal.
+5. A new upstream release does **not** automatically move the baseline.
+6. Changing the baseline requires an explicit review and documentation pass:
    1. investigate upstream changes,
    2. update the compatibility matrix,
    3. amend/supersede this ADR or add a new ADR if needed,
    4. update conformance fixtures and provenance records
       (`docs/compatibility/quarkdown/SPEC_SOURCES.md`).
-5. The clean-room policy (ADR-0007) remained unchanged: no upstream implementation
+7. The clean-room policy (ADR-0007) is unchanged: no upstream implementation
    code is copied, and no internal implementation is relied upon.
 
-ADR-0016 supersedes the fixed selected-subset contract and the idea that a new
-stable release is an optional adoption decision. It retains the useful rule
-that a verified baseline promotion requires reviewed public evidence,
-independent fixtures, passing tests, and documented divergences.
+This complements, and does not supersede, ADR-0007: ADR-0007 defines *how*
+compatibility is selected and recorded (documented subset, clean-room,
+explicit divergence tracking); this ADR defines *which version* is the current
+reference for that subset.
 
 ## Considered Options
 
@@ -68,12 +79,12 @@ that current Quarkdown users employ (line continuation, chaining, tight-call
 wrapping, newer builtins) would not be visible in the reference at all, and
 evaluator work would have to reconstruct behavior from an obsolete snapshot.
 
-### Option 2: Automatically promote a baseline without evidence (rejected)
+### Option 2: Automatically track the latest release (rejected)
 
-An unreviewed baseline promotion would silently turn a release observation into
-a compatibility claim. ADR-0016 instead makes the latest stable release the
-automatic adaptation target while keeping verified-baseline promotion
-evidence-gated.
+Follow-up releases would silently change the compatibility contract. The
+documented-subset contract requires a fixed reference so that each feature's
+compatibility claim is stable and testable; auto-tracking breaks the
+determinism of the matrix and the conformance suite.
 
 ### Option 3: Wide version range as a compatibility claim (rejected)
 
@@ -86,35 +97,36 @@ from claiming "everything".
 
 ### Positive
 
-- Evaluator implementation received a clear historical semantic reference: the
-  v2.5.0 documentation and release.
+- Evaluator implementation (M1+; see the follow-up plan) gets a clear
+  semantic reference: the v2.5.0 documentation and release.
 - The gap between the documented target and what current Quarkdown users see
   is reduced.
-- Feature-level evidence and review discipline are retained under ADR-0016.
+- Feature-level compatibility is preserved, while upstream changes are kept
+  under review-driven control (no implicit target migration).
 
 ### Negative
 
-- Readers may misunderstand the historical reference as a full current claim.
-  The compatibility document must distinguish the complete target, verified
-  baseline, and current feature evidence.
+- Readers may misunderstand the reference as "Scribium supports all of
+  Quarkdown v2.5.0". The compatibility document must therefore emphasize the
+  documented-subset model and the "not claimed" caveat for any feature not
+  listed in the matrix.
 - The matrix and provenance records need periodic attention; upstream release
   reviews (decision point 6) become a normal part of ADR/roadmap churn.
 
 ### Risks
 
-- User expects current full compatibility before evidence exists.
-- Mitigation: explicit README status, verified-baseline metadata, matrix
-  evidence, and compatibility-debt tracking.
+- User expects "Quarkdown compiler" and finds missing features.
+- Mitigation: explicit README status table + matrix with unclaimed rows,
+  NEVER claim full compatibility (see also ADR-0007).
 - Docs and wiki may lag the v2.5.0 release; only behavior actually verified
   against the release/wiki is recorded in `SPEC_SOURCES.md`; no guessing.
 
 ## References
 
 - ADR-0007: Quarkdown compatibility scope and clean-room process
-- `docs/compatibility/quarkdown/README.md` — compatibility matrix and evidence
+- `docs/compatibility/quarkdown/README.md` — compatibility matrix
 - `docs/compatibility/quarkdown/SPEC_SOURCES.md` — provenance records
 - Quarkdown v2.5.0 release: https://github.com/iamgio/quarkdown/releases/tag/v2.5.0
 - Quarkdown wiki "Syntax of a function call":
   https://quarkdown.com/wiki/syntax-of-a-function-call/ (accessed 2026-08-08)
 - Issue #25: Re-evaluate compatibility target: 0.9.x vs current upstream (v2.5.0)
-- ADR-0016: Full Quarkdown Compatibility and Continuous Upstream Evolution
