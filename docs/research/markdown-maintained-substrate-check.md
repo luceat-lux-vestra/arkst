@@ -10,6 +10,10 @@ Baseline: [`markdown-substrate-final-feasibility.md`](markdown-substrate-final-f
 That report's results for markdown-rs, its lower-bound fork, comrak,
 pulldown-cmark, and markdown-it-rust were reused without rerunning their PoCs.
 
+Rushdown's follow-up safety evidence is recorded in
+[`rushdown-safety-gate.md`](rushdown-safety-gate.md). This link does not rewrite
+the earlier substrate-screening conclusion.
+
 ## A. Question and screening method
 
 This gate asked whether a current Rust Markdown library has better upstream
