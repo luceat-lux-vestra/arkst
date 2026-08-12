@@ -540,13 +540,19 @@ syntax and provenance. It does not depend on xberg, convert HTML to Typst,
 reconstruct Markdown strings, or recursively parse synthetic Markdown. The
 engine invokes `scribium-html` for HTML requiring semantic normalization.
 
-The selected implementation library is `xberg-io/html-to-markdown`, isolated
-inside `scribium-html`. The adapter consumes its structured conversion result
-or equivalent structural API, including semantic document structure and
-visitor/customization facilities, and translates it directly into Scribium
-semantics. The architecture forbids an HTML → xberg Markdown string →
-`scribium-markdown` parser round-trip. xberg types do not cross the
-`scribium-html` public boundary.
+The selected dependency is:
+
+```text
+Upstream project: xberg-io/html-to-markdown
+Cargo package:   html-to-markdown-rs
+```
+
+The Cargo package is isolated inside `scribium-html`. The adapter consumes its
+structured conversion result or equivalent structural API, including semantic
+document structure and visitor/customization facilities, and translates it
+directly into Scribium semantics. The architecture forbids an HTML → xberg
+Markdown string → `scribium-markdown` parser round-trip. xberg types do not
+cross the `scribium-html` public boundary.
 
 Supported HTML is mapped to existing backend-neutral concepts where the
 mapping is faithful, including concepts equivalent to paragraphs, headings,
@@ -584,13 +590,15 @@ scribium-engine -> scribium-html
 scribium-html -> scribium-source
 scribium-html -> scribium-ir
 scribium-html -> scribium-diagnostics
-scribium-html -> xberg-io/html-to-markdown  (implementation only)
+scribium-html -> html-to-markdown-rs  (implementation only)
 ```
 
 `scribium-html` must not depend on `scribium-engine`, `scribium-markdown`,
 `scribium-core`, `scribium-project`, `scribium-typst`, or
-`scribium-typst-subprocess`; `scribium-markdown` and `scribium-typst` must not
-depend on xberg. `scribium-html` is part of the WASM-compatible compiler path
+`scribium-typst-subprocess`; only `scribium-html` may depend on the
+`html-to-markdown-rs` Cargo package. `scribium-markdown`, `scribium-engine`,
+`scribium-ir`, `scribium-core`, and `scribium-typst` must not directly depend
+on xberg. `scribium-html` is part of the WASM-compatible compiler path
 and must remain free of native filesystem, process, and network requirements.
 
 Pandoc is an optional externally installed development/compatibility oracle,
@@ -606,29 +614,132 @@ the WASM path.
 
 ## Typst Backend Interface
 
-```rust
-pub trait TypstBackend {
-    fn compile(&self, input: &TypstInput) -> Result<TypstOutput, TypstError>;
-    fn version(&self) -> Result<String, TypstError>;
-}
+Typst source generation and Typst compiler execution are separate operations.
+The Quarkdown/Markdown language semantics have already been processed before
+this boundary; `scribium-typst` consumes only backend-neutral Scribium IR.
 
-pub struct TypstInput {
-    pub source: String,
-    pub entry_path: PathBuf,
-    pub assets: Vec<Asset>,
-    pub fonts: Vec<Font>,
-    pub packages: Packages,
-}
+### Stage A — Typst backend lowering / code generation
 
-pub struct TypstOutput {
-    pub pdf: Option<Vec<u8>>,
-    pub html: Option<String>,
-    pub svg: Option<Vec<u8>>,
-    pub png: Option<Vec<u8>>,
-    pub diagnostics: Vec<TypstDiagnostic>,
-    pub duration: Duration,
-}
+`scribium-typst` owns pure lowering from a normalized `IrDocument` to Typst
+source. Conceptually, the result contains a `TypstLoweringResult` with:
+
+```text
+normalized IrDocument
+        |
+        v
+scribium-typst
+        |
+        v
+Typst source
++ generated-range -> original-source source map
++ lowering diagnostics
 ```
+
+`TypstLoweringResult` is a conceptual name, not a frozen Rust type. This stage
+only performs IR -> Typst source code generation. It does not invoke the Typst
+compiler, read or write files, spawn processes, or require a backend
+implementation. It remains usable in WASM.
+
+### Stage B — Typst compiler execution
+
+Compiler execution is a distinct operation after lowering. A platform-neutral
+compiler backend contract may remain owned by `scribium-typst`:
+
+```text
+Typst source
++ required in-memory compiler inputs
+        |
+        v
+Typst compiler backend contract
+        |
+        v
+compiled artifact(s)
++ compiler diagnostics
+```
+
+The exact platform-neutral input model for fonts, assets, packages, or other
+Typst compiler resources is intentionally not frozen here. The contract must
+remain independent of native implementation details: it exposes no native
+filesystem paths or file handles, temporary directory/file handles, process
+invocation types, or subprocess-specific stdout/stderr/status types.
+
+The lowering result and compiler result are distinct concepts:
+
+```text
+Typst lowering result
+    |-- Typst source
+    |-- source map
+    `-- lowering diagnostics
+
+Typst compiler result
+    |-- compiled artifact(s)
+    `-- compiler/backend diagnostics
+```
+
+Output-format capability belongs to the selected Typst compiler/backend and
+may evolve independently. This architecture does not freeze an exact set of
+output formats and does not model PDF, HTML, SVG, or PNG as fields of one
+combined `TypstOutput` structure.
+
+### Native subprocess adapter
+
+`scribium-typst-subprocess` implements the native subprocess execution adapter.
+It owns Typst executable path and discovery, native filesystem interaction
+required for execution, temporary files and directories, process invocation,
+process exit status, stdout/stderr, and subprocess-specific errors. It
+implements the platform-neutral contract; the contract itself does not move
+into this crate.
+
+```text
+scribium-typst
+        |
+        | platform-neutral backend contract
+        v
+scribium-typst-subprocess
+        |
+        | native process/filesystem implementation
+        v
+installed Typst executable
+```
+
+The CLI/host performs composition. `scribium-typst` must not depend on
+`scribium-project`, `scribium-core`, `scribium-engine`, Markdown or Quarkdown
+frontends, or `scribium-html`:
+
+```text
+scribium-cli
+    |
+    +---- scribium-core
+    |        |
+    |        v
+    |    CompileResult / normalized IR
+    |
+    +---- scribium-typst
+    |        |
+    |        v
+    |    Typst lowering result
+    |
+    +---- optional scribium-typst-subprocess
+             |
+             v
+         compiled output
+```
+
+There is no direct `scribium-core -> scribium-typst` dependency. The core
+facade produces the normalized IR, and the host composes it with lowering and,
+when selected, compiler execution.
+
+Supported HTML is normalized before backend code generation. If foreign HTML
+reaches `scribium-typst` as `ForeignContent(Html)`, it must be handled
+explicitly under the applicable lowering/compatibility policy. It must not be
+passed directly into Typst source, sent to xberg from `scribium-typst`, or
+silently discarded. `RawTypst` remains forbidden in backend-neutral IR; the
+exact foreign-HTML diagnostic and policy are outside this section.
+
+The current physical `scribium-typst` implementation may still combine
+lowering, the backend contract, and subprocess/native implementation. That is
+migration state rather than target ownership. PR #46 documents the target
+architecture only and does not split the Rust implementation.
 
 ## Error Model
 

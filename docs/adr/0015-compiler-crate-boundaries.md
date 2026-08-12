@@ -471,8 +471,8 @@ scribium-quarkdown -X-> scribium-core
 scribium-quarkdown -X-> scribium-compat
 scribium-engine -X-> scribium-project
 scribium-engine -X-> scribium-core
-scribium-markdown -X-> xberg-io/html-to-markdown
-scribium-typst -X-> xberg-io/html-to-markdown
+scribium-markdown -X-> html-to-markdown-rs
+scribium-typst -X-> html-to-markdown-rs
 scribium-html -X-> scribium-engine
 scribium-html -X-> scribium-markdown
 scribium-html -X-> scribium-core
@@ -496,13 +496,14 @@ scribium-source -X-> scribium-typst-subprocess
 The external implementation dependency is isolated inside the adapter:
 
 ```text
-scribium-html ------------> xberg-io/html-to-markdown
+scribium-html ------------> html-to-markdown-rs
 ```
 
 `scribium-markdown` must not depend on the xberg library, and neither
 `scribium-typst` nor any other compiler crate may depend on it. `scribium-html`
 must not depend on `scribium-engine`, `scribium-markdown`, `scribium-core`,
 `scribium-project`, `scribium-typst`, or `scribium-typst-subprocess`.
+Only `scribium-html` may depend on the `html-to-markdown-rs` Cargo package.
 
 This keeps the frontends usable without constructing an entire compilation
 project, keeps Quarkdown grammar independent from compatibility policy, and
@@ -603,7 +604,7 @@ the core facade stops at the normalized IR and shared diagnostics.
 
 Exact Rust structs and trait signatures are not defined in this ADR.
 
-## Decision 13: `scribium-html` owns HTML interoperability and oracle policy
+## Decision 13: `scribium-html` owns HTML interoperability; Pandoc is a repository oracle
 
 The target architecture contains a dedicated `scribium-html` crate. It is the
 HTML interoperability boundary, not a renderer and not a Typst-specific crate.
@@ -617,6 +618,10 @@ backend-neutral Scribium semantic/IR content. Its target responsibilities are:
 - preserve unsupported foreign HTML when necessary;
 - produce HTML-conversion diagnostics; and
 - isolate the third-party HTML library API from the rest of Scribium.
+
+The Pandoc oracle policy is a repository development and compatibility
+verification policy, not a `scribium-html` responsibility. No production crate
+owns Pandoc.
 
 The target flow is:
 
@@ -669,11 +674,17 @@ diagnostic is emitted rather than silently changing meaning.
 
 ### xberg is isolated behind the adapter
 
-The selected implementation infrastructure is
-`xberg-io/html-to-markdown`. Its structured conversion result, including its
-semantic document structure and visitor/customization facilities, is adapted
-directly by `scribium-html` into Scribium semantics. The exact xberg API calls
-are an implementation detail and are not frozen by PR #46.
+The selected dependency is:
+
+```text
+Upstream project: xberg-io/html-to-markdown
+Cargo package:   html-to-markdown-rs
+```
+
+The package's structured conversion result, including its semantic document
+structure and visitor/customization facilities, is adapted directly by
+`scribium-html` into Scribium semantics. The exact package API calls are an
+implementation detail and are not frozen by PR #46.
 
 The forbidden architecture is:
 
