@@ -31,8 +31,29 @@ Too much overhead for initial scope. Revisit if error complexity warrants it.
 ## Decision
 
 Use `thiserror` for library crate error types and `anyhow` for CLI error
-aggregation. Error codes are assigned per-diagnostic in the core crate,
-not per-error-type.
+aggregation. Error codes are assigned per diagnostic, not per error type.
+
+ADR-0009 owns the stable diagnostic-code ranges and error/exit-code policy.
+`scribium-diagnostics` owns the shared diagnostic representation. The compiler
+stage detecting a problem owns that diagnostic's semantics and construction;
+`scribium-core` aggregates diagnostics but is not their implementation owner.
+
+Conceptually:
+
+```text
+syntax/parser       -> frontend
+semantic/evaluation -> scribium-engine
+compatibility       -> scribium-compat
+Typst lowering      -> scribium-typst
+Typst execution     -> concrete Typst backend adapter
+project/config      -> responsible project/host layer
+all use
+    ↓
+scribium-diagnostics representation
+scribium-core
+    ↓
+aggregates results
+```
 
 ## Exit codes
 
@@ -74,5 +95,7 @@ not per-error-type.
 
 ## References
 
-- `crates/scribium-core/src/diagnostics.rs`
+- `crates/scribium-core/src/diagnostics.rs` (current implementation location
+  during physical migration, not target ownership)
 - `crates/scribium-cli/src/exit.rs`
+- ADR-0015: Compiler crate boundaries

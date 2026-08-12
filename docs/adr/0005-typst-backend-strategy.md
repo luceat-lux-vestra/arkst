@@ -102,7 +102,7 @@ verification. It does not block WASM frontend delivery.
 | Implementation | Crate | Target |
 |---|---|---|
 | `SubprocessBackend` | `scribium-typst-subprocess` | CLI |
-| `InProcessBackend` | `scribium-typst` (future) | CLI, server |
+| `InProcessBackend` | TBD: future dedicated adapter, per ADR-0011 re-evaluation | CLI, server |
 | `WebBackend` | `scribium-typst-web` (M7+) | Browser WASM |
 
 The trait itself stays in `scribium-typst` for all targets.

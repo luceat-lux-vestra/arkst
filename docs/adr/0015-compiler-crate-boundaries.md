@@ -535,6 +535,12 @@ A platform-neutral Typst backend contract may remain associated with
 types. Lowering must be usable without constructing or selecting a compiler
 backend. Conceptually:
 
+`scribium-typst` may own the platform-neutral compiler-backend contract, but
+concrete Typst compiler execution implementations do not belong to the pure
+lowering implementation. `scribium-typst-subprocess` is the currently decided
+concrete adapter. Ownership and the name of a future in-process implementation
+are intentionally deferred to the ADR-0011 re-evaluation.
+
 ```text
 scribium-cli
     |
