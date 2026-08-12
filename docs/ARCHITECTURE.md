@@ -14,39 +14,37 @@ User / CI
     v
 scribium-cli
     |
-    +------> scribium-project
-    |            |
-    |            +-- VirtualProject / sources / assets / metadata
+    +----> scribium-project
+    |         |
+    |         +---- constructs VirtualProject
     |
-    +------> scribium-core
-                 |
-                 +-- orchestration / CompileOptions / CompileResult
-                 |
-                 v
-          scribium-markdown
-                 | uses
-                 +------> scribium-quarkdown (grammar only)
-                 |
-                 v
-          frontend AST
-                 |
-                 v
-          scribium-engine
-                 |
-                 v
-          normalized IrDocument
-                 |
-                 v
-          scribium-typst
-                 |
-                 +-- Typst source + source map + lowering diagnostics
-                 |
-                 v
-          scribium-typst-subprocess
-          (optional native execution)
-                 |
-                 v
-          Typst compiler output
+    +----> scribium-core
+    |         |
+    |         +---- compiles VirtualProject
+    |                    |
+    |                    +---- scribium-markdown
+    |                    |          |
+    |                    |          +----> scribium-quarkdown
+    |                    |
+    |                    +---- scribium-engine
+    |                               |
+    |                               v
+    |                         normalized IrDocument
+    |                               |
+    |                               v
+    |                         CompileResult
+    |                         (normalized IR + shared diagnostics)
+    |
+    +----> scribium-typst
+    |         |
+    |         +---- lowers normalized IrDocument
+    |         +---- Typst source
+    |         +---- source map
+    |         +---- lowering diagnostics
+    |
+    +----> scribium-typst-subprocess
+              |
+              +---- optional native Typst execution
 
 Shared lower-level target crates:
   scribium-source       source identity, spans, source-map representation
@@ -57,6 +55,9 @@ Shared lower-level target crates:
 
 The shared lower-level crates are dependencies of the stages that use them;
 their implementations are not owned by `scribium-core`.
+The native CLI/host composes `scribium-core` compilation, `scribium-typst`
+lowering, and optional `scribium-typst-subprocess` execution. `scribium-core`
+does not depend on `scribium-typst`.
 
 ## Compile Pipeline
 
@@ -94,8 +95,9 @@ scribium-engine: semantic / evaluation / normalization passes
   └── resource limit enforcement
   │
   ▼
-normalized backend-neutral IrDocument
+CompileResult: normalized backend-neutral IrDocument + shared diagnostics
   │
+  │ host composes the next stage
   ▼
 scribium-typst lowering
   ├── Typst source
@@ -200,7 +202,23 @@ are not subject to that requirement.
 - Global mutable state
 - `std::path::PathBuf` in public API — use `VirtualPathBuf` instead
 
-### VirtualProject: I/O-Free Core
+### VirtualProject: I/O-Free Project Model
+
+`scribium-project` owns the in-memory project model and its supporting types:
+
+- `VirtualProject`
+- `VirtualProjectBuilder`
+- `SourceStore`
+- `AssetStore`
+- `VirtualPathBuf`
+- `ProjectMetadata`
+
+`VirtualProject` is the in-memory compilation project model. The native CLI or
+another native host loads filesystem, configuration, and resource data and
+constructs it. WASM and embedded hosts construct it directly from in-memory
+inputs. `scribium-core` consumes an already constructed `VirtualProject`.
+Project ownership does not prevent the core facade from accepting
+`&VirtualProject`.
 
 ```rust
 pub struct VirtualProject {
@@ -228,6 +246,21 @@ pub fn compile(
     options: &CompileOptions,
 ) -> CompileResult;
 ```
+
+Ownership of the I/O boundary is explicit:
+
+- filesystem discovery, reads, writes, and native output handling belong to
+  the native CLI/host;
+- OS-path canonicalization and symlink enforcement belong to the native
+  CLI/host;
+- `VirtualPathBuf`, `SourceStore`, `AssetStore`, and `VirtualProject` belong to
+  `scribium-project`; and
+- compiler orchestration belongs to `scribium-core`.
+
+`scribium-project` and `scribium-core` remain filesystem-free. The host
+acquires the required inputs and applies native filesystem policy before core
+compilation.
+
 - CLI builds `VirtualProject` from disk
 - WASM builds `VirtualProject` from in-memory sources
 - Core never touches filesystem
@@ -317,21 +350,25 @@ This design ensures:
 
 ### Synchronous Core, Async Host
 
-Core compilation is synchronous. Host loads dependencies asynchronously.
-
-```rust
-pub enum CompileStatus {
-    Complete(CompileOutput),
-    NeedsSources(Vec<VirtualPathBuf>),
-}
-```
+The host gathers all required filesystem, network, and resource input before
+core compilation. It constructs or updates the complete in-memory
+`VirtualProject`, then `scribium-core` performs synchronous, deterministic
+compilation over that project. Host-side acquisition may itself be
+asynchronous, but lower compiler crates do not request missing sources through
+callbacks or asynchronous compiler APIs.
 
 ### WASM Editions
 
 | Edition | Scope | Status |
 |---------|-------|--------|
-| Frontend WASM | Parse → evaluate → lower to Typst source | Guaranteed |
-| Full browser compile | + Typst compiler in WASM → PDF | M7+ feasibility gate |
+| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine → normalized IR → pure Typst lowering | Guaranteed target |
+| Full browser compile | Above + Typst compiler running in WASM → PDF/output | M7+ feasibility gate |
+
+The guaranteed compiler/library path includes pure `scribium-typst` lowering;
+it does not include `scribium-typst-subprocess`. Subprocess execution is
+native-only. Running the Typst compiler in a browser remains a later
+feasibility decision; this architecture does not introduce a browser adapter
+or an in-process backend.
 
 ## Source Span Model
 
