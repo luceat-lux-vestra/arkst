@@ -428,6 +428,7 @@ scribium-typst -----------> scribium-source
 scribium-typst -----------> scribium-diagnostics
 scribium-typst-subprocess -> scribium-typst
 scribium-typst-subprocess -> scribium-diagnostics
+scribium-cli -------------> scribium-project
 scribium-cli -------------> scribium-core
 scribium-cli -------------> scribium-typst
 scribium-cli -------------> scribium-typst-subprocess
@@ -544,25 +545,29 @@ are intentionally deferred to the ADR-0011 re-evaluation.
 ```text
 scribium-cli
     |
-    | build VirtualProject / CompileOptions
-    v
-scribium-core
+    +----> scribium-project
+    |          |
+    |          +---- constructs VirtualProject
     |
-    | normalized IrDocument + diagnostics
-    v
-scribium-typst
+    +----> scribium-core
+    |          |
+    |          +---- compiles VirtualProject
+    |                     |
+    |                     +---- returns normalized IrDocument + diagnostics
     |
-    | Typst source + source map + lowering diagnostics
-    v
-scribium-typst-subprocess
+    +----> scribium-typst
+    |          |
+    |          +---- lowers normalized IrDocument
     |
-    v
-Typst compiler output
+    +----> scribium-typst-subprocess (optional native execution)
 ```
 
-This is a host-level composition flow, not a dependency from
-`scribium-core` to `scribium-typst`. The core facade stops at the normalized IR
-and shared diagnostics; the CLI composes it with lowering and native execution.
+The CLI uses `scribium-project` to construct the `VirtualProject`, passes that
+project and `CompileOptions` to `scribium-core`, and receives normalized IR and
+diagnostics. It then composes `scribium-typst` lowering and, when selected,
+native execution through `scribium-typst-subprocess`. This is a host-level
+composition flow, not a dependency from `scribium-core` to `scribium-typst`;
+the core facade stops at the normalized IR and shared diagnostics.
 
 Exact Rust structs and trait signatures are not defined in this ADR.
 
