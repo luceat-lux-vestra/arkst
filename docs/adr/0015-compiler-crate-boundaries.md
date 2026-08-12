@@ -179,7 +179,15 @@ scribium-core
     v
 scribium-markdown
     |
-    | frontend AST
+    | frontend AST, including preserved raw HTML fragments and provenance
+    v
+scribium-engine
+    |
+    | delegates raw HTML normalization to scribium-html
+    v
+scribium-html
+    |
+    | backend-neutral Scribium semantics or explicit foreign HTML content
     v
 scribium-engine
     |
@@ -287,6 +295,7 @@ This is ownership only. The concepts are not physically moved by this ADR.
 - `scribium-ir`;
 - `scribium-source`;
 - `scribium-diagnostics`;
+- `scribium-html` for raw HTML semantic normalization;
 - `scribium-compat` for compatibility policy;
 - `scribium-quarkdown` only where Quarkdown grammar-level rules, such as
   valid identifiers, are required.
@@ -416,6 +425,7 @@ scribium-ir --------------> scribium-source
 scribium-engine ----------> scribium-source
 scribium-engine ----------> scribium-ir
 scribium-engine ----------> scribium-markdown
+scribium-engine ----------> scribium-html
 scribium-engine ----------> scribium-quarkdown (only for required grammar rules)
 scribium-core ------------> scribium-engine
 scribium-core ------------> scribium-ir
@@ -428,6 +438,9 @@ scribium-typst -----------> scribium-source
 scribium-typst -----------> scribium-diagnostics
 scribium-typst-subprocess -> scribium-typst
 scribium-typst-subprocess -> scribium-diagnostics
+scribium-html ------------> scribium-source
+scribium-html ------------> scribium-ir
+scribium-html ------------> scribium-diagnostics
 scribium-cli -------------> scribium-project
 scribium-cli -------------> scribium-core
 scribium-cli -------------> scribium-typst
@@ -458,6 +471,14 @@ scribium-quarkdown -X-> scribium-core
 scribium-quarkdown -X-> scribium-compat
 scribium-engine -X-> scribium-project
 scribium-engine -X-> scribium-core
+scribium-markdown -X-> xberg-io/html-to-markdown
+scribium-typst -X-> xberg-io/html-to-markdown
+scribium-html -X-> scribium-engine
+scribium-html -X-> scribium-markdown
+scribium-html -X-> scribium-core
+scribium-html -X-> scribium-project
+scribium-html -X-> scribium-typst
+scribium-html -X-> scribium-typst-subprocess
 scribium-compat -X-> scribium-markdown
 scribium-compat -X-> scribium-quarkdown
 scribium-compat -X-> scribium-engine
@@ -471,6 +492,17 @@ scribium-ir -X-> scribium-typst
 scribium-source -X-> scribium-typst
 scribium-source -X-> scribium-typst-subprocess
 ```
+
+The external implementation dependency is isolated inside the adapter:
+
+```text
+scribium-html ------------> xberg-io/html-to-markdown
+```
+
+`scribium-markdown` must not depend on the xberg library, and neither
+`scribium-typst` nor any other compiler crate may depend on it. `scribium-html`
+must not depend on `scribium-engine`, `scribium-markdown`, `scribium-core`,
+`scribium-project`, `scribium-typst`, or `scribium-typst-subprocess`.
 
 This keeps the frontends usable without constructing an entire compilation
 project, keeps Quarkdown grammar independent from compatibility policy, and
@@ -571,12 +603,188 @@ the core facade stops at the normalized IR and shared diagnostics.
 
 Exact Rust structs and trait signatures are not defined in this ADR.
 
+## Decision 13: `scribium-html` owns HTML interoperability and oracle policy
+
+The target architecture contains a dedicated `scribium-html` crate. It is the
+HTML interoperability boundary, not a renderer and not a Typst-specific crate.
+It owns the platform-independent conversion of raw HTML fragments into
+backend-neutral Scribium semantic/IR content. Its target responsibilities are:
+
+- consume raw HTML fragments recognized by the Markdown frontend;
+- parse and normalize HTML through the selected external HTML conversion
+  library;
+- translate supported HTML semantics into backend-neutral IR nodes;
+- preserve unsupported foreign HTML when necessary;
+- produce HTML-conversion diagnostics; and
+- isolate the third-party HTML library API from the rest of Scribium.
+
+The target flow is:
+
+```text
+Markdown / Quarkdown source
+        |
+        v
+scribium-markdown
+        |
+        | raw HTML syntax, context, and original SourceSpan
+        v
+frontend AST
+        |
+        v
+scribium-engine
+        |
+        | delegates HTML normalization
+        v
+scribium-html
+        |
+        v
+backend-neutral Scribium IR
+        |
+        v
+scribium-typst
+```
+
+HTML conversion therefore occurs before rendering or backend code generation.
+`scribium-engine` owns language evaluation and normalization and invokes
+`scribium-html` when the frontend AST contains raw HTML requiring semantic
+normalization. `scribium-html` must not depend on `scribium-engine`.
+
+### Markdown recognition stops at syntax-level preservation
+
+`scribium-markdown` remains responsible for CommonMark/Markdown syntax
+recognition. When raw inline or block HTML is encountered, it preserves the
+original HTML source content required for conversion, whether it occurred in
+block or inline context, and its original `SourceSpan`. The frontend does not
+depend directly on xberg, convert HTML to Typst, generate synthetic Markdown,
+or recursively parse a converted Markdown string. Its responsibility stops at
+syntax-level preservation.
+
+Inline HTML may interact with surrounding Markdown content. The implementation
+must preserve existing Markdown semantic children and HTML syntax/provenance
+accurately; it must not guess balanced HTML ranges or reconstruct Markdown
+strings. The exact mixed-inline algorithm is deferred to physical
+implementation work. Where faithful conversion is not yet possible, the
+content remains foreign HTML and the appropriate compatibility or lowering
+diagnostic is emitted rather than silently changing meaning.
+
+### xberg is isolated behind the adapter
+
+The selected implementation infrastructure is
+`xberg-io/html-to-markdown`. Its structured conversion result, including its
+semantic document structure and visitor/customization facilities, is adapted
+directly by `scribium-html` into Scribium semantics. The exact xberg API calls
+are an implementation detail and are not frozen by PR #46.
+
+The forbidden architecture is:
+
+```text
+HTML
+   ↓
+xberg Markdown string
+   ↓
+scribium-markdown parser
+   ↓
+AST
+```
+
+There must be no HTML → Markdown string → Scribium parser round-trip. The
+intended architecture is:
+
+```text
+HTML
+   ↓
+xberg structured document representation
+   ↓
+scribium-html adapter
+   ↓
+Scribium IR
+```
+
+The adapter produces Scribium semantics, not Typst. Supported constructs are
+normalized into existing backend-neutral concepts where there is a faithful
+mapping, such as paragraphs, headings, strong/emphasis, code, links, lists,
+tables, and line breaks. The final supported-tag matrix is not defined by this
+ADR, and xberg's exposed HTML/CSS concepts do not become IR concepts merely
+because the library exposes them.
+
+When HTML cannot be faithfully expressed as normal Scribium semantics, the
+backend-neutral IR may contain an explicit foreign-content representation. Its
+concept is deliberately illustrative rather than a frozen Rust API:
+
+```text
+ForeignContent
+    format = Html
+    original content
+    original provenance/span
+```
+
+This is permitted for HTML input/content. It is fundamentally different from
+`RawTypst`, `BackendRaw`, or a generic backend-code escape hatch, all of which
+remain forbidden in backend-neutral IR. The exact foreign-content enum or
+struct is not defined by PR #46.
+
+`scribium-typst` consumes backend-neutral IR and must never paste raw HTML into
+generated Typst source, interpret an HTML string as Typst syntax, or silently
+discard unsupported `ForeignContent(Html)`. If such content reaches the
+backend, it must be handled explicitly under the eventual compatibility and
+lowering policy. This ADR does not define the diagnostic code. `scribium-typst`
+does not depend on xberg.
+
+### Original-source provenance remains authoritative
+
+The original HTML fragment's Scribium `SourceSpan` remains authoritative
+provenance. Exact source spans must not be fabricated for nodes produced by
+third-party normalization. If xberg does not provide exact offsets that
+correspond to the original Scribium source, generated child nodes must not
+claim fake byte-precise original spans. Fragment-level provenance may be used
+initially, and a later source-mapping enhancement may improve child mapping.
+Converted or synthetic offsets must never escape as though they were offsets in
+the original `.qd` source.
+
+### Pandoc is an optional external development oracle
+
+Pandoc is selected as an optional external compatibility and development
+oracle. It may be used for differential testing of representative HTML
+semantics, comparison with Pandoc's HTML reader and native AST/JSON, expected
+HTML → Typst conversion investigation, ambiguous interoperability cases, and
+compatibility fixtures or expected-output evidence. Pandoc results are
+reference evidence, not automatically the Scribium specification: CommonMark,
+Quarkdown compatibility policy, and accepted Scribium ADRs take precedence
+when behavior conflicts.
+
+Pandoc is not a Scribium runtime, build, or production dependency. Scribium
+does not link or vendor Pandoc, require it to build, require it for normal unit
+tests, require it at runtime, or route production compilation through a Pandoc
+subprocess. The production path is Scribium → xberg-backed `scribium-html`;
+the development oracle path is tooling or isolated tests → an externally
+installed Pandoc executable. If automated oracle tests are added later, they
+must be isolated from the normal deterministic test suite and use an
+explicitly controlled and pinned Pandoc version. Pandoc is not part of the
+WASM path.
+
+### Adapter independence and WASM
+
+`scribium-html` depends on `scribium-source`, `scribium-ir`, and
+`scribium-diagnostics`, and on no parser, engine, project, or backend crate.
+Its public boundary must not expose xberg types. Replacing xberg must not
+require changes to the `scribium-markdown` public AST contract beyond the raw
+HTML fragment boundary, `scribium-engine` semantic responsibilities,
+`scribium-ir`, or `scribium-typst`.
+
+`scribium-html` is part of the platform-independent compiler path and must be
+capable of compiling for `wasm32-unknown-unknown`. It must not add native
+filesystem, process, or network requirements. If a selected xberg feature set
+prevents the required WASM build, that is an implementation blocker to report
+during physical migration; this ADR does not redesign the boundary around it.
+
 ## Resolution of ownership boundaries
 
 ADR-0015 has no remaining crate-ownership questions:
 
 - `scribium-source` owns backend-neutral source-map representation;
 - the lowering backend owns source-map entry generation;
+- `scribium-html` owns HTML interoperability and third-party HTML-library
+  isolation;
 - `scribium-typst` owns pure IR-to-Typst lowering and Typst lowering
   diagnostics; and
 - `scribium-typst-subprocess` owns only native Typst subprocess execution.
@@ -589,7 +797,7 @@ decisions.
 ## Migration and ADR history
 
 This ADR records target ownership only. It does not add workspace members,
-create crate directories, move Rust modules, change imports or public APIs, or
-change tests and CI. ADR-0002 remains readable as the historical architecture
-that was previously accepted; its workspace/crate-boundary decision is
-superseded by this ADR.
+create crate directories, move Rust modules, add Cargo dependencies, change
+imports or public APIs, or change tests and CI. ADR-0002 remains readable as
+the historical architecture that was previously accepted; its
+workspace/crate-boundary decision is superseded by this ADR.

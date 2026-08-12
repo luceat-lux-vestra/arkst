@@ -28,6 +28,9 @@ scribium-cli
     |                    |
     |                    +---- scribium-engine
     |                               |
+    |                               +----> scribium-html
+    |                               |          |
+    |                               |          +---- HTML semantics / foreign content
     |                               v
     |                         normalized IrDocument
     |                               |
@@ -51,6 +54,7 @@ Shared lower-level target crates:
   scribium-diagnostics  shared diagnostic representation
   scribium-compat       compatibility policy
   scribium-ir           backend-neutral document IR
+  scribium-html         HTML interoperability adapter
 ```
 
 The shared lower-level crates are dependencies of the stages that use them;
@@ -84,7 +88,14 @@ scribium-markdown BlockParser
 Markdown frontend AST
   │
   ▼
-scribium-engine: AST → initial IrDocument
+scribium-engine: AST normalization
+  │
+  ├── delegates raw HTML normalization to scribium-html
+  │     ├── structured xberg result → Scribium semantics
+  │     └── unsupported content → explicit foreign HTML content when needed
+  │
+  ▼
+initial IrDocument
   │
   ▼
 scribium-engine: semantic / evaluation / normalization passes
@@ -155,6 +166,13 @@ Quarkdown call participates as block or inline and owns any following body;
 Markdown parser or AST types. This is a first-party Scribium integration, not
 a plugin API or generic extension framework.
 
+Raw inline and block HTML is recognized by `scribium-markdown` at the syntax
+level. The frontend preserves the original HTML content, its block or inline
+context, and its original `SourceSpan` in the frontend AST. It does not depend
+on xberg, convert HTML to Typst, generate synthetic Markdown, or recursively
+parse an HTML-to-Markdown string. HTML semantic normalization belongs to
+`scribium-engine`'s delegation to `scribium-html`.
+
 The target module layout and migration status are design work under
 `docs/adr/0014-markdown-block-parser-foundation.md`; blockquote behavior is
 intentionally not enabled by the foundation refactor.
@@ -171,6 +189,7 @@ intentionally not enabled by the foundation refactor.
 | scribium-compat          | Quarkdown compatibility policy                                           | Yes  |
 | scribium-ir              | backend-neutral document IR                                              | Yes  |
 | scribium-engine          | AST→IR lowering, semantic/evaluation/normalization, built-ins            | Yes  |
+| scribium-html            | HTML fragment→backend-neutral Scribium semantics/IR adapter             | Yes  |
 | scribium-core            | public facade and compiler orchestration                                 | Yes  |
 | scribium-typst           | pure IR→Typst lowering and source-map generation                         | Yes  |
 | scribium-typst-subprocess | native Typst subprocess adapter                                          | No   |
@@ -361,7 +380,7 @@ callbacks or asynchronous compiler APIs.
 
 | Edition | Scope | Status |
 |---------|-------|--------|
-| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine → normalized IR → pure Typst lowering | Guaranteed target |
+| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine (including `scribium-html` HTML normalization) → normalized IR → pure Typst lowering | Guaranteed target |
 | Full browser compile | Above + Typst compiler running in WASM → PDF/output | M7+ feasibility gate |
 
 The guaranteed compiler/library path includes pure `scribium-typst` lowering;
@@ -491,6 +510,99 @@ The current physical implementation still contains `IrNode::RawTypst`. This is
 a migration artifact only and does not represent accepted target ownership. It
 must be removed or eliminated during the later physical crate/IR migration;
 PR #46 does not decide or implement that code migration.
+
+## HTML Interoperability Policy
+
+`scribium-html` is the target first-party HTML interoperability boundary. It
+converts raw HTML fragments preserved by `scribium-markdown` into
+backend-neutral Scribium semantics/IR; it is not a renderer, a Typst-specific
+crate, or a generator of Typst source. HTML normalization occurs before
+rendering/backend code generation:
+
+```text
+Markdown / Quarkdown source
+        ↓
+scribium-markdown
+        ↓ raw HTML content + block/inline context + original SourceSpan
+frontend AST
+        ↓
+scribium-engine
+        ↓ delegates HTML normalization
+scribium-html
+        ↓
+backend-neutral Scribium IR
+        ↓
+scribium-typst
+```
+
+The frontend recognizes CommonMark/Markdown syntax and preserves raw HTML
+syntax and provenance. It does not depend on xberg, convert HTML to Typst,
+reconstruct Markdown strings, or recursively parse synthetic Markdown. The
+engine invokes `scribium-html` for HTML requiring semantic normalization.
+
+The selected implementation library is `xberg-io/html-to-markdown`, isolated
+inside `scribium-html`. The adapter consumes its structured conversion result
+or equivalent structural API, including semantic document structure and
+visitor/customization facilities, and translates it directly into Scribium
+semantics. The architecture forbids an HTML → xberg Markdown string →
+`scribium-markdown` parser round-trip. xberg types do not cross the
+`scribium-html` public boundary.
+
+Supported HTML is mapped to existing backend-neutral concepts where the
+mapping is faithful, including concepts equivalent to paragraphs, headings,
+strong/emphasis, code, links, lists, tables, and line breaks. The supported-tag
+matrix and exact Rust API are deferred. When faithful normalization is not
+possible, the IR may represent foreign input content conceptually as:
+
+```text
+ForeignContent
+    format = Html
+    original content
+    original provenance/span
+```
+
+This is allowed for HTML input but does not introduce `RawTypst`, `BackendRaw`,
+or a generic backend-code escape hatch; those remain forbidden in
+backend-neutral IR. `scribium-typst` must handle unsupported foreign HTML
+explicitly according to the eventual compatibility/lowering policy. It must
+never paste HTML into Typst source, interpret HTML as Typst syntax, or silently
+discard it. The exact diagnostic code is not defined here.
+
+The original HTML fragment's `SourceSpan` remains authoritative. Child nodes
+produced by third-party normalization must not claim fabricated byte-precise
+spans when xberg offsets do not correspond to the original `.qd` source;
+fragment-level provenance is permitted until a later source-mapping enhancement.
+Mixed inline Markdown/HTML must preserve existing Markdown children and HTML
+provenance without guessed ranges. If faithful conversion is unavailable,
+foreign HTML and the appropriate compatibility/lowering diagnostic preserve the
+meaning.
+
+Target dependencies are:
+
+```text
+scribium-engine -> scribium-html
+scribium-html -> scribium-source
+scribium-html -> scribium-ir
+scribium-html -> scribium-diagnostics
+scribium-html -> xberg-io/html-to-markdown  (implementation only)
+```
+
+`scribium-html` must not depend on `scribium-engine`, `scribium-markdown`,
+`scribium-core`, `scribium-project`, `scribium-typst`, or
+`scribium-typst-subprocess`; `scribium-markdown` and `scribium-typst` must not
+depend on xberg. `scribium-html` is part of the WASM-compatible compiler path
+and must remain free of native filesystem, process, and network requirements.
+
+Pandoc is an optional externally installed development/compatibility oracle,
+not a Scribium dependency. It may provide differential evidence, native
+AST/JSON comparisons, expected-output investigation, or compatibility
+fixtures. Pandoc behavior is reference evidence rather than the Scribium
+specification; accepted CommonMark, Quarkdown, and Scribium ADR contracts win
+when they conflict. Pandoc is not linked, vendored, required to build, needed
+for normal unit tests, used at runtime, or used as a production subprocess.
+Any future oracle tests must be isolated from the normal deterministic suite
+and use an explicitly controlled/pinned Pandoc version. Pandoc is not part of
+the WASM path.
 
 ## Typst Backend Interface
 
