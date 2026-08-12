@@ -3,6 +3,10 @@
 Status: research evidence and recommendation only. This document does not
 accept an architecture, supersede ADR-0014, or migrate production code.
 
+> A subsequent maintained-candidate search is recorded in
+> [`markdown-maintained-substrate-check.md`](markdown-maintained-substrate-check.md).
+> It adds current candidate evidence but likewise makes no architecture decision.
+
 Verified: 2026-08-13 (Asia/Seoul)
 
 ## A. Scribium live repository state
