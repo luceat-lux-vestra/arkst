@@ -32,7 +32,8 @@ The searched universe was:
 - the baseline libraries markdown-rs, comrak, pulldown-cmark, and
   markdown-it-rust;
 - [`rushdown`](https://github.com/yuin/rushdown), `sparkdown`, `ferromark`,
-  `oak-markdown`, `mdx-gen`, `satteri`, and `ndg-commonmark`; and
+  `oak-markdown`, `mdx-gen`, `satteri`, `ndg-commonmark`, and
+  `markdown-that`; and
 - [`tree-sitter-markdown`](https://github.com/tree-sitter-grammars/tree-sitter-markdown)
   as the plausible grammar-based alternative.
 
@@ -50,6 +51,7 @@ the word “markdown” was enumerated.
 | `mdx-gen` | Apache-2.0 and active | rejected: parses with comrak first, then rewrites completed `HtmlBlock` nodes; no new block/inline parser lifecycle is exposed |
 | `satteri` | MIT and active | rejected: its parser is explicitly `satteri-pulldown-cmark`, a fork, while plugins visit AST/HAST after parsing |
 | `ndg-commonmark` | active Nix documentation implementation | rejected: MPL-2.0 and a fixed comrak-based flavor, without generic downstream syntax rules |
+| `markdown-that` | `markdown-that 0.7.1`, MIT workspace license, and an explicit fork of markdown-it-rust with its public rule/ruler model retained | `REJECTED_BEFORE_POC`: technically relevant markdown-it-rust fork, but the current source history has no meaningful source activity after 2025-05-18 |
 | `tree-sitter-markdown` | MIT and active grammar repository | rejected: upstream cautions against correctness-critical use, custom syntax requires grammar modification/regeneration, and WASM does not work out of the box |
 
 The four baseline libraries were not re-benchmarked. No new material evidence
@@ -121,11 +123,16 @@ discipline. A source scan found 341 `unsafe { ... }` blocks across 12 `src`
 files, heavily concentrated in the generated scanner but also present in text,
 parser, utility, and renderer code. Public `Segment::new` accepts arbitrary
 byte indexes while the safe `Segment::str` method uses unchecked string slicing
-and documents that it does not check UTF-8 boundaries. That is an unverified
-safety-invariant risk at a public boundary, not merely an internal performance
-implementation detail. No production adoption can proceed without the
-architecture/security exception and safety proof required by
-`docs/ENGINEERING.md`.
+and documents that it does not check UTF-8 boundaries. The same relationship
+exists for the public safe `Index::new(start, stop)` and `Index::str(source)`
+methods: the constructor represents arbitrary byte positions, while `str`
+uses unchecked slicing and explicitly documents that UTF-8 boundaries are not
+checked. The concern is therefore not simply that the implementation contains
+`unsafe`; a source-slice safety invariant appears to cross a public safe API
+boundary. This report does not classify rushdown as unsound, rejected, or
+accepted, and no broader unsafe audit is part of this gate. No production
+adoption can proceed without the architecture/security exception and safety
+proof required by `docs/ENGINEERING.md`.
 
 ## D. Disposable PoC
 
@@ -180,7 +187,47 @@ Commands and results:
 This demonstrates a lower-bound extension lifecycle. It does not constitute a
 production adapter, an exhaustive Quarkdown grammar, or a safety acceptance.
 
-## E. Direct comparison
+## E. Markdown-that screening record
+
+[`markdown-that`](https://github.com/z0ne-dev/markdown-that) was included in the
+candidate universe because it is a technically relevant fork of markdown-it-rust
+rather than a renderer-only wrapper. The official repository identifies itself
+as forked from `markdown-it-rust/markdown-it`; its README retains the public
+custom syntax claim, and the current source retains public
+[`BlockRule`](https://github.com/z0ne-dev/markdown-that/blob/2f410e3a629219d9f2688b5a67580de725a4e861/crates/markdown-that/src/parser/block/rule.rs),
+[`InlineRule`](https://github.com/z0ne-dev/markdown-that/blob/2f410e3a629219d9f2688b5a67580de725a4e861/crates/markdown-that/src/parser/inline/rule.rs),
+and ordered
+[`Ruler`](https://github.com/z0ne-dev/markdown-that/blob/2f410e3a629219d9f2688b5a67580de725a4e861/crates/markdown-that/src/common/ruler.rs)
+APIs. Those parser mechanics are already covered by the markdown-it-rust
+evidence in the baseline report, so this candidate did not receive a second
+PoC.
+
+The live primary-source snapshot was:
+
+| Field | Observed value |
+| --- | --- |
+| Crate | [`markdown-that 0.7.1`](https://crates.io/crates/markdown-that/0.7.1), published 2025-05-18 |
+| Current HEAD | `2f410e3a629219d9f2688b5a67580de725a4e861` on `master` |
+| Repository created | 2025-05-18T09:27:54Z |
+| Latest source commit | `2f410e3a629219d9f2688b5a67580de725a4e861`, 2025-05-18T15:02:10Z; pushed 2025-05-18T15:04:46Z |
+| License | MIT in the workspace/package metadata |
+| Upstream relationship | fork of markdown-it-rust; 13 commits ahead of the `0.6.1` baseline at this snapshot |
+| Maintenance evidence | no source commit after 2025-05-18; the later repository metadata update was not source activity |
+| WASM/platform | README retains the original browser/WASM demo claim, but current CI only runs stable `cargo test`; no current WASM target check was found. `stacker` is a normal dependency and default features add optional `syntect`, so platform-neutral/WASM suitability is not independently demonstrated |
+
+The README's “updated and maintained crates” wording does not override the
+source history. `markdown-that` therefore fails the mandatory meaningful
+maintenance gate before PoC:
+
+```text
+REJECTED_BEFORE_POC
+```
+
+It is a technically relevant markdown-it-rust fork, but it does not satisfy
+the current meaningful-maintenance gate. It does not change the rushdown versus
+markdown-it-rust comparison or the final recommendation.
+
+## F. Direct comparison
 
 | Criterion                  | rushdown | markdown-it-rust                   |
 | -------------------------- | -------- | ---------------------------------- |
@@ -203,7 +250,7 @@ coverage. Markdown-it-rust has a much longer field history and forbids unsafe
 code, but is stale and retains its open panic and transitive advisory risks.
 The trade-off is not clearly dominated in either direction.
 
-## F. Final recommendation
+## G. Final recommendation
 
 ```text
 ARCHITECTURE_UNRESOLVED
