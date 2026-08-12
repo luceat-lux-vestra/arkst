@@ -1,115 +1,112 @@
 # Architecture — Scribium
 
+This document describes the accepted target architecture defined by ADR-0014
+and ADR-0015. Some target crates are not yet physically extracted from
+`scribium-core`; their current physical location during migration does not
+change their architectural ownership. Implementation and migration status
+must not be confused with target ownership.
+
 ## Context Diagram
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                      User / CI                          │
-│  scribium build | check | inspect | watch              │
-└────────────────────┬───────────────────────────────────┘
-                     │ CLI arguments, config (scribium.toml)
-                     ▼
-┌────────────────────────────────────────────────────────┐
-│                     scribium-cli                        │
-│  Command dispatch, config loading, filesystem I/O       │
-│  Exit codes, human/JSON diagnostics output             │
-└────────────────────┬───────────────────────────────────┘
-                     │ CompileRequest
-                     ▼
-┌────────────────────────────────────────────────────────┐
-│                     scribium-core                       │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │  Source      │  │  Semantic    │  │  Evaluator    │ │
-│  │  Abstraction │  │  Analysis    │  │               │ │
-│  │  Spans       │  │  Scope       │  │  Built-ins    │ │
-│  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘ │
-│         │                 │                   │         │
-│  ┌──────▼─────────────────▼───────────────────▼───────┐ │
-│  │                    IR (Intermediate Representation) │ │
-│  └──────────────────────┬─────────────────────────────┘ │
-│                         │                               │
-│  ┌──────────────────────▼─────────────────────────────┐ │
-│  │              Source Map                             │ │
-│  │  Original positions ↔ Generated positions           │ │
-│  └────────────────────────────────────────────────────┘ │
-│                                                         │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │  compatibility/ (profile, divergence, diagnostics) │ │
-│  └────────────────────────────────────────────────────┘ │
-└────────────────────┬───────────────────────────────────┘
-                     │ TypstDocument
-                     ▼
-┌────────────────────────────────────────────────────────┐
-│                     scribium-typst                      │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  TypstLowering                                    │  │
-│  │  IR → Typst source code                           │  │
-│  │  Source map updates                               │  │
-│  └──────────────────────┬───────────────────────────┘  │
-│                         │ Typst source (.typ)           │
-│  ┌──────────────────────▼───────────────────────────┐  │
-│  │  TypstBackend (trait)                             │  │
-│  │  Subprocess adapter | InProcess adapter (future) │  │
-│  │  → Typst compiler                                 │  │
-│  │  → PDF / HTML / SVG / PNG                        │  │
-│  └──────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────┘
+User / CI
+    |
+    v
+scribium-cli
+    |
+    +------> scribium-project
+    |            |
+    |            +-- VirtualProject / sources / assets / metadata
+    |
+    +------> scribium-core
+                 |
+                 +-- orchestration / CompileOptions / CompileResult
+                 |
+                 v
+          scribium-markdown
+                 | uses
+                 +------> scribium-quarkdown (grammar only)
+                 |
+                 v
+          frontend AST
+                 |
+                 v
+          scribium-engine
+                 |
+                 v
+          normalized IrDocument
+                 |
+                 v
+          scribium-typst
+                 |
+                 +-- Typst source + source map + lowering diagnostics
+                 |
+                 v
+          scribium-typst-subprocess
+          (optional native execution)
+                 |
+                 v
+          Typst compiler output
+
+Shared lower-level target crates:
+  scribium-source       source identity, spans, source-map representation
+  scribium-diagnostics  shared diagnostic representation
+  scribium-compat       compatibility policy
+  scribium-ir           backend-neutral document IR
 ```
+
+The shared lower-level crates are dependencies of the stages that use them;
+their implementations are not owned by `scribium-core`.
 
 ## Compile Pipeline
 
 ```
-Source Text (String)
+VirtualProject
   │
   ▼
-Source Abstraction (SourceId + SourceText)
+core selects entry source, metadata defaults, and compatibility options
   │
   ▼
-Physical-line scanner / classifier
-  (SourceLine + source/span primitives)
+Source text + SourceId
   │
   ▼
-Markdown block parser
-  (current recursive parser; BlockParser state proposed in ADR-0014)
+Markdown physical-line scanner / classifier
+  └── front matter framing at document start
+  │
+  ▼
+scribium-markdown BlockParser
   ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
-  ├── Quarkdown directives: .function, .function {arg} name:{value}
-      (indented block bodies)
-  ├── Expressions: literals, variables, function calls, conditionals
-  └── Front matter: flat key-value metadata block
+  ├── invokes scribium-quarkdown only for Quarkdown call/directive grammar
+  └── owns document-context and body/container decisions
   │
   ▼
-Semantic Analysis
-  ├── Scope resolution
-  ├── Name binding
-  ├── Type checking (basic)
-  └── Compatibility profile application
+Markdown frontend AST
   │
   ▼
-Evaluator
-  ├── Literal evaluation
-  ├── Variable lookup
-  ├── Function/component call
-  ├── Conditional branching
-  ├── Iteration
-  └── Resource limit enforcement
+scribium-engine: AST → initial IrDocument
   │
   ▼
-IR (Document IR)
-  ├── Typst-oriented nodes
-  ├── Content blocks
-  ├── Metadata
-  └── Source span annotations
+scribium-engine: semantic / evaluation / normalization passes
+  ├── scope and name resolution
+  ├── variables, function/component calls, and built-ins
+  ├── conditional branching and iteration
+  ├── compatibility policy application
+  └── resource limit enforcement
   │
   ▼
-Typst Lowering
-  ├── IR → Typst code generation
-  ├── Source map recording
-  └── Escape handling
+normalized backend-neutral IrDocument
   │
   ▼
-Typst Backend (trait)
-  └── Subprocess adapter → typst compile
-      └── PDF / HTML / SVG / PNG + diagnostics
+scribium-typst lowering
+  ├── Typst source
+  ├── source map
+  └── lowering diagnostics
+  │
+  ▼
+optional scribium-typst-subprocess
+  │
+  ▼
+Typst compiler output
 ```
 
 ## Markdown Frontend Boundary
@@ -119,8 +116,8 @@ layer. The implementation currently provides this through `SourceLine` and
 `split_lines` in `syntax/markdown/parser.rs`; there is no separate generic
 tokenizer or token stream.
 
-ADR-0014 proposes the following frontend ownership target. PR #46 does not
-change the physical crate layout or public parser API:
+ADR-0014 establishes the following frontend ownership target. PR #46 does
+not change the physical crate layout or public parser API:
 
 ```text
 source/span primitives
@@ -135,9 +132,15 @@ scribium-markdown::BlockParser
         ↓
 pure Markdown + Quarkdown block candidates
         ↓
-Markdown AST
+Markdown frontend AST
         ↓
-ast_to_ir → evaluator → IR
+scribium-engine
+        ↓
+initial IrDocument
+        ↓
+semantic / evaluation / normalization
+        ↓
+normalized IrDocument
 ```
 
 The target `BlockParser` in `scribium-markdown` owns container continuation,
@@ -156,20 +159,38 @@ intentionally not enabled by the foundation refactor.
 
 ## Crate Boundaries
 
-| Crate               | Responsibility                                          | WASM? |
-|---------------------|---------------------------------------------------------|-------|
-| scribium-core       | Source abstraction, parsing, semantic analysis,         | Yes   |
-|                     | evaluator, built-ins, IR, source map, compatibility     |       |
-| scribium-typst      | Typst lowering, TypstBackend trait, backend adapters    | Yes ¹ |
-| scribium-cli        | CLI dispatch, config, filesystem, output formatting     | No    |
-| scribium-test-support | Fixture loading, golden test utilities, temp projects | No    |
+| Crate                    | Target responsibility                                                    | WASM |
+|--------------------------|--------------------------------------------------------------------------|------|
+| scribium-source          | source identity, spans, source-map representation                        | Yes  |
+| scribium-project         | VirtualProject, source/asset stores, project metadata                    | Yes  |
+| scribium-quarkdown       | Quarkdown grammar                                                        | Yes  |
+| scribium-markdown        | Markdown frontend, AST, BlockParser                                      | Yes  |
+| scribium-diagnostics     | shared diagnostic representation                                         | Yes  |
+| scribium-compat          | Quarkdown compatibility policy                                           | Yes  |
+| scribium-ir              | backend-neutral document IR                                              | Yes  |
+| scribium-engine          | AST→IR lowering, semantic/evaluation/normalization, built-ins            | Yes  |
+| scribium-core            | public facade and compiler orchestration                                 | Yes  |
+| scribium-typst           | pure IR→Typst lowering and source-map generation                         | Yes  |
+| scribium-typst-subprocess | native Typst subprocess adapter                                          | No   |
+| scribium-cli             | native host, filesystem/config/output composition                         | No   |
+| scribium-test-support    | fixtures/test utilities                                                   | No   |
 
-¹ Lowering layer only (not subprocess backend).
+These are target architectural boundaries. Physical workspace extraction is
+a subsequent migration.
 
 ## Platform Independence
 
-`scribium-core` and `scribium-typst` (lowering only) MUST compile for
-`wasm32-unknown-unknown`. CI enforces this on every push.
+All platform-independent compiler/library crates in the table marked Yes must
+remain filesystem/network/process independent and compile for
+`wasm32-unknown-unknown`.
+
+Native host/adapter crates such as:
+
+- `scribium-cli`
+- `scribium-typst-subprocess`
+- `scribium-test-support`
+
+are not subject to that requirement.
 
 ### Forbidden in core crates
 
