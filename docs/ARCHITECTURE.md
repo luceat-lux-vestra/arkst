@@ -868,40 +868,199 @@ implementation.
 
 ## Configuration Model
 
+Scribium uses `scribium.toml` as the project-level configuration file.
+Discovery starts at the entry-file directory and walks upward to the
+filesystem root or git root according to ADR-0008. CLI flags override file
+configuration. Configuration supports project settings, output-target
+selection, resource limits, and compatibility settings.
+
+The following is illustrative rather than a permanently frozen complete
+configuration schema. A field is contractual only when it is fixed by an
+Accepted ADR or an implemented public contract.
+
 ```toml
-# scribium.toml (project-level)
+# Illustrative scribium.toml (project-level)
 [project]
 name = "my-doc"
 root = "."
 entry = "src/main.qd"
 
 [output]
-targets = ["pdf", "html"]
+targets = ["pdf"] # illustrative
 dir = "out"
 
 [typst]
-backend = "subprocess"
-packages = []
+backend = "subprocess" # illustrative host-level backend selection
 
 [resources]
-max_source_size = "10MB"
-max_include_depth = 16
-max_evaluation_steps = 100000
-max_loop_iterations = 10000
-max_recursion_depth = 64
+max_source_size = "10MB" # illustrative value
+max_include_depth = 16 # illustrative value
+max_evaluation_steps = 100000 # illustrative value
+max_loop_iterations = 10000 # illustrative value
+max_recursion_depth = 64 # illustrative value
 
 [compatibility]
-profile = "quarkdown-v2.5"
+profile = "quarkdown-v2.5" # illustrative profile value
 strict = false
 ```
 
+The native CLI/host owns configuration-file discovery, reading and parsing
+`scribium.toml`, CLI override application, native output directory/path
+configuration, selection of the concrete Typst compiler adapter, and
+filesystem-related host configuration. Lower compiler crates must not discover
+or read `scribium.toml` themselves.
+
+`scribium-project` owns normalized in-memory project information required to
+describe the compilation project. `scribium-core` consumes normalized compiler
+options and the completed `VirtualProject`. Exact Rust conversion APIs are not
+frozen here.
+
+```text
+scribium.toml + CLI flags
+          |
+          v
+scribium-cli / host
+          |
+          +---- project information ----> scribium-project / VirtualProject
+          |
+          +---- compiler options -------> scribium-core / CompileOptions
+          |
+          +---- backend selection ------> host composition
+```
+
+Compiler/language options include the compatibility profile, strictness or
+compatibility behavior, and semantic/evaluation resource limits. Host/output
+options include the output path or directory, requested output target,
+selected Typst compiler adapter, and native filesystem behavior. Output-path
+or subprocess configuration does not belong in `scribium-engine` or another
+platform-independent compiler crate. `VirtualProject` does not select a
+native backend executable.
+
+ADR-0008 requires output-target selection, but backend capability is not a
+fixed architecture-wide list. Users may request output targets through
+configuration or CLI flags; the selected Typst compiler backend determines
+whether each requested target is available. An unsupported target request
+produces a clear configuration or backend diagnostic. The IR and lowering
+model do not hard-code backend capabilities, and this document does not define
+a permanent target enum.
+
+The `backend` setting is a host-level concept. The exact platform-neutral
+Typst compiler-input model for fonts, packages, and compiler assets/resources
+remains intentionally unfrozen by ADR-0015. No package, font, or resource
+configuration is defined here; additional backend/compiler-resource fields
+require their own accepted contract.
+
+Resource-limit concepts remain part of configuration, including source/input
+size, include depth, evaluation steps, loop iterations, and recursion depth.
+The numeric values in the example are not permanent API guarantees unless
+established elsewhere. Each limit is enforced by the stage that performs the
+bounded operation:
+
+```text
+source/input size
+    -> project/host ingestion boundary
+include/project traversal limits
+    -> responsible project/host or compiler stage
+evaluation steps
+loop iterations
+recursion depth
+    -> scribium-engine
+```
+
+`scribium-core` does not centralize every limit. It carries normalized options
+to the stages that enforce them.
+
+Compatibility configuration remains conceptually:
+
+```toml
+[compatibility]
+profile = "..." # illustrative profile selection
+strict = false
+```
+
+The example profile value is illustrative, not a promise that one specific
+Quarkdown version is permanently the default. The CLI/host parses the setting
+and passes normalized compatibility selection into compilation.
+`scribium-compat` owns compatibility-policy definitions, while
+`scribium-core` distributes the selected policy and options to the stages that
+need them. Individual frontend or backend crates do not parse `scribium.toml`.
+
 ## Security Boundaries
 
-- No shell execution from document source
-- No network access by default
-- Filesystem access scoped to project root
-- Absolute includes denied by default
-- Symlink escape denied
-- Resource limits enforced at evaluation time
-- No hidden global mutable state
-- Generated Typst output is deterministic
+### Language/compiler guarantees
+
+Platform-independent compiler crates must:
+
+- never execute shell commands originating from document source;
+- perform no filesystem access;
+- perform no network access;
+- perform no native process execution;
+- contain no hidden global mutable state affecting deterministic compilation;
+- enforce their own semantic/evaluation resource limits; and
+- preserve deterministic behavior for identical in-memory inputs and options.
+
+The HTML interoperability layer follows the same restrictions.
+`html-to-markdown-rs` usage inside `scribium-html` must not introduce
+filesystem, network, or process access. HTML normalization must not fetch
+remote resources; an HTML element referring to a remote URL does not cause
+network I/O merely because the element exists.
+
+### Native host security
+
+The CLI/native host owns and enforces:
+
+- filesystem access;
+- project-root containment;
+- configuration-file discovery;
+- OS-path canonicalization;
+- symlink containment;
+- absolute-path/include policy at the native filesystem boundary;
+- output-path safety; and
+- native process execution when a concrete backend requires it.
+
+These OS policies are not attributed to `scribium-core` or
+`scribium-project`. Once content is inside `VirtualProject`, compiler crates
+operate only on virtual or in-memory project data. `scribium-engine`,
+`scribium-markdown`, and `scribium-html` do not resolve OS paths.
+
+### Controlled Typst subprocess exception
+
+Compiler and library crates do not spawn processes as part of the
+platform-independent compiler boundary. This does not prohibit the explicitly
+native `scribium-typst-subprocess` adapter from invoking the Typst executable:
+
+```text
+document source
+    -X-> arbitrary shell/process execution
+
+scribium-typst-subprocess
+    ---> controlled Typst executable invocation
+         selected by the trusted host boundary
+```
+
+Document content must never select an arbitrary executable or command line.
+The concrete backend is selected and configured by the trusted host boundary.
+This architecture does not design sandboxing or privilege separation.
+
+### Filesystem, network, and determinism policy
+
+Platform-independent compiler crates perform no network access. Any future
+network-backed package or resource acquisition belongs to an explicit
+host/tooling adapter and requires a separate architecture and security
+decision; no such adapter is defined here.
+
+Project-root containment, absolute include restrictions, and symlink escape
+prevention are native host filesystem policies. Compiler crates receive only
+virtual or in-memory project data after host ingestion.
+
+For identical `VirtualProject`, compiler options, compatibility policy, and
+relevant pinned tool/library versions, Scribium's platform-independent
+compilation and Typst code generation are deterministic. Native compiler
+execution may additionally depend on the selected or pinned Typst compiler and
+its explicitly supplied resources. This does not promise reproducible PDF
+bytes across arbitrary Typst/compiler, font, or platform versions. Pandoc is
+not part of production determinism; it remains an optional development oracle.
+
+These are target ownership boundaries. The current physical crate layout may
+not enforce every boundary yet; this section does not modify that migration
+state or add configuration fields solely for future possibilities.
