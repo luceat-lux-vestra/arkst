@@ -1,5 +1,11 @@
 # Markdown parser substrate spike
 
+> **Preliminary research record.** The markdown-rs/thin-fork recommendation
+> below was subsequently tested and superseded by the
+> [final feasibility gate](markdown-substrate-final-feasibility.md). Do not
+> treat this document's recommendation as the current architecture
+> recommendation.
+
 Status: research evidence and recommendation only. This document does not
 accept a new architecture, supersede ADR-0014, or migrate production code.
 

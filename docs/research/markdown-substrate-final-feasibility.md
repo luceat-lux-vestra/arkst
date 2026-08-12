@@ -100,6 +100,36 @@ pathological groups passed. It offers CommonMark plus selected extras such as
 tables and strikethrough, but does not provide markdown-rs's complete built-in
 GFM bundle (notably no built-in task-list/footnote equivalent was found).
 
+### Dependency-review evidence from PR #49
+
+The first PR run at `f0585a679ac1eb50d374b734be46f1201b212b09`
+failed the repository's unchanged Dependency Review policy. The check reported
+the following moderate-severity addition from the disposable PoC lockfile:
+
+```text
+tools/spikes/markdown-final-feasibility/Cargo.lock
+  markdown-it 0.6.1
+    -> mdurl 0.3.1
+      -> idna 0.3.0
+         GHSA-h97m-ww89-6jmq
+         CVE-2024-12224
+         RUSTSEC-2024-0421
+```
+
+The advisory covers `idna` versions before 1.0.0. The same dependency path was
+also present in the preliminary spike lockfile. Low OpenSSF scores for several
+new transitive packages were emitted as warnings, not as the failing
+condition. This live failure strengthens the existing dependency-health risk;
+removing disposable lockfiles from version control does not make the upstream
+dependency chain safe or acceptable for production.
+
+These PoCs are research fixtures, not adopted production dependencies. Their
+manifests retain exact direct versions, while their locally generated
+`Cargo.lock` files are ignored and not committed. This preserves the checked
+source and direct-version recipe without presenting a one-run research
+resolution as a production dependency addition. No Dependency Review setting,
+severity threshold, advisory allow-list, or path exclusion was changed.
+
 ## C. Phase A — vanilla markdown-rs feasibility
 
 The disposable PoC in
