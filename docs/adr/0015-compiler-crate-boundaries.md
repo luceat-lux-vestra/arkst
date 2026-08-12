@@ -187,9 +187,9 @@ scribium-engine
     v
 scribium-html
     |
-    | backend-neutral Scribium semantics or explicit foreign HTML content
+    | returns backend-neutral Scribium semantics or explicit foreign HTML content
     v
-scribium-engine
+scribium-engine (continues normalization/evaluation)
     |
     | normalized IrDocument
     v
@@ -564,10 +564,9 @@ not designed by this ADR.
 
 ## Decision 12: lowering and compiler-backend interfaces remain separate
 
-A platform-neutral Typst backend contract may remain associated with
-`scribium-typst` if needed, but it must not require filesystem or process
-types. Lowering must be usable without constructing or selecting a compiler
-backend. Conceptually:
+The platform-neutral Typst backend contract belongs to `scribium-typst`, but it
+must not require filesystem or process types. Lowering must be usable without
+constructing or selecting a compiler backend. Conceptually:
 
 `scribium-typst` may own the platform-neutral compiler-backend contract, but
 concrete Typst compiler execution implementations do not belong to the pure
@@ -766,7 +765,8 @@ when behavior conflicts.
 Pandoc is not a Scribium runtime, build, or production dependency. Scribium
 does not link or vendor Pandoc, require it to build, require it for normal unit
 tests, require it at runtime, or route production compilation through a Pandoc
-subprocess. The production path is Scribium → xberg-backed `scribium-html`;
+subprocess. The production path is Scribium → `html-to-markdown-rs`-backed
+`scribium-html`;
 the development oracle path is tooling or isolated tests → an externally
 installed Pandoc executable. If automated oracle tests are added later, they
 must be isolated from the normal deterministic test suite and use an
@@ -806,6 +806,22 @@ without replacing their behavioral, backend-strategy, or source-map fidelity
 decisions.
 
 ## Migration and ADR history
+
+Physical migration can proceed through bounded, reviewable steps:
+
+1. establish the accepted crate boundaries physically;
+2. migrate source, project, diagnostic, compatibility, and IR ownership
+   without behavior changes;
+3. establish the frontend, engine, and backend boundaries;
+4. add `scribium-html` and isolate `html-to-markdown-rs` when HTML
+   interoperability is implemented;
+5. implement the authoritative Markdown `BlockParser` foundation;
+6. preserve the existing regression baseline throughout; and
+7. add BlockQuote behavior only in a later feature PR.
+
+This is a sequence of bounded migrations, not a requirement for one large
+implementation PR. The parser foundation remains deferred until this
+architecture PR is merged.
 
 This ADR records target ownership only. It does not add workspace members,
 create crate directories, move Rust modules, add Cargo dependencies, change

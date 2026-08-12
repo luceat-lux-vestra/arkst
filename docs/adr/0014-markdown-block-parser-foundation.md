@@ -109,9 +109,9 @@ Source abstraction
   → frontend AST
 ```
 
-- architecture documentation must clearly distinguish current implementation from accepted/proposed target architecture;
-- proposed target layers may be documented before physical extraction when they are explicitly identified as design targets;
-- documentation must never claim that a proposed crate or layer already exists when it does not.
+- architecture documentation must clearly distinguish current implementation from the accepted target architecture;
+- accepted target layers may be documented before physical extraction when they are explicitly identified as design targets;
+- documentation must never claim that a target crate or layer already exists physically when it does not.
 
 ## Decision 3: one authoritative `BlockParser` state
 
@@ -239,7 +239,7 @@ translation with one reusable source-mapping boundary.
 
 ## Module boundary
 
-The future `scribium-markdown` frontend target layout is:
+The target `scribium-markdown` frontend layout is:
 
 ```text
 crates/scribium-markdown/src/
@@ -280,14 +280,14 @@ The foundation PR is behavior-preserving for `main`. It does not:
 - redesign AST/IR/evaluator/Typst;
 - physically create or move crates;
 - add a public parser trait;
-- this ADR does not decide the remaining compiler boundaries owned by ADR-0015, including diagnostics, IR, evaluation, compatibility, and backend/lowering responsibilities.
+- decide the remaining compiler boundaries owned by ADR-0015, including diagnostics, IR, evaluation, compatibility, and backend/lowering responsibilities;
 - treat crate extraction as complete before the architecture is accepted and
   the migration is performed; or
 - special-case CommonMark examples outside the centralized state rules.
 
 PR #46 defines the target frontend ownership. Crate extraction is a
-prerequisite migration after the architecture is accepted and before the new
-`BlockParser` implementation is treated as complete.
+prerequisite migration after PR #46 is merged and before the new `BlockParser`
+implementation is treated as complete.
 
 The foundation must freeze and preserve paragraphs, soft/hard breaks, headings,
 thematic breaks, unordered/ordered/nested lists, list continuation, fenced

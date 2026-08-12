@@ -7,6 +7,10 @@
 
 Superseded by ADR-0015.
 
+The four-crate ownership decision below is historical. ADR-0015 defines the
+current target crate boundaries; the remaining sections are retained as
+historical context where they are not superseded.
+
 ## Context
 
 The initial crate structure must support the compiler pipeline without

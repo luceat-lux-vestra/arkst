@@ -15,7 +15,8 @@ diagnostics, and predictable exit codes.
 - Errors must be machine-parseable (JSON) and human-readable
 - Error codes must be stable across versions
 - Libraries must never call `process::exit`
-- Source locations must always be preserved
+- Reliable original-source locations must be preserved when available; generated
+  or synthetic offsets must not be reported as original source locations
 
 ## Considered Options
 

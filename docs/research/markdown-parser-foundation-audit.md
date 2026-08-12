@@ -1,6 +1,6 @@
 # Markdown Parser Foundation Audit
 
-- **Status:** Design review requested
+- **Status:** Accepted design evidence
 - **Baseline:** `main` at `06daad7` (2026-08-11 audit)
 - **Related work:** closed PR #45; retained branch `feat/m2-blockquotes`
 - **Scope:** parser architecture and migration design only
@@ -14,9 +14,9 @@ lazy continuation. PR #45 made the missing ownership visible: the blockquote
 collector acquired a second state machine that replays list, quote, fence, and
 leaf rules while the real parser still owns those rules elsewhere.
 
-The foundation should therefore move the Markdown frontend to the future
+The physical migration should move the Markdown frontend to the target
 `scribium-markdown` crate, with block parsing behind one authoritative
-`BlockParser` state. Quarkdown-specific grammar belongs in the future
+`BlockParser` state. Quarkdown-specific grammar belongs in the target
 `scribium-quarkdown` crate, which `scribium-markdown` may call. Blockquote
 remains out of the foundation implementation; it is a later container
 migration using the same state machinery. PR #46 defines this ownership but
@@ -46,9 +46,10 @@ the evaluator recursively evaluates directive bodies and unordered-list item
 nodes. Neither downstream layer should participate in block-container
 ownership.
 
-The architecture document currently describes a `Lexer / Tokenizer` between
-source abstraction and parser (`docs/ARCHITECTURE.md:63-76`), but no such layer
-exists in the implementation. The actual first lexical unit is `SourceLine`.
+An earlier architecture draft described a `Lexer / Tokenizer` between source
+abstraction and parser, but no such layer exists in the implementation. The
+accepted architecture now uses `SourceLine` and the physical-line
+scanner/classifier as the first lexical unit.
 
 ## Responsibility audit
 
@@ -95,7 +96,7 @@ exists in the implementation. The actual first lexical unit is `SourceLine`.
    nested argument content. That recursion is different from block-container
    reparsing and should be isolated rather than removed indiscriminately.
 
-## Decisions for review
+## Accepted design decisions
 
 ### Frontend crate ownership
 
@@ -104,14 +105,14 @@ The target frontend split is `scribium-markdown` for the Markdown frontend and
 line scanning, `LineView`, `BlockParser`, container lifecycle, Markdown
 recognizers, inline parsing, front-matter framing, block-layer recovery, and
 the frontend AST. The Quarkdown crate owns call and argument grammar only; it
-does not own Markdown parser state or AST types. Extraction is deferred until
-after the architecture is accepted.
+does not own Markdown parser state or AST types. Extraction remains deferred to
+the post-merge physical migration.
 
 ### Lexer/tokenizer terminology
 
 Choose Option B: the physical-line scanner and classifier are Scribium's
 Markdown frontend lexical layer. Do not add a token stream merely to satisfy
-the current architecture diagram. The architecture document should replace
+the current architecture diagram. The accepted architecture document replaces
 the nonexistent generic lexer box with `physical-line scanner/classifier`,
 then `BlockParser`.
 
@@ -142,7 +143,7 @@ Recognizers may classify a candidate but may not advance the cursor, mutate the
 container stack, collect a body, or start a lazy continuation. Those operations
 belong only to `BlockParser`.
 
-## Proposed module structure
+## Target module structure
 
 ```text
 crates/scribium-markdown/src/

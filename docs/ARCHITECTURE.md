@@ -18,9 +18,9 @@ scribium-cli
     |         |
     |         +---- constructs VirtualProject
     |
-    +----> scribium-core
+    +----> scribium-core (facade/orchestration)
     |         |
-    |         +---- compiles VirtualProject
+    |         +---- consumes VirtualProject and coordinates compiler stages
     |                    |
     |                    +---- scribium-markdown
     |                    |          |
@@ -164,7 +164,9 @@ neither recognizer owns parser state. `scribium-markdown` decides whether a
 Quarkdown call participates as block or inline and owns any following body;
 `scribium-quarkdown` owns only Quarkdown grammar and must not depend on
 Markdown parser or AST types. This is a first-party Scribium integration, not
-a plugin API or generic extension framework.
+a plugin API or generic extension framework. Each physical line follows one
+`BlockParser` transition path; transformed or synthetic Markdown is never
+recursively reparsed to rediscover container state.
 
 Raw inline and block HTML is recognized by `scribium-markdown` at the syntax
 level. The frontend preserves the original HTML content, its block or inline
@@ -191,7 +193,7 @@ intentionally not enabled by the foundation refactor.
 | scribium-engine          | AST→IR lowering, semantic/evaluation/normalization, built-ins            | Yes  |
 | scribium-html            | HTML fragment→backend-neutral Scribium semantics/IR adapter             | Yes  |
 | scribium-core            | public facade and compiler orchestration                                 | Yes  |
-| scribium-typst           | pure IR→Typst lowering and source-map generation                         | Yes  |
+| scribium-typst           | pure IR→Typst lowering, source-map generation, and platform-neutral compiler contract | Yes  |
 | scribium-typst-subprocess | native Typst subprocess adapter                                          | No   |
 | scribium-cli             | native host, filesystem/config/output composition                         | No   |
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
@@ -369,12 +371,14 @@ This design ensures:
 
 ### Synchronous Core, Async Host
 
-The host gathers all required filesystem, network, and resource input before
-core compilation. It constructs or updates the complete in-memory
+The host gathers all required filesystem and explicitly supplied resource input
+before core compilation. It constructs or updates the complete in-memory
 `VirtualProject`, then `scribium-core` performs synchronous, deterministic
 compilation over that project. Host-side acquisition may itself be
 asynchronous, but lower compiler crates do not request missing sources through
-callbacks or asynchronous compiler APIs.
+callbacks or asynchronous compiler APIs. Any future network-backed resource
+acquisition requires a separate host/tooling architecture and security
+decision.
 
 ### WASM Editions
 
@@ -642,8 +646,8 @@ implementation. It remains usable in WASM.
 
 ### Stage B — Typst compiler execution
 
-Compiler execution is a distinct operation after lowering. A platform-neutral
-compiler backend contract may remain owned by `scribium-typst`:
+Compiler execution is a distinct operation after lowering. The
+platform-neutral compiler backend contract is owned by `scribium-typst`:
 
 ```text
 Typst source

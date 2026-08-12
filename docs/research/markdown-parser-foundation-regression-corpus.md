@@ -78,4 +78,3 @@ The foundation PR may add these cases as named fixtures or disabled corpus
 records, but it must not add a `BlockQuote` AST/IR node or make them pass by
 enabling blockquote syntax. The later `feat/m2-blockquotes-v2` PR owns the
 activation and all expected semantic/lowering output changes.
-
