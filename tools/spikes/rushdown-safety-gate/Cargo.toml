@@ -11,6 +11,3 @@ invalid-cases = []
 
 [dependencies]
 rushdown = { version = "=0.18.0", default-features = false, features = ["std", "html-entities"] }
-
-[dev-dependencies]
-proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
