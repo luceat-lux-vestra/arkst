@@ -743,28 +743,128 @@ architecture only and does not split the Rust implementation.
 
 ## Error Model
 
-```
-Diagnostic
-├── code: "E0001" (stable diagnostic code)
-├── severity: Error | Warning | Hint
-├── message: "concise description"
-├── primary_span: SourceSpan
-├── secondary_spans: Vec<SourceSpan>
-├── hints: Vec<String>
-├── include_stack: Vec<SourceLocation>
-└── expansion_stack: Vec<CallLocation>
+The target common diagnostic representation is conceptually:
 
-Error codes:
-  E1xxx - Syntax
-  E2xxx - Semantic
-  E3xxx - Evaluation
-  E4xxx - Lowering
-  E5xxx - Typst backend
-  E6xxx - Project/config
-  E7xxx - IO/assets
-  E8xxx - Compatibility
-  E9xxx - Internal invariant
+```text
+Diagnostic
+├── code
+├── severity
+├── message
+├── primary: optional SourceSpan
+├── secondary: zero or more SourceSpan
+└── hints
 ```
+
+This is a shared representation, not a frozen Rust structure or collection
+schema. Diagnostic codes are stable, severity is structured, and the message
+is human-readable. A primary original-source location is optional; secondary
+original-source locations and hints may be attached. A diagnostic does not
+require a user-source location when none can be established reliably. This
+includes project/configuration failures, native filesystem failures, Typst
+executable or backend failures, and internal failures without a reliable
+user-source location.
+
+The common representation does not require speculative include or expansion
+context. Additional context may be introduced later when concrete diagnostics
+justify it, without changing the basic ownership rule.
+
+`scribium-diagnostics` owns the shared diagnostic representation only. It does
+not own the semantic meaning of every compiler failure. The stage detecting a
+problem owns construction and semantics:
+
+```text
+syntax / Markdown parsing
+    -> scribium-markdown
+HTML normalization
+    -> scribium-html
+semantic analysis / evaluation / normalization
+    -> scribium-engine
+compatibility policy violations
+    -> scribium-compat
+Typst code generation / lowering
+    -> scribium-typst
+Typst compiler execution
+    -> concrete Typst backend adapter
+       (`scribium-typst-subprocess` for the current native adapter)
+project-model validation
+    -> scribium-project
+native filesystem/config/host failures
+    -> scribium-cli / host
+```
+
+All compiler stages use the common representation from
+`scribium-diagnostics` where a structured user-facing compiler diagnostic is
+appropriate. `scribium-core` aggregates compiler-stage diagnostics into
+`CompileResult`; it must not become the implementation owner of all diagnostic
+codes.
+
+ADR-0009 remains authoritative for stable diagnostic-code ranges and process
+exit codes. The ranges are:
+
+```text
+E1xxx - Syntax
+E2xxx - Semantic
+E3xxx - Evaluation
+E4xxx - Lowering
+E5xxx - Typst backend
+E6xxx - Project/config
+E7xxx - IO/assets
+E8xxx - Compatibility
+E9xxx - Internal invariant
+```
+
+HTML conversion diagnostics use the existing category appropriate to their
+actual semantic meaning. This architecture does not create a new HTML or
+subprocess range and does not decide individual HTML diagnostic codes.
+
+Structured diagnostics and typed Rust operational errors remain separate.
+Structured diagnostics are for user-facing compiler problems for which
+Scribium can report a stable, structured problem, such as syntax, semantic,
+compatibility, unsupported-lowering, or source-related compiler failures.
+Library crates use typed Rust errors, normally via `thiserror`, for operational
+or API failures where returning a Rust error is appropriate. Not every Rust
+error type requires a diagnostic code, and not every `thiserror` variant must
+contain a `Diagnostic`. `Diagnostic` is not a universal error type.
+
+The CLI/host owns process-level reporting and exit behavior. Library crates
+must never call `std::process::exit(...)`. The CLI may use `anyhow` for
+top-level aggregation/reporting, and exit-code selection remains owned by the
+CLI according to ADR-0009.
+
+Lowering and compiler-execution failures remain distinct:
+
+```text
+Scribium IR -> Typst source failure
+    -> scribium-typst
+    -> E4xxx lowering diagnostic where applicable
+
+Typst compiler execution failure
+    -> concrete Typst backend adapter
+    -> E5xxx Typst-backend diagnostic or typed backend error as appropriate
+```
+
+Native subprocess errors belong to `scribium-typst-subprocess`, including
+executable-not-found, process-spawn, process-exit, and temporary-file or
+adapter-filesystem failures. They must not force native OS or process error
+types into the platform-neutral Typst backend contract. Exact conversion APIs
+are not defined here.
+
+ADR-0009 requires source locations to be preserved. When a diagnostic
+originates from source content and a reliable original-source location exists,
+it is preserved. Transformed or synthetic offsets must never be reported as
+original source offsets. If no meaningful original-source location exists, the
+diagnostic has no primary `SourceSpan`; a span must not be fabricated merely
+to satisfy the representation.
+
+This follows the HTML provenance policy: xberg-produced child offsets must not
+be reported as original `.qd` source offsets unless they can be mapped
+reliably. Fragment-level provenance or no primary location is preferable to a
+fabricated original-source span.
+
+The current physical implementation still has
+`crates/scribium-core/src/diagnostics.rs`. That is migration state. Target
+ownership is `scribium-diagnostics`; PR #46 does not modify the Rust
+implementation.
 
 ## Configuration Model
 
