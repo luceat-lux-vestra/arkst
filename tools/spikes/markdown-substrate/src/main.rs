@@ -3,14 +3,30 @@ use markdown::mdast::Node as MdastNode;
 use markdown::{to_mdast, Constructs, Options as MarkdownOptions, ParseOptions};
 use markdown_it::parser::block::{BlockRule, BlockState};
 use markdown_it::parser::inline::{InlineRule, InlineState};
-use markdown_it::plugins::cmark;
+use markdown_it::plugins::{cmark, html};
 use pulldown_cmark::{Event, Options as PulldownOptions, Parser, Tag};
+use std::cell::Cell;
 use std::fmt::Debug;
 
 const UTF8: &str = "한글 **bold** text";
 const FIXTURE: &str = "# Heading\r\n\r\nNormal **Markdown** and [link](https://example.com).\r\n.foo {bar}\r\nText before .foo {bar} and **after**.\r\n- item\r\n  .foo {bar}\r\n    body\r\n> .foo {bar}\r\n> continued **Markdown**\r\n`inline .foo {not-a-call}`\r\n```text\r\n.foo {not-a-call}\r\n```\r\n";
 const EDGE_FIXTURE: &str = "- outer\r\n  - inner\r\n    body\r\n> outer quote\r\n> > nested quote\r\n> > - list in quote\r\n> >   .foo {bar}\r\n- item with quote\r\n  > quote inside list\r\n  > lazy continuation\r\n*before* .foo {bar} **after**\r\n[.foo {not-a-call}](https://example.com)\r\n<span>.foo {not-a-call}</span>\r\n.outer {.inner {value}}\r\n.align {center}\r\n  body **Markdown**\r\n";
 const FRONT_MATTER: &str = "---\r\ntitle: Demo\r\n---\r\n\r\n# Heading\r\n";
+const EXTENSION_FIXTURE: &str = "\
+.foo {bar}\r\n\
+- item\r\n\
+  .foo {bar}\r\n\
+> .foo {bar}\r\n\
+*before* .foo {bar} **after**\r\n\
+[.foo {bar}](https://example.com)\r\n\
+![.foo {bar}](image.png)\r\n\
+\\.foo {bar}\r\n\
+&period;foo {bar}\r\n\
+<span>.foo {bar}</span>\r\n\
+`inline .foo {bar}`\r\n\
+```text\r\n\
+.foo {bar}\r\n\
+```\r\n";
 
 fn main() {
     markdown_rs();
@@ -126,6 +142,7 @@ fn markdown_it() {
 
     let md = &mut markdown_it::MarkdownIt::new();
     cmark::add(md);
+    html::add(md);
     md.block.add_rule::<QuarkdownBlockRule>().before_all();
     md.inline.add_rule::<QuarkdownInlineRule>().before_all();
     let tree = md.parse(".foo {bar}\nText .foo {bar} and `inline .foo {not-a-call}`\n");
@@ -139,8 +156,45 @@ fn markdown_it() {
     let edge = format!("{edge:?}");
     assert!(edge.contains("Blockquote"));
     assert!(edge.contains("Link"));
+    verify_markdown_it_extension_context(md);
     let frontmatter = md.parse(FRONT_MATTER);
     assert!(!format!("{frontmatter:?}").contains("FrontMatter"));
+}
+
+fn verify_markdown_it_extension_context(md: &markdown_it::MarkdownIt) {
+    let tree = md.parse(EXTENSION_FIXTURE);
+    let block_count = Cell::new(0);
+    let inline_count = Cell::new(0);
+    let inline_in_link_count = Cell::new(0);
+    let exact_spans = Cell::new(0);
+
+    tree.walk(|node, _| {
+        if node.is::<QuarkdownBlock>() {
+            block_count.set(block_count.get() + 1);
+        }
+        if let Some(value) = node.cast::<QuarkdownInline>() {
+            inline_count.set(inline_count.get() + 1);
+            if value.link_level > 0 {
+                inline_in_link_count.set(inline_in_link_count.get() + 1);
+            }
+        }
+        if node.srcmap.is_some_and(|map| {
+            &EXTENSION_FIXTURE[map.get_byte_offsets().0..map.get_byte_offsets().1] == ".foo {bar}"
+        }) {
+            exact_spans.set(exact_spans.get() + 1);
+        }
+    });
+
+    // The block rule participates after list/blockquote rules adjust their
+    // nested BlockState, so all three standalone calls become custom blocks.
+    assert_eq!(block_count.get(), 3);
+    // Ordinary text, link text, image text, and HTML text currently invoke
+    // this deliberately naive rule. Escaped/entity spelling and code
+    // spans/fences do not. Production policy must use the exposed state and
+    // precedence controls to narrow those contexts.
+    assert_eq!(inline_count.get(), 4);
+    assert_eq!(inline_in_link_count.get(), 2);
+    assert_eq!(exact_spans.get(), 7);
 }
 
 #[derive(Debug)]
@@ -161,7 +215,9 @@ impl BlockRule for QuarkdownBlockRule {
 }
 
 #[derive(Debug)]
-struct QuarkdownInline;
+struct QuarkdownInline {
+    link_level: i32,
+}
 
 impl markdown_it::NodeValue for QuarkdownInline {}
 
@@ -173,9 +229,14 @@ impl InlineRule for QuarkdownInlineRule {
     fn run(state: &mut InlineState) -> Option<(markdown_it::Node, usize)> {
         let input = &state.src[state.pos..state.pos_max];
         let call = ".foo {bar}";
-        input
-            .starts_with(call)
-            .then(|| (markdown_it::Node::new(QuarkdownInline), call.len()))
+        input.starts_with(call).then(|| {
+            (
+                markdown_it::Node::new(QuarkdownInline {
+                    link_level: state.link_level,
+                }),
+                call.len(),
+            )
+        })
     }
 }
 

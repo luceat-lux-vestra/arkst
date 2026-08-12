@@ -3,7 +3,7 @@
 Status: research evidence and recommendation only. This document does not
 accept a new architecture, supersede ADR-0014, or migrate production code.
 
-Verified: 2026-08-12 (Asia/Seoul)
+Verified: 2026-08-13 (Asia/Seoul)
 
 ## Scope and method
 
@@ -16,6 +16,13 @@ The candidate repositories, tags, source, tests, dependency manifests, and
 public APIs were inspected directly. The disposable PoC is in
 [`tools/spikes/markdown-substrate`](../../tools/spikes/markdown-substrate/).
 No production crate was changed and ADR-0014 was not modified.
+
+The base was revalidated on 2026-08-13 without relying on the local tracking
+ref: `git ls-remote` reported the same `main` SHA, and the GitHub PR API
+reported PR #48 merged into `main` at 2026-08-12 11:39:15Z with that merge
+commit. The checkout could not write `.git/FETCH_HEAD` in the restricted
+environment, so this direct remote verification replaced a local-ref update;
+the research branch is based directly on the verified commit.
 
 The Quarkdown examples used here are clean-room fixtures derived from the
 public syntax evidence recorded in
@@ -193,13 +200,22 @@ Only markdown-it-rust provides the required public shape today:
 * construct shielding inherited from the built-in code-span/fence rules.
 
 The PoC registered a block rule for `.foo {bar}` and an inline rule for the
-same syntax. Both produced custom nodes. The inline rule was placed before
-the built-in rules; code spans were still opaque and did not produce a custom
-node. This proves a usable extension API, but not that markdown-it-rust has
-all Quarkdown container semantics already implemented. A custom block rule
-must consume and model its body using the exposed block state, and the inline
-rule must explicitly account for link nesting and any Quarkdown-specific
-precedence policy.
+same syntax. Both produced custom nodes. The block rule ran at the document
+root and from the nested parser state established for a list item and a
+blockquote; all three nodes retained exact byte ranges for `.foo {bar}`. This
+confirms that downstream rules participate in the parser's adjusted container
+state instead of requiring a parallel list/quote scanner.
+
+The inline rule was placed before the built-in rules. Code spans and fences,
+escaped `\.foo`, and entity spelling such as `&period;foo` remained opaque and
+did not produce a custom node. Ordinary text, link text, image alt text, and
+text between raw HTML tags did invoke the deliberately naive rule. The rule
+could read `InlineState::link_level`, which was nonzero in both link and image
+text. This proves that the public API exposes the information needed to narrow
+those contexts, but the downstream rule must actually enforce Scribium's
+policy. It does not prove that markdown-it-rust has all Quarkdown container or
+body semantics already implemented. A custom block rule must consume and
+model its body using the exposed block state.
 
 ### D — Thin fork
 
@@ -229,9 +245,9 @@ container lifecycle.
 
 | Required interaction | Observation |
 | --- | --- |
-| Code span/fence before Quarkdown | Standard parsers shield code spans and fences. The markdown-it PoC confirms the custom inline rule does not run inside a code span. |
-| Quarkdown vs emphasis/link | markdown-it can order a custom rule, but the rule must inspect `InlineState` and link nesting. The other candidates have no public pre-interpretation hook. |
-| List/blockquote nesting | Standard container parsing is internal and correct for Markdown. A downstream markdown-it block rule receives `BlockState` fields such as line, indentation, level, and source map, but no dedicated Quarkdown body callback. |
+| Code span/fence before Quarkdown | Standard parsers shield code spans and fences. The markdown-it PoC confirms the custom inline rule does not run inside a code span or fenced block; escaped and entity spellings are also consumed before the literal-dot rule. |
+| Quarkdown vs emphasis/link | markdown-it can order a custom rule and exposes `InlineState::link_level`. The naive PoC rule ran in ordinary, link, image-alt, and HTML-surrounded text, demonstrating both configurability and the need for an explicit Scribium policy. The other candidates have no public pre-interpretation hook. |
+| List/blockquote nesting | Standard container parsing is internal and correct for Markdown. A downstream markdown-it block rule ran from root, list-item, and blockquote states and received exact source maps. `BlockState` also exposes line, indentation, level, and list state, but no dedicated Quarkdown body callback. |
 | Lazy continuation and indented body | The substrate can parse the Markdown context, but a Quarkdown body recognizer must participate before the ordinary paragraph/lazy-continuation decision or a fork must add that decision point. |
 | Physical source span | markdown-rs, pulldown-cmark, and markdown-it-rust expose byte offsets; comrak exposes byte-oriented line/columns only. Original source must remain available outside normalized node payloads. |
 
@@ -504,12 +520,14 @@ dependency versions in its own `Cargo.toml` and generated `Cargo.lock`.
 ```text
 cargo fmt --manifest-path tools/spikes/markdown-substrate/Cargo.toml
 cargo fmt --manifest-path tools/spikes/markdown-substrate/Cargo.toml -- --check
+cargo clippy --manifest-path tools/spikes/markdown-substrate/Cargo.toml -- \
+  -D warnings
 cargo run --manifest-path tools/spikes/markdown-substrate/Cargo.toml
 cargo check --manifest-path tools/spikes/markdown-substrate/Cargo.toml \
   --target wasm32-unknown-unknown
 ```
 
-All four commands completed successfully after formatting. The PoC covered:
+All five commands completed successfully. The PoC covered:
 
 * UTF-8 byte spans for strong text;
 * CRLF headings, paragraphs, links, lists, blockquotes, inline code, and
@@ -517,8 +535,12 @@ All four commands completed successfully after formatting. The PoC covered:
 * nested lists and blockquotes, list/blockquote crossing, lazy continuation,
   raw HTML, front matter, emphasis adjacent to calls, link text containing
   call-looking text, and nested call-looking bodies;
-* custom markdown-it-rust block and inline rules;
-* code-span shielding from the custom inline rule;
+* custom markdown-it-rust block and inline rules, including custom block nodes
+  at root, list-item, and blockquote levels;
+* exact custom-node byte spans and access to link/image nesting state;
+* inline policy interactions with emphasis, strong, links, images, escapes,
+  entities, raw HTML, inline code, and fenced code;
+* code/fence, escape, and entity shielding from the literal-dot custom rule;
 * custom-node/source-map output and standard-node output for all candidates.
 
 The PoC is evidence for API shape and provenance behavior, not a complete
