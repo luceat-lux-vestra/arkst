@@ -36,6 +36,14 @@ Start with subprocess adapter for M1 vertical slice. The `TypstBackend` trait
 abstracts the backend choice. Investigate in-process embedding feasibility
 before v0.1. Both backends do not need to be permanently maintained.
 
+## Architecture ownership note
+
+ADR-0015 refines physical crate ownership without changing this backend
+strategy. Pure Typst lowering and the platform-neutral backend contract belong
+to `scribium-typst`; `SubprocessBackend` belongs to
+`scribium-typst-subprocess`. Future in-process and browser work remains
+governed by ADR-0005 and ADR-0011.
+
 ## Consequences
 
 ### Positive
@@ -93,8 +101,8 @@ verification. It does not block WASM frontend delivery.
 
 | Implementation | Crate | Target |
 |---|---|---|
-| `SubprocessBackend` | `scribium-typst` (or future `scribium-typst-native`) | CLI |
-| `InProcessBackend` | `scribium-typst` (future) | CLI, server |
+| `SubprocessBackend` | `scribium-typst-subprocess` | CLI |
+| `InProcessBackend` | TBD: future dedicated adapter, per ADR-0011 re-evaluation | CLI, server |
 | `WebBackend` | `scribium-typst-web` (M7+) | Browser WASM |
 
 The trait itself stays in `scribium-typst` for all targets.

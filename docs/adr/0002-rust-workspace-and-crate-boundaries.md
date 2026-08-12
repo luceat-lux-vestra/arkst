@@ -1,9 +1,15 @@
 # ADR-0002: Rust Workspace and Crate Boundaries
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-02
 - **Owners:** Scribium maintainers
 - **Related issues:** #1
+
+Superseded by ADR-0015.
+
+The four-crate ownership decision below is historical. ADR-0015 defines the
+current target crate boundaries; the remaining sections are retained as
+historical context where they are not superseded.
 
 ## Context
 
