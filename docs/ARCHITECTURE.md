@@ -372,30 +372,125 @@ or an in-process backend.
 
 ## Source Span Model
 
-- **SourceId**: unique identifier for each source file
-- **ByteSpan**: byte offset + length in source text
-- **LineColumn**: line (1-indexed) + column (1-indexed, byte offset within line)
-- **Span conversion functions**: byte ↔ line/column, both directions
-- **Span attachment**: every AST node, IR node, and diagnostic carries its source span
+`scribium-source` owns the source-location primitives and the backend-neutral
+source-map representation. Its target responsibilities include:
+
+- `SourceId`, the identity of an original source;
+- `ByteSpan`, a byte range within source text;
+- `SourceSpan`, an original-source identity plus byte range;
+- `LineColumn`, the line and column view of a source position;
+- project-independent byte/span conversion primitives;
+- generated-output range primitives; and
+- the backend-neutral representation of source maps.
+
+`SourceSpan` identifies an original source location using `SourceId` plus a byte
+range. AST nodes and IR nodes preserve their original source spans through the
+frontend, engine, and lowering stages. Diagnostics use `SourceSpan` when an
+original source location is available. A primary source span is not mandatory
+for every diagnostic: project, backend, and internal diagnostics may have no
+corresponding original source range.
+
+The location types remain distinct:
+
+```
+original source location
+    -> SourceId + SourceSpan
+
+generated backend output location
+    -> generated range
+
+source map
+    -> generated range -> original SourceSpan
+```
+
+Source-map entries are created when backend lowering emits generated output.
+The source-map representation belongs to `scribium-source`; generated mappings
+do not belong to `scribium-ir`. This section describes the model without
+defining exact Rust structs.
 
 ## IR Model
 
-The IR is a Typst-oriented tree:
+Scribium IR is a backend-neutral document representation. Its purpose is to
+separate Scribium language semantics from any concrete output backend.
+
+The pipeline has one IR model in the current target architecture:
 
 ```
-Document
-├── Metadata (title, author, date, etc.)
-├── Content
-│   ├── Heading (level, body)
-│   ├── Paragraph (inline content)
-│   ├── List (ordered/unordered, items)
-│   ├── CodeBlock (language, source)
-│   ├── Table (header, rows)
-│   ├── Math (display/inline, source)
-│   ├── RawTypst (raw Typst block)
-│   ├── FunctionCall (name, args, body)
-│   └── NativeBlock (evaluated Typst output)
+Markdown frontend AST
+        ↓
+scribium-engine
+        ↓
+initial IrDocument
+        ↓
+semantic / evaluation / normalization
+        ↓
+normalized IrDocument
+        ↓
+backend lowering
 ```
+
+An `IrDocument` may therefore be at an earlier or later stage of semantic
+normalization; IR values are not inherently all already evaluated. The target
+architecture does not introduce HIR/MIR or separate evaluated and unevaluated
+IR crates.
+
+`scribium-ir` owns the backend-neutral IR model, including the architectural
+equivalents of `IrDocument`, `IrMetadata`, `IrNode`, `IrInline`, `IrListItem`,
+and `IrValue`. Illustrative Scribium semantic/document concepts represented by
+the IR include:
+
+- headings and paragraphs;
+- ordered and unordered lists;
+- code blocks and thematic breaks;
+- math and links;
+- inline formatting;
+- semantic function/component calls;
+- resolved values; and
+- document metadata.
+
+This list is illustrative, not a requirement to add missing variants. The
+target IR contains Scribium semantics, not backend-specific output fragments:
+
+```
+IrDocument
+├── IrMetadata
+└── semantic content
+    ├── IrNode
+    ├── IrInline
+    ├── IrListItem
+    └── IrValue
+```
+
+A semantic function/component-call node represents a Scribium/Quarkdown
+semantic operation, not pre-generated Typst source. The Typst backend may lower
+that semantic node into an appropriate Typst construct; retaining the semantic
+operation does not make the IR Typst-specific.
+
+IR nodes preserve their original `SourceSpan`, but generated-output source-map
+entries are not stored in `IrDocument` or `IrNode`:
+
+```
+IrDocument
+    |
+    | original SourceSpan values only
+    v
+scribium-typst lowering
+    |
+    +---- generated Typst source
+    +---- source-map entries
+```
+
+The source-map entries use the representation owned by `scribium-source` and
+are created as lowering emits generated output. A backend-specific source
+fragment must not cross backward into `scribium-ir`; `scribium-ir` expresses
+Scribium semantics and `scribium-typst` translates those semantics into Typst.
+
+### Migration Note
+
+The current physical implementation still contains `IrNode::RawTypst`. This is
+a migration artifact only and does not represent accepted target ownership. It
+must be removed or eliminated during the later physical crate/IR migration;
+PR #46 does not decide or implement that code migration.
 
 ## Typst Backend Interface
 
