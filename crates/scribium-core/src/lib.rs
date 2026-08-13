@@ -2,7 +2,7 @@
 ///
 /// Responsibilities:
 /// - Source abstraction and span management
-/// - Markdown + Quarkdown-compatible parsing
+/// - Composition of the Markdown/Quarkdown frontend
 /// - Semantic analysis and scope resolution
 /// - Evaluator and built-in functions
 /// - Document IR (Intermediate Representation)
@@ -17,7 +17,6 @@ pub mod evaluator;
 pub mod ir;
 pub mod source;
 pub mod source_map;
-pub mod syntax;
 pub mod virtual_project;
 
 pub use diagnostics::*;
@@ -424,6 +423,41 @@ mod tests {
         let (result, _) = compile_source(".foo {bar}\n");
         assert!(result.diagnostics.is_empty());
         assert_eq!(result.ir.nodes.len(), 1);
+    }
+
+    #[test]
+    fn compile_qd_uses_the_production_frontend_pipeline() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", "# Hello\n.note {hello}\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.ir.nodes.len(), 2);
+        assert!(
+            matches!(result.ir.nodes[1], IrNode::FunctionCall { ref name, .. } if name == "note")
+        );
+    }
+
+    #[test]
+    fn compile_md_uses_markdown_mode_through_the_production_frontend() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.md")
+            .expect("valid path")
+            .add_source("main.md", "# Hello\n\n**world**\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.ir.nodes.len(), 2);
+        assert!(matches!(result.ir.nodes[0], IrNode::Heading { .. }));
+        assert!(matches!(result.ir.nodes[1], IrNode::Paragraph { .. }));
     }
 
     #[test]

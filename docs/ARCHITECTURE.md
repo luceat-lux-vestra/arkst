@@ -214,8 +214,10 @@ string. HTML semantic normalization belongs to `scribium-engine`'s delegation
 to `scribium-html`.
 
 ADR-0017 records the pinned Rushdown revision and safety gate. The legacy
-parser modules remain only as migration-era compatibility/test material; new
-Markdown behavior belongs in `scribium-markdown`.
+first-party Markdown and Quarkdown parser modules were removed after the
+Rushdown frontend migration completed. Markdown behavior belongs in
+`scribium-markdown`, and Quarkdown call grammar belongs in
+`scribium-quarkdown`.
 
 ## Crate Boundaries
 

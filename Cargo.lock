@@ -571,6 +571,7 @@ version = "0.0.1"
 dependencies = [
  "insta",
  "scribium-markdown",
+ "scribium-quarkdown",
  "scribium-source",
  "serde",
  "serde_json",

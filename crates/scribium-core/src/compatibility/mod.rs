@@ -9,6 +9,7 @@ pub mod syntax;
 /// - Recording known divergences from reference behavior
 /// - Generating `E8xxx` diagnostics for unsupported features
 ///
-/// The actual Quarkdown-compatible syntax parsing lives in `syntax::quarkdown`,
-/// not here. This module is about *tracking* compatibility, not *implementing* it.
+/// The actual Quarkdown-compatible syntax parsing lives in the
+/// `scribium-quarkdown` crate, not here. This module is about *tracking*
+/// compatibility, not *implementing* it.
 pub mod profile;

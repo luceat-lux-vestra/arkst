@@ -237,3 +237,9 @@ layer, authorize a permanent fork, or waive the upstream safety issue.
 - Production adoption preserves WASM and filesystem-free lower-level crates.
 - Issue #24 and resource-resolution work remain deferred; this ADR does not
   move `VirtualProject` or implement assets/imports.
+
+## Implementation note / follow-up
+
+The legacy first-party Markdown and Quarkdown parser modules were removed in a
+follow-up cleanup after the Rushdown frontend migration completed. The
+decision and consequence recorded above are preserved as historical context.

@@ -1277,6 +1277,26 @@ mod tests {
     }
 
     #[test]
+    fn qd_mode_parses_root_and_inline_calls_with_crlf_provenance() {
+        let root_source = ".note {hello}\r\n";
+        let root = parse_with_diagnostics(root_source);
+        assert!(root.diagnostics.is_empty(), "{:?}", root.diagnostics);
+        let Block::DirectiveCall { span, .. } = &root.document.nodes[0] else {
+            panic!("expected root directive call")
+        };
+        assert_eq!(&root_source[span.start..span.end], ".note {hello}");
+
+        let inline = parse_with_diagnostics("before .note {x} after\n");
+        assert!(inline.diagnostics.is_empty(), "{:?}", inline.diagnostics);
+        let Block::Paragraph { content, .. } = &inline.document.nodes[0] else {
+            panic!("expected inline paragraph")
+        };
+        assert!(content
+            .iter()
+            .any(|item| matches!(item, Inline::DirectiveCall { name, .. } if name == "note")));
+    }
+
+    #[test]
     fn malformed_root_block_reports_argument_span() {
         assert_malformed_argument_span(".foo {unterminated");
     }

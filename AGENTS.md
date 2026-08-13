@@ -76,6 +76,8 @@ from current file placement.
 - Rushdown is Scribium's Markdown parsing substrate. Do not implement
   CommonMark/GFM parsing from scratch unless a later accepted architecture
   decision explicitly requires it.
+- Do not add Markdown or Quarkdown parser implementations back to
+  `scribium-core`.
 - Quarkdown extensions belong in `scribium-markdown` and
   `scribium-quarkdown`, never in a Rushdown fork. Rushdown types must not
   escape `scribium-markdown`.
