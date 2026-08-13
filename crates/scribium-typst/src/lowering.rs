@@ -3,7 +3,10 @@
 //! Each IR node type maps to a Typst construct. The lowering pass
 //! records source map entries as it generates code.
 
-use scribium_core::ir::{IrDocument, IrInline, IrNode, IrValue, SourceMapEntry};
+use scribium_core::ir::{
+    IrDocument, IrInline, IrNode, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    SourceMapEntry,
+};
 use scribium_core::source::SourceSpan;
 
 /// Lower a Scribium IR document to Typst source code.
@@ -110,6 +113,17 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrNode::Blockquote { content, span } => {
+                let before = self.output.len();
+                self.push_str("#quote(block: true)[\n");
+                for child in content {
+                    self.lower_node(child);
+                }
+                self.push_str("]\n");
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrNode::UnorderedList { items, span } => {
                 let before = self.output.len();
                 let was_nested = self.list_nesting > 0;
@@ -123,7 +137,7 @@ impl LoweringContext {
                     } else {
                         "- ".to_string()
                     };
-                    self.lower_list_item(&marker_prefix, &item.nodes);
+                    self.lower_list_item(&marker_prefix, item);
                 }
                 self.list_nesting -= 1;
                 if was_nested {
@@ -148,13 +162,20 @@ impl LoweringContext {
                     } else {
                         format!("{}. ", counter)
                     };
-                    self.lower_list_item(&marker_prefix, &item.nodes);
+                    self.lower_list_item(&marker_prefix, item);
                 }
                 self.list_nesting -= 1;
                 if was_nested {
                     self.list_indent
                         .truncate(self.list_indent.len().saturating_sub(2));
                 }
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrNode::Table { header, rows, span } => {
+                let before = self.output.len();
+                self.lower_table(header, rows);
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -300,6 +321,15 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::Strikethrough { content, span } => {
+                let before = self.output.len();
+                self.push_str("#strike[");
+                self.lower_inlines(content);
+                self.push(']');
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::DirectiveCall {
                 name,
                 positional_args,
@@ -435,15 +465,77 @@ impl LoweringContext {
 
     /// Lower every block of the current `IrListItem` so the item's
     /// continuation indent is applied at each block boundary.
-    fn lower_list_item(&mut self, marker_prefix: &str, nodes: &[IrNode]) {
+    fn lower_list_item(&mut self, marker_prefix: &str, item: &scribium_core::ir::IrListItem) {
+        let before = self.output.len();
         let saved = std::mem::replace(&mut self.list_item_indent, " ".repeat(marker_prefix.len()));
         self.at_line_start = false;
         self.push_str(marker_prefix);
-        for child in nodes {
+        if let Some(task) = item.task {
+            self.push_str(match task {
+                IrTaskStatus::Active => "☐ ",
+                IrTaskStatus::Completed => "☑ ",
+            });
+        }
+        for child in &item.nodes {
             self.lower_item_block(child);
         }
         self.list_item_indent = saved;
         self.push('\n');
+        if item.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(item.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_table(&mut self, header: &IrTableRow, rows: &[IrTableRow]) {
+        let columns = header
+            .cells
+            .len()
+            .max(rows.iter().map(|row| row.cells.len()).max().unwrap_or(0))
+            .max(1);
+        self.push_str("#table(\n");
+        self.push_str(&format!("  columns: {columns},\n"));
+        let header_before = self.output.len();
+        self.push_str("  table.header(");
+        self.lower_table_cells(&header.cells, columns);
+        self.push_str("),\n");
+        if header.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(header.span, self.output.len() - header_before);
+        }
+        for row in rows {
+            let row_before = self.output.len();
+            self.push_str("  ");
+            self.lower_table_cells(&row.cells, columns);
+            self.push_str(",\n");
+            if row.span.source_id != scribium_core::SourceId(0) {
+                self.record_span(row.span, self.output.len() - row_before);
+            }
+        }
+        self.push_str(")\n");
+    }
+
+    fn lower_table_cells(&mut self, cells: &[IrTableCell], columns: usize) {
+        for index in 0..columns {
+            if index > 0 {
+                self.push_str(", ");
+            }
+            if let Some(cell) = cells.get(index) {
+                self.lower_table_cell(cell);
+            } else {
+                self.push_str("table.cell(align: auto)[]");
+            }
+        }
+    }
+
+    fn lower_table_cell(&mut self, cell: &IrTableCell) {
+        let before = self.output.len();
+        self.push_str("table.cell(align: ");
+        self.push_str(table_alignment_name(cell.alignment));
+        self.push_str(")[");
+        self.lower_inlines(&cell.content);
+        self.push(']');
+        if cell.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(cell.span, self.output.len() - before);
+        }
     }
 
     fn lower_item_block(&mut self, node: &IrNode) {
@@ -460,6 +552,15 @@ impl LoweringContext {
     }
 }
 
+fn table_alignment_name(alignment: IrTableAlignment) -> &'static str {
+    match alignment {
+        IrTableAlignment::Left => "left",
+        IrTableAlignment::Center => "center",
+        IrTableAlignment::Right => "right",
+        IrTableAlignment::None => "auto",
+    }
+}
+
 /// Escape characters that are special inside a double-quoted Typst string:
 /// backslashes and double quotes.
 fn escape_typst_string(s: &str) -> String {
@@ -468,7 +569,10 @@ fn escape_typst_string(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use scribium_core::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrValue};
+    use scribium_core::ir::{
+        IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment, IrTableCell,
+        IrTableRow, IrTaskStatus, IrValue,
+    };
     use scribium_core::source::SourceSpan;
 
     fn empty_span() -> SourceSpan {
@@ -556,6 +660,116 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "Hello *italic* and *bold*\n\n");
+    }
+
+    #[test]
+    fn lower_structured_markdown_nodes_preserves_semantics_and_source_map() {
+        let quote_span = SourceSpan::new(scribium_core::SourceId(1), 0, 30);
+        let strike_span = SourceSpan::new(scribium_core::SourceId(1), 8, 22);
+        let active_span = SourceSpan::new(scribium_core::SourceId(1), 31, 45);
+        let completed_span = SourceSpan::new(scribium_core::SourceId(1), 46, 62);
+        let header_span = SourceSpan::new(scribium_core::SourceId(1), 64, 82);
+        let row_span = SourceSpan::new(scribium_core::SourceId(1), 83, 98);
+        let table_span = SourceSpan::new(scribium_core::SourceId(1), 64, 98);
+        let doc = IrDocument {
+            nodes: vec![
+                IrNode::Blockquote {
+                    content: vec![IrNode::Paragraph {
+                        content: vec![IrInline::Strikethrough {
+                            content: vec![IrInline::Strong {
+                                content: vec![text("removed")],
+                                span: strike_span,
+                            }],
+                            span: strike_span,
+                        }],
+                        span: quote_span,
+                    }],
+                    span: quote_span,
+                },
+                IrNode::UnorderedList {
+                    items: vec![
+                        IrListItem {
+                            nodes: vec![
+                                IrNode::Paragraph {
+                                    content: vec![text("active")],
+                                    span: active_span,
+                                },
+                                IrNode::UnorderedList {
+                                    items: vec![IrListItem {
+                                        nodes: vec![IrNode::Paragraph {
+                                            content: vec![text("nested")],
+                                            span: active_span,
+                                        }],
+                                        task: Some(IrTaskStatus::Completed),
+                                        span: active_span,
+                                    }],
+                                    span: active_span,
+                                },
+                            ],
+                            task: Some(IrTaskStatus::Active),
+                            span: active_span,
+                        },
+                        IrListItem {
+                            nodes: vec![IrNode::Paragraph {
+                                content: vec![text("completed")],
+                                span: completed_span,
+                            }],
+                            task: Some(IrTaskStatus::Completed),
+                            span: completed_span,
+                        },
+                    ],
+                    span: active_span,
+                },
+                IrNode::Table {
+                    header: IrTableRow {
+                        cells: vec![
+                            IrTableCell {
+                                content: vec![text("left")],
+                                alignment: IrTableAlignment::Left,
+                                span: header_span,
+                            },
+                            IrTableCell {
+                                content: vec![text("center")],
+                                alignment: IrTableAlignment::Center,
+                                span: header_span,
+                            },
+                        ],
+                        span: header_span,
+                    },
+                    rows: vec![IrTableRow {
+                        cells: vec![IrTableCell {
+                            content: vec![text("right")],
+                            alignment: IrTableAlignment::Right,
+                            span: row_span,
+                        }],
+                        span: row_span,
+                    }],
+                    span: table_span,
+                },
+            ],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, map) = super::lower_to_typst(&doc);
+        assert!(code.contains("#quote(block: true)["));
+        assert!(code.contains("#strike[*removed*]"));
+        assert!(code.contains("- ☐ active"));
+        assert!(code.contains("- ☑ completed"));
+        assert!(code.contains("☑ nested"));
+        assert!(code.contains("columns: 2"));
+        assert!(code.contains("align: left"));
+        assert!(code.contains("align: center"));
+        assert!(code.contains("align: right"));
+        assert!(code.contains("table.cell(align: auto)[]"));
+        assert!(map.iter().any(|entry| entry.original == quote_span));
+        assert!(map.iter().any(|entry| entry.original == strike_span));
+        assert!(map.iter().any(|entry| entry.original == active_span));
+        assert!(map.iter().any(|entry| entry.original == completed_span));
+        assert!(map.iter().any(|entry| entry.original == table_span));
+        assert!(map
+            .iter()
+            .all(|entry| entry.generated_start < entry.generated_end
+                && entry.generated_end <= code.len()));
     }
 
     #[test]
@@ -773,6 +987,7 @@ mod tests {
                             content: vec![text("Item one")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -780,6 +995,7 @@ mod tests {
                             content: vec![text("Item two")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],
@@ -801,6 +1017,7 @@ mod tests {
                             content: vec![text("Item one")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -808,6 +1025,7 @@ mod tests {
                             content: vec![text("Item two")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],
@@ -830,6 +1048,7 @@ mod tests {
                             content: vec![text("Item three")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -837,6 +1056,7 @@ mod tests {
                             content: vec![text("Item four")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],
@@ -865,12 +1085,14 @@ mod tests {
                                     content: vec![text("Inner")],
                                     span: empty_span(),
                                 }],
+                                task: None,
                                 span: empty_span(),
                             }],
                             start: 1,
                             span: empty_span(),
                         },
                     ],
+                    task: None,
                     span: empty_span(),
                 }],
                 start: 1,
@@ -900,6 +1122,7 @@ mod tests {
                                         content: vec![text("unordered")],
                                         span: empty_span(),
                                     }],
+                                    task: None,
                                     span: empty_span(),
                                 },
                                 IrListItem {
@@ -907,12 +1130,14 @@ mod tests {
                                         content: vec![text("another")],
                                         span: empty_span(),
                                     }],
+                                    task: None,
                                     span: empty_span(),
                                 },
                             ],
                             span: empty_span(),
                         },
                     ],
+                    task: None,
                     span: empty_span(),
                 }],
                 start: 1,
@@ -943,6 +1168,7 @@ mod tests {
                                         content: vec![text("ordered")],
                                         span: empty_span(),
                                     }],
+                                    task: None,
                                     span: empty_span(),
                                 },
                                 IrListItem {
@@ -950,6 +1176,7 @@ mod tests {
                                         content: vec![text("ordered two")],
                                         span: empty_span(),
                                     }],
+                                    task: None,
                                     span: empty_span(),
                                 },
                             ],
@@ -957,6 +1184,7 @@ mod tests {
                             span: empty_span(),
                         },
                     ],
+                    task: None,
                     span: empty_span(),
                 }],
                 span: empty_span(),
@@ -1021,6 +1249,7 @@ mod tests {
                                 span: empty_span(),
                             },
                         ],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -1028,6 +1257,7 @@ mod tests {
                             content: vec![text("next")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],
@@ -1056,6 +1286,7 @@ mod tests {
                                 span: empty_span(),
                             },
                         ],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -1063,6 +1294,7 @@ mod tests {
                             content: vec![text("next")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],
@@ -1096,6 +1328,7 @@ mod tests {
                                 span: empty_span(),
                             },
                         ],
+                        task: None,
                         span: empty_span(),
                     },
                     IrListItem {
@@ -1103,6 +1336,7 @@ mod tests {
                             content: vec![text("three")],
                             span: empty_span(),
                         }],
+                        task: None,
                         span: empty_span(),
                     },
                 ],

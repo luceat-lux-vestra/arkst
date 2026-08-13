@@ -748,6 +748,7 @@ fn convert_inline(
         KindData::CodeSpan(_) => code_span_span(arena, node, source),
         KindData::RawHtml(html) => raw_html_span(arena, node, html, source),
         KindData::Link(link) => link_span(arena, node, link, source),
+        KindData::Strikethrough(_) => strikethrough_span(arena, node, source),
         _ => node_span(arena, node, source),
     }?;
     let span = offset_span(local_span, base)?;
@@ -1138,6 +1139,25 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     span.is_valid_for(source).then_some(span)
 }
 
+fn strikethrough_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
+    let span = node_span(arena, node, source)?;
+    if source.get(span.start..span.end)?.ends_with("~~") {
+        return Some(span);
+    }
+    let limit = arena[node]
+        .parent()
+        .and_then(|parent| node_span(arena, parent, source))
+        .map_or(source.len(), |parent| parent.end);
+    let suffix = source.get(span.end..limit)?;
+    let closing_offset = suffix
+        .as_bytes()
+        .windows(2)
+        .position(|window| window == b"~~")?;
+    let end = span.end.checked_add(closing_offset)?.checked_add(2)?;
+    let complete = ByteSpan::new(span.start, end);
+    complete.is_valid_for(source).then_some(complete)
+}
+
 fn link_span(
     arena: &Arena,
     node: NodeRef,
@@ -1492,6 +1512,7 @@ fn code_span_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::TableAlignment;
 
     fn assert_malformed_argument_span(source: &str) {
         let output = parse_with_diagnostics(source);
@@ -1803,6 +1824,93 @@ mod tests {
             };
             assert_eq!(content, expected);
         }
+    }
+
+    #[test]
+    fn preserved_markdown_structures_keep_nested_semantics_and_source_spans() {
+        let source = "> quoted **strong**\n>\n> - [ ] active\n> - [x] done\n\nBefore ~~removed *content*~~ after ~~later~~\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~~γ~~ | tail |\n";
+        let output = parse_with_mode(source, Mode::Markdown);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let document = output.document;
+        assert_eq!(document.nodes.len(), 3);
+
+        let Block::Blockquote {
+            content: quote_content,
+            span: quote_span,
+        } = &document.nodes[0]
+        else {
+            panic!("expected blockquote")
+        };
+        assert_eq!(
+            &source[quote_span.start..quote_span.end],
+            source.lines().take(4).collect::<Vec<_>>().join("\n")
+        );
+        assert!(matches!(quote_content[0], Block::Paragraph { .. }));
+        let Block::UnorderedList { items, .. } = &quote_content[1] else {
+            panic!("expected list inside blockquote")
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].task, Some(TaskStatus::Active));
+        assert_eq!(items[1].task, Some(TaskStatus::Completed));
+        for item in items {
+            assert!(source.is_char_boundary(item.span.start));
+            assert!(source.is_char_boundary(item.span.end));
+        }
+
+        let Block::Paragraph { content, .. } = &document.nodes[1] else {
+            panic!("expected strikethrough paragraph")
+        };
+        let strike = content
+            .iter()
+            .find_map(|inline| match inline {
+                Inline::Strikethrough { span, content } => Some((span, content)),
+                _ => None,
+            })
+            .expect("expected strikethrough");
+        assert_eq!(
+            &source[strike.0.start..strike.0.end],
+            "~~removed *content*~~"
+        );
+        assert!(matches!(strike.1[1], Inline::Emphasis { .. }));
+
+        let Block::Table { header, rows, span } = &document.nodes[2] else {
+            panic!("expected table")
+        };
+        assert_eq!(header.cells.len(), 4);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cells.len(), 4);
+        assert_eq!(header.cells[0].alignment, TableAlignment::Left);
+        assert_eq!(header.cells[1].alignment, TableAlignment::Center);
+        assert_eq!(header.cells[2].alignment, TableAlignment::Right);
+        assert_eq!(header.cells[3].alignment, TableAlignment::None);
+        assert!(matches!(header.cells[1].content[0], Inline::Text { .. }));
+        assert!(matches!(rows[0].cells[1].content[0], Inline::Strong { .. }));
+        assert!(matches!(
+            rows[0].cells[2].content[0],
+            Inline::Strikethrough { .. }
+        ));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+
+        let crlf_source = "> 한글 **강조**\r\n>\r\n> - [x] 완료\r\n";
+        let crlf = parse_with_mode(crlf_source, Mode::Markdown);
+        assert!(crlf.diagnostics.is_empty(), "{crlf:?}");
+        let Block::Blockquote { content, span } = &crlf.document.nodes[0] else {
+            panic!("expected CRLF blockquote")
+        };
+        assert!(!content.is_empty());
+        assert!(crlf_source.is_char_boundary(span.start));
+        assert!(crlf_source.is_char_boundary(span.end));
+
+        let qd = parse_with_diagnostics(".note\n  > body **strong**\n");
+        assert!(qd.diagnostics.is_empty(), "{qd:?}");
+        let Block::DirectiveCall {
+            body: Some(body), ..
+        } = &qd.document.nodes[0]
+        else {
+            panic!("expected Quarkdown body")
+        };
+        assert!(matches!(body[0], Block::Blockquote { .. }));
     }
 
     fn paragraph_text(block: &Block) -> String {

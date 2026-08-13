@@ -80,14 +80,23 @@ Implemented (M2):
   - An opener with no matching closer recovers deterministically as literal
     text with no character loss and no diagnostic
 
+- End-to-end Markdown structures (M2, tested subset)
+  - Blockquotes (`> `) preserve recursively structured paragraphs, lists, and
+    inline markup through IR and Typst lowering
+  - Strikethrough (`~~text~~`) preserves nested inline markup and lowers as a
+    Typst strike element
+  - GFM task lists preserve unchecked/checked state as semantic IR state and
+    lower to deterministic unchecked/checked markers
+  - GFM tables preserve header/body rows, cell order, inline markup, and
+    left/center/right/default alignment through IR and Typst lowering
+  - Source spans remain byte-based and source-backed for UTF-8 and CRLF inputs
+  - Evidence covers `.md`, `.qd`, and Markdown in an indented Quarkdown body
+  - This is a tested M2 slice, not a claim of complete CommonMark/GFM support
+
 Planned (M2+):
 
-- Task lists
 - Images (`![alt](url)`)
-- Blockquotes (`> `)
-- Tables (GFM pipe tables)
 - Footnotes
-- Strikethrough (`~~text~~`)
 - Math (`$...$` and `$$...$$`)
 - HTML passthrough (policy TBD)
 

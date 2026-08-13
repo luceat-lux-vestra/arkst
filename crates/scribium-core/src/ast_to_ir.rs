@@ -5,10 +5,13 @@
 //! since there is no evaluator yet.
 
 use crate::diagnostics::{Diagnostic, Severity};
-use crate::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode};
+use crate::ir::{
+    IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment, IrTableCell,
+    IrTableRow, IrTaskStatus,
+};
 use crate::source::{SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
-use scribium_markdown::ast::{Block, Document, Inline, Value};
+use scribium_markdown::ast::{Block, Document, Inline, TableAlignment, TaskStatus, Value};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
@@ -102,22 +105,17 @@ fn block_to_ir(
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Block::Blockquote { content, span } => Some(IrNode::Blockquote {
+            content: content
+                .iter()
+                .filter_map(|child| block_to_ir(child, source_id, diagnostics))
+                .collect(),
+            span: byte_to_source_span(span, source_id),
+        }),
         Block::UnorderedList { items, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| {
-                    if item.task.is_some() {
-                        push_unsupported(diagnostics, "GFM task list", &item.span, source_id);
-                    }
-                    IrListItem {
-                        nodes: item
-                            .content
-                            .iter()
-                            .filter_map(|b| block_to_ir(b, source_id, diagnostics))
-                            .collect(),
-                        span: byte_to_source_span(&item.span, source_id),
-                    }
-                })
+                .map(|item| list_item_to_ir(item, source_id, diagnostics))
                 .collect();
             Some(IrNode::UnorderedList {
                 items: ir_items,
@@ -127,29 +125,13 @@ fn block_to_ir(
         Block::OrderedList { items, start, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| {
-                    if item.task.is_some() {
-                        push_unsupported(diagnostics, "GFM task list", &item.span, source_id);
-                    }
-                    IrListItem {
-                        nodes: item
-                            .content
-                            .iter()
-                            .filter_map(|b| block_to_ir(b, source_id, diagnostics))
-                            .collect(),
-                        span: byte_to_source_span(&item.span, source_id),
-                    }
-                })
+                .map(|item| list_item_to_ir(item, source_id, diagnostics))
                 .collect();
             Some(IrNode::OrderedList {
                 items: ir_items,
                 start: *start,
                 span: byte_to_source_span(span, source_id),
             })
-        }
-        Block::Blockquote { span, .. } => {
-            push_unsupported(diagnostics, "blockquote", span, source_id);
-            None
         }
         Block::CodeBlock {
             language,
@@ -196,10 +178,14 @@ fn block_to_ir(
             // Metadata is handled via front_matter on the Document; skip as a block node.
             None
         }
-        Block::Table { span, .. } => {
-            push_unsupported(diagnostics, "GFM table", span, source_id);
-            None
-        }
+        Block::Table { header, rows, span } => Some(IrNode::Table {
+            header: table_row_to_ir(header, source_id, diagnostics),
+            rows: rows
+                .iter()
+                .map(|row| table_row_to_ir(row, source_id, diagnostics))
+                .collect(),
+            span: byte_to_source_span(span, source_id),
+        }),
         Block::RawHtml { span, .. } => {
             push_unsupported(diagnostics, "raw HTML block", span, source_id);
             None
@@ -210,6 +196,57 @@ fn block_to_ir(
             }
             None
         }
+    }
+}
+
+fn list_item_to_ir(
+    item: &scribium_markdown::ast::ListItem,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> IrListItem {
+    IrListItem {
+        nodes: item
+            .content
+            .iter()
+            .filter_map(|child| block_to_ir(child, source_id, diagnostics))
+            .collect(),
+        task: item.task.map(task_status_to_ir),
+        span: byte_to_source_span(&item.span, source_id),
+    }
+}
+
+fn task_status_to_ir(status: TaskStatus) -> IrTaskStatus {
+    match status {
+        TaskStatus::Active => IrTaskStatus::Active,
+        TaskStatus::Completed => IrTaskStatus::Completed,
+    }
+}
+
+fn table_row_to_ir(
+    row: &scribium_markdown::ast::TableRow,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> IrTableRow {
+    IrTableRow {
+        cells: row
+            .cells
+            .iter()
+            .map(|cell| IrTableCell {
+                content: inlines_to_ir(&cell.content, source_id, diagnostics),
+                alignment: table_alignment_to_ir(cell.alignment),
+                span: byte_to_source_span(&cell.span, source_id),
+            })
+            .collect(),
+        span: byte_to_source_span(&row.span, source_id),
+    }
+}
+
+fn table_alignment_to_ir(alignment: TableAlignment) -> IrTableAlignment {
+    match alignment {
+        TableAlignment::Left => IrTableAlignment::Left,
+        TableAlignment::Center => IrTableAlignment::Center,
+        TableAlignment::Right => IrTableAlignment::Right,
+        TableAlignment::None => IrTableAlignment::None,
     }
 }
 
@@ -248,6 +285,10 @@ fn inline_to_ir(
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Inline::Strikethrough { content, span } => Some(IrInline::Strikethrough {
+            content: inlines_to_ir(content, source_id, diagnostics),
+            span: byte_to_source_span(span, source_id),
+        }),
         Inline::DirectiveCall {
             name,
             positional_args,
@@ -296,10 +337,6 @@ fn inline_to_ir(
         }
         Inline::RawHtml { span, .. } => {
             push_unsupported(diagnostics, "raw HTML inline", span, source_id);
-            None
-        }
-        Inline::Strikethrough { span, .. } => {
-            push_unsupported(diagnostics, "strikethrough", span, source_id);
             None
         }
         Inline::Unsupported { kind, span } => {
@@ -768,7 +805,142 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_markdown_semantics_are_diagnosed_without_coercion() {
+    fn convert_structures_preserves_task_table_and_nested_spans() {
+        use scribium_markdown::ast::ListItem;
+        let doc = Document {
+            nodes: vec![
+                Block::Blockquote {
+                    content: vec![Block::Paragraph {
+                        content: vec![Inline::Strikethrough {
+                            content: vec![Inline::Strong {
+                                content: vec![Inline::Text {
+                                    content: "removed".into(),
+                                    span: bs(4, 11),
+                                }],
+                                span: bs(2, 13),
+                            }],
+                            span: bs(0, 15),
+                        }],
+                        span: bs(0, 15),
+                    }],
+                    span: bs(0, 15),
+                },
+                Block::UnorderedList {
+                    items: vec![
+                        ListItem {
+                            content: vec![Block::Paragraph {
+                                content: vec![Inline::Text {
+                                    content: "active".into(),
+                                    span: bs(17, 23),
+                                }],
+                                span: bs(17, 23),
+                            }],
+                            span: bs(15, 23),
+                            task: Some(TaskStatus::Active),
+                        },
+                        ListItem {
+                            content: vec![Block::Paragraph {
+                                content: vec![Inline::Text {
+                                    content: "done".into(),
+                                    span: bs(25, 29),
+                                }],
+                                span: bs(25, 29),
+                            }],
+                            span: bs(23, 29),
+                            task: Some(TaskStatus::Completed),
+                        },
+                    ],
+                    span: bs(15, 29),
+                },
+                Block::Table {
+                    header: TableRow {
+                        cells: vec![
+                            TableCell {
+                                content: vec![Inline::Text {
+                                    content: "Name".into(),
+                                    span: bs(31, 35),
+                                }],
+                                alignment: TableAlignment::Left,
+                                span: bs(31, 35),
+                            },
+                            TableCell {
+                                content: vec![Inline::Text {
+                                    content: "Value".into(),
+                                    span: bs(37, 42),
+                                }],
+                                alignment: TableAlignment::Center,
+                                span: bs(37, 42),
+                            },
+                        ],
+                        span: bs(31, 42),
+                    },
+                    rows: vec![TableRow {
+                        cells: vec![
+                            TableCell {
+                                content: vec![Inline::Text {
+                                    content: "α".into(),
+                                    span: bs(44, 46),
+                                }],
+                                alignment: TableAlignment::Right,
+                                span: bs(44, 46),
+                            },
+                            TableCell {
+                                content: vec![Inline::Text {
+                                    content: "β".into(),
+                                    span: bs(48, 50),
+                                }],
+                                alignment: TableAlignment::None,
+                                span: bs(48, 50),
+                            },
+                        ],
+                        span: bs(44, 50),
+                    }],
+                    span: bs(31, 50),
+                },
+            ],
+            front_matter: None,
+            line_count: 8,
+        };
+
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&doc, source_id(), &empty_project_metadata());
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+
+        let IrNode::Blockquote { content, span } = &ir.nodes[0] else {
+            panic!("expected blockquote")
+        };
+        assert_eq!(*span, SourceSpan::new(source_id(), 0, 15));
+        let IrNode::Paragraph { content, .. } = &content[0] else {
+            panic!("expected quoted paragraph")
+        };
+        let IrInline::Strikethrough { content, span } = &content[0] else {
+            panic!("expected strikethrough")
+        };
+        assert_eq!(*span, SourceSpan::new(source_id(), 0, 15));
+        assert!(matches!(content[0], IrInline::Strong { .. }));
+
+        let IrNode::UnorderedList { items, .. } = &ir.nodes[1] else {
+            panic!("expected task list")
+        };
+        assert_eq!(items[0].task, Some(IrTaskStatus::Active));
+        assert_eq!(items[1].task, Some(IrTaskStatus::Completed));
+        assert_eq!(items[0].span, SourceSpan::new(source_id(), 15, 23));
+
+        let IrNode::Table { header, rows, .. } = &ir.nodes[2] else {
+            panic!("expected table")
+        };
+        assert_eq!(header.cells[0].alignment, IrTableAlignment::Left);
+        assert_eq!(header.cells[1].alignment, IrTableAlignment::Center);
+        assert_eq!(rows[0].cells[0].alignment, IrTableAlignment::Right);
+        assert_eq!(rows[0].cells[1].alignment, IrTableAlignment::None);
+        assert_eq!(rows[0].cells[0].span, SourceSpan::new(source_id(), 44, 46));
+    }
+
+    #[test]
+    fn supported_markdown_structures_are_converted_and_unsupported_descendants_remain_explicit() {
         let doc = Document {
             nodes: vec![
                 Block::Blockquote {
@@ -876,24 +1048,27 @@ mod tests {
                 _ => None,
             })
             .expect("the supported link paragraph remains");
-        assert_eq!(paragraph.len(), 1);
+        assert_eq!(paragraph.len(), 2);
         assert!(matches!(paragraph[0], IrInline::Link { .. }));
-        assert_eq!(ir.nodes.len(), 1);
+        assert!(matches!(paragraph[1], IrInline::Strikethrough { .. }));
+        assert_eq!(ir.nodes.len(), 3);
+        assert!(matches!(ir.nodes[0], IrNode::Blockquote { .. }));
+        assert!(matches!(ir.nodes[2], IrNode::Table { .. }));
 
         let messages: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())
             .collect();
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("blockquote")));
         assert!(messages.iter().any(|message| message.contains("image")));
         assert!(messages
             .iter()
-            .any(|message| message.contains("strikethrough")));
-        assert!(messages
-            .iter()
             .any(|message| message.contains("raw HTML inline")));
-        assert!(messages.iter().any(|message| message.contains("GFM table")));
+        assert!(!messages
+            .iter()
+            .any(|message| message.contains("blockquote")));
+        assert!(!messages
+            .iter()
+            .any(|message| message.contains("strikethrough")));
+        assert!(!messages.iter().any(|message| message.contains("GFM table")));
     }
 }
