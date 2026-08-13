@@ -9,6 +9,8 @@ authors.workspace = true
 description = "Core Scribium library: parsing, semantics, evaluation, IR, and source maps"
 
 [dependencies]
+scribium-markdown.workspace = true
+scribium-source.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

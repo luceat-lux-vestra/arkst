@@ -1,11 +1,10 @@
 # Architecture — Scribium
 
 This document describes the accepted target architecture defined by ADR-0014,
-ADR-0015, and the compatibility policy in ADR-0016. Some target crates are not
-yet physically extracted from
-`scribium-core`; their current physical location during migration does not
-change their architectural ownership. Implementation and migration status
-must not be confused with target ownership.
+ADR-0015, ADR-0016, and ADR-0017. The source, Quarkdown, and Markdown
+frontend boundary crates are now physically present; project and broader
+compiler-layer extraction remains migration work. Implementation and
+migration status must not be confused with target ownership.
 
 ## Context Diagram
 
@@ -76,14 +75,12 @@ core selects entry source, metadata defaults, and compatibility options
 Source text + SourceId
   │
   ▼
-Markdown physical-line scanner / classifier
-  └── front matter framing at document start
-  │
-  ▼
-scribium-markdown BlockParser
-  ├── Markdown blocks: headings, paragraphs, lists, code, tables, etc.
-  ├── invokes scribium-quarkdown only for Quarkdown call/directive grammar
-  └── owns document-context and body/container decisions
+scribium-markdown
+  ├── Rushdown CommonMark/GFM substrate
+  ├── Quarkdown block/inline extension rules in `.qd` mode
+  ├── standard Rushdown parser in `.md` mode
+  ├── source-range validation and adapter
+  └── invokes scribium-quarkdown only for Quarkdown call/directive grammar
   │
   ▼
 Markdown frontend AST
@@ -162,26 +159,24 @@ follow Typst releases. See `docs/compatibility/typst/README.md`.
 
 ## Markdown Frontend Boundary
 
-The Markdown frontend uses a physical-line scanner/classifier as its lexical
-layer. The implementation currently provides this through `SourceLine` and
-`split_lines` in `syntax/markdown/parser.rs`; there is no separate generic
-tokenizer or token stream.
+The Markdown frontend delegates CommonMark/GFM scanning and block/inline
+lifecycle to the pinned Rushdown substrate. `scribium-markdown` owns the
+extension registration, mode selection, adapter conversion, diagnostics, and
+source-range validation; there is no separate Scribium CommonMark parser or
+generic parser plugin framework.
 
-ADR-0014 establishes the following frontend ownership target. PR #46 does
-not change the physical crate layout or public parser API:
+ADR-0014 establishes the following frontend ownership target, and ADR-0017
+selects Rushdown as its Markdown substrate:
 
 ```text
-source/span primitives
+scribium-source primitives
         ↓
-scribium-markdown frontend
-        ↓
-scribium-markdown::BlockParser
-  ├── one source position
-  ├── one open-container stack
-  ├── one open-leaf state
-  └── one diagnostic/source-mapping sink
-        ↓
-pure Markdown + Quarkdown block candidates
+scribium-markdown
+  ├── pinned Rushdown parser
+  ├── `.md`/`.qd` configuration
+  ├── Quarkdown extension rules
+  ├── source-range safety adapter
+  └── frontend AST conversion
         ↓
 Markdown frontend AST
         ↓
@@ -194,28 +189,33 @@ semantic / evaluation / normalization
 normalized IrDocument
 ```
 
-The target `BlockParser` in `scribium-markdown` owns container continuation,
-block interruption, paragraph/lazy continuation, fence lifecycle, body
-collection, and source mapping. `scribium-markdown` recognizers classify
-Markdown candidates and may invoke `scribium-quarkdown` for call grammar, but
-neither recognizer owns parser state. `scribium-markdown` decides whether a
-Quarkdown call participates as block or inline and owns any following body;
-`scribium-quarkdown` owns only Quarkdown grammar and must not depend on
-Markdown parser or AST types. This is a first-party Scribium integration, not
-a plugin API or generic extension framework. Each physical line follows one
-`BlockParser` transition path; transformed or synthetic Markdown is never
-recursively reparsed to rediscover container state.
+Rushdown owns CommonMark/GFM container continuation, block interruption,
+paragraph/lazy continuation, fence lifecycle, inline parsing, and source
+segmentation. `scribium-markdown` decides whether a Quarkdown call participates
+as block or inline, registers the appropriate Rushdown extension rules, owns
+the following body integration, and converts source-backed Rushdown nodes into
+the frontend AST. `scribium-quarkdown` owns only Quarkdown grammar and must
+not depend on Markdown parser or AST types. This is a first-party Scribium
+integration, not a plugin API or generic extension framework.
 
-Raw inline and block HTML is recognized by `scribium-markdown` at the syntax
-level. The frontend preserves the original HTML content, its block or inline
-context, and its original `SourceSpan` in the frontend AST. It does not depend
-on xberg, convert HTML to Typst, generate synthetic Markdown, or recursively
-parse an HTML-to-Markdown string. HTML semantic normalization belongs to
-`scribium-engine`'s delegation to `scribium-html`.
+Quarkdown content arguments remain tied to the original document source. The
+adapter may scan nested Quarkdown calls with the grammar crate, but it must not
+create a synthetic Markdown buffer, prepend a sentinel, or compensate offsets.
+Because Rushdown 0.18.0 does not expose an arbitrary original-span inline-parser
+entry point, Markdown inline markers in such content are preserved as original
+text with an explicit diagnostic until a reviewed integration API exists.
 
-The target module layout and migration status are design work under
-`docs/adr/0014-markdown-block-parser-foundation.md`; blockquote behavior is
-intentionally not enabled by the foundation refactor.
+Raw inline and block HTML recognized by Rushdown is preserved by
+`scribium-markdown` at the frontend boundary. The frontend preserves the
+original HTML content, its block or inline context, and its original
+`SourceSpan` in the frontend AST. It does not depend on xberg, convert HTML to
+Typst, generate synthetic Markdown, or recursively parse an HTML-to-Markdown
+string. HTML semantic normalization belongs to `scribium-engine`'s delegation
+to `scribium-html`.
+
+ADR-0017 records the pinned Rushdown revision and safety gate. The legacy
+parser modules remain only as migration-era compatibility/test material; new
+Markdown behavior belongs in `scribium-markdown`.
 
 ## Crate Boundaries
 
@@ -224,7 +224,7 @@ intentionally not enabled by the foundation refactor.
 | scribium-source          | source identity, spans, source-map representation                        | Yes  |
 | scribium-project         | VirtualProject, source/asset stores, project metadata                    | Yes  |
 | scribium-quarkdown       | Quarkdown grammar                                                        | Yes  |
-| scribium-markdown        | Markdown frontend, AST, BlockParser                                      | Yes  |
+| scribium-markdown        | Rushdown-backed Markdown frontend, AST, and adapter                      | Yes  |
 | scribium-diagnostics     | shared diagnostic representation                                         | Yes  |
 | scribium-compat          | Quarkdown compatibility policy                                           | Yes  |
 | scribium-ir              | backend-neutral document IR                                              | Yes  |
@@ -236,8 +236,9 @@ intentionally not enabled by the foundation refactor.
 | scribium-cli             | native host, filesystem/config/output composition                         | No   |
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
 
-These are target architectural boundaries. Physical workspace extraction is
-a subsequent migration.
+These are target architectural boundaries. `scribium-source`,
+`scribium-quarkdown`, and `scribium-markdown` are physically extracted; the
+remaining project/engine/IR extraction is subsequent migration work.
 
 ## Platform Independence
 

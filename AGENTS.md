@@ -73,6 +73,15 @@ from current file placement.
 - Platform-neutral compiler crates remain filesystem-, process-, and
   network-free and WASM-capable. Security capabilities require accepted host
   architecture.
+- Rushdown is Scribium's Markdown parsing substrate. Do not implement
+  CommonMark/GFM parsing from scratch unless a later accepted architecture
+  decision explicitly requires it.
+- Quarkdown extensions belong in `scribium-markdown` and
+  `scribium-quarkdown`, never in a Rushdown fork. Rushdown types must not
+  escape `scribium-markdown`.
+- Any Rushdown version change requires parser, provenance, WASM, CommonMark/
+  GFM, and safety validation; exact revisions are reviewed rather than
+  automatically upgraded.
 
 Do not start crate extraction, BlockParser refactoring, IR migration, Typst
 crate splitting, new Quarkdown semantics, or mature upstream automation in a

@@ -1,28 +1,41 @@
 //! AST-to-IR conversion — translates the parsed Markdown AST into the Scribium IR.
 //!
-//! This is the bridge between `syntax::markdown` (parser output) and `ir`
+//! This is the bridge between `scribium-markdown` (parser output) and `ir`
 //! (evaluator input / lowering input). For M1, this is a direct 1:1 mapping
 //! since there is no evaluator yet.
 
+use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode};
 use crate::source::{SourceId, SourceSpan};
-use crate::syntax::markdown::ast::{Block, Document, Inline, Value};
 use crate::virtual_project::ProjectMetadata;
+use scribium_markdown::ast::{Block, Document, Inline, Value};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
 /// `source_id` identifies the source file in the span model.
 /// `project_metadata` provides project-level defaults that can be overridden
 /// by document front matter.
-pub fn ast_to_ir(
+#[cfg(test)]
+fn ast_to_ir(
     doc: &Document,
     source_id: SourceId,
     project_metadata: &ProjectMetadata,
 ) -> IrDocument {
+    ast_to_ir_with_diagnostics(doc, source_id, project_metadata).0
+}
+
+/// Convert frontend AST to IR while reporting syntax that the current IR and
+/// Typst backend cannot represent without changing its meaning.
+pub fn ast_to_ir_with_diagnostics(
+    doc: &Document,
+    source_id: SourceId,
+    project_metadata: &ProjectMetadata,
+) -> (IrDocument, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
     let nodes: Vec<IrNode> = doc
         .nodes
         .iter()
-        .filter_map(|b| block_to_ir(b, source_id))
+        .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics))
         .collect();
 
     // Start with project metadata as defaults
@@ -50,18 +63,25 @@ pub fn ast_to_ir(
     // Sort raw metadata by key for deterministic ordering
     raw.sort_by(|a, b| a.0.cmp(&b.0));
 
-    IrDocument {
-        nodes,
-        metadata: IrMetadata {
-            title,
-            author,
-            date,
-            raw,
+    (
+        IrDocument {
+            nodes,
+            metadata: IrMetadata {
+                title,
+                author,
+                date,
+                raw,
+            },
         },
-    }
+        diagnostics,
+    )
 }
 
-fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
+fn block_to_ir(
+    block: &Block,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<IrNode> {
     match block {
         Block::Heading {
             level,
@@ -69,11 +89,11 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
             span,
         } => Some(IrNode::Heading {
             level: *level,
-            content: inlines_to_ir(content, source_id),
+            content: inlines_to_ir(content, source_id, diagnostics),
             span: byte_to_source_span(span, source_id),
         }),
         Block::Paragraph { content, span } => {
-            let inlines = inlines_to_ir(content, source_id);
+            let inlines = inlines_to_ir(content, source_id, diagnostics);
             if inlines.is_empty() {
                 return None;
             }
@@ -85,13 +105,18 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
         Block::UnorderedList { items, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| IrListItem {
-                    nodes: item
-                        .content
-                        .iter()
-                        .filter_map(|b| block_to_ir(b, source_id))
-                        .collect(),
-                    span: byte_to_source_span(&item.span, source_id),
+                .map(|item| {
+                    if item.task.is_some() {
+                        push_unsupported(diagnostics, "GFM task list", &item.span, source_id);
+                    }
+                    IrListItem {
+                        nodes: item
+                            .content
+                            .iter()
+                            .filter_map(|b| block_to_ir(b, source_id, diagnostics))
+                            .collect(),
+                        span: byte_to_source_span(&item.span, source_id),
+                    }
                 })
                 .collect();
             Some(IrNode::UnorderedList {
@@ -102,13 +127,18 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
         Block::OrderedList { items, start, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| IrListItem {
-                    nodes: item
-                        .content
-                        .iter()
-                        .filter_map(|b| block_to_ir(b, source_id))
-                        .collect(),
-                    span: byte_to_source_span(&item.span, source_id),
+                .map(|item| {
+                    if item.task.is_some() {
+                        push_unsupported(diagnostics, "GFM task list", &item.span, source_id);
+                    }
+                    IrListItem {
+                        nodes: item
+                            .content
+                            .iter()
+                            .filter_map(|b| block_to_ir(b, source_id, diagnostics))
+                            .collect(),
+                        span: byte_to_source_span(&item.span, source_id),
+                    }
                 })
                 .collect();
             Some(IrNode::OrderedList {
@@ -116,6 +146,10 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
                 start: *start,
                 span: byte_to_source_span(span, source_id),
             })
+        }
+        Block::Blockquote { span, .. } => {
+            push_unsupported(diagnostics, "blockquote", span, source_id);
+            None
         }
         Block::CodeBlock {
             language,
@@ -129,7 +163,6 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
         Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {
             span: byte_to_source_span(span, source_id),
         }),
-        Block::BlankLine { .. } => None,
         Block::DirectiveCall {
             name,
             positional_args,
@@ -139,16 +172,16 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
         } => {
             let ir_positional: Vec<_> = positional_args
                 .iter()
-                .map(|v| value_to_ir(v, source_id))
+                .map(|v| value_to_ir(v, source_id, diagnostics))
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
+                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
                 .collect();
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
                     .iter()
-                    .filter_map(|b| block_to_ir(b, source_id))
+                    .filter_map(|b| block_to_ir(b, source_id, diagnostics))
                     .collect::<Vec<_>>()
             });
             Some(IrNode::FunctionCall {
@@ -163,31 +196,53 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
             // Metadata is handled via front_matter on the Document; skip as a block node.
             None
         }
+        Block::Table { span, .. } => {
+            push_unsupported(diagnostics, "GFM table", span, source_id);
+            None
+        }
+        Block::RawHtml { span, .. } => {
+            push_unsupported(diagnostics, "raw HTML block", span, source_id);
+            None
+        }
+        Block::Unsupported { kind, span } => {
+            if !kind.starts_with("malformed Quarkdown") {
+                push_unsupported(diagnostics, kind, span, source_id);
+            }
+            None
+        }
     }
 }
 
-fn inlines_to_ir(inlines: &[Inline], source_id: SourceId) -> Vec<IrInline> {
+fn inlines_to_ir(
+    inlines: &[Inline],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<IrInline> {
     inlines
         .iter()
-        .filter_map(|inline| inline_to_ir(inline, source_id))
+        .filter_map(|inline| inline_to_ir(inline, source_id, diagnostics))
         .collect()
 }
 
-fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
+fn inline_to_ir(
+    inline: &Inline,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<IrInline> {
     match inline {
         Inline::Text { content, span } => Some(IrInline::Text {
             content: content.clone(),
             span: byte_to_source_span(span, source_id),
         }),
         Inline::Emphasis { content, span } => {
-            let children = inlines_to_ir(content, source_id);
+            let children = inlines_to_ir(content, source_id, diagnostics);
             Some(IrInline::Emphasis {
                 content: children,
                 span: byte_to_source_span(span, source_id),
             })
         }
         Inline::Strong { content, span } => {
-            let children = inlines_to_ir(content, source_id);
+            let children = inlines_to_ir(content, source_id, diagnostics);
             Some(IrInline::Strong {
                 content: children,
                 span: byte_to_source_span(span, source_id),
@@ -202,13 +257,15 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
         } => {
             let ir_positional: Vec<_> = positional_args
                 .iter()
-                .map(|v| value_to_ir(v, source_id))
+                .map(|v| value_to_ir(v, source_id, diagnostics))
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
+                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
                 .collect();
-            let ir_body = body.as_ref().map(|b| inlines_to_ir(b, source_id));
+            let ir_body = body
+                .as_ref()
+                .map(|b| inlines_to_ir(b, source_id, diagnostics));
             Some(IrInline::DirectiveCall {
                 name: name.clone(),
                 positional_args: ir_positional,
@@ -229,10 +286,26 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
             destination,
             span,
         } => Some(IrInline::Link {
-            content: inlines_to_ir(content, source_id),
+            content: inlines_to_ir(content, source_id, diagnostics),
             destination: destination.clone(),
             span: byte_to_source_span(span, source_id),
         }),
+        Inline::Image { span, .. } => {
+            push_unsupported(diagnostics, "image", span, source_id);
+            None
+        }
+        Inline::RawHtml { span, .. } => {
+            push_unsupported(diagnostics, "raw HTML inline", span, source_id);
+            None
+        }
+        Inline::Strikethrough { span, .. } => {
+            push_unsupported(diagnostics, "strikethrough", span, source_id);
+            None
+        }
+        Inline::Unsupported { kind, span } => {
+            push_unsupported(diagnostics, kind, span, source_id);
+            None
+        }
         Inline::Code { content, span } => Some(IrInline::Code {
             content: content.clone(),
             span: byte_to_source_span(span, source_id),
@@ -240,7 +313,11 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
     }
 }
 
-fn value_to_ir(value: &Value, source_id: SourceId) -> crate::ir::IrValue {
+fn value_to_ir(
+    value: &Value,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> crate::ir::IrValue {
     match value {
         Value::String(s) => crate::ir::IrValue::String(s.clone()),
         Value::Number(n) => crate::ir::IrValue::Number(*n),
@@ -257,15 +334,15 @@ fn value_to_ir(value: &Value, source_id: SourceId) -> crate::ir::IrValue {
             {
                 let ir_positional: Vec<_> = positional_args
                     .iter()
-                    .map(|v| value_to_ir(v, source_id))
+                    .map(|v| value_to_ir(v, source_id, diagnostics))
                     .collect();
                 let ir_named: Vec<_> = named_args
                     .iter()
-                    .map(|(k, v)| (k.clone(), value_to_ir(v, source_id)))
+                    .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
                     .collect();
                 let ir_body = body.as_ref().map(|b| {
                     vec![IrNode::Paragraph {
-                        content: inlines_to_ir(b, source_id),
+                        content: inlines_to_ir(b, source_id, diagnostics),
                         span: byte_to_source_span(span, source_id),
                     }]
                 });
@@ -281,12 +358,32 @@ fn value_to_ir(value: &Value, source_id: SourceId) -> crate::ir::IrValue {
                 let end = inlines.last().map(inline_span_end);
                 let span = crate::source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
                 crate::ir::IrValue::Content(vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id),
+                    content: inlines_to_ir(inlines, source_id, diagnostics),
                     span: byte_to_source_span(&span, source_id),
                 }])
             }
         }
     }
+}
+
+fn push_unsupported(
+    diagnostics: &mut Vec<Diagnostic>,
+    feature: &str,
+    span: &crate::source::ByteSpan,
+    source_id: SourceId,
+) {
+    diagnostics.push(Diagnostic {
+        code: "E8001".to_string(),
+        severity: Severity::Error,
+        message: format!(
+            "Markdown syntax `{feature}` was parsed and preserved by the frontend but is not supported by the current IR/Typst lowering"
+        ),
+        primary: Some(byte_to_source_span(span, source_id)),
+        secondary: Vec::new(),
+        hints: vec![
+            "The source semantics were not coerced into a different Markdown node.".to_string(),
+        ],
+    });
 }
 
 fn inline_span_start(inline: &Inline) -> usize {
@@ -296,6 +393,10 @@ fn inline_span_start(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Image { span, .. }
+        | Inline::RawHtml { span, .. }
+        | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
         | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.start,
@@ -309,6 +410,10 @@ fn inline_span_end(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Image { span, .. }
+        | Inline::RawHtml { span, .. }
+        | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
         | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.end,
@@ -322,7 +427,7 @@ fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId)
 mod tests {
     use super::*;
     use crate::source::{ByteSpan, SourceId};
-    use crate::syntax::markdown::ast::FrontMatter;
+    use scribium_markdown::ast::{FrontMatter, TableAlignment, TableCell, TableRow};
 
     fn source_id() -> SourceId {
         SourceId(42)
@@ -620,7 +725,7 @@ mod tests {
 
     #[test]
     fn convert_unordered_list() {
-        use crate::syntax::markdown::ast::ListItem;
+        use scribium_markdown::ast::ListItem;
         let doc = Document {
             nodes: vec![Block::UnorderedList {
                 items: vec![
@@ -633,6 +738,7 @@ mod tests {
                             span: bs(2, 3),
                         }],
                         span: bs(0, 3),
+                        task: None,
                     },
                     ListItem {
                         content: vec![Block::Paragraph {
@@ -643,6 +749,7 @@ mod tests {
                             span: bs(7, 8),
                         }],
                         span: bs(5, 8),
+                        task: None,
                     },
                 ],
                 span: bs(0, 8),
@@ -658,5 +765,135 @@ mod tests {
             }
             _ => panic!("expected UnorderedList"),
         }
+    }
+
+    #[test]
+    fn unsupported_markdown_semantics_are_diagnosed_without_coercion() {
+        let doc = Document {
+            nodes: vec![
+                Block::Blockquote {
+                    content: vec![
+                        Block::Paragraph {
+                            content: vec![Inline::Text {
+                                content: "first".into(),
+                                span: bs(2, 7),
+                            }],
+                            span: bs(2, 7),
+                        },
+                        Block::Paragraph {
+                            content: vec![Inline::Text {
+                                content: "second".into(),
+                                span: bs(10, 16),
+                            }],
+                            span: bs(10, 16),
+                        },
+                    ],
+                    span: bs(0, 16),
+                },
+                Block::Paragraph {
+                    content: vec![
+                        Inline::Link {
+                            content: vec![Inline::Text {
+                                content: "link".into(),
+                                span: bs(18, 22),
+                            }],
+                            destination: "page.md".into(),
+                            span: bs(17, 32),
+                        },
+                        Inline::Image {
+                            content: vec![Inline::Text {
+                                content: "image".into(),
+                                span: bs(35, 40),
+                            }],
+                            destination: "image.png".into(),
+                            span: bs(34, 51),
+                        },
+                        Inline::Strikethrough {
+                            content: vec![
+                                Inline::Text {
+                                    content: "hello ".into(),
+                                    span: bs(53, 59),
+                                },
+                                Inline::Strong {
+                                    content: vec![Inline::Text {
+                                        content: "world".into(),
+                                        span: bs(61, 66),
+                                    }],
+                                    span: bs(59, 68),
+                                },
+                                Inline::Code {
+                                    content: "code".into(),
+                                    span: bs(69, 75),
+                                },
+                            ],
+                            span: bs(52, 77),
+                        },
+                        Inline::RawHtml {
+                            content: "<em>html</em>".into(),
+                            span: bs(78, 92),
+                        },
+                    ],
+                    span: bs(17, 92),
+                },
+                Block::Table {
+                    header: TableRow {
+                        cells: vec![TableCell {
+                            content: vec![Inline::Text {
+                                content: "A".into(),
+                                span: bs(94, 95),
+                            }],
+                            alignment: TableAlignment::None,
+                            span: bs(94, 95),
+                        }],
+                        span: bs(94, 95),
+                    },
+                    rows: vec![TableRow {
+                        cells: vec![TableCell {
+                            content: vec![Inline::Text {
+                                content: "1".into(),
+                                span: bs(96, 97),
+                            }],
+                            alignment: TableAlignment::None,
+                            span: bs(96, 97),
+                        }],
+                        span: bs(96, 97),
+                    }],
+                    span: bs(94, 97),
+                },
+            ],
+            front_matter: None,
+            line_count: 1,
+        };
+
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&doc, source_id(), &empty_project_metadata());
+
+        let paragraph = ir
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                IrNode::Paragraph { content, .. } => Some(content),
+                _ => None,
+            })
+            .expect("the supported link paragraph remains");
+        assert_eq!(paragraph.len(), 1);
+        assert!(matches!(paragraph[0], IrInline::Link { .. }));
+        assert_eq!(ir.nodes.len(), 1);
+
+        let messages: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("blockquote")));
+        assert!(messages.iter().any(|message| message.contains("image")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("strikethrough")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("raw HTML inline")));
+        assert!(messages.iter().any(|message| message.contains("GFM table")));
     }
 }

@@ -281,3 +281,7 @@ The unresolved risks requiring architecture/security review are:
 
 No production dependency, parser migration, abstraction, ADR change, or
 architecture decision was made.
+
+Follow-up architecture decision: [`ADR-0017`](../adr/0017-rushdown-markdown-substrate.md)
+adopts Rushdown behind the extracted Markdown frontend and records the local
+safety containment and exact revision policy.
