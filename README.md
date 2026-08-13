@@ -6,7 +6,7 @@
 
 **Scribium is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 
-> Scribium targets complete compatibility with the publicly documented Quarkdown document language while tracking stable upstream evolution. Current verified compatibility is partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.0. See `docs/compatibility/quarkdown/` for the matrix, evidence, and compatibility debt.
+> Scribium targets complete compatibility with the publicly documented Quarkdown document language while tracking stable upstream evolution. Current verified compatibility is partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.1. See `docs/compatibility/quarkdown/` for the matrix, evidence, and compatibility debt.
 
 > Scribium is an independent project. It is not affiliated with, endorsed by, or
 > sponsored by Typst GmbH or the Quarkdown project.

@@ -5,10 +5,12 @@ Quarkdown-compatible feature implementation.
 
 ## Reference Baseline
 
-- **Reference version:** Quarkdown **v2.5.0** (released 2026-08-04;
-  `iamgio/quarkdown` tag `v2.5.0`)
+- **Reference version:** Quarkdown **v2.5.1** (released 2026-08-12;
+  `iamgio/quarkdown` tag `v2.5.1`)
 - **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)
-- **Current verified baseline:** v2.5.0; current implementation is partial
+- **Current verified baseline:** v2.5.1; current implementation is partial
+- **Historical evidence retained:** v2.5.0 sources below remain part of the
+  provenance record and are not deleted by this adaptation review
 
 ## Primary Sources
 
@@ -24,6 +26,13 @@ Quarkdown-compatible feature implementation.
 | Quarkdown quickstart                          | https://quarkdown.com/                      | Call examples (`.pow {5} to:{2}`, `.align {center}` with an indented body) | 2026-08-08 |
 | Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
+| GitHub release tag `v2.5.1`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.1 | Release identification and D1-D5 public delta inventory | 2026-08-13 |
+| CommonMark specification, current link rules  | https://spec.commonmark.org/current/#links | D2 balanced/escaped link destinations, literal trailing delimiters, and URI backslash-escape semantics | 2026-08-13 |
+| CommonMark specification, current autolink rules | https://spec.commonmark.org/current/#autolinks | D2 autolink URI/email grammar and the rule that backslash escapes do not apply inside autolinks | 2026-08-13 |
+| CommonMark specification, current list rules  | https://spec.commonmark.org/current/#lists | D3 nested list container and indentation semantics | 2026-08-13 |
+| Quarkdown wiki — Markdown content            | https://quarkdown.com/wiki/markdown-content/ | Public body-content interaction for links, lists, and nested block content | 2026-08-13 |
+| Quarkdown wiki — Iterable                   | https://quarkdown.com/wiki/iterable/ | Corroborating public scope for nested Markdown list document semantics | 2026-08-13 |
+| Quarkdown wiki — Subdocuments                | https://quarkdown.com/wiki/subdocuments/ | Corroborating public scope for D4 local subdocument links and HTML output | 2026-08-13 |
 
 The current evidence set covers the function-call syntax documented on the wiki
 page above, plus the conditional constructs (`.if` / `.ifnot`) and implicit
@@ -32,7 +41,7 @@ positional references (`.1`, `.2`, ...), at the levels recorded in
 baseline, not a permanent restriction on the complete public-language target.
 Public features not yet covered remain compatibility debt.
 
-The current verified baseline is **Quarkdown v2.5.0**. The v2.5.0-badged
+The current verified baseline is **Quarkdown v2.5.1**. The v2.5.0-badged
 *"Syntax of a function call"* wiki page is the primary public specification
 source for the currently evidenced function-call behavior. Version provenance
 is recorded per source:
@@ -50,13 +59,20 @@ is recorded per source:
 - The **`docs/latest/…` API pages** are unversioned and are corroborating
   sources rather than evidence that a behavior was introduced in or
   uniquely belongs to v2.5.0.
+- The **v2.5.1 release notes** are the primary source for release
+  identification and D1-D5. The CommonMark links/autolinks/lists sections are
+  corroborating public behavior specifications for D2/D3. The Markdown
+  content and Subdocuments wiki pages corroborate scope and are not claims
+  that those behaviors were introduced in v2.5.1.
 
-URLs other than those listed above were not consulted for this feature set.
+The sources listed above are the sources consulted for this feature set and
+the v2.5.1 impact review.
 
 ## Observational Method
 
-- Implemented from public documentation only (no interactive reference
-  sessions were run for the current evidence set)
+- Implemented from public documentation only; no Quarkdown binary black-box
+  observation was required because the release note and CommonMark rules made
+  the expected D2/D3 behavior explicit
 - No Quarkdown source code is read or copied
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs
