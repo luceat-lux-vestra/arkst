@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "crates/scribium-core",
+    "crates/scribium-source",
+    "crates/scribium-quarkdown",
+    "crates/scribium-markdown",
     "crates/scribium-typst",
     "crates/scribium-cli",
     "crates/scribium-test-support",
@@ -23,6 +26,9 @@ authors = ["Scribium Authors"]
 
 [workspace.dependencies]
 scribium-core = { path = "crates/scribium-core" }
+scribium-source = { path = "crates/scribium-source" }
+scribium-quarkdown = { path = "crates/scribium-quarkdown" }
+scribium-markdown = { path = "crates/scribium-markdown" }
 scribium-typst = { path = "crates/scribium-typst" }
 scribium-cli = { path = "crates/scribium-cli" }
 scribium-test-support = { path = "crates/scribium-test-support" }
@@ -38,6 +44,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = "1"
 tempfile = "3"
+rushdown = { git = "https://github.com/yuin/rushdown.git", rev = "e5eb4e4446541ea0ed53111c1b37e779283ff57c", default-features = false, features = ["std", "html-entities"] }
 
 [profile.release]
 opt-level = 2

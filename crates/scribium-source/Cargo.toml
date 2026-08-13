@@ -1,0 +1,12 @@
+[package]
+name = "scribium-source"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Platform-neutral source identity and byte-span primitives for Scribium"
+
+[dependencies]
+serde.workspace = true
