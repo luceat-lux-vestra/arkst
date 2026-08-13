@@ -257,7 +257,8 @@ fn is_name_char(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
-/// Returns whether `name` satisfies Quarkdown's normal call-name grammar:
+/// Returns whether `name` satisfies Scribium's currently supported normal
+/// call-name grammar:
 /// `[A-Za-z_][A-Za-z0-9_-]*`.
 ///
 /// This is the single public validation helper for consumers that need to

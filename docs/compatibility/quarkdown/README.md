@@ -66,6 +66,16 @@ provenance records.
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
 | `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
+For an indented body, the minimum eligibility rule is at least two leading
+spaces or one leading tab in the current Rushdown container context. The first
+qualifying nonblank line establishes the actual body indentation; later lines
+must meet that same container-relative indentation and a dedent ends the body.
+The frontend preserves this parser decision for lazy paragraph normalization,
+so body ownership is not re-inferred from absolute source columns or a fixed
+indentation width. The evidence above covers 2/3/4/8-space bodies, one-space
+rejection, single-tab and mixed indentation, UTF-8/CRLF provenance, nested
+Markdown and Quarkdown, and list/blockquote-relative containers.
+
 `Implemented` rows are current claims only at their stated compatibility level
 and are covered by the listed unit/golden/conformance evidence (see
 [Conformance Evidence](#conformance-evidence)). `Planned` means the behavior is
@@ -90,7 +100,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
 | Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
 | Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
-| Indented body argument          | `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
+| Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
 | Nested calls                    | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
 | Inline (mid-paragraph) call     | `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
 | Tight-call boundaries           | `scribium-quarkdown/src/lib.rs::tight_word_adjacency_and_symbol_boundaries_are_explicit`, `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries` |
