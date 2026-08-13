@@ -437,7 +437,7 @@ fn convert_block(
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Option<Block> {
-    let span = node_span(arena, node, source).map(|span| add_base(span, base))?;
+    let span = node_span(arena, node, source).and_then(|span| offset_span(span, base))?;
     match arena[node].kind_data() {
         KindData::Paragraph(_) => Some(Block::Paragraph {
             content: convert_inlines(arena, node, source, base, diagnostics),
@@ -460,7 +460,7 @@ fn convert_block(
                     KindData::ListItem(item) => Some(ListItem {
                         content: convert_children_blocks(arena, child, source, base, diagnostics),
                         span: node_span(arena, child, source)
-                            .map(|value| add_base(value, base))
+                            .and_then(|value| offset_span(value, base))
                             .unwrap_or(span),
                         task: item.task().map(|task| match task {
                             Task::Active => TaskStatus::Active,
@@ -511,10 +511,13 @@ fn convert_block(
                     span,
                 }),
                 Err(error) => {
+                    let diagnostic_span = offset_span(error.span, call_span.start)
+                        .and_then(|body_span| offset_span(body_span, base))
+                        .unwrap_or(span);
                     diagnostics.push(ParserDiagnostic {
                         code: error.code,
                         message: error.message,
-                        span: add_base(error.span, base),
+                        span: diagnostic_span,
                     });
                     Some(Block::Unsupported {
                         kind: "malformed Quarkdown block call".to_string(),
@@ -588,7 +591,7 @@ fn convert_table_row(
     if !matches!(arena[node].kind_data(), KindData::TableRow(_)) {
         return None;
     }
-    let span = node_span(arena, node, source).map(|value| add_base(value, base))?;
+    let span = node_span(arena, node, source).and_then(|value| offset_span(value, base))?;
     let cells = arena[node]
         .children(arena)
         .filter_map(|cell| match arena[cell].kind_data() {
@@ -602,7 +605,7 @@ fn convert_table_row(
                     _ => crate::ast::TableAlignment::None,
                 },
                 span: node_span(arena, cell, source)
-                    .map(|value| add_base(value, base))
+                    .and_then(|value| offset_span(value, base))
                     .unwrap_or(span),
             }),
             _ => None,
@@ -621,8 +624,9 @@ fn directive_block(
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Block {
     let span = node_span(arena, node, source)
-        .map(|value| add_base(value, base))
-        .unwrap_or_else(|| add_base(call.span, call_base));
+        .and_then(|value| offset_span(value, base))
+        .or_else(|| offset_span(call.span, call_base))
+        .unwrap_or(ByteSpan::new(0, 0));
     let body_nodes = convert_children_blocks(arena, node, source, base, diagnostics);
     Block::DirectiveCall {
         name: call.name,
@@ -684,7 +688,7 @@ fn convert_inline(
         KindData::RawHtml(html) => raw_html_span(arena, node, html, source),
         _ => node_span(arena, node, source),
     }?;
-    let span = add_base(local_span, base);
+    let span = offset_span(local_span, base)?;
     match arena[node].kind_data() {
         KindData::Text(text) => {
             let local = text
@@ -693,7 +697,7 @@ fn convert_inline(
                 .or_else(|| node_span(arena, node, source))?;
             Some(Inline::Text {
                 content: source.get(local.start..local.end)?.to_string(),
-                span: add_base(local, base),
+                span: offset_span(local, base)?,
             })
         }
         KindData::Emphasis(_) => Some(Inline::Emphasis {
@@ -746,7 +750,7 @@ fn convert_inline(
                     diagnostics.push(ParserDiagnostic {
                         code: error.code,
                         message: error.message,
-                        span: add_base(error.span, base),
+                        span: offset_span(error.span, base).unwrap_or(span),
                     });
                     return None;
                 }
@@ -789,12 +793,14 @@ fn convert_arg(
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value),
         ArgContent::Content(content) => {
-            let span = add_base(*content, call_base);
-            let Some(span) = checked_local_span(span, source) else {
+            let span = offset_span(*content, call_base);
+            let Some(span) = span.and_then(|value| checked_local_span(value, source)) else {
                 diagnostics.push(ParserDiagnostic {
                     code: "E9002",
                     message: "Quarkdown content argument is outside the source".to_string(),
-                    span: add_base(span, base),
+                    span: span
+                        .and_then(|value| offset_span(value, base))
+                        .unwrap_or(ByteSpan::new(0, 0)),
                 });
                 return Value::String(String::new());
             };
@@ -852,7 +858,7 @@ fn parse_original_content(
                 Err(error) => diagnostics.push(ParserDiagnostic {
                     code: error.code,
                     message: error.message,
-                    span: add_base(error.span, base),
+                    span: offset_span(error.span, base).unwrap_or(ByteSpan::new(0, 0)),
                 }),
                 _ => {}
             }
@@ -867,7 +873,7 @@ fn parse_original_content(
         diagnostics.push(ParserDiagnostic {
             code: "E3010",
             message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because Rushdown exposes no original-span inline-fragment parser".to_string(),
-            span: add_base(span, base),
+            span: offset_span(span, base).unwrap_or(ByteSpan::new(0, 0)),
         });
     }
     inlines
@@ -884,10 +890,12 @@ fn push_content_text(
         return;
     }
     if let Some(content) = source.get(start..end) {
-        inlines.push(Inline::Text {
-            content: content.to_string(),
-            span: add_base(ByteSpan::new(start, end), base),
-        });
+        if let Some(span) = offset_span(ByteSpan::new(start, end), base) {
+            inlines.push(Inline::Text {
+                content: content.to_string(),
+                span,
+            });
+        }
     }
 }
 
@@ -897,7 +905,7 @@ fn convert_content_call(
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Inline {
-    let span = add_base(call.span, base);
+    let span = offset_span(call.span, base).unwrap_or(ByteSpan::new(0, 0));
     Inline::DirectiveCall {
         name: call.name,
         positional_args: call
@@ -1104,8 +1112,11 @@ fn checked_value<'a>(value: &'a rushdown::text::Value, source: &'a str) -> Optio
     }
 }
 
-fn add_base(span: ByteSpan, base: usize) -> ByteSpan {
-    ByteSpan::new(span.start + base, span.end + base)
+fn offset_span(span: ByteSpan, offset: usize) -> Option<ByteSpan> {
+    Some(ByteSpan::new(
+        span.start.checked_add(offset)?,
+        span.end.checked_add(offset)?,
+    ))
 }
 
 fn code_language(code: &rushdown::ast::CodeBlock, source: &str) -> Option<String> {
@@ -1221,6 +1232,28 @@ fn code_span_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan
 mod tests {
     use super::*;
 
+    fn assert_malformed_argument_span(source: &str) {
+        let output = parse_with_diagnostics(source);
+        let diagnostic = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E2003")
+            .unwrap_or_else(|| panic!("expected E2003 diagnostic, got {:?}", output.diagnostics));
+        let expected_start = source.find('{').expect("malformed argument opening");
+        assert_eq!(diagnostic.span, ByteSpan::new(expected_start, source.len()));
+        assert!(diagnostic.span.start <= diagnostic.span.end);
+        assert!(diagnostic.span.end <= source.len());
+        assert!(source.is_char_boundary(diagnostic.span.start));
+        assert!(source.is_char_boundary(diagnostic.span.end));
+        assert!(source
+            .get(diagnostic.span.start..diagnostic.span.end)
+            .is_some());
+        assert_eq!(
+            source.get(diagnostic.span.start..diagnostic.span.end),
+            Some("{unterminated")
+        );
+    }
+
     #[test]
     fn markdown_mode_keeps_quarkdown_as_text() {
         let document = parse_md(".foo {bar}\n");
@@ -1241,6 +1274,78 @@ mod tests {
             }
             other => panic!("unexpected node: {other:?}"),
         }
+    }
+
+    #[test]
+    fn malformed_root_block_reports_argument_span() {
+        assert_malformed_argument_span(".foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_block_restores_preceding_content_offset() {
+        assert_malformed_argument_span("# heading\n.foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_named_argument_restores_preceding_content_offset() {
+        let source = "# heading\n.foo name:{unterminated";
+        let output = parse_with_diagnostics(source);
+        let diagnostic = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E2003")
+            .expect("expected malformed named argument diagnostic");
+        let expected_start = source.find('{').unwrap();
+        assert_eq!(diagnostic.span, ByteSpan::new(expected_start, source.len()));
+        assert!(source
+            .get(diagnostic.span.start..diagnostic.span.end)
+            .is_some());
+    }
+
+    #[test]
+    fn malformed_block_restores_front_matter_and_body_offsets() {
+        assert_malformed_argument_span("---\ntitle: test\n---\n# heading\n.foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_block_restores_front_matter_offset() {
+        assert_malformed_argument_span("---\ntitle: test\n---\n.foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_inline_call_preserves_full_source_offset() {
+        let source = "prefix .foo {unterminated";
+        let output = parse_with_diagnostics(source);
+        let diagnostic = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E2003")
+            .expect("expected malformed inline call diagnostic");
+        let expected_start = source.find('{').unwrap();
+        assert_eq!(diagnostic.span, ByteSpan::new(expected_start, source.len()));
+        assert!(diagnostic.span.start <= diagnostic.span.end);
+        assert!(diagnostic.span.end <= source.len());
+        assert!(source.is_char_boundary(diagnostic.span.start));
+        assert!(source.is_char_boundary(diagnostic.span.end));
+        assert_eq!(
+            source.get(diagnostic.span.start..diagnostic.span.end),
+            Some("{unterminated")
+        );
+    }
+
+    #[test]
+    fn malformed_nested_block_restores_container_offset() {
+        assert_malformed_argument_span("> .foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_utf8_block_span_is_source_backed() {
+        assert_malformed_argument_span("# 한글 제목\n.foo {unterminated");
+    }
+
+    #[test]
+    fn malformed_crlf_block_span_is_source_backed() {
+        assert_malformed_argument_span("# heading\r\n.foo {unterminated");
     }
 
     #[test]
