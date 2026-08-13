@@ -76,9 +76,18 @@ the Rushdown fork. A narrow adapter normalization handles Rushdown's ordinary
 lazy-paragraph behavior at an indented Quarkdown body boundary without
 creating a synthetic source or reparsing transformed Markdown.
 
+Quarkdown content arguments are also processed against the original document
+source. Nested Quarkdown calls are scanned with the grammar crate and retain
+their original spans. Rushdown 0.18.0 does not expose a public inline-parser
+entry point for an arbitrary original-source span, so Markdown inline markers
+inside a content argument remain source-backed text and produce explicit
+diagnostic `E3010`; the adapter does not create a sentinel prefix, copy a
+fragment, or compensate synthetic offsets.
+
 ## Safety decision and containment
 
-Rushdown 0.18.0 has a known public safe-API soundness defect: `Index` and
+`KNOWN_UPSTREAM_SOUNDNESS_RISK_ACCEPTED`: Rushdown 0.18.0 has a known public
+safe-API soundness defect: `Index` and
 `Segment` safe constructors/mutators accept arbitrary byte offsets while their
 safe `str()` accessors call unchecked string slicing. The downstream safe-only
 reproduction and Miri evidence are recorded in the historical safety report.
@@ -92,15 +101,21 @@ or permanent fork is assumed by this decision.
 Until an upstream fix exists, the local safety delta is limited to the
 `scribium-markdown` adapter:
 
-- Rushdown `Index`/`Segment` values are converted to `ByteSpan` only after
-  bounds and UTF-8-boundary validation;
-- the adapter does not call Rushdown's unchecked `str()` accessors;
-- parser-produced source ranges are checked by deterministic adversarial and
-  `proptest` suites; and
+- `DIRECT_AFFECTED_ACCESSORS_AVOIDED_AT_ADAPTER_BOUNDARY`: Rushdown
+  `Index`/`Segment` values are converted to `ByteSpan` only after bounds and
+  UTF-8-boundary validation, and the adapter does not call the affected
+  `str()` accessors;
+- `PARSER_PATH_MIRI_AND_PROPERTY_REGRESSION_MONITORED`: parser-produced
+  source ranges are checked by deterministic adversarial, `proptest`, and
+  Miri-eligible suites; and
 - the parser is created per document and a panic is converted to structured
   diagnostic `E9003` with `catch_unwind`. This contains parser robustness
   failures only; it is not a memory-safety proof and does not make the
   upstream unsafe API sound.
+
+These adapter checks reduce direct affected-accessor exposure and validate
+frontend provenance. They do not prove that every unsafe path inside Rushdown
+is sound, and the accepted upstream issue remains an explicit dependency risk.
 
 The existing safe-only/Miri reproduction remains in
 `tools/spikes/rushdown-safety-gate/`. Invalid constructor cases are never run
@@ -121,10 +136,13 @@ input, code-shielding, nested-list, blockquote, link/image, GFM, and Quarkdown
 fixtures. Existing core tests remain the compatibility regression corpus.
 
 The current frontend AST preserves image, raw HTML, strikethrough, blockquote,
-and other Rushdown nodes. The existing backend-neutral IR has narrower legacy
-variants, so lowering behavior for those nodes remains explicit compatibility
-debt until the owning IR/engine decisions are reviewed. This ADR does not add
-a new IR tier or silently claim complete Quarkdown compatibility.
+tables, task-list status, and other Rushdown nodes. The existing backend-neutral
+IR has narrower legacy variants, so lowering behavior for those nodes remains
+explicit compatibility debt until the owning IR/engine decisions are reviewed.
+The lowering boundary emits an unsupported diagnostic rather than coercing an
+image to a link, a table to a blockquote, raw HTML to text, or rich
+strikethrough children to plain text. This ADR does not add a new IR tier or
+silently claim complete Quarkdown compatibility.
 
 The Rushdown issue and its known unsafe implementation are part of the
 accepted dependency risk. The risk is managed through the exact revision,
@@ -177,14 +195,33 @@ upstream safety debt.
 | exact provenance | PASS |
 | `.md`/`.qd` isolation | PASS |
 | CommonMark | PASS; the official 652-fixture baseline is reused from PR #49 because the version is unchanged |
-| required GFM profile | PASS at the parser/frontend boundary for tables, task lists, strikethrough, and autolink/linkify; some backend lowering remains compatibility debt |
-| known panic exposure | CONTAINED at the frontend boundary as explicit `E9003` failure; `catch_unwind` is not a memory-safety proof |
-| silent corruption exposure | EXCLUDED for the affected raw span accessors by checked adapter validation; upstream issue remains open |
+| required GFM profile | See the stage matrix below; parser and frontend preservation pass for the covered table/task/strikethrough/link features, while unsupported lowering is explicit |
+| known panic exposure | Parser panic is converted to explicit `E9003` failure at the document boundary; `catch_unwind` is robustness containment only |
+| silent corruption exposure | Not claimed as excluded; original-source spans are checked at the adapter boundary while the upstream soundness risk remains accepted |
 | selected dependency graph | CLEAN |
 | WASM | PASS |
 | unsafe policy | FAIL upstream policy (`unsafe` is present and not forbidden); local Scribium delta is zero and the known defect is tracked/contained |
 | maintenance | HIGH_RISK; exact pin, audit, regression, and human review are required |
 | permanent fork required | NO |
+
+The stage-specific support status is:
+
+| Feature | Parser | Frontend | IR | Typst |
+|---|---|---|---|---|
+| blockquote | PASS | PASS | DEFERRED; `E8001` | DEFERRED |
+| image | PASS | PASS | DEFERRED; `E8001` | DEFERRED |
+| table | PASS | PASS | DEFERRED; `E8001` | DEFERRED |
+| task list | PASS | PASS; status preserved | DEFERRED; `E8001` | DEFERRED |
+| strikethrough | PASS | PASS; children preserved | DEFERRED; `E8001` | DEFERRED |
+| raw HTML | PASS | PASS | DEFERRED; `E8001` | DEFERRED |
+| autolink/linkify | PASS | PASS when enabled | existing Link path where applicable | existing Link lowering where applicable |
+| Quarkdown block/inline | PASS | PASS | existing directive path where applicable | existing directive lowering where applicable |
+
+`PASS` at the parser or frontend stage does not claim end-to-end rendering.
+For a Quarkdown content argument containing Markdown inline markers, the
+current stage is parser/original-span preservation with `E3010`, not Strong or
+Emphasis lowering; arbitrary-span Rushdown inline parsing is not public in
+0.18.0.
 
 The acceptance decision is `RUSHDOWN_SELECTED` under this ADR. This is a
 substrate adoption decision only; it does not select a future architecture

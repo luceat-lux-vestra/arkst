@@ -198,6 +198,13 @@ the frontend AST. `scribium-quarkdown` owns only Quarkdown grammar and must
 not depend on Markdown parser or AST types. This is a first-party Scribium
 integration, not a plugin API or generic extension framework.
 
+Quarkdown content arguments remain tied to the original document source. The
+adapter may scan nested Quarkdown calls with the grammar crate, but it must not
+create a synthetic Markdown buffer, prepend a sentinel, or compensate offsets.
+Because Rushdown 0.18.0 does not expose an arbitrary original-span inline-parser
+entry point, Markdown inline markers in such content are preserved as original
+text with an explicit diagnostic until a reviewed integration API exists.
+
 Raw inline and block HTML recognized by Rushdown is preserved by
 `scribium-markdown` at the frontend boundary. The frontend preserves the
 original HTML content, its block or inline context, and its original

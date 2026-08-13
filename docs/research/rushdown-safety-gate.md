@@ -336,11 +336,18 @@ narrow `scribium-markdown` adapter while the defect is disclosed upstream:
 
 - upstream issue: https://github.com/yuin/rushdown/issues/2;
 - selected revision: `e5eb4e4446541ea0ed53111c1b37e779283ff57c`;
-- adapter policy: checked bounds/UTF-8 validation and no direct unchecked
-  `Index::str`/`Segment::str` call;
+- safety posture: `KNOWN_UPSTREAM_SOUNDNESS_RISK_ACCEPTED`;
+- adapter policy: `DIRECT_AFFECTED_ACCESSORS_AVOIDED_AT_ADAPTER_BOUNDARY`, with
+  checked bounds/UTF-8 validation and no direct unchecked `Index::str`/
+  `Segment::str` call;
+- regression posture: `PARSER_PATH_MIRI_AND_PROPERTY_REGRESSION_MONITORED`;
 - parser-produced range regression: `crates/scribium-markdown/tests/range_invariants.rs`;
 - exact dependency and feature policy: `docs/adr/0017-rushdown-markdown-substrate.md`.
 
 This addendum does not delete or rewrite the original factual classification.
 The known upstream defect remains an accepted, explicitly tracked dependency
-risk and is not represented as fixed.
+risk and is not represented as fixed. Adapter checks validate exposed
+frontend provenance and reduce direct affected-accessor exposure; they do not
+prove that every unsafe path inside Rushdown is sound. `catch_unwind`, where
+used by the frontend document boundary, is panic robustness containment only,
+not memory-safety or UB containment.
