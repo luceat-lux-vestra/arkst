@@ -7,7 +7,10 @@ mod parser;
 
 pub mod ast;
 
-pub use ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
+pub use ast::{
+    Block, Document, FrontMatter, Inline, ListItem, TableAlignment, TableCell, TableRow,
+    TaskStatus, Value,
+};
 pub use parser::{
     parse, parse_md, parse_qd, parse_with_diagnostics, parse_with_mode, Mode, ParseOutput,
     ParserDiagnostic,

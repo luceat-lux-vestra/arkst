@@ -2,7 +2,8 @@ use std::fmt::{self, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use rushdown::ast::{
-    Arena, CodeBlockKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TypeData,
+    Arena, CodeBlockKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TableCellAlignment,
+    Task, TypeData,
 };
 use rushdown::parser::{
     gfm, parser_extension, BlockParser, Context, GfmOptions, InlineParser, NoParserOptions,
@@ -13,7 +14,9 @@ use rushdown::{as_extension_data, matches_extension_kind};
 use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue};
 use scribium_source::ByteSpan;
 
-use crate::ast::{Block, Document, FrontMatter, Inline, ListItem, Value};
+use crate::ast::{
+    Block, Document, FrontMatter, Inline, ListItem, TableCell, TableRow, TaskStatus, Value,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -378,11 +381,13 @@ fn block_start(block: &Block) -> usize {
         | Block::Blockquote { span, .. }
         | Block::UnorderedList { span, .. }
         | Block::OrderedList { span, .. }
+        | Block::Table { span, .. }
         | Block::CodeBlock { span, .. }
         | Block::ThematicBreak { span }
         | Block::DirectiveCall { span, .. }
         | Block::Metadata { span, .. }
-        | Block::Raw { span, .. } => span.start,
+        | Block::RawHtml { span, .. }
+        | Block::Unsupported { span, .. } => span.start,
     }
 }
 
@@ -452,11 +457,16 @@ fn convert_block(
             let items = arena[node]
                 .children(arena)
                 .filter_map(|child| match arena[child].kind_data() {
-                    KindData::ListItem(_) => Some(ListItem {
+                    KindData::ListItem(item) => Some(ListItem {
                         content: convert_children_blocks(arena, child, source, base, diagnostics),
                         span: node_span(arena, child, source)
                             .map(|value| add_base(value, base))
                             .unwrap_or(span),
+                        task: item.task().map(|task| match task {
+                            Task::Active => TaskStatus::Active,
+                            Task::Completed => TaskStatus::Completed,
+                            _ => TaskStatus::Active,
+                        }),
                     }),
                     _ => None,
                 })
@@ -471,6 +481,7 @@ fn convert_block(
                 Some(Block::UnorderedList { items, span })
             }
         }
+        KindData::Table(_) => Some(convert_table(arena, node, source, base, span, diagnostics)),
         KindData::CodeBlock(code) => {
             let raw = source.get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?;
             let language = code_language(code, source);
@@ -495,8 +506,8 @@ fn convert_block(
                     call_span.start,
                     diagnostics,
                 )),
-                Ok(None) => Some(Block::Raw {
-                    source: source.get(call_span.start..call_span.end)?.to_string(),
+                Ok(None) => Some(Block::Unsupported {
+                    kind: "malformed Quarkdown block call".to_string(),
                     span,
                 }),
                 Err(error) => {
@@ -505,31 +516,99 @@ fn convert_block(
                         message: error.message,
                         span: add_base(error.span, base),
                     });
-                    Some(Block::Raw {
-                        source: source.get(call_span.start..call_span.end)?.to_string(),
+                    Some(Block::Unsupported {
+                        kind: "malformed Quarkdown block call".to_string(),
                         span,
                     })
                 }
             }
         }
-        KindData::HtmlBlock(_) => Some(Block::Raw {
+        KindData::HtmlBlock(_) => Some(Block::RawHtml {
             source: source
                 .get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?
                 .to_string(),
             span,
         }),
-        _ => {
-            let children = convert_children_blocks(arena, node, source, base, diagnostics);
-            if children.is_empty() {
-                None
-            } else {
-                Some(Block::Blockquote {
-                    content: children,
-                    span,
-                })
+        KindData::LinkReferenceDefinition(_) => None,
+        _ => Some(Block::Unsupported {
+            kind: arena[node].kind_data().kind_name().to_string(),
+            span,
+        }),
+    }
+}
+
+fn convert_table(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    base: usize,
+    span: ByteSpan,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Block {
+    let mut header = None;
+    let mut rows = Vec::new();
+    for child in arena[node].children(arena) {
+        match arena[child].kind_data() {
+            KindData::TableHeader(_) => {
+                header = arena[child]
+                    .children(arena)
+                    .find_map(|row| convert_table_row(arena, row, source, base, diagnostics));
             }
+            KindData::TableBody(_) => {
+                rows.extend(
+                    arena[child]
+                        .children(arena)
+                        .filter_map(|row| convert_table_row(arena, row, source, base, diagnostics)),
+                );
+            }
+            _ => diagnostics.push(ParserDiagnostic {
+                code: "E3011",
+                message: "Rushdown table contains an unsupported structural node".to_string(),
+                span,
+            }),
         }
     }
+    Block::Table {
+        header: header.unwrap_or(TableRow {
+            cells: Vec::new(),
+            span,
+        }),
+        rows,
+        span,
+    }
+}
+
+fn convert_table_row(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Option<TableRow> {
+    if !matches!(arena[node].kind_data(), KindData::TableRow(_)) {
+        return None;
+    }
+    let span = node_span(arena, node, source).map(|value| add_base(value, base))?;
+    let cells = arena[node]
+        .children(arena)
+        .filter_map(|cell| match arena[cell].kind_data() {
+            KindData::TableCell(table_cell) => Some(TableCell {
+                content: convert_inlines(arena, cell, source, base, diagnostics),
+                alignment: match table_cell.alignment() {
+                    TableCellAlignment::Left => crate::ast::TableAlignment::Left,
+                    TableCellAlignment::Center => crate::ast::TableAlignment::Center,
+                    TableCellAlignment::Right => crate::ast::TableAlignment::Right,
+                    TableCellAlignment::None => crate::ast::TableAlignment::None,
+                    _ => crate::ast::TableAlignment::None,
+                },
+                span: node_span(arena, cell, source)
+                    .map(|value| add_base(value, base))
+                    .unwrap_or(span),
+            }),
+            _ => None,
+        })
+        .collect();
+    Some(TableRow { cells, span })
 }
 
 fn directive_block(
@@ -600,10 +679,10 @@ fn convert_inline(
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Option<Inline> {
-    let local_span = if matches!(arena[node].kind_data(), KindData::CodeSpan(_)) {
-        code_span_span(arena, node, source)
-    } else {
-        node_span(arena, node, source)
+    let local_span = match arena[node].kind_data() {
+        KindData::CodeSpan(_) => code_span_span(arena, node, source),
+        KindData::RawHtml(html) => raw_html_span(arena, node, html, source),
+        _ => node_span(arena, node, source),
     }?;
     let span = add_base(local_span, base);
     match arena[node].kind_data() {
@@ -658,8 +737,8 @@ fn convert_inline(
             let call = match parsed {
                 Ok(Some((call, _))) => call,
                 Ok(None) => {
-                    return Some(Inline::Text {
-                        content: source.get(call_span.start..call_span.end)?.to_string(),
+                    return Some(Inline::Unsupported {
+                        kind: "malformed Quarkdown inline call".to_string(),
                         span,
                     })
                 }
@@ -693,13 +772,10 @@ fn convert_inline(
                 span,
             })
         }
-        _ => {
-            let local = span.start.saturating_sub(base)..span.end.saturating_sub(base);
-            Some(Inline::Text {
-                content: source.get(local)?.to_string(),
-                span,
-            })
-        }
+        _ => Some(Inline::Unsupported {
+            kind: arena[node].kind_data().kind_name().to_string(),
+            span,
+        }),
     }
 }
 
@@ -722,55 +798,126 @@ fn convert_arg(
                 });
                 return Value::String(String::new());
             };
-            Value::Content(parse_inline_fragment(source, span, base, diagnostics))
+            Value::Content(parse_original_content(source, span, base, diagnostics))
         }
     }
 }
 
-fn parse_inline_fragment(
+fn parse_original_content(
     source: &str,
     span: ByteSpan,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Vec<Inline> {
-    let Some(fragment) = source.get(span.start..span.end) else {
+    let Some(_) = source.get(span.start..span.end) else {
         return Vec::new();
     };
-    // A bare call at the beginning of a document is a block candidate in
-    // Rushdown. Prefixing a sentinel paragraph byte forces the same inline
-    // lifecycle used by a real argument label without changing source spans.
-    let wrapped = format!("x {fragment}");
-    let parser = parser(Mode::Quarkdown);
-    let mut reader = BasicReader::new(&wrapped);
-    let fragment_start = base + span.start;
-    let wrapped_base = fragment_start.saturating_sub(2);
-    let parsed = catch_unwind(AssertUnwindSafe(|| parser.parse(&mut reader)));
-    let Ok((arena, root)) = parsed else {
-        diagnostics.push(ParserDiagnostic {
-            code: "E9003",
-            message: "Rushdown panicked while parsing a Quarkdown content argument".to_string(),
-            span,
-        });
-        return Vec::new();
-    };
-    arena[root]
-        .children(&arena)
-        .filter_map(|child| {
-            if matches!(arena[child].kind_data(), KindData::Paragraph(_)) {
-                Some(convert_inlines(
-                    &arena,
-                    child,
-                    &wrapped,
-                    wrapped_base,
-                    diagnostics,
-                ))
-            } else {
-                None
+    let mut inlines = Vec::new();
+    let mut cursor = span.start;
+    let mut text_start = cursor;
+    let mut has_unsupported_markdown = false;
+    while cursor < span.end {
+        let byte = source.as_bytes()[cursor];
+        if byte == b'`' {
+            has_unsupported_markdown = true;
+            let delimiter_len = source.as_bytes()[cursor..span.end]
+                .iter()
+                .take_while(|byte| **byte == b'`')
+                .count();
+            if delimiter_len == 0 {
+                cursor += 1;
+                continue;
             }
-        })
-        .flatten()
-        .filter(|inline| inline_start(inline) >= fragment_start)
-        .collect()
+            cursor += delimiter_len;
+            while cursor + delimiter_len <= span.end {
+                if source.as_bytes()[cursor..span.end]
+                    .starts_with(&source.as_bytes()[cursor - delimiter_len..cursor])
+                {
+                    cursor += delimiter_len;
+                    break;
+                }
+                cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
+            }
+            continue;
+        }
+        if byte == b'.' {
+            match scribium_quarkdown::parse_inline_call(source, cursor) {
+                Ok(Some((call, end))) if end <= span.end => {
+                    push_content_text(&mut inlines, source, text_start, cursor, base);
+                    inlines.push(convert_content_call(call, source, base, diagnostics));
+                    cursor = end;
+                    text_start = cursor;
+                    continue;
+                }
+                Err(error) => diagnostics.push(ParserDiagnostic {
+                    code: error.code,
+                    message: error.message,
+                    span: add_base(error.span, base),
+                }),
+                _ => {}
+            }
+        }
+        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~' | b'<' | b'>') {
+            has_unsupported_markdown = true;
+        }
+        cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
+    }
+    push_content_text(&mut inlines, source, text_start, span.end, base);
+    if has_unsupported_markdown {
+        diagnostics.push(ParserDiagnostic {
+            code: "E3010",
+            message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because Rushdown exposes no original-span inline-fragment parser".to_string(),
+            span: add_base(span, base),
+        });
+    }
+    inlines
+}
+
+fn push_content_text(
+    inlines: &mut Vec<Inline>,
+    source: &str,
+    start: usize,
+    end: usize,
+    base: usize,
+) {
+    if start >= end {
+        return;
+    }
+    if let Some(content) = source.get(start..end) {
+        inlines.push(Inline::Text {
+            content: content.to_string(),
+            span: add_base(ByteSpan::new(start, end), base),
+        });
+    }
+}
+
+fn convert_content_call(
+    call: QuarkdownCall,
+    source: &str,
+    base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Inline {
+    let span = add_base(call.span, base);
+    Inline::DirectiveCall {
+        name: call.name,
+        positional_args: call
+            .positional_args
+            .iter()
+            .map(|arg| convert_arg(arg, source, base, 0, diagnostics))
+            .collect(),
+        named_args: call
+            .named_args
+            .iter()
+            .map(|arg| {
+                (
+                    arg.name.clone(),
+                    convert_arg(&arg.value, source, base, 0, diagnostics),
+                )
+            })
+            .collect(),
+        body: None,
+        span,
+    }
 }
 
 fn inline_start(inline: &Inline) -> usize {
@@ -784,6 +931,7 @@ fn inline_start(inline: &Inline) -> usize {
         | Inline::Code { span, .. }
         | Inline::RawHtml { span, .. }
         | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.start,
     }
@@ -800,6 +948,7 @@ fn inline_end(inline: &Inline) -> usize {
         | Inline::Code { span, .. }
         | Inline::RawHtml { span, .. }
         | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.end,
     }
@@ -850,6 +999,28 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
         }
     }
     let span = ByteSpan::new(start?, end?);
+    span.is_valid_for(source).then_some(span)
+}
+
+fn raw_html_span(
+    arena: &Arena,
+    node: NodeRef,
+    html: &rushdown::ast::RawHtml,
+    source: &str,
+) -> Option<ByteSpan> {
+    let parent = arena[node].parent()?;
+    let parent_span = node_span(arena, parent, source)?;
+    let search_start = arena[node]
+        .previous_sibling()
+        .and_then(|previous| node_span(arena, previous, source))
+        .map_or(parent_span.start, |span| span.end);
+    let raw = html.bytes(source);
+    let raw = raw.as_ref();
+    let haystack = source.get(search_start..parent_span.end)?.as_bytes();
+    let offset = haystack
+        .windows(raw.len())
+        .position(|window| window == raw)?;
+    let span = ByteSpan::new(search_start + offset, search_start + offset + raw.len());
     span.is_valid_for(source).then_some(span)
 }
 
@@ -1101,5 +1272,150 @@ mod tests {
             panic!()
         };
         assert_eq!(content, "code");
+    }
+
+    #[test]
+    fn content_argument_preserves_original_span_and_reports_markdown_gap() {
+        let source = ".text {**한글**}\n";
+        let content_start = source.find("**").unwrap();
+        let content_end = content_start + "**한글**".len();
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E3010"
+                && diagnostic.span == ByteSpan::new(content_start, content_end)
+                && diagnostic.message.contains("original text")
+        }));
+        let Block::DirectiveCall {
+            positional_args, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected directive block")
+        };
+        let Value::Content(content) = &positional_args[0] else {
+            panic!("expected content argument")
+        };
+        assert!(matches!(content.as_slice(), [Inline::Text { .. }]));
+        let Inline::Text { span, content } = &content[0] else {
+            unreachable!()
+        };
+        assert_eq!(*span, ByteSpan::new(content_start, content_end));
+        assert_eq!(content, "**한글**");
+        assert_eq!(&source[span.start..span.end], content);
+    }
+
+    #[test]
+    fn nested_content_calls_keep_prefix_suffix_and_original_spans() {
+        let source = ".panel {prefix .text {red} suffix}\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        let Block::DirectiveCall {
+            positional_args, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected directive block")
+        };
+        let Value::Content(content) = &positional_args[0] else {
+            panic!("expected content argument")
+        };
+        assert!(matches!(
+            content.as_slice(),
+            [
+                Inline::Text { .. },
+                Inline::DirectiveCall { .. },
+                Inline::Text { .. }
+            ]
+        ));
+        let Inline::Text {
+            content: prefix,
+            span: prefix_span,
+        } = &content[0]
+        else {
+            unreachable!()
+        };
+        let Inline::DirectiveCall {
+            name,
+            span: nested_span,
+            ..
+        } = &content[1]
+        else {
+            unreachable!()
+        };
+        let Inline::Text {
+            content: suffix,
+            span: suffix_span,
+        } = &content[2]
+        else {
+            unreachable!()
+        };
+        assert_eq!(prefix, "prefix ");
+        assert_eq!(suffix, " suffix");
+        assert_eq!(name, "text");
+        assert_eq!(&source[prefix_span.start..prefix_span.end], prefix);
+        assert_eq!(&source[nested_span.start..nested_span.end], ".text {red}");
+        assert_eq!(&source[suffix_span.start..suffix_span.end], suffix);
+    }
+
+    #[test]
+    fn gfm_table_is_preserved_as_frontend_table() {
+        let document = parse_md("| A | B |\n|---|---|\n| 1 | 2 |\n");
+        let Block::Table { header, rows, .. } = &document.nodes[0] else {
+            panic!("expected table, got {:?}", document.nodes)
+        };
+        assert_eq!(header.cells.len(), 2);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cells.len(), 2);
+    }
+
+    #[test]
+    fn task_list_status_is_preserved_in_frontend_ast() {
+        let document = parse_md("- [ ] todo\n- [x] done\n");
+        let Block::UnorderedList { items, .. } = &document.nodes[0] else {
+            panic!("expected list")
+        };
+        assert_eq!(items[0].task, Some(crate::ast::TaskStatus::Active));
+        assert_eq!(items[1].task, Some(crate::ast::TaskStatus::Completed));
+    }
+
+    #[test]
+    fn image_strikethrough_and_html_keep_distinct_frontend_nodes() {
+        let document = parse_md(
+            "[link](page.md) ![image](image.png) ~~strike **strong** `code`~~ <em>x</em>\n",
+        );
+        let Block::Paragraph { content, .. } = &document.nodes[0] else {
+            panic!("expected paragraph")
+        };
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Link { .. })));
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Image { .. })));
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Strikethrough { .. })));
+        assert!(
+            content
+                .iter()
+                .any(|inline| matches!(inline, Inline::RawHtml { .. })),
+            "{content:?}"
+        );
+    }
+
+    #[test]
+    fn blockquote_preserves_all_child_blocks() {
+        let document = parse_md("> first\n>\n> second\n>\n> third\n");
+        let Block::Blockquote { content, .. } = &document.nodes[0] else {
+            panic!("expected blockquote, got {:?}", document.nodes)
+        };
+        assert_eq!(content.len(), 3);
+        for (block, expected) in content.iter().zip(["first", "second", "third"]) {
+            let Block::Paragraph { content, .. } = block else {
+                panic!("expected paragraph")
+            };
+            let Inline::Text { content, .. } = &content[0] else {
+                panic!("expected text")
+            };
+            assert_eq!(content, expected);
+        }
     }
 }

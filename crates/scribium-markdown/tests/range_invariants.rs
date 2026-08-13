@@ -29,6 +29,7 @@ fn check_inline(inline: &Inline, source: &str) {
         | Inline::Code { span, .. }
         | Inline::RawHtml { span, .. }
         | Inline::Strikethrough { span, .. }
+        | Inline::Unsupported { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span,
     };
@@ -79,7 +80,9 @@ fn check_block(block: &Block, source: &str) {
         | Block::ThematicBreak { span }
         | Block::DirectiveCall { span, .. }
         | Block::Metadata { span, .. }
-        | Block::Raw { span, .. } => span,
+        | Block::Table { span, .. }
+        | Block::RawHtml { span, .. }
+        | Block::Unsupported { span, .. } => span,
     };
     assert!(
         valid(*span, source),
@@ -104,6 +107,12 @@ fn check_block(block: &Block, source: &str) {
                 }
             }
         }
+        Block::Table { header, rows, .. } => {
+            check_table_row(header, source);
+            for row in rows {
+                check_table_row(row, source);
+            }
+        }
         Block::DirectiveCall {
             positional_args,
             named_args,
@@ -123,6 +132,16 @@ fn check_block(block: &Block, source: &str) {
             }
         }
         _ => {}
+    }
+}
+
+fn check_table_row(row: &scribium_markdown::ast::TableRow, source: &str) {
+    assert!(valid(row.span, source));
+    for cell in &row.cells {
+        assert!(valid(cell.span, source));
+        for inline in &cell.content {
+            check_inline(inline, source);
+        }
     }
 }
 

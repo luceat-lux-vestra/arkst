@@ -37,6 +37,11 @@ pub enum Block {
         start: usize,
         span: ByteSpan,
     },
+    Table {
+        header: TableRow,
+        rows: Vec<TableRow>,
+        span: ByteSpan,
+    },
     CodeBlock {
         language: Option<String>,
         source: String,
@@ -56,8 +61,12 @@ pub enum Block {
         fields: Vec<(String, String)>,
         span: ByteSpan,
     },
-    Raw {
+    RawHtml {
         source: String,
+        span: ByteSpan,
+    },
+    Unsupported {
+        kind: String,
         span: ByteSpan,
     },
 }
@@ -66,6 +75,34 @@ pub enum Block {
 pub struct ListItem {
     pub content: Vec<Block>,
     pub span: ByteSpan,
+    pub task: Option<TaskStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Active,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    pub cells: Vec<TableCell>,
+    pub span: ByteSpan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableCell {
+    pub content: Vec<Inline>,
+    pub alignment: TableAlignment,
+    pub span: ByteSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableAlignment {
+    Left,
+    Center,
+    Right,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +152,10 @@ pub enum Inline {
         span: ByteSpan,
     },
     SoftBreak {
+        span: ByteSpan,
+    },
+    Unsupported {
+        kind: String,
         span: ByteSpan,
     },
 }
