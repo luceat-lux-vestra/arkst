@@ -404,6 +404,14 @@ mod tests {
             scalar(&call.positional_args[0]),
             Value::Identifier("Introduction".into())
         );
+
+        for source in [".range {1}    {2}", ".range{1}{ 14}"] {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert_eq!(call.positional_args.len(), 2, "{source:?}");
+        }
+        let (call, end) = parse_call(".note and more text").unwrap().unwrap();
+        assert_eq!(call.name, "note");
+        assert_eq!(end, 5);
     }
 
     #[test]
@@ -430,6 +438,14 @@ mod tests {
             let call = parse_call(source).unwrap().unwrap().0;
             assert_eq!(scalar(&call.positional_args[0]), expected, "{source:?}");
         }
+        let call = parse_call(".fn {\"hello \\\"world\\\"\"}")
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(
+            scalar(&call.positional_args[0]),
+            Value::String("hello \"world\"".into())
+        );
         for source in [
             ".foo {hello world}",
             ".foo {**bold**}",
