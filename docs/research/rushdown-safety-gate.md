@@ -326,3 +326,21 @@ change any architecture decision.
 No Rushdown fork, vendoring, local patch, wrapper workaround, production
 dependency, parser migration, ADR change, upstream issue, or upstream PR was
 created.
+
+## Adoption addendum (2026-08-13)
+
+The historical safety-gate recommendation above records the evidence and
+recommendation made before a maintainer architecture decision. The maintainer
+has since accepted ADR-0017, which adopts the exact `0.18.0` revision behind a
+narrow `scribium-markdown` adapter while the defect is disclosed upstream:
+
+- upstream issue: https://github.com/yuin/rushdown/issues/2;
+- selected revision: `e5eb4e4446541ea0ed53111c1b37e779283ff57c`;
+- adapter policy: checked bounds/UTF-8 validation and no direct unchecked
+  `Index::str`/`Segment::str` call;
+- parser-produced range regression: `crates/scribium-markdown/tests/range_invariants.rs`;
+- exact dependency and feature policy: `docs/adr/0017-rushdown-markdown-substrate.md`.
+
+This addendum does not delete or rewrite the original factual classification.
+The known upstream defect remains an accepted, explicitly tracked dependency
+risk and is not represented as fixed.

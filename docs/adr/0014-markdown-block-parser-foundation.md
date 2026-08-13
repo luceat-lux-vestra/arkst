@@ -1,5 +1,11 @@
 # ADR-0014: Markdown Block Parser Foundation
 
+> **Superseded in part by ADR-0017.** ADR-0017 retains the `scribium-markdown`
+> and `scribium-quarkdown` ownership and dependency direction recorded here,
+> but replaces the Scribium-owned CommonMark/block/inline parser decision with
+> a Rushdown-backed frontend and adapter boundary. The historical rationale and
+> rejected PR record below are preserved.
+
 - **Status:** Accepted
 - **Date:** 2026-08-11
 - **Owners:** Scribium maintainers
