@@ -64,7 +64,11 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
         };
     };
 
-    let parsed = syntax::markdown::parse_with_diagnostics(source);
+    let parsed = if entry.as_str().ends_with(".md") {
+        scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Markdown)
+    } else {
+        scribium_markdown::parse_with_diagnostics(source)
+    };
     let ir = ast_to_ir::ast_to_ir(&parsed.document, source_id, project.metadata());
     let (ir, evaluation_diagnostics) = evaluator::Evaluator::new().evaluate(&ir);
     let mut diagnostics: Vec<Diagnostic> = parsed

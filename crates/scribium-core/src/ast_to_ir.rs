@@ -6,8 +6,8 @@
 
 use crate::ir::{IrDocument, IrInline, IrListItem, IrMetadata, IrNode};
 use crate::source::{SourceId, SourceSpan};
-use crate::syntax::markdown::ast::{Block, Document, Inline, Value};
 use crate::virtual_project::ProjectMetadata;
+use scribium_markdown::ast::{Block, Document, Inline, Value};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
@@ -117,6 +117,9 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Block::Blockquote { content, .. } => content
+            .iter()
+            .find_map(|block| block_to_ir(block, source_id)),
         Block::CodeBlock {
             language,
             source,
@@ -129,7 +132,6 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
         Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {
             span: byte_to_source_span(span, source_id),
         }),
-        Block::BlankLine { .. } => None,
         Block::DirectiveCall {
             name,
             positional_args,
@@ -163,6 +165,13 @@ fn block_to_ir(block: &Block, source_id: SourceId) -> Option<IrNode> {
             // Metadata is handled via front_matter on the Document; skip as a block node.
             None
         }
+        Block::Raw { source, span } => Some(IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: source.clone(),
+                span: byte_to_source_span(span, source_id),
+            }],
+            span: byte_to_source_span(span, source_id),
+        }),
     }
 }
 
@@ -233,6 +242,29 @@ fn inline_to_ir(inline: &Inline, source_id: SourceId) -> Option<IrInline> {
             destination: destination.clone(),
             span: byte_to_source_span(span, source_id),
         }),
+        Inline::Image {
+            content,
+            destination,
+            span,
+        } => Some(IrInline::Link {
+            content: inlines_to_ir(content, source_id),
+            destination: destination.clone(),
+            span: byte_to_source_span(span, source_id),
+        }),
+        Inline::RawHtml { content, span } => Some(IrInline::Text {
+            content: content.clone(),
+            span: byte_to_source_span(span, source_id),
+        }),
+        Inline::Strikethrough { content, span } => Some(IrInline::Text {
+            content: inlines_to_ir(content, source_id)
+                .into_iter()
+                .filter_map(|inline| match inline {
+                    IrInline::Text { content, .. } => Some(content),
+                    _ => None,
+                })
+                .collect::<String>(),
+            span: byte_to_source_span(span, source_id),
+        }),
         Inline::Code { content, span } => Some(IrInline::Code {
             content: content.clone(),
             span: byte_to_source_span(span, source_id),
@@ -296,6 +328,9 @@ fn inline_span_start(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Image { span, .. }
+        | Inline::RawHtml { span, .. }
+        | Inline::Strikethrough { span, .. }
         | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.start,
@@ -309,6 +344,9 @@ fn inline_span_end(inline: &Inline) -> usize {
         | Inline::Strong { span, .. }
         | Inline::DirectiveCall { span, .. }
         | Inline::Link { span, .. }
+        | Inline::Image { span, .. }
+        | Inline::RawHtml { span, .. }
+        | Inline::Strikethrough { span, .. }
         | Inline::Code { span, .. }
         | Inline::HardBreak { span }
         | Inline::SoftBreak { span } => span.end,
@@ -322,7 +360,7 @@ fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId)
 mod tests {
     use super::*;
     use crate::source::{ByteSpan, SourceId};
-    use crate::syntax::markdown::ast::FrontMatter;
+    use scribium_markdown::ast::FrontMatter;
 
     fn source_id() -> SourceId {
         SourceId(42)
@@ -620,7 +658,7 @@ mod tests {
 
     #[test]
     fn convert_unordered_list() {
-        use crate::syntax::markdown::ast::ListItem;
+        use scribium_markdown::ast::ListItem;
         let doc = Document {
             nodes: vec![Block::UnorderedList {
                 items: vec![
