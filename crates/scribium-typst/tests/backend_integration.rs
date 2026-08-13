@@ -167,7 +167,7 @@ fn integration_multi_block_list_item_compiles() {
 fn integration_markdown_structures_compile_to_valid_pdf() {
     use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 
-    let source = "> quoted **strong**\n>\n> - [ ] active\n>   - [x] nested\n> - [x] completed\n\nBefore ~~removed **content**~~ after.\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~~γ~~ | tail |\n";
+    let source = "> quoted **strong**\n>\n> - [ ] active\n>   - [x] nested\n> - [x] completed\n\nBefore ~removed **content**~ after ~~double~~.\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~γ~ | tail |\n";
     for entry in ["main.md", "main.qd"] {
         let project = VirtualProjectBuilder::new()
             .entry(entry)
@@ -185,6 +185,7 @@ fn integration_markdown_structures_compile_to_valid_pdf() {
         let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
         assert!(typst_code.contains("#quote(block: true)"));
         assert!(typst_code.contains("#strike[removed *content*]"));
+        assert!(typst_code.contains("#strike[double]"));
         assert!(typst_code.contains("☐ active"));
         assert!(typst_code.contains("☑ nested"));
         assert!(typst_code.contains("☑ completed"));

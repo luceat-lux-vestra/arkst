@@ -78,8 +78,9 @@ inline destinations receive the tested escape normalization while Auto,
 Reference, and Image destination representations remain unchanged.
 
 Issue #57 adds a separate end-to-end Markdown evidence slice for structures
-already preserved by the frontend: blockquotes, strikethrough, GFM task lists,
-and GFM tables. The slice carries recursive content, task state, table
+already preserved by the frontend: blockquotes, single- and double-tilde
+strikethrough, GFM task lists, and GFM tables. The slice carries recursive
+content, task state, table
 alignment, source spans, evaluator recursion, and deterministic Typst
 lowering through `.md`, `.qd`, and an indented Quarkdown body. It is evidence
 for the tested structures and forms only; it does not promote images, raw HTML,

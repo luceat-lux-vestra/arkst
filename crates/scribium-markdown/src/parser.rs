@@ -1141,21 +1141,75 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
 
 fn strikethrough_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     let span = node_span(arena, node, source)?;
-    if source.get(span.start..span.end)?.ends_with("~~") {
+    // Rushdown exposes the accepted node but not its delimiter width. Derive
+    // that width only from the node's source opener, then match the same
+    // complete run within the parser-owned parent boundary.
+    let delimiter_width = tilde_run_width_at(source, span.start).unwrap_or(0);
+    if delimiter_width == 0 {
         return Some(span);
     }
     let limit = arena[node]
         .parent()
         .and_then(|parent| node_span(arena, parent, source))
         .map_or(source.len(), |parent| parent.end);
-    let suffix = source.get(span.end..limit)?;
-    let closing_offset = suffix
-        .as_bytes()
-        .windows(2)
-        .position(|window| window == b"~~")?;
-    let end = span.end.checked_add(closing_offset)?.checked_add(2)?;
-    let complete = ByteSpan::new(span.start, end);
-    complete.is_valid_for(source).then_some(complete)
+    if has_tilde_run_ending_at(source, span.end, delimiter_width) {
+        return Some(span);
+    }
+    let end = find_tilde_closer(source, span.end, limit, delimiter_width)
+        .and_then(|end| end.checked_add(delimiter_width));
+    let complete = end.map(|end| ByteSpan::new(span.start, end));
+    // Keep an accepted node visible if a conservative span completion cannot
+    // be proven. In particular, never consume an unrelated later delimiter.
+    complete
+        .filter(|candidate| candidate.is_valid_for(source))
+        .or(Some(span))
+}
+
+fn tilde_run_width_at(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'~')
+        || start.checked_sub(1).and_then(|index| bytes.get(index)) == Some(&b'~')
+    {
+        return None;
+    }
+    let mut end = start;
+    while bytes.get(end) == Some(&b'~') {
+        end = end.checked_add(1)?;
+    }
+    end.checked_sub(start)
+}
+
+fn has_tilde_run_ending_at(source: &str, end: usize, width: usize) -> bool {
+    let Some(start) = end.checked_sub(width) else {
+        return false;
+    };
+    let bytes = source.as_bytes();
+    bytes.get(start..end).is_some_and(|run| {
+        run.iter().all(|byte| *byte == b'~')
+            && (start == 0 || bytes.get(start - 1) != Some(&b'~'))
+            && bytes.get(end) != Some(&b'~')
+    })
+}
+
+fn find_tilde_closer(source: &str, start: usize, limit: usize, width: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let limit = limit.min(bytes.len());
+    if start > limit {
+        return None;
+    }
+    let mut cursor = start.min(limit);
+    while cursor.checked_add(width)? <= limit {
+        if tilde_run_width_at(source, cursor) == Some(width)
+            && bytes
+                .get(cursor..cursor.checked_add(width)?)?
+                .iter()
+                .all(|byte| *byte == b'~')
+        {
+            return Some(cursor);
+        }
+        cursor = cursor.checked_add(1)?;
+    }
+    None
 }
 
 fn link_span(
@@ -1828,7 +1882,7 @@ mod tests {
 
     #[test]
     fn preserved_markdown_structures_keep_nested_semantics_and_source_spans() {
-        let source = "> quoted **strong**\n>\n> - [ ] active\n> - [x] done\n\nBefore ~~removed *content*~~ after ~~later~~\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~~γ~~ | tail |\n";
+        let source = "> quoted **strong**\n>\n> - [ ] active\n> - [x] done\n\nBefore ~~removed *content*~~ after ~~later~~\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~γ~ | tail |\n";
         let output = parse_with_mode(source, Mode::Markdown);
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let document = output.document;
@@ -1911,6 +1965,140 @@ mod tests {
             panic!("expected Quarkdown body")
         };
         assert!(matches!(body[0], Block::Blockquote { .. }));
+    }
+
+    #[test]
+    fn strikethrough_delimiter_width_is_preserved_across_siblings() {
+        for (source, expected) in [
+            ("~Hi~", vec!["~Hi~"]),
+            ("~~Hi~~", vec!["~~Hi~~"]),
+            ("~one~ and ~~two~~", vec!["~one~", "~~two~~"]),
+            ("~~one~~ and ~two~", vec!["~~one~~", "~two~"]),
+            ("~one~ and ~two~", vec!["~one~", "~two~"]),
+            ("~~one~~ and ~~two~~", vec!["~~one~~", "~~two~~"]),
+        ] {
+            let output = parse_with_mode(source, Mode::Markdown);
+            assert!(output.diagnostics.is_empty(), "{source:?}: {output:?}");
+            let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+                panic!("expected paragraph for {source:?}")
+            };
+            let spans: Vec<_> = content
+                .iter()
+                .filter_map(|inline| match inline {
+                    Inline::Strikethrough { span, .. } => Some(&source[span.start..span.end]),
+                    _ => None,
+                })
+                .collect();
+            let mut previous_end = 0;
+            for inline in content {
+                if let Inline::Strikethrough { span, .. } = inline {
+                    assert!(span.start >= previous_end, "overlapping span in {source:?}");
+                    assert!(source.is_char_boundary(span.start));
+                    assert!(source.is_char_boundary(span.end));
+                    previous_end = span.end;
+                }
+            }
+            assert_eq!(
+                spans, expected,
+                "source: {source:?}, document: {:?}",
+                output.document
+            );
+        }
+
+        for source in ["~removed *content*~", "~~removed *content*~~"] {
+            let output = parse_with_mode(source, Mode::Markdown);
+            assert!(output.diagnostics.is_empty(), "{source:?}: {output:?}");
+            let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+                panic!("expected paragraph for {source:?}")
+            };
+            let Inline::Strikethrough {
+                content: strike_content,
+                span,
+            } = content.first().expect("expected strikethrough")
+            else {
+                panic!("expected strikethrough for {source:?}")
+            };
+            assert_eq!(&source[span.start..span.end], source);
+            assert!(strike_content
+                .iter()
+                .any(|inline| matches!(inline, Inline::Emphasis { .. })));
+        }
+
+        for source in ["This will ~~~not~~~ strike.", "~~~Hi~~~ Hello, world!"] {
+            let output = parse_with_mode(source, Mode::Markdown);
+            assert!(output.diagnostics.is_empty(), "{source:?}: {output:?}");
+            assert!(!output.document.nodes.iter().any(|block| match block {
+                Block::Paragraph { content, .. } | Block::Heading { content, .. } => content
+                    .iter()
+                    .any(|inline| matches!(inline, Inline::Strikethrough { .. })),
+                _ => false,
+            }));
+        }
+    }
+
+    #[test]
+    fn strikethrough_spans_preserve_utf8_crlf_modes_and_containers() {
+        let source = "Before ~한글~ after.\r\n";
+        let output = parse_with_mode(source, Mode::Markdown);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!("expected paragraph")
+        };
+        let Inline::Strikethrough {
+            content: strike_content,
+            span,
+        } = content
+            .iter()
+            .find(|inline| matches!(inline, Inline::Strikethrough { .. }))
+            .expect("expected UTF-8 strikethrough")
+        else {
+            unreachable!()
+        };
+        assert_eq!(&source[span.start..span.end], "~한글~");
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+        assert_eq!(
+            strike_content.iter().find_map(|inline| match inline {
+                Inline::Text { content, .. } => Some(content.as_str()),
+                _ => None,
+            }),
+            Some("한글")
+        );
+
+        for (mode_source, mode) in [
+            ("Before ~body~ after.\n", Mode::Markdown),
+            ("Before ~body~ after.\n", Mode::Quarkdown),
+        ] {
+            let output = parse_with_mode(mode_source, mode);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+                panic!("expected mode paragraph")
+            };
+            assert!(content.iter().any(|inline| matches!(
+                inline,
+                Inline::Strikethrough { span, .. }
+                    if &mode_source[span.start..span.end] == "~body~"
+            )));
+        }
+
+        let body_source = ".if {true}\n  ~body~\n";
+        let body = parse_with_diagnostics(body_source);
+        assert!(body.diagnostics.is_empty(), "{body:?}");
+        let Block::DirectiveCall {
+            body: Some(body), ..
+        } = &body.document.nodes[0]
+        else {
+            panic!("expected Quarkdown body")
+        };
+        let Block::Paragraph { content, .. } = &body[0] else {
+            panic!("expected body paragraph")
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Strikethrough { span, .. }
+                if span.end <= body_source.len()
+                    && &body_source[span.start..span.end] == "~body~"
+        )));
     }
 
     fn paragraph_text(block: &Block) -> String {

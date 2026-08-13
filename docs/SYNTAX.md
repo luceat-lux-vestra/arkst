@@ -83,8 +83,9 @@ Implemented (M2):
 - End-to-end Markdown structures (M2, tested subset)
   - Blockquotes (`> `) preserve recursively structured paragraphs, lists, and
     inline markup through IR and Typst lowering
-  - Strikethrough (`~~text~~`) preserves nested inline markup and lowers as a
-    Typst strike element
+  - Strikethrough (`~text~` and `~~text~~`, as accepted by the pinned
+    Rushdown substrate) preserves nested inline markup and lowers as a Typst
+    strike element
   - GFM task lists preserve unchecked/checked state as semantic IR state and
     lower to deterministic unchecked/checked markers
   - GFM tables preserve header/body rows, cell order, inline markup, and
