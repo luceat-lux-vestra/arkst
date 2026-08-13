@@ -6,10 +6,11 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Core Scribium library: parsing, semantics, evaluation, IR, and source maps"
+description = "Core Scribium library: composition, semantics, evaluation, IR, and source maps"
 
 [dependencies]
 scribium-markdown.workspace = true
+scribium-quarkdown.workspace = true
 scribium-source.workspace = true
 serde.workspace = true
 serde_json.workspace = true

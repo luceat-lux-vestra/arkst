@@ -257,6 +257,18 @@ fn is_name_char(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
+/// Returns whether `name` satisfies Scribium's currently supported normal
+/// call-name grammar:
+/// `[A-Za-z_][A-Za-z0-9_-]*`.
+///
+/// This is the single public validation helper for consumers that need to
+/// validate a name without parsing a complete call. The parser itself uses
+/// the same byte-level predicates for call names.
+pub fn is_valid_normal_call_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(is_name_start) && bytes.all(is_name_char)
+}
+
 fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
 }
@@ -280,26 +292,243 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_mixed_arguments() {
+    fn empty_and_plain_text_are_not_calls() {
+        for source in ["", "hello world", ".", ".0", ".05", ". note", "...ellipsis"] {
+            assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn parses_implicit_positional_references_and_boundaries() {
+        for (source, expected) in [(".1", "1"), (".2", "2"), (".12", "12")] {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(call.name, expected);
+            assert_eq!(call.name_span, ByteSpan::new(0, source.len()));
+            assert_eq!(call.span, ByteSpan::new(0, source.len()));
+            assert!(call.positional_args.is_empty());
+            assert!(call.named_args.is_empty());
+            assert_eq!(end, source.len());
+        }
+
+        for source in [".1abc", ".12foo", ".1한", ".1e5"] {
+            assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
+        }
+        for source in [".1-1", ".1.", ".1)", ".1!"] {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(call.name, "1");
+            assert_eq!(end, 2);
+        }
+    }
+
+    #[test]
+    fn implicit_references_do_not_consume_arguments() {
+        let (call, end) = parse_call(".1 {item}").unwrap().unwrap();
+        assert_eq!(call.name, "1");
+        assert!(call.positional_args.is_empty());
+        assert!(call.named_args.is_empty());
+        assert_eq!(call.span, ByteSpan::new(0, 2));
+        assert_eq!(end, 2);
+    }
+
+    #[test]
+    fn tight_word_adjacency_and_symbol_boundaries_are_explicit() {
+        for source in [".note {x}suffix", ".note {x}B", ".note {x}한"] {
+            assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
+        }
+        for (source, start) in [("A.note {x}", 1), ("한.note {x}", 3), ("..note {x}", 1)] {
+            assert!(
+                matches!(parse_inline_call(source, start), Ok(None)),
+                "{source:?}"
+            );
+        }
+
+        let (call, end) = parse_inline_call("-.note {x}", 1).unwrap().unwrap();
+        assert_eq!(call.name, "note");
+        assert_eq!(end, 10);
+        let (call, end) = parse_call(".note {x}-").unwrap().unwrap();
+        assert_eq!(call.name, "note");
+        assert_eq!(end, 9);
+
+        for source in ["0.5", "3.14", "foo.1"] {
+            assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn parses_normal_call_names_and_spans() {
         let source = ".panel {한글} width:{320}";
         let (call, end) = parse_call(source).unwrap().unwrap();
         assert_eq!(end, source.len());
         assert_eq!(call.name, "panel");
         assert_eq!(call.positional_args.len(), 1);
         assert_eq!(call.named_args[0].name, "width");
+        assert_eq!(call.name_span, ByteSpan::new(0, 6));
+        assert_eq!(call.span, ByteSpan::new(0, source.len()));
+        assert_eq!(parse_call(".note").unwrap().unwrap().0.name, "note");
+        assert_eq!(parse_call(".my_call").unwrap().unwrap().0.name, "my_call");
+        assert_eq!(
+            parse_call(".my-call {1}").unwrap().unwrap().0.name,
+            "my-call"
+        );
     }
 
     #[test]
-    fn rejects_malformed_arguments_without_panicking() {
-        let error = parse_call(".panel {unterminated").unwrap_err();
-        assert_eq!(error.code, "E2003");
+    fn parses_positional_named_and_mixed_arguments() {
+        let call = parse_call(".range {1} {10}").unwrap().unwrap().0;
+        assert_eq!(call.positional_args.len(), 2);
+        assert_eq!(call.named_args.len(), 0);
+        assert_eq!(scalar(&call.positional_args[0]), Value::Number(1.0));
+        assert_eq!(scalar(&call.positional_args[1]), Value::Number(10.0));
+
+        let call = parse_call(".panel width:{320} align:{center}")
+            .unwrap()
+            .unwrap()
+            .0;
+        assert!(call.positional_args.is_empty());
+        assert_eq!(call.named_args.len(), 2);
+        assert_eq!(call.named_args[0].name, "width");
+        assert_eq!(call.named_args[0].name_span, ByteSpan::new(7, 12));
+        assert_eq!(call.named_args[0].span, ByteSpan::new(7, 18));
+        assert_eq!(scalar(&call.named_args[0].value), Value::Number(320.0));
+        assert_eq!(
+            scalar(&call.named_args[1].value),
+            Value::Identifier("center".into())
+        );
+
+        let call = parse_call(".panel {Introduction} width:{320}")
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(call.positional_args.len(), 1);
+        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(
+            scalar(&call.positional_args[0]),
+            Value::Identifier("Introduction".into())
+        );
+
+        for source in [".range {1}    {2}", ".range{1}{ 14}"] {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert_eq!(call.positional_args.len(), 2, "{source:?}");
+        }
+        let (call, end) = parse_call(".note and more text").unwrap().unwrap();
+        assert_eq!(call.name, "note");
+        assert_eq!(end, 5);
     }
 
     #[test]
-    fn preserves_non_ascii_byte_offsets() {
+    fn parses_nested_content_and_scalar_classification() {
+        let nested = parse_call(".outer {.nested {x}}").unwrap().unwrap().0;
+        assert!(matches!(
+            nested.positional_args[0].content,
+            ArgContent::Content(_)
+        ));
+
+        let cases = [
+            (".foo {hello}", Value::Identifier("hello".into())),
+            (
+                ".foo {\"hello world\"}",
+                Value::String("hello world".into()),
+            ),
+            (".foo {show_code}", Value::Identifier("show_code".into())),
+            (".foo {0.5}", Value::Number(0.5)),
+            (".foo {-1}", Value::Number(-1.0)),
+            (".foo {true}", Value::Boolean(true)),
+            (".foo {false}", Value::Boolean(false)),
+        ];
+        for (source, expected) in cases {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert_eq!(scalar(&call.positional_args[0]), expected, "{source:?}");
+        }
+        let call = parse_call(".fn {\"hello \\\"world\\\"\"}")
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(
+            scalar(&call.positional_args[0]),
+            Value::String("hello \"world\"".into())
+        );
+        for source in [
+            ".foo {hello world}",
+            ".foo {**bold**}",
+            ".foo {.nested {x}}",
+        ] {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert!(
+                matches!(call.positional_args[0].content, ArgContent::Content(_)),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn newline_and_crlf_terminate_calls() {
+        for source in [".foo\n{bar}", ".foo {a}\n{b}", ".foo {a}\r\n{b}"] {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(call.name, "foo");
+            assert_eq!(
+                call.positional_args.len(),
+                if source.contains("{a}") { 1 } else { 0 }
+            );
+            assert_eq!(end, if source.starts_with(".foo ") { 8 } else { 4 });
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_and_ordered_arguments_without_panicking() {
+        for source in [
+            ".panel {unterminated",
+            ".foo {",
+            ".foo {value",
+            ".foo key:{",
+            ".foo key:{value",
+        ] {
+            let error = parse_call(source).unwrap_err();
+            assert_eq!(error.code, "E2003", "{source:?}");
+        }
+        for source in [".foo key:", ".foo key: value"] {
+            let error = parse_call(source).unwrap_err();
+            assert_eq!(error.code, "E2002", "{source:?}");
+        }
+        let error = parse_call(".foo width:{\"x\"} {y}").unwrap_err();
+        assert_eq!(error.code, "E2001");
+    }
+
+    #[test]
+    fn public_name_validation_matches_call_name_grammar() {
+        for name in [
+            "a",
+            "name",
+            "Name",
+            "_",
+            "_name",
+            "name123",
+            "valid-name",
+            "valid_name",
+            "a-b-c",
+        ] {
+            assert!(is_valid_normal_call_name(name), "{name}");
+        }
+        for name in [
+            "", "1name", "-name", "name!", "name.", "na me", "na\tme", "na\rme", "na\nme", "한글",
+        ] {
+            assert!(!is_valid_normal_call_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn preserves_utf8_byte_spans() {
         let source = "한글 .text {빨강} 끝";
         let start = source.find('.').unwrap();
         let (call, _) = parse_inline_call(source, start).unwrap().unwrap();
         assert_eq!(&source[call.span.start..call.span.end], ".text {빨강}");
+        assert!(source.is_char_boundary(call.name_span.start));
+        assert!(source.is_char_boundary(call.name_span.end));
+    }
+
+    fn scalar(arg: &Arg) -> Value {
+        match &arg.content {
+            ArgContent::Scalar(value) => value.clone(),
+            other => panic!("expected scalar, got {other:?}"),
+        }
     }
 }

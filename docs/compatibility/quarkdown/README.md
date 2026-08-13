@@ -66,6 +66,16 @@ provenance records.
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
 | `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
+For an indented body, the minimum eligibility rule is at least two leading
+spaces or one leading tab in the current Rushdown container context. The first
+qualifying nonblank line establishes the actual body indentation; later lines
+must meet that same container-relative indentation and a dedent ends the body.
+The frontend preserves this parser decision for lazy paragraph normalization,
+so body ownership is not re-inferred from absolute source columns or a fixed
+indentation width. The evidence above covers 2/3/4/8-space bodies, one-space
+rejection, single-tab and mixed indentation, UTF-8/CRLF provenance, nested
+Markdown and Quarkdown, and list/blockquote-relative containers.
+
 `Implemented` rows are current claims only at their stated compatibility level
 and are covered by the listed unit/golden/conformance evidence (see
 [Conformance Evidence](#conformance-evidence)). `Planned` means the behavior is
@@ -76,25 +86,25 @@ its absence is tracked compatibility debt against the complete target.
 
 Each `Implemented` row is backed by at least one Scribium conformance test.
 The table maps every `Implemented` feature to the test(s) that verify it;
-`quarkdown/parser.rs` refers to
-`crates/scribium-core/src/syntax/quarkdown/parser.rs` and `markdown/parser.rs`
-to `crates/scribium-core/src/syntax/markdown/parser.rs`. A single test may
-cover multiple features. This table is the implementation-evidence
-counterpart of the upstream provenance recorded in `SPEC_SOURCES.md`; the two
-are kept separate on purpose.
+Quarkdown grammar evidence lives in
+`crates/scribium-quarkdown/src/lib.rs`, while frontend integration evidence
+lives in `crates/scribium-markdown/src/parser.rs` and its integration tests. A
+single test may cover multiple features. This table is the
+implementation-evidence counterpart of the upstream provenance recorded in
+`SPEC_SOURCES.md`; the two are kept separate on purpose.
 
 | Feature                         | Evidence (unit tests) |
 |---------------------------------|------------------------|
-| Dot-prefixed call               | `quarkdown/parser.rs::parse_call_no_args`, `quarkdown/parser.rs::parse_call_underscore_name`, `quarkdown/parser.rs::parse_call_hyphen_name`, `quarkdown/parser.rs::empty_and_plain_text_are_not_calls`, `markdown/parser.rs::block_call_no_arguments`, `markdown/parser.rs::valid_calls_produce_no_diagnostics` |
-| Implicit positional refs        | `quarkdown/parser.rs::implicit_positional_references`, `quarkdown/parser.rs::implicit_reference_boundary_stops_at_word_characters`, `quarkdown/parser.rs::implicit_reference_survives_symbol_boundaries`, `markdown/parser.rs::implicit_reference_call_at_block_level`, `markdown/parser.rs::implicit_reference_inline_boundaries` |
-| Positional arguments            | `quarkdown/parser.rs::parse_call_positional_scalar`, `quarkdown/parser.rs::parse_call_positional_string`, `quarkdown/parser.rs::parse_call_boolean_args`, `quarkdown/parser.rs::multiple_args_with_various_whitespace`, `markdown/parser.rs::block_call_positional_args` |
-| Named arguments                 | `quarkdown/parser.rs::parse_call_named_args`, `markdown/parser.rs::block_call_named_args` |
-| Mixed positional/named          | `quarkdown/parser.rs::parse_mixed_args`, `markdown/parser.rs::block_call_mixed_args` |
-| Indented body argument          | `markdown/parser.rs::block_call_with_indented_body`, `markdown/parser.rs::block_call_body_span_covers_indented_lines`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls`, `markdown/parser.rs::body_requires_minimum_indentation`, `markdown/parser.rs::body_single_tab_counts_as_body`, `markdown/parser.rs::body_stops_at_less_indented_line` |
-| Nested calls                    | `quarkdown/parser.rs::parse_nested_call_in_argument`, `markdown/parser.rs::nested_call_inside_argument`, `markdown/parser.rs::block_body_may_contain_markdown_and_nested_calls` |
-| Inline (mid-paragraph) call     | `markdown/parser.rs::inline_call_in_sentence`, `markdown/parser.rs::call_with_trailing_text_is_inline_call`, `markdown/parser.rs::inline_call_at_line_start_continues_paragraph`, `markdown/parser.rs::isolated_call_line_still_starts_block` |
-| Tight-call boundaries           | `quarkdown/parser.rs::tight_word_adjacency_makes_call_ordinary_text`, `quarkdown/parser.rs::symbols_are_valid_call_boundaries`, `quarkdown/parser.rs::implicit_reference_does_not_consume_arguments`, `markdown/parser.rs::tight_call_boundary_rejects_trailing_word`, `markdown/parser.rs::tight_call_hyphen_boundaries_are_valid`, `markdown/parser.rs::unicode_word_characters_are_tight_adjacency`, `markdown/parser.rs::inline_call_does_not_parse_in_numbers` |
-| Malformed-call diagnostics      | `quarkdown/parser.rs::positional_after_named_is_rejected` (`E2001`), `quarkdown/parser.rs::named_argument_without_braces_is_error` (`E2002`), `quarkdown/parser.rs::unclosed_argument_is_error` (`E2003`), `markdown/parser.rs::malformed_calls_produce_structured_diagnostics`, `markdown/parser.rs::malformed_calls_do_not_panic_and_fall_back_to_paragraph` |
+| Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `scribium-quarkdown/src/lib.rs::parses_normal_call_names_and_spans`, `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
+| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `scribium-quarkdown/src/lib.rs::implicit_references_do_not_consume_arguments` |
+| Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
+| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
+| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
+| Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
+| Nested calls                    | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
+| Inline (mid-paragraph) call     | `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
+| Tight-call boundaries           | `scribium-quarkdown/src/lib.rs::tight_word_adjacency_and_symbol_boundaries_are_explicit`, `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries` |
+| Malformed-call diagnostics      | `scribium-quarkdown/src/lib.rs::rejects_malformed_and_ordered_arguments_without_panicking`, `scribium-markdown/src/parser.rs::malformed_root_block_reports_argument_span`, `scribium-markdown/src/parser.rs::malformed_inline_call_preserves_full_source_offset` |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 

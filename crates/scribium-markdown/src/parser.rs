@@ -10,7 +10,8 @@ use rushdown::parser::{
     Options, Parser, ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
 };
 use rushdown::text::{BasicReader, BlockReader, Lines, Reader, Segment};
-use rushdown::{as_extension_data, matches_extension_kind};
+use rushdown::util::{indent_position, indent_width, is_blank};
+use rushdown::{as_extension_data, as_extension_data_mut, matches_extension_kind};
 use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue};
 use scribium_source::ByteSpan;
 
@@ -37,10 +38,17 @@ pub struct ParseOutput {
     pub diagnostics: Vec<ParserDiagnostic>,
 }
 
+type BodyLineRanges = Vec<(ByteSpan, Vec<ByteSpan>)>;
+
 #[derive(Debug)]
 struct QuarkdownBlock {
     call: Segment,
-    indent: usize,
+    /// The first qualifying body's visual indentation in the current reader
+    /// context. This is never an absolute source-column measurement.
+    body_indent: Option<usize>,
+    /// Original reader segments accepted as body lines. These preserve parser
+    /// ownership for the frontend's lazy-paragraph normalization.
+    body_lines: Vec<Segment>,
 }
 
 impl NodeKind for QuarkdownBlock {
@@ -102,7 +110,8 @@ impl BlockParser for QuarkdownBlockParser {
         };
         let node_ref = arena.new_node(QuarkdownBlock {
             call: call_segment,
-            indent: physical_indent(source, segment.start()).max(leading_indent(&line)),
+            body_indent: None,
+            body_lines: Vec::new(),
         });
         reader.advance_to_eol();
         Some((node_ref, State::HAS_CHILDREN))
@@ -116,38 +125,48 @@ impl BlockParser for QuarkdownBlockParser {
         _ctx: &mut Context,
     ) -> Option<State> {
         let (line, segment) = reader.peek_line_bytes()?;
-        let indent = as_extension_data!(arena, node_ref, QuarkdownBlock).indent;
-        let current_indent =
-            physical_indent(reader.source(), segment.start()).max(leading_indent(&line));
-        let body_indent = indent.saturating_add(4);
-        if current_indent < body_indent {
-            return None;
+        if is_blank(&line) {
+            reader.advance_to_eol();
+            return Some(State::HAS_CHILDREN);
         }
-        Some(if current_indent == body_indent {
-            reader.advance(body_indent);
-            State::HAS_CHILDREN
-        } else {
-            State::NO_CHILDREN
-        })
+
+        let (actual_indent, _) = indent_width(&line, reader.line_offset());
+        let body_indent = {
+            let block = as_extension_data!(arena, node_ref, QuarkdownBlock);
+            if let Some(body_indent) = block.body_indent {
+                if actual_indent < body_indent {
+                    return None;
+                }
+                body_indent
+            } else {
+                let has_minimum_indent = actual_indent >= 2 || line.first() == Some(&b'\t');
+                if !has_minimum_indent {
+                    return None;
+                }
+                actual_indent
+            }
+        };
+
+        if as_extension_data!(arena, node_ref, QuarkdownBlock)
+            .body_indent
+            .is_none()
+        {
+            as_extension_data_mut!(arena, node_ref, QuarkdownBlock).body_indent =
+                Some(actual_indent);
+        }
+
+        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
+            .body_lines
+            .push(segment);
+
+        let (position, padding) = indent_position(&line, reader.line_offset(), body_indent)?;
+        reader.advance_and_set_padding(position, padding);
+        Some(State::HAS_CHILDREN)
     }
 
     fn can_interrupt_paragraph(&self) -> bool {
         true
     }
-}
-
-fn physical_indent(source: &str, position: usize) -> usize {
-    let line_start = source[..position.min(source.len())]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    position.saturating_sub(line_start)
-}
-
-fn leading_indent(line: &[u8]) -> usize {
-    line.iter()
-        .take_while(|byte| matches!(byte, b' ' | b'\t'))
-        .map(|byte| if *byte == b'\t' { 4 } else { 1 })
-        .sum()
 }
 
 #[derive(Debug)]
@@ -271,15 +290,23 @@ pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
         };
     };
     let mut nodes = Vec::new();
+    let mut body_line_ranges = Vec::new();
     for child in arena[root].children(&arena) {
-        if let Some(node) = convert_block(&arena, child, body, body_start, &mut diagnostics) {
+        if let Some(node) = convert_block(
+            &arena,
+            child,
+            body,
+            body_start,
+            &mut diagnostics,
+            &mut body_line_ranges,
+        ) {
             nodes.push(node);
         }
     }
     if mode == Mode::Quarkdown {
         let original = std::mem::take(&mut nodes);
         for mut node in original {
-            nodes.extend(normalize_block(&mut node, source));
+            nodes.extend(normalize_block(&mut node, &body_line_ranges));
         }
     }
     ParseOutput {
@@ -292,27 +319,36 @@ pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
     }
 }
 
-fn normalize_block(block: &mut Block, source: &str) -> Vec<Block> {
+fn normalize_block(block: &mut Block, body_line_ranges: &BodyLineRanges) -> Vec<Block> {
     match block {
         Block::DirectiveCall {
             body: Some(body),
             span,
             ..
         } => {
+            let accepted_lines = body_line_ranges
+                .iter()
+                .find(|(owner, _)| owner == span)
+                .map(|(_, lines)| lines.as_slice());
             let children = std::mem::take(body);
             let mut normalized_children = Vec::new();
             for mut child in children {
-                normalized_children.extend(normalize_block(&mut child, source));
+                normalized_children.extend(normalize_block(&mut child, body_line_ranges));
             }
-            let body_indent = line_indent(source, span.start).saturating_add(4);
+
+            let Some(accepted_lines) = accepted_lines else {
+                *body = normalized_children;
+                return vec![block.clone()];
+            };
+
             let mut kept = Vec::new();
             let mut promoted = Vec::new();
             for child in normalized_children {
-                for piece in split_block_by_indent(child, source, body_indent) {
-                    if line_indent(source, block_start(&piece)) < body_indent {
-                        promoted.push(piece);
-                    } else {
+                for (is_body, piece) in split_block_by_body_lines(child, accepted_lines) {
+                    if is_body {
                         kept.push(piece);
+                    } else {
+                        promoted.push(piece);
                     }
                 }
             }
@@ -322,12 +358,12 @@ fn normalize_block(block: &mut Block, source: &str) -> Vec<Block> {
             result
         }
         Block::Blockquote { content, .. } => {
-            normalize_children(content, source);
+            normalize_children(content, body_line_ranges);
             vec![block.clone()]
         }
         Block::UnorderedList { items, .. } | Block::OrderedList { items, .. } => {
             for item in items {
-                normalize_children(&mut item.content, source);
+                normalize_children(&mut item.content, body_line_ranges);
             }
             vec![block.clone()]
         }
@@ -335,35 +371,40 @@ fn normalize_block(block: &mut Block, source: &str) -> Vec<Block> {
     }
 }
 
-fn normalize_children(children: &mut Vec<Block>, source: &str) {
+fn normalize_children(children: &mut Vec<Block>, body_line_ranges: &BodyLineRanges) {
     let original = std::mem::take(children);
     for mut child in original {
-        children.extend(normalize_block(&mut child, source));
+        children.extend(normalize_block(&mut child, body_line_ranges));
     }
 }
 
-fn split_block_by_indent(block: Block, source: &str, body_indent: usize) -> Vec<Block> {
+fn split_block_by_body_lines(block: Block, accepted_lines: &[ByteSpan]) -> Vec<(bool, Block)> {
     let Block::Paragraph { content, span } = block else {
-        return vec![block];
+        return vec![(true, block)];
     };
-    if content.len() < 2 {
-        return vec![Block::Paragraph { content, span }];
+    if content.is_empty() {
+        return vec![(true, Block::Paragraph { content, span })];
     }
-    let mut groups: Vec<Vec<Inline>> = Vec::new();
-    let mut promoted = None;
+
+    let mut groups: Vec<(bool, Vec<Inline>)> = Vec::new();
     for inline in content {
-        let is_promoted = line_indent(source, inline_start(&inline)) < body_indent;
-        if promoted != Some(is_promoted) {
-            groups.push(Vec::new());
-            promoted = Some(is_promoted);
+        let is_body = accepted_lines
+            .iter()
+            .any(|line| line.start <= inline_start(&inline) && inline_start(&inline) < line.end);
+        if groups
+            .last()
+            .is_none_or(|(previous, _)| *previous != is_body)
+        {
+            groups.push((is_body, Vec::new()));
         }
-        groups.last_mut().expect("group created").push(inline);
+        groups.last_mut().expect("group created").1.push(inline);
     }
+
     groups
         .into_iter()
-        .map(|content| Block::Paragraph {
-            span: paragraph_span(&content),
-            content,
+        .map(|(is_body, content)| {
+            let span = paragraph_span(&content);
+            (is_body, Block::Paragraph { content, span })
         })
         .collect()
 }
@@ -372,34 +413,6 @@ fn paragraph_span(content: &[Inline]) -> ByteSpan {
     let start = content.first().map(inline_start).unwrap_or(0);
     let end = content.last().map(inline_end).unwrap_or(start);
     ByteSpan::new(start, end)
-}
-
-fn block_start(block: &Block) -> usize {
-    match block {
-        Block::Heading { span, .. }
-        | Block::Paragraph { span, .. }
-        | Block::Blockquote { span, .. }
-        | Block::UnorderedList { span, .. }
-        | Block::OrderedList { span, .. }
-        | Block::Table { span, .. }
-        | Block::CodeBlock { span, .. }
-        | Block::ThematicBreak { span }
-        | Block::DirectiveCall { span, .. }
-        | Block::Metadata { span, .. }
-        | Block::RawHtml { span, .. }
-        | Block::Unsupported { span, .. } => span.start,
-    }
-}
-
-fn line_indent(source: &str, position: usize) -> usize {
-    let line_start = source[..position.min(source.len())]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    source[line_start..]
-        .bytes()
-        .take_while(|byte| matches!(byte, b' ' | b'\t'))
-        .map(|byte| if byte == b'\t' { 4 } else { 1 })
-        .sum()
 }
 
 fn parse_front_matter(source: &str) -> (Option<FrontMatter>, usize) {
@@ -436,6 +449,7 @@ fn convert_block(
     source: &str,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    body_line_ranges: &mut BodyLineRanges,
 ) -> Option<Block> {
     let span = node_span(arena, node, source).and_then(|span| offset_span(span, base))?;
     match arena[node].kind_data() {
@@ -450,7 +464,14 @@ fn convert_block(
         }),
         KindData::ThematicBreak(_) => Some(Block::ThematicBreak { span }),
         KindData::Blockquote(_) => Some(Block::Blockquote {
-            content: convert_children_blocks(arena, node, source, base, diagnostics),
+            content: convert_children_blocks(
+                arena,
+                node,
+                source,
+                base,
+                diagnostics,
+                body_line_ranges,
+            ),
             span,
         }),
         KindData::List(list) => {
@@ -458,7 +479,14 @@ fn convert_block(
                 .children(arena)
                 .filter_map(|child| match arena[child].kind_data() {
                     KindData::ListItem(item) => Some(ListItem {
-                        content: convert_children_blocks(arena, child, source, base, diagnostics),
+                        content: convert_children_blocks(
+                            arena,
+                            child,
+                            source,
+                            base,
+                            diagnostics,
+                            body_line_ranges,
+                        ),
                         span: node_span(arena, child, source)
                             .and_then(|value| offset_span(value, base))
                             .unwrap_or(span),
@@ -495,6 +523,14 @@ fn convert_block(
         }
         KindData::Extension(_) if matches_extension_kind!(arena, node, QuarkdownBlock) => {
             let extension = as_extension_data!(arena, node, QuarkdownBlock);
+            let ranges = extension
+                .body_lines
+                .iter()
+                .map(|segment| offset_span(ByteSpan::new(segment.start(), segment.stop()), base))
+                .collect::<Option<Vec<_>>>()?;
+            if !ranges.is_empty() {
+                body_line_ranges.push((span, ranges));
+            }
             let call_span = checked_segment(extension.call, source)?;
             match scribium_quarkdown::parse_call(source.get(call_span.start..call_span.end)?) {
                 Ok(Some((call, _))) => Some(directive_block(
@@ -504,7 +540,10 @@ fn convert_block(
                     source,
                     base,
                     call_span.start,
-                    diagnostics,
+                    ConversionState {
+                        diagnostics,
+                        body_line_ranges,
+                    },
                 )),
                 Ok(None) => Some(Block::Unsupported {
                     kind: "malformed Quarkdown block call".to_string(),
@@ -614,6 +653,11 @@ fn convert_table_row(
     Some(TableRow { cells, span })
 }
 
+struct ConversionState<'a> {
+    diagnostics: &'a mut Vec<ParserDiagnostic>,
+    body_line_ranges: &'a mut BodyLineRanges,
+}
+
 fn directive_block(
     call: QuarkdownCall,
     arena: &Arena,
@@ -621,13 +665,18 @@ fn directive_block(
     source: &str,
     base: usize,
     call_base: usize,
-    diagnostics: &mut Vec<ParserDiagnostic>,
+    state: ConversionState<'_>,
 ) -> Block {
+    let ConversionState {
+        diagnostics,
+        body_line_ranges,
+    } = state;
     let span = node_span(arena, node, source)
         .and_then(|value| offset_span(value, base))
         .or_else(|| offset_span(call.span, call_base))
         .unwrap_or(ByteSpan::new(0, 0));
-    let body_nodes = convert_children_blocks(arena, node, source, base, diagnostics);
+    let body_nodes =
+        convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
     Block::DirectiveCall {
         name: call.name,
         positional_args: call
@@ -656,10 +705,13 @@ fn convert_children_blocks(
     source: &str,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    body_line_ranges: &mut BodyLineRanges,
 ) -> Vec<Block> {
     arena[node]
         .children(arena)
-        .filter_map(|child| convert_block(arena, child, source, base, diagnostics))
+        .filter_map(|child| {
+            convert_block(arena, child, source, base, diagnostics, body_line_ranges)
+        })
         .collect()
 }
 
@@ -1277,6 +1329,26 @@ mod tests {
     }
 
     #[test]
+    fn qd_mode_parses_root_and_inline_calls_with_crlf_provenance() {
+        let root_source = ".note {hello}\r\n";
+        let root = parse_with_diagnostics(root_source);
+        assert!(root.diagnostics.is_empty(), "{:?}", root.diagnostics);
+        let Block::DirectiveCall { span, .. } = &root.document.nodes[0] else {
+            panic!("expected root directive call")
+        };
+        assert_eq!(&root_source[span.start..span.end], ".note {hello}");
+
+        let inline = parse_with_diagnostics("before .note {x} after\n");
+        assert!(inline.diagnostics.is_empty(), "{:?}", inline.diagnostics);
+        let Block::Paragraph { content, .. } = &inline.document.nodes[0] else {
+            panic!("expected inline paragraph")
+        };
+        assert!(content
+            .iter()
+            .any(|item| matches!(item, Inline::DirectiveCall { name, .. } if name == "note")));
+    }
+
+    #[test]
     fn malformed_root_block_reports_argument_span() {
         assert_malformed_argument_span(".foo {unterminated");
     }
@@ -1522,5 +1594,209 @@ mod tests {
             };
             assert_eq!(content, expected);
         }
+    }
+
+    fn paragraph_text(block: &Block) -> String {
+        let Block::Paragraph { content, .. } = block else {
+            panic!("expected paragraph, got {block:?}")
+        };
+        content
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text { content, .. } | Inline::Code { content, .. } => content.clone(),
+                Inline::Strong { content, .. } | Inline::Emphasis { content, .. } => content
+                    .iter()
+                    .map(|child| match child {
+                        Inline::Text { content, .. } => content.clone(),
+                        other => panic!("unexpected nested inline {other:?}"),
+                    })
+                    .collect(),
+                other => panic!("unexpected inline {other:?}"),
+            })
+            .collect()
+    }
+
+    fn directive_body(document: &Document) -> &Vec<Block> {
+        let Block::DirectiveCall { body, .. } = &document.nodes[0] else {
+            panic!("expected directive, got {:?}", document.nodes)
+        };
+        body.as_ref().expect("expected directive body")
+    }
+
+    #[test]
+    fn quarkdown_body_uses_first_body_line_indent_not_fixed_width() {
+        for indent in ["  ", "   ", "    ", "        ", "\t"] {
+            let source = format!(".note\n{indent}body\n");
+            let output = parse_with_diagnostics(&source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            assert_eq!(paragraph_text(&directive_body(&output.document)[0]), "body");
+        }
+    }
+
+    #[test]
+    fn quarkdown_body_rejects_one_space() {
+        let output = parse_with_diagnostics(".note\n body\n");
+        let Block::DirectiveCall { body, .. } = &output.document.nodes[0] else {
+            panic!("expected directive")
+        };
+        assert!(body.is_none());
+        assert_eq!(paragraph_text(&output.document.nodes[1]), "body");
+    }
+
+    #[test]
+    fn quarkdown_body_tab_preserves_text_and_utf8_spans() {
+        let source = ".note\n\t한글 body\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            body: Some(body),
+            span: directive_span,
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected directive body")
+        };
+        let Block::Paragraph {
+            content: paragraph_content,
+            span: paragraph_span,
+        } = &body[0]
+        else {
+            panic!("expected body paragraph")
+        };
+        assert_eq!(paragraph_text(&body[0]), "한글 body");
+        let Inline::Text {
+            content: text,
+            span: text_span,
+        } = &paragraph_content[0]
+        else {
+            panic!("expected body text")
+        };
+        assert_eq!(text, "한글");
+        for span in [directive_span, paragraph_span, text_span] {
+            assert!(span.start <= span.end);
+            assert!(span.end <= source.len());
+            assert!(source.is_char_boundary(span.start));
+            assert!(source.is_char_boundary(span.end));
+            assert!(source.get(span.start..span.end).is_some());
+        }
+    }
+
+    #[test]
+    fn quarkdown_body_accepts_mixed_indentation_without_byte_width_assumptions() {
+        for source in [".note\n\t  body\n", ".note\n  \tbody\n"] {
+            let output = parse_with_diagnostics(source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            assert_eq!(paragraph_text(&directive_body(&output.document)[0]), "body");
+        }
+    }
+
+    #[test]
+    fn quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed() {
+        let output = parse_with_diagnostics(".note\n    first\n  second\n\noutside\n");
+        let Block::DirectiveCall {
+            body: Some(body), ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected directive body")
+        };
+        assert_eq!(body.len(), 1);
+        assert_eq!(paragraph_text(&body[0]), "first");
+        assert_eq!(paragraph_text(&output.document.nodes[1]), "second");
+        assert_eq!(paragraph_text(&output.document.nodes[2]), "outside");
+    }
+
+    #[test]
+    fn quarkdown_body_blank_lines_preserve_body_lifecycle() {
+        let before_body = parse_with_diagnostics(".note\n\n    body\n");
+        assert_eq!(
+            paragraph_text(&directive_body(&before_body.document)[0]),
+            "body"
+        );
+
+        let inside_body = parse_with_diagnostics(".note\n    first\n\n    second\n");
+        let body = directive_body(&inside_body.document);
+        assert_eq!(body.len(), 2);
+        assert_eq!(paragraph_text(&body[0]), "first");
+        assert_eq!(paragraph_text(&body[1]), "second");
+    }
+
+    #[test]
+    fn quarkdown_body_preserves_nested_markdown() {
+        let output = parse_with_diagnostics(".panel\n  **strong** and `code`\n");
+        let Block::Paragraph { content, .. } = &directive_body(&output.document)[0] else {
+            panic!("expected paragraph")
+        };
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Strong { .. })));
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Code { content, .. } if content == "code")));
+    }
+
+    #[test]
+    fn quarkdown_body_preserves_nested_quarkdown_blocks() {
+        let output = parse_with_diagnostics(".panel\n  .note\n    inner\n");
+        let Block::DirectiveCall {
+            name: outer_name,
+            body: Some(outer_body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected outer directive")
+        };
+        assert_eq!(outer_name, "panel");
+        let Block::DirectiveCall {
+            name: inner_name,
+            body: Some(inner_body),
+            ..
+        } = &outer_body[0]
+        else {
+            panic!("expected nested directive")
+        };
+        assert_eq!(inner_name, "note");
+        assert_eq!(paragraph_text(&inner_body[0]), "inner");
+    }
+
+    #[test]
+    fn quarkdown_body_preserves_inline_quarkdown_calls() {
+        let output = parse_with_diagnostics(".panel\n  before .text {red} after\n");
+        let Block::Paragraph { content, .. } = &directive_body(&output.document)[0] else {
+            panic!("expected paragraph")
+        };
+        assert!(matches!(
+            content.get(1),
+            Some(Inline::DirectiveCall { name, .. }) if name == "text"
+        ));
+    }
+
+    #[test]
+    fn quarkdown_body_is_container_relative_in_lists_and_blockquotes() {
+        let list = parse_with_diagnostics("- .panel\n    body\n");
+        let Block::UnorderedList { items, .. } = &list.document.nodes[0] else {
+            panic!("expected list")
+        };
+        let Block::DirectiveCall { body, .. } = &items[0].content[0] else {
+            panic!("expected directive inside list")
+        };
+        assert_eq!(paragraph_text(&body.as_ref().unwrap()[0]), "body");
+
+        let quote = parse_with_diagnostics("> .panel\n>   body\n");
+        let Block::Blockquote { content, .. } = &quote.document.nodes[0] else {
+            panic!("expected blockquote")
+        };
+        let Block::DirectiveCall { body, .. } = &content[0] else {
+            panic!("expected directive inside blockquote")
+        };
+        assert_eq!(paragraph_text(&body.as_ref().unwrap()[0]), "body");
+    }
+
+    #[test]
+    fn quarkdown_body_has_same_semantics_for_lf_and_crlf() {
+        let lf = parse_with_diagnostics(".note\n  body\n");
+        let crlf = parse_with_diagnostics(".note\r\n  body\r\n");
+        assert_eq!(paragraph_text(&directive_body(&lf.document)[0]), "body");
+        assert_eq!(paragraph_text(&directive_body(&crlf.document)[0]), "body");
+        assert_eq!(lf.diagnostics, crlf.diagnostics);
     }
 }

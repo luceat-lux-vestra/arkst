@@ -31,7 +31,7 @@
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{IrDocument, IrInline, IrNode, IrValue};
 use crate::source::SourceSpan;
-use crate::syntax::quarkdown::is_valid_normal_call_name;
+use scribium_quarkdown::is_valid_normal_call_name;
 use std::collections::BTreeMap;
 
 /// A resolved variable value stored in the evaluation environment.
