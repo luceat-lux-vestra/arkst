@@ -738,6 +738,7 @@ fn convert_inline(
     let local_span = match arena[node].kind_data() {
         KindData::CodeSpan(_) => code_span_span(arena, node, source),
         KindData::RawHtml(html) => raw_html_span(arena, node, html, source),
+        KindData::Link(link) => link_span(arena, node, link, source),
         _ => node_span(arena, node, source),
     }?;
     let span = offset_span(local_span, base)?;
@@ -768,12 +769,12 @@ fn convert_inline(
         }),
         KindData::Link(link) => Some(Inline::Link {
             content: convert_inlines(arena, node, source, base, diagnostics),
-            destination: checked_value(link.destination(), source)?.to_string(),
+            destination: unescape_link_destination(checked_value(link.destination(), source)?),
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
             content: convert_inlines(arena, node, source, base, diagnostics),
-            destination: checked_value(image.destination(), source)?.to_string(),
+            destination: unescape_link_destination(checked_value(image.destination(), source)?),
             span,
         }),
         KindData::RawHtml(_html) => Some(Inline::RawHtml {
@@ -1023,6 +1024,28 @@ fn convert_value(value: &QuarkdownValue) -> Value {
     }
 }
 
+fn unescape_link_destination(destination: &str) -> String {
+    let mut result = String::with_capacity(destination.len());
+    let mut chars = destination.chars();
+    while let Some(character) = chars.next() {
+        if character == '\\' {
+            if let Some(next) = chars.next() {
+                if next.is_ascii_punctuation() {
+                    result.push(next);
+                } else {
+                    result.push(character);
+                    result.push(next);
+                }
+            } else {
+                result.push(character);
+            }
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
+
 fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     if let KindData::Text(text) = arena[node].kind_data() {
         if let Some(index) = text.index() {
@@ -1060,6 +1083,69 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     }
     let span = ByteSpan::new(start?, end?);
     span.is_valid_for(source).then_some(span)
+}
+
+fn link_span(
+    arena: &Arena,
+    node: NodeRef,
+    link: &rushdown::ast::Link,
+    source: &str,
+) -> Option<ByteSpan> {
+    let span = node_span(arena, node, source)?;
+    if !matches!(link.link_kind(), rushdown::ast::LinkKind::Inline) {
+        return Some(span);
+    }
+
+    let rushdown::text::Value::Index(destination) = link.destination() else {
+        return Some(span);
+    };
+    let destination = checked_index(*destination, source)?;
+    let bytes = source.as_bytes();
+    let mut cursor = destination.end;
+
+    if bytes.get(cursor) == Some(&b'>') {
+        cursor += 1;
+    }
+    cursor = skip_link_spaces(bytes, cursor);
+
+    if link.title().is_some() {
+        let opener = *bytes.get(cursor)?;
+        let closer = if opener == b'(' { b')' } else { opener };
+        cursor += 1;
+        let mut closed = false;
+        while cursor < bytes.len() {
+            if bytes[cursor] == b'\\' {
+                cursor = cursor.saturating_add(2);
+                continue;
+            }
+            if bytes[cursor] == closer {
+                cursor += 1;
+                closed = true;
+                break;
+            }
+            cursor += 1;
+        }
+        if !closed {
+            return Some(span);
+        }
+        cursor = skip_link_spaces(bytes, cursor);
+    }
+
+    if bytes.get(cursor) != Some(&b')') {
+        return Some(span);
+    }
+    let span = ByteSpan::new(span.start, cursor + 1);
+    span.is_valid_for(source).then_some(span)
+}
+
+fn skip_link_spaces(bytes: &[u8], mut cursor: usize) -> usize {
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c))
+    {
+        cursor += 1;
+    }
+    cursor
 }
 
 fn raw_html_span(
