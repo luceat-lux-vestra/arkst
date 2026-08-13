@@ -217,16 +217,20 @@ fn integration_variable_evaluation_before_lowering() {
         .unwrap();
     let result = compile(&project, &CompileOptions::default());
     assert!(
-        result.diagnostics.is_empty(),
-        "diagnostics: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3010"),
+        "expected an explicit unsupported content diagnostic: {:?}",
         result.diagnostics
     );
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    // Rich content should be preserved (strong markup in Typst)
+    // The source-backed content is retained as literal text; it is not
+    // falsely represented as Strong after synthetic reparsing was removed.
     assert!(
-        typst_code.contains("*Scribium*"),
-        "rich variable content must preserve strong markup: {}",
+        typst_code.contains("**Scribium**"),
+        "unsupported rich content must remain source text: {}",
         typst_code
     );
     assert!(
