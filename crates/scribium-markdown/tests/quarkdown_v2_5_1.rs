@@ -197,6 +197,23 @@ fn link(inline: &Inline) -> (&str, ByteSpan) {
     (destination, *span)
 }
 
+fn link_label(inline: &Inline) -> String {
+    let Inline::Link { content, .. } = inline else {
+        panic!("expected link, got {inline:?}");
+    };
+    text_content(content)
+}
+
+fn image(inline: &Inline) -> (&str, ByteSpan) {
+    let Inline::Image {
+        destination, span, ..
+    } = inline
+    else {
+        panic!("expected image, got {inline:?}");
+    };
+    (destination, *span)
+}
+
 fn unordered_list(block: &Block) -> &[ListItem] {
     let Block::UnorderedList { items, .. } = block else {
         panic!("expected unordered list, got {block:?}");
@@ -281,7 +298,7 @@ fn qd251_links_accept_balanced_escaped_and_nested_parentheses() {
 
 #[test]
 fn qd251_unbalanced_plain_destination_stays_literal() {
-    let source = "[unbalanced](https://example.test/a(b(c))";
+    let source = "[unbalanced](destination(a(b))";
     let document = parse_without_diagnostics(source, Mode::Markdown);
     let content = paragraph(&document);
     assert!(!content
@@ -356,6 +373,130 @@ fn qd251_link_boundary_is_identical_in_md_qd_and_qd_body_modes() {
     };
     let (index, _, _) = first_link(content);
     assert_eq!(text_content(&content[index + 1..]), ") after");
+}
+
+#[test]
+fn qd251_link_correction_empty_destinations_have_complete_spans() {
+    for source in ["[empty]()", "[empty](   )"] {
+        let document = parse_without_diagnostics(source, Mode::Markdown);
+        let (index, destination, span) = first_link(paragraph(&document));
+        assert_eq!(index, 0);
+        assert_eq!(destination, "");
+        assert_eq!(&source[span.start..span.end], source);
+    }
+
+    let source = "before [empty]()) after";
+    let document = parse_without_diagnostics(source, Mode::Markdown);
+    let content = paragraph(&document);
+    let (index, destination, span) = first_link(content);
+    assert_eq!(destination, "");
+    assert_eq!(&source[span.start..span.end], "[empty]()");
+    assert_eq!(text_content(&content[index + 1..]), ") after");
+}
+
+#[test]
+fn qd251_link_correction_preserves_angle_and_title_forms() {
+    let cases = [
+        (
+            "[angle](<https://example.test/path>) suffix",
+            "https://example.test/path",
+            "[angle](<https://example.test/path>)",
+        ),
+        (
+            "[double](url \"title\") suffix",
+            "url",
+            "[double](url \"title\")",
+        ),
+        (
+            "[single](url 'title') suffix",
+            "url",
+            "[single](url 'title')",
+        ),
+        ("[paren](url (title)) suffix", "url", "[paren](url (title))"),
+    ];
+
+    for (source, expected_destination, expected_link) in cases {
+        let document = parse_without_diagnostics(source, Mode::Markdown);
+        let (index, destination, span) = first_link(paragraph(&document));
+        assert_eq!(destination, expected_destination);
+        assert_eq!(&source[span.start..span.end], expected_link);
+        assert_eq!(text_content(&paragraph(&document)[index + 1..]), " suffix");
+    }
+}
+
+#[test]
+fn qd251_link_correction_preserves_multiline_title_span() {
+    let source = "[multi](url \"multi\nline\") suffix";
+    let document = parse_without_diagnostics(source, Mode::Markdown);
+    let (index, destination, span) = first_link(paragraph(&document));
+    assert_eq!(destination, "url");
+    assert_eq!(
+        &source[span.start..span.end],
+        "[multi](url \"multi\nline\")"
+    );
+    assert_eq!(text_content(&paragraph(&document)[index + 1..]), " suffix");
+}
+
+#[test]
+fn qd251_link_correction_preserves_autolink_backslashes_and_email_semantics() {
+    let uri_source = r"before <xx:part\+tail> after";
+    let uri_document = parse_without_diagnostics(uri_source, Mode::Markdown);
+    let uri_content = paragraph(&uri_document);
+    let (index, destination, span) = first_link(uri_content);
+    assert_eq!(destination, r"xx:part\+tail");
+    assert_eq!(link_label(&uri_content[index]), r"xx:part\+tail");
+    assert_eq!(&uri_source[span.start..span.end], r"<xx:part\+tail>");
+    assert_eq!(text_content(&uri_content[index + 1..]), " after");
+
+    let email_source = "before foo@bar.example.com after";
+    let email_document = parse_without_diagnostics(email_source, Mode::Markdown);
+    let email_content = paragraph(&email_document);
+    let (index, destination, span) = first_link(email_content);
+    assert_eq!(destination, "mailto:foo@bar.example.com");
+    assert_eq!(link_label(&email_content[index]), "foo@bar.example.com");
+    assert_eq!(&email_source[span.start..span.end], "foo@bar.example.com");
+    assert_eq!(text_content(&email_content[index + 1..]), " after");
+}
+
+#[test]
+fn qd251_link_correction_preserves_reference_and_image_destinations() {
+    let reference_source = "[ref]: https://example.test/a\\+b\n\nbefore [reference][ref] after";
+    let reference_document = parse_without_diagnostics(reference_source, Mode::Markdown);
+    let reference_content = match reference_document.nodes.last() {
+        Some(Block::Paragraph { content, .. }) => content,
+        other => panic!("expected reference paragraph, got {other:?}"),
+    };
+    let (_, destination, _) = first_link(reference_content);
+    assert_eq!(destination, r"https://example.test/a\+b");
+
+    let image_source = r"![image](https://example.test/a\+b)";
+    let image_document = parse_without_diagnostics(image_source, Mode::Markdown);
+    let image_content = paragraph(&image_document);
+    let Inline::Image { .. } = &image_content[0] else {
+        panic!("expected image, got {image_content:?}");
+    };
+    let (destination, span) = image(&image_content[0]);
+    assert_eq!(destination, r"https://example.test/a\+b");
+    assert_valid_span(span, image_source);
+}
+
+#[test]
+fn qd251_link_correction_preserves_utf8_and_crlf_edge_spans() {
+    let utf8_source = "[빈](<https://example.test/경로>) 뒤";
+    let utf8_document = parse_without_diagnostics(utf8_source, Mode::Markdown);
+    let (_, _, utf8_span) = first_link(paragraph(&utf8_document));
+    assert_eq!(
+        &utf8_source[utf8_span.start..utf8_span.end],
+        "[빈](<https://example.test/경로>)"
+    );
+
+    let crlf_source = "[crlf](url \"title\") 뒤\r\n";
+    let crlf_document = parse_without_diagnostics(crlf_source, Mode::Markdown);
+    let (_, _, crlf_span) = first_link(paragraph(&crlf_document));
+    assert_eq!(
+        &crlf_source[crlf_span.start..crlf_span.end],
+        "[crlf](url \"title\")"
+    );
 }
 
 #[test]

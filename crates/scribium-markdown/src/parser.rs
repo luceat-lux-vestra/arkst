@@ -722,10 +722,19 @@ fn convert_inlines(
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Vec<Inline> {
-    arena[node]
-        .children(arena)
-        .filter_map(|child| convert_inline(arena, child, source, base, diagnostics))
-        .collect()
+    let mut inlines = Vec::new();
+    let mut previous = None;
+    for child in arena[node].children(arena) {
+        if duplicate_autolink_closer(arena, previous, child, source) {
+            previous = Some(child);
+            continue;
+        }
+        if let Some(inline) = convert_inline(arena, child, source, base, diagnostics) {
+            inlines.push(inline);
+        }
+        previous = Some(child);
+    }
+    inlines
 }
 
 fn convert_inline(
@@ -768,13 +777,20 @@ fn convert_inline(
             span,
         }),
         KindData::Link(link) => Some(Inline::Link {
-            content: convert_inlines(arena, node, source, base, diagnostics),
-            destination: unescape_link_destination(checked_value(link.destination(), source)?),
+            content: {
+                let content = convert_inlines(arena, node, source, base, diagnostics);
+                if content.is_empty() {
+                    auto_link_content(link, source, base).unwrap_or(content)
+                } else {
+                    content
+                }
+            },
+            destination: convert_link_destination(link, source)?,
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
             content: convert_inlines(arena, node, source, base, diagnostics),
-            destination: unescape_link_destination(checked_value(image.destination(), source)?),
+            destination: checked_value(image.destination(), source)?.to_string(),
             span,
         }),
         KindData::RawHtml(_html) => Some(Inline::RawHtml {
@@ -1024,7 +1040,44 @@ fn convert_value(value: &QuarkdownValue) -> Value {
     }
 }
 
-fn unescape_link_destination(destination: &str) -> String {
+fn convert_link_destination(link: &rushdown::ast::Link, source: &str) -> Option<String> {
+    let raw = checked_value(link.destination(), source)?;
+    let destination = match link.link_kind() {
+        rushdown::ast::LinkKind::Inline => unescape_inline_link_destination(raw),
+        _ => raw.to_string(),
+    };
+    Some(destination)
+}
+
+fn auto_link_content(link: &rushdown::ast::Link, source: &str, base: usize) -> Option<Vec<Inline>> {
+    let rushdown::ast::LinkKind::Auto(auto) = link.link_kind() else {
+        return None;
+    };
+    let rushdown::text::Value::Index(text) = auto.text() else {
+        return None;
+    };
+    let text = checked_index(*text, source)?;
+    let start = if source.as_bytes().get(text.start) == Some(&b'<') {
+        text.start.checked_add(1)?
+    } else {
+        text.start
+    };
+    let end = if text.end > start && source.as_bytes().get(text.end - 1) == Some(&b'>') {
+        text.end - 1
+    } else {
+        text.end
+    };
+    let span = ByteSpan::new(start, end);
+    if !span.is_valid_for(source) {
+        return None;
+    }
+    Some(vec![Inline::Text {
+        content: source.get(start..end)?.to_string(),
+        span: offset_span(span, base)?,
+    }])
+}
+
+fn unescape_inline_link_destination(destination: &str) -> String {
     let mut result = String::with_capacity(destination.len());
     let mut chars = destination.chars();
     while let Some(character) = chars.next() {
@@ -1091,17 +1144,44 @@ fn link_span(
     link: &rushdown::ast::Link,
     source: &str,
 ) -> Option<ByteSpan> {
-    let span = node_span(arena, node, source)?;
+    let span = match link.link_kind() {
+        rushdown::ast::LinkKind::Auto(auto) => match auto.text() {
+            rushdown::text::Value::Index(text) => {
+                checked_index(*text, source).or_else(|| node_span(arena, node, source))
+            }
+            _ => node_span(arena, node, source),
+        },
+        _ => node_span(arena, node, source),
+    }?;
+    if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
+        let end = if source.as_bytes().get(span.start) == Some(&b'<')
+            && source.as_bytes().get(span.end) == Some(&b'>')
+        {
+            span.end.checked_add(1)?
+        } else {
+            span.end
+        };
+        let span = ByteSpan::new(span.start, end);
+        return span.is_valid_for(source).then_some(span);
+    }
     if !matches!(link.link_kind(), rushdown::ast::LinkKind::Inline) {
         return Some(span);
     }
 
-    let rushdown::text::Value::Index(destination) = link.destination() else {
-        return Some(span);
-    };
-    let destination = checked_index(*destination, source)?;
     let bytes = source.as_bytes();
-    let mut cursor = destination.end;
+    let mut cursor = match link.destination() {
+        rushdown::text::Value::Index(destination) => {
+            let destination = checked_index(*destination, source)?;
+            destination.end
+        }
+        rushdown::text::Value::String(destination) if destination.is_empty() => {
+            let Some(cursor) = empty_inline_destination_cursor(span, bytes) else {
+                return Some(span);
+            };
+            cursor
+        }
+        _ => return Some(span),
+    };
 
     if bytes.get(cursor) == Some(&b'>') {
         cursor += 1;
@@ -1136,6 +1216,49 @@ fn link_span(
     }
     let span = ByteSpan::new(span.start, cursor + 1);
     span.is_valid_for(source).then_some(span)
+}
+
+fn empty_inline_destination_cursor(span: ByteSpan, bytes: &[u8]) -> Option<usize> {
+    let mut cursor = span.end;
+    if bytes.get(cursor) != Some(&b']') {
+        return None;
+    }
+    cursor += 1;
+    if bytes.get(cursor) != Some(&b'(') {
+        return None;
+    }
+    cursor += 1;
+    Some(skip_link_spaces(bytes, cursor))
+}
+
+fn duplicate_autolink_closer(
+    arena: &Arena,
+    previous: Option<NodeRef>,
+    current: NodeRef,
+    source: &str,
+) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    let KindData::Link(link) = arena[previous].kind_data() else {
+        return false;
+    };
+    if !matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
+        return false;
+    }
+    let KindData::Text(text) = arena[current].kind_data() else {
+        return false;
+    };
+    let Some(text) = text.index().and_then(|index| checked_index(*index, source)) else {
+        return false;
+    };
+    if source.get(text.start..text.end) != Some(">") {
+        return false;
+    }
+    let Some(link_span) = link_span(arena, previous, link, source) else {
+        return false;
+    };
+    text.start.checked_add(1) == Some(link_span.end)
 }
 
 fn skip_link_spaces(bytes: &[u8], mut cursor: usize) -> usize {

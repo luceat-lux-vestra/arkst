@@ -28,6 +28,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
 | GitHub release tag `v2.5.1`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.1 | Release identification and D1-D5 public delta inventory | 2026-08-13 |
 | CommonMark specification, current link rules  | https://spec.commonmark.org/current/#links | D2 balanced/escaped link destinations, literal trailing delimiters, and URI backslash-escape semantics | 2026-08-13 |
+| CommonMark specification, current autolink rules | https://spec.commonmark.org/current/#autolinks | D2 autolink URI/email grammar and the rule that backslash escapes do not apply inside autolinks | 2026-08-13 |
 | CommonMark specification, current list rules  | https://spec.commonmark.org/current/#lists | D3 nested list container and indentation semantics | 2026-08-13 |
 | Quarkdown wiki — Markdown content            | https://quarkdown.com/wiki/markdown-content/ | Public body-content interaction for links, lists, and nested block content | 2026-08-13 |
 | Quarkdown wiki — Iterable                   | https://quarkdown.com/wiki/iterable/ | Corroborating public scope for nested Markdown list document semantics | 2026-08-13 |
@@ -59,7 +60,7 @@ is recorded per source:
   sources rather than evidence that a behavior was introduced in or
   uniquely belongs to v2.5.0.
 - The **v2.5.1 release notes** are the primary source for release
-  identification and D1-D5. The CommonMark links/lists sections are
+  identification and D1-D5. The CommonMark links/autolinks/lists sections are
   corroborating public behavior specifications for D2/D3. The Markdown
   content and Subdocuments wiki pages corroborate scope and are not claims
   that those behaviors were introduced in v2.5.1.
