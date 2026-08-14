@@ -11,6 +11,26 @@ pub struct QuarkdownCall {
     pub name_span: ByteSpan,
     pub positional_args: Vec<Arg>,
     pub named_args: Vec<NamedArg>,
+    /// Subsequent `::name` segments, in source order.
+    ///
+    /// The grammar crate deliberately preserves the chain structure without
+    /// applying Quarkdown's evaluator transformation. That keeps source
+    /// identity available to the frontend and leaves evaluation semantics to
+    /// the owning later stage.
+    pub chain: Vec<CallSegment>,
+    pub span: ByteSpan,
+    /// The call span before an optional tight-call wrapper is added.
+    pub inner_span: ByteSpan,
+    /// The complete `{.call ...}` wrapper span, when this is a tight call.
+    pub wrapper_span: Option<ByteSpan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallSegment {
+    pub name: String,
+    pub name_span: ByteSpan,
+    pub positional_args: Vec<Arg>,
+    pub named_args: Vec<NamedArg>,
     pub span: ByteSpan,
 }
 
@@ -76,20 +96,206 @@ pub fn parse_directive_at(
     if start >= bytes.len() || bytes[start] != b'.' || !valid_boundary(bytes, start) {
         return Ok(None);
     }
-    let name_start = start + 1;
-    let Some(&first) = bytes.get(name_start) else {
+    let first = parse_segment(source, start, true)?;
+    if first.0.name.is_empty() {
+        return Ok(None);
+    }
+    let mut chain = Vec::new();
+    let mut cursor = first.1;
+    let mut end = first.0.span.end;
+
+    while cursor == end
+        && cursor
+            .checked_add(2)
+            .is_some_and(|limit| source.as_bytes().get(cursor..limit) == Some(b"::"))
+    {
+        let chain_start = cursor;
+        let segment_start = cursor + 2;
+        let segment = parse_segment(source, segment_start, false).map_err(|error| {
+            if error.code == "E2003" {
+                error
+            } else {
+                ParseError::new(
+                    "E2004",
+                    "call chain must be followed by a valid call name",
+                    ByteSpan::new(chain_start, segment_start.min(source.len())),
+                )
+            }
+        })?;
+        if segment.0.name.is_empty() {
+            return Err(ParseError::new(
+                "E2004",
+                "call chain must be followed by a valid call name",
+                ByteSpan::new(chain_start, segment_start.min(source.len())),
+            ));
+        }
+        cursor = segment.1;
+        end = segment.0.span.end;
+        chain.push(segment.0);
+    }
+
+    let first = first.0;
+    if source.as_bytes().get(end).is_some_and(|b| is_word(*b)) {
+        return Ok(None);
+    }
+    let span = ByteSpan::new(first.span.start, end);
+    Ok(Some((
+        QuarkdownCall {
+            name: first.name,
+            name_span: first.name_span,
+            positional_args: first.positional_args,
+            named_args: first.named_args,
+            chain,
+            span,
+            inner_span: span,
+            wrapper_span: None,
+        },
+        end,
+    )))
+}
+
+/// Parse a tight call of the form `{.call ...}`.
+pub fn parse_tight_call(
+    source: &str,
+    start: usize,
+) -> Result<Option<(QuarkdownCall, usize)>, ParseError> {
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'{') {
+        return Ok(None);
+    }
+    let inner_start = start.checked_add(1).ok_or_else(|| {
+        ParseError::new(
+            "E9002",
+            "tight call start overflowed",
+            ByteSpan::new(start, start),
+        )
+    })?;
+    let Some((mut call, end)) = parse_directive_at(source, inner_start)? else {
         return Ok(None);
     };
-    let mut name_end = name_start;
-    if first.is_ascii_digit() && first != b'0' {
+    if bytes.get(end) != Some(&b'}') {
+        return Ok(None);
+    }
+    let wrapper_end = end.checked_add(1).ok_or_else(|| {
+        ParseError::new(
+            "E9002",
+            "tight call end overflowed",
+            ByteSpan::new(start, end),
+        )
+    })?;
+    let wrapper_span = ByteSpan::new(start, wrapper_end);
+    call.inner_span = call.span;
+    call.span = wrapper_span;
+    call.wrapper_span = Some(wrapper_span);
+    Ok(Some((call, wrapper_end)))
+}
+
+/// Return whether a physical line can only be completed by more input.
+///
+/// This helper is intentionally lexical and conservative. The Markdown
+/// lifecycle uses it only to keep an accepted Quarkdown block header alive
+/// while Rushdown advances one physical line at a time; actual acceptance
+/// remains owned by `parse_call`.
+pub fn needs_more_input(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for &byte in bytes {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth = depth.saturating_add(1),
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return true;
+    }
+    has_trailing_continuation(source)
+}
+
+/// Return whether the source ends with an unescaped continuation marker.
+///
+/// The marker must be the last non-newline byte. Horizontal whitespace after
+/// it is deliberately not accepted as continuation syntax.
+pub fn has_trailing_continuation(source: &str) -> bool {
+    let line_end = source.trim_end_matches(['\r', '\n']);
+    line_end.as_bytes().last() == Some(&b'\\')
+}
+
+fn parse_segment(
+    source: &str,
+    start: usize,
+    dotted: bool,
+) -> Result<(CallSegment, usize), ParseError> {
+    let bytes = source.as_bytes();
+    let name_start = if dotted {
+        if bytes.get(start) != Some(&b'.') {
+            return Ok((
+                CallSegment {
+                    name: String::new(),
+                    name_span: ByteSpan::new(start, start),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    span: ByteSpan::new(start, start),
+                },
+                start,
+            ));
+        }
+        start + 1
+    } else {
+        start
+    };
+    let Some(&first) = bytes.get(name_start) else {
+        if dotted {
+            return Ok((
+                CallSegment {
+                    name: String::new(),
+                    name_span: ByteSpan::new(start, start),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    span: ByteSpan::new(start, start),
+                },
+                start,
+            ));
+        }
+        return Err(ParseError::new(
+            "E2004",
+            "call chain must be followed by a valid call name",
+            ByteSpan::new(start.min(source.len()), source.len()),
+        ));
+    };
+
+    if dotted && first.is_ascii_digit() && first != b'0' {
+        let mut name_end = name_start;
         while bytes.get(name_end).is_some_and(|b| b.is_ascii_digit()) {
             name_end += 1;
         }
         if bytes.get(name_end).is_some_and(|b| is_word(*b)) {
-            return Ok(None);
+            return Ok((
+                CallSegment {
+                    name: String::new(),
+                    name_span: ByteSpan::new(start, start),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    span: ByteSpan::new(start, start),
+                },
+                start,
+            ));
         }
-        return Ok(Some((
-            QuarkdownCall {
+        return Ok((
+            CallSegment {
                 name: source[name_start..name_end].to_string(),
                 name_span: ByteSpan::new(start, name_end),
                 positional_args: Vec::new(),
@@ -97,20 +303,71 @@ pub fn parse_directive_at(
                 span: ByteSpan::new(start, name_end),
             },
             name_end,
-        )));
+        ));
     }
     if !is_name_start(first) {
-        return Ok(None);
+        if dotted {
+            return Ok((
+                CallSegment {
+                    name: String::new(),
+                    name_span: ByteSpan::new(start, start),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    span: ByteSpan::new(start, start),
+                },
+                start,
+            ));
+        }
+        return Err(ParseError::new(
+            "E2004",
+            "call chain must be followed by a valid call name",
+            ByteSpan::new(start.min(source.len()), (name_start + 1).min(source.len())),
+        ));
     }
+    let mut name_end = name_start;
     while bytes.get(name_end).is_some_and(|b| is_name_char(*b)) {
         name_end += 1;
     }
+    let parsed = parse_arguments(source, name_end)?;
+    let span = ByteSpan::new(if dotted { start } else { name_start }, parsed.end);
+    Ok((
+        CallSegment {
+            name: source[name_start..name_end].to_string(),
+            name_span: ByteSpan::new(if dotted { start } else { name_start }, name_end),
+            positional_args: parsed.positional_args,
+            named_args: parsed.named_args,
+            span,
+        },
+        parsed.cursor,
+    ))
+}
 
-    let mut cursor = skip_horizontal(bytes, name_end);
-    let mut call_end = name_end;
+struct ParsedArguments {
+    positional_args: Vec<Arg>,
+    named_args: Vec<NamedArg>,
+    end: usize,
+    cursor: usize,
+}
+
+fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, ParseError> {
+    let bytes = source.as_bytes();
+    let mut cursor = skip_horizontal(bytes, after_name);
+    let mut end = after_name;
     let mut positional_args = Vec::new();
     let mut named_args = Vec::new();
-    while let Some(&byte) = bytes.get(cursor) {
+    let mut require_argument = false;
+
+    loop {
+        let Some(&byte) = bytes.get(cursor) else {
+            if require_argument {
+                return Err(ParseError::new(
+                    "E2004",
+                    "line continuation must be followed by an argument",
+                    ByteSpan::new(cursor.saturating_sub(1), cursor),
+                ));
+            }
+            break;
+        };
         if byte == b'{' {
             if !named_args.is_empty() {
                 return Err(ParseError::new(
@@ -120,85 +377,118 @@ pub fn parse_directive_at(
                 ));
             }
             let arg = parse_braced(source, cursor)?;
-            cursor = skip_horizontal(bytes, arg.span.end);
-            call_end = arg.span.end;
+            end = arg.span.end;
+            cursor = arg.span.end;
             positional_args.push(arg);
-            continue;
+        } else {
+            let arg_name_start = cursor;
+            while bytes.get(cursor).is_some_and(|b| is_name_char(*b)) {
+                cursor += 1;
+            }
+            if cursor == arg_name_start {
+                if require_argument {
+                    return Err(ParseError::new(
+                        "E2004",
+                        "line continuation must be followed by an argument",
+                        ByteSpan::new(arg_name_start, (arg_name_start + 1).min(source.len())),
+                    ));
+                }
+                break;
+            }
+            let after_name = skip_horizontal(bytes, cursor);
+            if bytes.get(after_name) != Some(&b':') {
+                if require_argument {
+                    return Err(ParseError::new(
+                        "E2004",
+                        "line continuation must be followed by an argument",
+                        ByteSpan::new(arg_name_start, cursor),
+                    ));
+                }
+                break;
+            }
+            let open = skip_horizontal(bytes, after_name + 1);
+            if bytes.get(open) != Some(&b'{') {
+                return Err(ParseError::new(
+                    "E2002",
+                    "named argument must be followed by a braced value",
+                    ByteSpan::new(arg_name_start, after_name + 1),
+                ));
+            }
+            let value = parse_braced(source, open)?;
+            end = value.span.end;
+            named_args.push(NamedArg {
+                name: source[arg_name_start..cursor].to_string(),
+                name_span: ByteSpan::new(arg_name_start, cursor),
+                value,
+                span: ByteSpan::new(arg_name_start, end),
+            });
+            cursor = end;
         }
-        let arg_name_start = cursor;
-        while bytes.get(cursor).is_some_and(|b| is_name_char(*b)) {
-            cursor += 1;
+
+        let next = skip_horizontal(bytes, cursor);
+        if let Some(after_continuation) = consume_continuation(bytes, next) {
+            let next_argument = skip_line_indentation(bytes, after_continuation);
+            if next_argument >= bytes.len() || bytes[next_argument] == b'\n' {
+                return Err(ParseError::new(
+                    "E2004",
+                    "line continuation must be followed by an argument",
+                    ByteSpan::new(next, (next + 1).min(source.len())),
+                ));
+            }
+            cursor = next_argument;
+            require_argument = true;
+        } else {
+            cursor = next;
+            require_argument = false;
+            if bytes.get(cursor).is_some_and(|b| *b == b':') {
+                break;
+            }
         }
-        if cursor == arg_name_start {
-            break;
-        }
-        let after_name = skip_horizontal(bytes, cursor);
-        if bytes.get(after_name) != Some(&b':') {
-            break;
-        }
-        let open = skip_horizontal(bytes, after_name + 1);
-        if bytes.get(open) != Some(&b'{') {
-            return Err(ParseError::new(
-                "E2002",
-                "named argument must be followed by a braced value",
-                ByteSpan::new(arg_name_start, after_name + 1),
-            ));
-        }
-        let value = parse_braced(source, open)?;
-        let end = value.span.end;
-        named_args.push(NamedArg {
-            name: source[arg_name_start..cursor].to_string(),
-            name_span: ByteSpan::new(arg_name_start, cursor),
-            value,
-            span: ByteSpan::new(arg_name_start, end),
-        });
-        call_end = end;
-        cursor = skip_horizontal(bytes, end);
     }
-    if bytes.get(call_end).is_some_and(|b| is_word(*b)) {
-        return Ok(None);
-    }
-    let end = call_end;
-    Ok(Some((
-        QuarkdownCall {
-            name: source[name_start..name_end].to_string(),
-            name_span: ByteSpan::new(start, name_end),
-            positional_args,
-            named_args,
-            span: ByteSpan::new(start, end),
-        },
+
+    Ok(ParsedArguments {
+        positional_args,
+        named_args,
         end,
-    )))
+        cursor,
+    })
 }
 
 fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
     let bytes = source.as_bytes();
     let mut depth = 1usize;
     let mut cursor = open + 1;
+    let mut in_string = false;
+    let mut escaped = false;
     while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    let content = ByteSpan::new(open + 1, cursor);
-                    let content_kind = parse_scalar(source, content)
-                        .map(ArgContent::Scalar)
-                        .unwrap_or(ArgContent::Content(content));
-                    return Ok(Arg {
-                        content: content_kind,
-                        span: ByteSpan::new(open, cursor + 1),
-                    });
+        let byte = bytes[cursor];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let content = ByteSpan::new(open + 1, cursor);
+                        let content_kind = parse_scalar(source, content)
+                            .map(ArgContent::Scalar)
+                            .unwrap_or(ArgContent::Content(content));
+                        return Ok(Arg {
+                            content: content_kind,
+                            span: ByteSpan::new(open, cursor + 1),
+                        });
+                    }
                 }
+                _ => {}
             }
-            b'\n' => {
-                return Err(ParseError::new(
-                    "E2003",
-                    "unclosed `{...}` argument",
-                    ByteSpan::new(open, cursor + 1),
-                ));
-            }
-            _ => {}
         }
         cursor += 1;
     }
@@ -247,6 +537,24 @@ fn skip_horizontal(bytes: &[u8], mut cursor: usize) -> usize {
         cursor += 1;
     }
     cursor
+}
+
+fn skip_line_indentation(bytes: &[u8], mut cursor: usize) -> usize {
+    while bytes.get(cursor).is_some_and(|b| matches!(b, b' ' | b'\t')) {
+        cursor += 1;
+    }
+    cursor
+}
+
+fn consume_continuation(bytes: &[u8], cursor: usize) -> Option<usize> {
+    if bytes.get(cursor) != Some(&b'\\') {
+        return None;
+    }
+    match (bytes.get(cursor + 1), bytes.get(cursor + 2)) {
+        (Some(b'\n'), _) => Some(cursor + 2),
+        (Some(b'\r'), Some(b'\n')) => Some(cursor + 3),
+        _ => None,
+    }
 }
 
 fn is_name_start(byte: u8) -> bool {
@@ -458,6 +766,127 @@ mod tests {
                 "{source:?}"
             );
         }
+    }
+
+    #[test]
+    fn parses_multiline_nested_arguments_with_original_spans() {
+        let source = ".divide {\n  .cos {.pi}\n} by:{\n  .sum {2} {1}\n}";
+        let (call, end) = parse_call(source).unwrap().unwrap();
+        assert_eq!(end, source.len());
+        assert_eq!(call.positional_args.len(), 1);
+        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(call.span, ByteSpan::new(0, source.len()));
+        let ArgContent::Content(content) = call.positional_args[0].content else {
+            panic!("expected multiline content argument")
+        };
+        assert_eq!(&source[content.start..content.end], "\n  .cos {.pi}\n");
+        assert_eq!(
+            &source[call.named_args[0].value.span.start..call.named_args[0].value.span.end],
+            "{\n  .sum {2} {1}\n}"
+        );
+        for span in [call.span, call.name_span, content, call.named_args[0].span] {
+            assert!(span.is_valid_for(source));
+        }
+
+        let crlf = concat!(".call {\r\n  한글\r\n} \\", "\r\n  next:{값}");
+        let (call, end) = parse_call(crlf).unwrap().unwrap();
+        assert_eq!(end, crlf.len());
+        assert_eq!(call.named_args.len(), 1);
+        assert!(call.span.is_valid_for(crlf));
+        let ArgContent::Content(content) = call.positional_args[0].content else {
+            panic!("expected CRLF content argument")
+        };
+        assert_eq!(&crlf[content.start..content.end], "\r\n  한글\r\n");
+    }
+
+    #[test]
+    fn parses_line_continuations_without_fixed_indentation() {
+        for (source, positional, named) in [
+            (concat!(".call {a} \\", "\n{b}"), 2, 0),
+            (concat!(".call {a} \\", "\n  {b}"), 2, 0),
+            (concat!(".call {a} \\", "\n        {b}"), 2, 0),
+            (concat!(".call {a} \\", "\n\t{b}"), 2, 0),
+            (concat!(".call {a} \\", "\n  {b} \\", "\n  {c}"), 3, 0),
+            (concat!(".call first:{a} \\", "\n  second:{b}"), 0, 2),
+        ] {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(end, source.len(), "{source:?}");
+            assert_eq!(call.positional_args.len(), positional, "{source:?}");
+            assert_eq!(call.named_args.len(), named, "{source:?}");
+            assert!(call.span.is_valid_for(source), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn parses_chains_as_source_backed_segments_without_rewriting() {
+        for source in [
+            ".a::b",
+            ".a::b::c",
+            ".a {x}::b {y}",
+            ".a first:{x}::b second:{y}",
+        ] {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(end, source.len(), "{source:?}");
+            assert_eq!(call.chain.len(), source.matches("::").count());
+            assert_eq!(&source[call.span.start..call.span.end], source);
+            assert!(call.span.is_valid_for(source));
+            for segment in &call.chain {
+                assert!(segment.span.is_valid_for(source));
+                assert!(segment.name_span.is_valid_for(source));
+            }
+        }
+        let (call, _) = parse_call(".a {x}::b {y}").unwrap().unwrap();
+        assert_eq!(call.name, "a");
+        assert_eq!(call.chain[0].name, "b");
+        assert_eq!(call.positional_args.len(), 1);
+        assert_eq!(call.chain[0].positional_args.len(), 1);
+    }
+
+    #[test]
+    fn rejects_malformed_chains_deterministically() {
+        for source in [".a::", ".a:::b", ".a:: {x}", ".a::1abc"] {
+            let error = parse_call(source).unwrap_err();
+            assert_eq!(error.code, "E2004", "{source:?}");
+            assert!(error.span.is_valid_for(source), "{source:?}");
+        }
+        for source in [
+            concat!(".call {a} \\", "\n"),
+            concat!(".call {a} \\", "\n\nnext"),
+        ] {
+            let error = parse_call(source).unwrap_err();
+            assert_eq!(error.code, "E2004", "{source:?}");
+            assert!(error.span.is_valid_for(source), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn parses_tight_calls_and_preserves_inner_provenance() {
+        for source in [
+            "{.note}",
+            "H{.text {2}}O",
+            "한{.note}글",
+            "{.a::b}",
+            "A{.a::b}B",
+        ] {
+            let start = source.find('{').unwrap();
+            let expected_end = source.rfind('}').unwrap() + 1;
+            let (call, end) = parse_tight_call(source, start).unwrap().unwrap();
+            assert_eq!(end, expected_end);
+            let wrapper = call.wrapper_span.expect("tight wrapper");
+            assert_eq!(
+                &source[wrapper.start..wrapper.end],
+                &source[start..expected_end]
+            );
+            assert_eq!(
+                &source[call.inner_span.start..call.inner_span.end],
+                &source[start + 1..expected_end - 1]
+            );
+            assert!(wrapper.is_valid_for(source));
+            assert!(call.inner_span.is_valid_for(source));
+            assert!(call.name_span.is_valid_for(source));
+        }
+        assert!(parse_tight_call("{not a call}", 0).unwrap().is_none());
+        assert!(parse_tight_call("{.note", 0).unwrap().is_none());
     }
 
     #[test]

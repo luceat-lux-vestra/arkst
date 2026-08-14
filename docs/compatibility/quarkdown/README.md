@@ -50,7 +50,7 @@ provenance records.
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Implemented      |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Implemented      |
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
-| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`        | Error                    | Implemented      |
+| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Implemented      |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
 | Iteration                      | —                                | —                        | Planned          |
@@ -59,10 +59,10 @@ provenance records.
 | Metadata                       | —                                | —                        | Planned          |
 | Row/column/grid                | —                                | —                        | Planned          |
 | Semantic evaluation            | `.if`/`.ifnot` + variables       | Partial / In progress    | Planned          |
-| Call chaining (`::`)           | `.a {x}::b {y}`                  | Not implemented          | Planned          |
-| Line continuation (`\`)        | `\` at end of line               | Not implemented          | Planned          |
-| Tight / brace-wrapped calls    | `.x` wrapped in braces at adjacency | Not implemented       | Planned          |
-| Multi-line arguments           | `{.…}` parsing spans lines        | Not implemented (E2xxx today) | Planned          |
+| Call chaining (`::`)           | `.a {x}::b {y}`                  | Parsed; evaluation deferred | Implemented    |
+| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Implemented      |
+| Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Implemented      |
+| Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Implemented      |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
 | `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
 
@@ -128,8 +128,31 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | v2.5.1 link parentheses         | `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_links_accept_balanced_escaped_and_nested_parentheses`, `qd251_unbalanced_plain_destination_stays_literal`, `qd251_trailing_parenthesis_and_surrounding_text_are_not_swallowed`, `qd251_links_preserve_utf8_and_crlf_source_boundaries`, `qd251_link_boundary_is_identical_in_md_qd_and_qd_body_modes`, `qd251_link_correction_empty_destinations_have_complete_spans`, `qd251_link_correction_preserves_angle_and_title_forms`, `qd251_link_correction_preserves_multiline_title_span`, `qd251_link_correction_preserves_autolink_backslashes_and_email_semantics`, `qd251_link_correction_preserves_reference_and_image_destinations`, `qd251_link_correction_preserves_utf8_and_crlf_edge_spans` |
 | v2.5.1 deep four-space lists   | `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_deep_four_space_lists_have_exact_depth_in_md_and_qd`, `qd251_deep_list_preserves_siblings_dedent_and_following_content`, `qd251_nested_paragraph_and_list_content_remain_in_their_items`, `qd251_deep_lists_preserve_utf8_and_crlf_spans`, `qd251_qd_body_uses_dynamic_indent_before_markdown_list_parsing` |
 | M2 blockquotes / strikethrough / task lists / tables | `scribium-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `scribium-core/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `scribium-core/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `scribium-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `scribium-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
+| v2.5.1 call syntax slice | `scribium-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `scribium-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `scribium-core/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`; `fixtures/markdown/quarkdown_v251_syntax.qd` CLI/Typst smoke |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
+
+### v2.5.1 syntax-gap evidence
+
+The v2.5.1 public function-call syntax review is backed by independently
+authored fixtures in the grammar and frontend tests. The evidence covers
+multiline nested positional/named arguments, line continuation with arbitrary
+leading indentation, parser-preserved `::` chains, tight brace-wrapped calls,
+normal boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd`
+isolation, and the existing dynamic body-indentation lifecycle.
+
+The syntax adapter preserves the head, each chain segment, each name span,
+argument spans, and the complete source span without synthetic reparsing. The
+evaluator recursively evaluates segment argument values but does not yet apply
+the documented chained value-flow transformation. Consequently chaining is a
+**Parsed** claim only; it is not a semantic or output-equivalence claim in
+this issue. That evaluator work remains tracked separately under #61.
+
+The public source for this slice is the Quarkdown wiki's [Syntax of a
+function call](https://quarkdown.com/wiki/syntax-of-a-function-call/) page,
+which documents multiline arguments, line continuation, chaining, and tight
+function calls. Fixtures are independently authored from that public contract;
+no upstream implementation source, test, or fixture was used.
 
 ## Compatibility Levels
 
@@ -144,7 +167,9 @@ implementation-evidence counterpart of the upstream provenance recorded in
 
 Function calls are currently **Parsed**: `.name`, positional arguments
 `{arg}`, named arguments `name:{arg}`, nested calls, and indented block
-bodies are parsed into the Scribium AST/IR. **Conditional evaluation
+bodies are parsed into the Scribium AST/IR. Multiline braced arguments, line
+continuations, tight brace-wrapped calls, and parser-preserved `::` chains
+are also accepted at the syntax level with source-backed spans. **Conditional evaluation
 (`.if` / `.ifnot`) with boolean literals and variable references
 (`.if {.name}`) is implemented**. Full semantic evaluation (functions,
 iteration, components) remains the next milestone (see `docs/SYNTAX.md` and
@@ -156,7 +181,7 @@ diagnostic state.
 
 ### Tight-call boundaries
 
-A call requires a boundary before and after it: whitespace, a symbol
+A normal call requires a boundary before and after it: whitespace, a symbol
 (including `-`), or the start/end of the line. A call directly adjacent to a
 word character — any Unicode letter or digit, plus `_` — is not recognized and
 the whole construct stays ordinary text. Examples:
@@ -166,10 +191,10 @@ the whole construct stays ordinary text. Examples:
 - `-.note` and `.note-` are valid calls: `-` is a symbol, not a word
   character.
 
-The new-in-Quarkdown brace-wrapped form (`H{.text {2}}O`), which lifts the
-boundary requirement, is a documented v2.5.0 behavior but is **not
-implemented** here; the inner call parses, but the wrapping braces are kept
-as literal text.
+The brace-wrapped form (`H{.text {2}}O`) lifts the boundary requirement. The
+frontend accepts a complete wrapper, consumes the wrapper from output syntax,
+and keeps both the wrapper and inner-call provenance. An incomplete wrapper
+recovers as ordinary text.
 
 ### Existing public-language compatibility debt
 
@@ -178,9 +203,9 @@ Scribium has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
 debt against the complete target. They do not produce `E8xxx` diagnostics today
 and their current behavior is undefined for the purposes of a claim; examples
-include line continuation (`\` at EOL), `::` chaining, tight brace-wrapped
-calls, multi-line arguments, and v2.5.0 built-ins such as data loading and
-`.markdown`.
+include chained value-flow evaluation and v2.5.0 built-ins such as data
+loading and `.markdown`. The parser-level syntax rows above do not promote
+those later semantic surfaces.
 
 ## Specification Record Format
 

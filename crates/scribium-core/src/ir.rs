@@ -83,6 +83,18 @@ pub enum IrNode {
         body: Option<Vec<IrNode>>,
         span: SourceSpan,
     },
+    /// A parser-preserved `::` call chain.
+    ///
+    /// Chaining is represented structurally here, but its value-flow
+    /// evaluation is intentionally deferred to the Quarkdown evaluator
+    /// compatibility work. This prevents the grammar adapter from rewriting
+    /// source into synthetic nested calls.
+    ChainedFunctionCall {
+        head: IrCallSegment,
+        chain: Vec<IrCallSegment>,
+        body: Option<Vec<IrNode>>,
+        span: SourceSpan,
+    },
     /// A thematic break (horizontal rule).
     ThematicBreak { span: SourceSpan },
     /// Math expression (inline or display).
@@ -121,6 +133,13 @@ pub enum IrInline {
         body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
+    /// An inline parser-preserved `::` call chain.
+    ChainedDirectiveCall {
+        head: IrCallSegment,
+        chain: Vec<IrCallSegment>,
+        body: Option<Vec<IrInline>>,
+        span: SourceSpan,
+    },
     /// A Markdown inline link (`[label](destination)`).
     ///
     /// The label is kept as inline markup; the destination is preserved
@@ -143,6 +162,16 @@ pub enum IrInline {
 pub struct IrListItem {
     pub nodes: Vec<IrNode>,
     pub task: Option<IrTaskStatus>,
+    pub span: SourceSpan,
+}
+
+/// One source-backed segment of a parser-preserved Quarkdown call chain.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCallSegment {
+    pub name: String,
+    pub name_span: SourceSpan,
+    pub positional_args: Vec<IrValue>,
+    pub named_args: Vec<(String, IrValue)>,
     pub span: SourceSpan,
 }
 

@@ -1,0 +1,3 @@
+Source-backed chain syntax remains parser-preserved:
+
+.a::b

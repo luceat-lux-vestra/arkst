@@ -29,7 +29,7 @@
 //! and materialize it at reference sites.
 
 use crate::diagnostics::{Diagnostic, Severity};
-use crate::ir::{IrDocument, IrInline, IrNode, IrValue};
+use crate::ir::{IrCallSegment, IrDocument, IrInline, IrNode, IrValue};
 use crate::source::SourceSpan;
 use scribium_quarkdown::is_valid_normal_call_name;
 use std::collections::BTreeMap;
@@ -249,6 +249,22 @@ impl Evaluator {
                     }]
                 }
             }
+            IrNode::ChainedFunctionCall {
+                head,
+                chain,
+                body,
+                span,
+            } => vec![IrNode::ChainedFunctionCall {
+                head: self.evaluate_call_segment(head, diagnostics, context),
+                chain: chain
+                    .iter()
+                    .map(|segment| self.evaluate_call_segment(segment, diagnostics, context))
+                    .collect(),
+                body: body
+                    .as_ref()
+                    .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context)),
+                span: *span,
+            }],
             IrNode::Heading {
                 level,
                 content,
@@ -436,6 +452,22 @@ impl Evaluator {
                     }]
                 }
             }
+            IrInline::ChainedDirectiveCall {
+                head,
+                chain,
+                body,
+                span,
+            } => vec![IrInline::ChainedDirectiveCall {
+                head: self.evaluate_call_segment(head, diagnostics, context),
+                chain: chain
+                    .iter()
+                    .map(|segment| self.evaluate_call_segment(segment, diagnostics, context))
+                    .collect(),
+                body: body
+                    .as_ref()
+                    .map(|inlines| self.evaluate_inlines(inlines, diagnostics, context)),
+                span: *span,
+            }],
             IrInline::Code { content, span } => {
                 // Code spans are opaque: the content is never resolved,
                 // recursed into, or evaluated. It passes straight through.
@@ -445,6 +477,22 @@ impl Evaluator {
                 }]
             }
             other => vec![other.clone()],
+        }
+    }
+
+    /// Evaluates value arguments (recursing into content values).
+    fn evaluate_call_segment(
+        &self,
+        segment: &IrCallSegment,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> IrCallSegment {
+        IrCallSegment {
+            name: segment.name.clone(),
+            name_span: segment.name_span,
+            positional_args: self.evaluate_values(&segment.positional_args, diagnostics, context),
+            named_args: self.evaluate_named(&segment.named_args, diagnostics, context),
+            span: segment.span,
         }
     }
 
@@ -1001,6 +1049,39 @@ mod tests {
 
     fn evaluate(nodes: Vec<IrNode>) -> Vec<IrNode> {
         Evaluator::new().evaluate(&doc(nodes)).0.nodes
+    }
+
+    #[test]
+    fn parser_preserved_chain_recurses_without_applying_value_flow() {
+        let whole = span(0, 13);
+        let nodes = evaluate(vec![IrNode::ChainedFunctionCall {
+            head: IrCallSegment {
+                name: "a".into(),
+                name_span: span(0, 2),
+                positional_args: vec![IrValue::Identifier("x".into())],
+                named_args: Vec::new(),
+                span: whole,
+            },
+            chain: vec![IrCallSegment {
+                name: "b".into(),
+                name_span: span(8, 9),
+                positional_args: vec![IrValue::Identifier("y".into())],
+                named_args: Vec::new(),
+                span: span(8, 13),
+            }],
+            body: None,
+            span: whole,
+        }]);
+        let IrNode::ChainedFunctionCall { head, chain, .. } = &nodes[0] else {
+            panic!("expected parser-preserved chain")
+        };
+        assert_eq!(head.name, "a");
+        assert_eq!(chain[0].name, "b");
+        assert_eq!(head.positional_args, vec![IrValue::Identifier("x".into())]);
+        assert_eq!(
+            chain[0].positional_args,
+            vec![IrValue::Identifier("y".into())]
+        );
     }
 
     #[test]

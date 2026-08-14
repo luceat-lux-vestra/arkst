@@ -150,6 +150,20 @@ Call syntax has the following properties:
   named argument must also be named.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
   arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
+- Braced arguments may span physical lines, including nested braces. Their
+  indentation is preserved as source content and is not a fixed-width syntax
+  rule.
+- A trailing backslash immediately before a line ending continues the
+  argument list. The continuation marker and line ending are syntax, not
+  argument content; leading spaces or tabs on the continuation line are
+  ignored for argument recognition.
+- `::` preserves a parser-level call chain (`.a {x}::b {y}`) with each
+  segment and argument source span. Value-flow evaluation of the chain is
+  deferred to the evaluator compatibility work; this syntax row is not an
+  output-equivalence claim.
+- A complete call may be wrapped in braces to lift word-adjacency boundaries,
+  for example `H{.text {2}}O`. The wrapper is consumed by the Quarkdown
+  frontend and its source span remains available.
 - Inline calls appear inside a paragraph: `.strong {bold}` in surrounding
   text. A call that has trailing text after it on the same line is treated
   as an inline call, not a block-level call.
@@ -167,6 +181,10 @@ block-level call. Its body is the indented content that follows:
 
 - The body starts at the next non-blank line indented by at least 2 spaces
   or one tab.
+- A multiline braced argument or a continued argument list is completed
+  before body parsing begins. For example, the lines inside
+  `.call { ... }` are argument content, while `.call` followed by an
+  indented line is a body argument.
 - All body lines share the same indentation; deeper indentation is allowed
   inside for nested calls.
 - The body ends at the first line with less indentation.

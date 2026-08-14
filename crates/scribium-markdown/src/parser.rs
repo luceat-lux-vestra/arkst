@@ -16,7 +16,8 @@ use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue
 use scribium_source::ByteSpan;
 
 use crate::ast::{
-    Block, Document, FrontMatter, Inline, ListItem, TableCell, TableRow, TaskStatus, Value,
+    Block, CallSegment, Document, FrontMatter, Inline, ListItem, TableCell, TableRow, TaskStatus,
+    Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,9 @@ type BodyLineRanges = Vec<(ByteSpan, Vec<ByteSpan>)>;
 #[derive(Debug)]
 struct QuarkdownBlock {
     call: Segment,
+    call_start: usize,
+    header_pending: bool,
+    continuation_pending: bool,
     /// The first qualifying body's visual indentation in the current reader
     /// context. This is never an absolute source-column measurement.
     body_indent: Option<usize>,
@@ -95,7 +99,12 @@ impl BlockParser for QuarkdownBlockParser {
         let source = reader.source();
         let line_end = end - start;
         let line_source = source.get(start..end)?;
-        let call_segment = match scribium_quarkdown::parse_call(line_source) {
+        let needs_more_input = scribium_quarkdown::needs_more_input(line_source);
+        let continuation_pending = scribium_quarkdown::has_trailing_continuation(line_source);
+        let (call_segment, header_pending) = match scribium_quarkdown::parse_call(line_source) {
+            Ok(Some((_call, _call_end))) if needs_more_input => {
+                (Segment::new(start, segment.stop()), true)
+            }
             Ok(Some((call, call_end))) => {
                 if line_source.as_bytes()[call_end..]
                     .iter()
@@ -103,13 +112,20 @@ impl BlockParser for QuarkdownBlockParser {
                 {
                     return None;
                 }
-                Segment::new(call.span.start + start, call.span.end + start)
+                (
+                    Segment::new(call.span.start + start, call.span.end + start),
+                    false,
+                )
             }
             Ok(None) => return None,
-            Err(_) => Segment::new(start, start + line_end),
+            Err(_) if needs_more_input => (Segment::new(start, segment.stop()), true),
+            Err(_) => (Segment::new(start, start + line_end), false),
         };
         let node_ref = arena.new_node(QuarkdownBlock {
             call: call_segment,
+            call_start: start,
+            header_pending,
+            continuation_pending: header_pending && continuation_pending,
             body_indent: None,
             body_lines: Vec::new(),
         });
@@ -125,6 +141,44 @@ impl BlockParser for QuarkdownBlockParser {
         _ctx: &mut Context,
     ) -> Option<State> {
         let (line, segment) = reader.peek_line_bytes()?;
+
+        if as_extension_data!(arena, node_ref, QuarkdownBlock).header_pending {
+            let source = reader.source();
+            let call_start = as_extension_data!(arena, node_ref, QuarkdownBlock).call_start;
+            let candidate_end = segment.stop().min(source.len());
+            let candidate = source.get(call_start..candidate_end)?;
+            let continuation_pending =
+                as_extension_data!(arena, node_ref, QuarkdownBlock).continuation_pending;
+            if continuation_pending && !starts_argument_line(&line) {
+                return None;
+            }
+            match scribium_quarkdown::parse_call(candidate) {
+                Ok(Some((call, _))) => {
+                    let call_end = call.span.end.checked_add(call_start)?;
+                    let trailing = source.get(call_end..candidate_end)?;
+                    let has_continuation = scribium_quarkdown::has_trailing_continuation(candidate);
+                    if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
+                        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+                        block.call = Segment::new(call_start, call_end);
+                        block.header_pending = false;
+                        block.continuation_pending = false;
+                    } else if has_continuation {
+                        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
+                            .continuation_pending = true;
+                    } else {
+                        return None;
+                    }
+                }
+                Err(error)
+                    if error.code == "E2003"
+                        || (continuation_pending
+                            && scribium_quarkdown::has_trailing_continuation(candidate)) => {}
+                _ => return None,
+            }
+            reader.advance_to_eol();
+            return Some(State::HAS_CHILDREN);
+        }
+
         if is_blank(&line) {
             reader.advance_to_eol();
             return Some(State::HAS_CHILDREN);
@@ -166,6 +220,36 @@ impl BlockParser for QuarkdownBlockParser {
 
     fn can_interrupt_paragraph(&self) -> bool {
         true
+    }
+}
+
+fn starts_argument_line(line: &[u8]) -> bool {
+    let mut cursor = 0;
+    while line
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    match line.get(cursor) {
+        Some(b'{') => true,
+        Some(byte) if byte.is_ascii_alphabetic() || *byte == b'_' => {
+            cursor += 1;
+            while line
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            {
+                cursor += 1;
+            }
+            while line
+                .get(cursor)
+                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                cursor += 1;
+            }
+            line.get(cursor) == Some(&b':')
+        }
+        _ => false,
     }
 }
 
@@ -215,7 +299,7 @@ impl InlineParser for QuarkdownInlineParser {
         let source = reader.source();
         let parsed = scribium_quarkdown::parse_inline_call(source, segment.start());
         let (call_segment, consumed) = match parsed {
-            Ok(Some((call, end))) if end <= segment.stop() => (
+            Ok(Some((call, end))) => (
                 Segment::new(call.span.start, call.span.end),
                 end - segment.start(),
             ),
@@ -227,6 +311,35 @@ impl InlineParser for QuarkdownInlineParser {
         };
         reader.advance(consumed);
         Some(arena.new_node(QuarkdownInline { call: call_segment }))
+    }
+}
+
+#[derive(Debug)]
+struct QuarkdownTightInlineParser;
+
+impl InlineParser for QuarkdownTightInlineParser {
+    fn trigger(&self) -> &[u8] {
+        b"{"
+    }
+
+    fn parse(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut BlockReader,
+        _ctx: &mut Context,
+    ) -> Option<NodeRef> {
+        let (_, segment) = reader.peek_line_bytes()?;
+        let source = reader.source();
+        let (call, end) = match scribium_quarkdown::parse_tight_call(source, segment.start()) {
+            Ok(Some((call, end))) => (call, end),
+            Ok(None) | Err(_) => return None,
+        };
+        let consumed = end.checked_sub(segment.start())?;
+        reader.advance(consumed);
+        Some(arena.new_node(QuarkdownInline {
+            call: Segment::new(call.span.start, call.span.end),
+        }))
     }
 }
 
@@ -244,6 +357,11 @@ fn parser(mode: Mode) -> Parser {
             );
             parser.add_inline_parser(
                 || -> Box<dyn InlineParser> { Box::new(QuarkdownInlineParser) },
+                NoParserOptions,
+                PRIORITY_CODE_SPAN + 1,
+            );
+            parser.add_inline_parser(
+                || -> Box<dyn InlineParser> { Box::new(QuarkdownTightInlineParser) },
                 NoParserOptions,
                 PRIORITY_CODE_SPAN + 1,
             );
@@ -673,12 +791,14 @@ fn directive_block(
     } = state;
     let span = node_span(arena, node, source)
         .and_then(|value| offset_span(value, base))
-        .or_else(|| offset_span(call.span, call_base))
+        .or_else(|| offset_span(call.span, base.checked_add(call_base)?))
         .unwrap_or(ByteSpan::new(0, 0));
+    let span_base = base.checked_add(call_base).unwrap_or(base);
     let body_nodes =
         convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
     Block::DirectiveCall {
         name: call.name,
+        name_span: offset_span(call.name_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
         positional_args: call
             .positional_args
             .iter()
@@ -693,6 +813,11 @@ fn directive_block(
                     convert_arg(&arg.value, source, base, call_base, diagnostics),
                 )
             })
+            .collect(),
+        chain: call
+            .chain
+            .iter()
+            .map(|segment| convert_call_segment(segment, source, base, call_base, diagnostics))
             .collect(),
         body: (!body_nodes.is_empty()).then_some(body_nodes),
         span,
@@ -807,7 +932,11 @@ fn convert_inline(
         KindData::Extension(_) if matches_extension_kind!(arena, node, QuarkdownInline) => {
             let extension = as_extension_data!(arena, node, QuarkdownInline);
             let call_span = checked_segment(extension.call, source)?;
-            let parsed = scribium_quarkdown::parse_inline_call(source, call_span.start);
+            let parsed = if source.as_bytes().get(call_span.start) == Some(&b'{') {
+                scribium_quarkdown::parse_tight_call(source, call_span.start)
+            } else {
+                scribium_quarkdown::parse_inline_call(source, call_span.start)
+            };
             let call = match parsed {
                 Ok(Some((call, _))) => call,
                 Ok(None) => {
@@ -827,6 +956,7 @@ fn convert_inline(
             };
             Some(Inline::DirectiveCall {
                 name: call.name,
+                name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
                 positional_args: call
                     .positional_args
                     .iter()
@@ -841,6 +971,11 @@ fn convert_inline(
                             convert_arg(&arg.value, source, base, 0, diagnostics),
                         )
                     })
+                    .collect(),
+                chain: call
+                    .chain
+                    .iter()
+                    .map(|segment| convert_call_segment(segment, source, base, 0, diagnostics))
                     .collect(),
                 body: None,
                 span,
@@ -978,6 +1113,7 @@ fn convert_content_call(
     let span = offset_span(call.span, base).unwrap_or(ByteSpan::new(0, 0));
     Inline::DirectiveCall {
         name: call.name,
+        name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
         positional_args: call
             .positional_args
             .iter()
@@ -993,8 +1129,47 @@ fn convert_content_call(
                 )
             })
             .collect(),
+        chain: call
+            .chain
+            .iter()
+            .map(|segment| convert_call_segment(segment, source, base, 0, diagnostics))
+            .collect(),
         body: None,
         span,
+    }
+}
+
+fn convert_call_segment(
+    segment: &scribium_quarkdown::CallSegment,
+    source: &str,
+    base: usize,
+    call_base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> CallSegment {
+    CallSegment {
+        name: segment.name.clone(),
+        name_span: offset_span(
+            segment.name_span,
+            base.checked_add(call_base).unwrap_or(base),
+        )
+        .unwrap_or(ByteSpan::new(0, 0)),
+        positional_args: segment
+            .positional_args
+            .iter()
+            .map(|arg| convert_arg(arg, source, base, call_base, diagnostics))
+            .collect(),
+        named_args: segment
+            .named_args
+            .iter()
+            .map(|arg| {
+                (
+                    arg.name.clone(),
+                    convert_arg(&arg.value, source, base, call_base, diagnostics),
+                )
+            })
+            .collect(),
+        span: offset_span(segment.span, base.checked_add(call_base).unwrap_or(base))
+            .unwrap_or(ByteSpan::new(0, 0)),
     }
 }
 
@@ -1597,6 +1772,184 @@ mod tests {
             document.nodes.first(),
             Some(Block::Paragraph { .. })
         ));
+    }
+
+    #[test]
+    fn qd_multiline_arguments_and_continuations_keep_header_body_boundary() {
+        let source = ".divide {\n  .cos {.pi}\n} by:{\n  .sum {2} {1}\n}\n  body\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            name,
+            positional_args,
+            named_args,
+            body,
+            span,
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!(
+                "expected multiline Quarkdown call, got {:?}",
+                output.document.nodes
+            )
+        };
+        assert_eq!(name, "divide");
+        assert_eq!(positional_args.len(), 1);
+        assert_eq!(named_args.len(), 1);
+        assert_eq!(&source[span.start..span.end], source.trim_end());
+        let body = body.as_ref().expect("body after multiline header");
+        assert_eq!(paragraph_text(&body[0]), "body");
+
+        let continuation = concat!(
+            ".container alignment:{center} \\",
+            "\n  background:{red} \\",
+            "\n  padding:{1px}\n"
+        );
+        let output = parse_with_diagnostics(continuation);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            named_args, span, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected continued call")
+        };
+        assert_eq!(named_args.len(), 3);
+        assert_eq!(&continuation[span.start..span.end], continuation.trim_end());
+    }
+
+    #[test]
+    fn qd_inline_continuation_and_tight_calls_preserve_text_and_spans() {
+        let source = concat!(
+            "Before .call {a} \\",
+            "\n  second:{b} after H{.text {2}}O\n"
+        );
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!("expected paragraph")
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::DirectiveCall { span, .. }
+                if &source[span.start..span.end] == concat!(".call {a} \\", "\n  second:{b}")
+        )));
+        let tight = content
+            .iter()
+            .find_map(|inline| match inline {
+                Inline::DirectiveCall { span, .. }
+                    if &source[span.start..span.end] == "{.text {2}}" =>
+                {
+                    Some(span)
+                }
+                _ => None,
+            })
+            .expect("tight call");
+        assert!(source.is_char_boundary(tight.start));
+        assert!(source.is_char_boundary(tight.end));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, .. } if content == "Before "
+        )));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, .. } if content == "O"
+        )));
+
+        let chain_source = "prefix .a {x}::b {y} suffix\n";
+        let chain = parse_with_diagnostics(chain_source);
+        assert!(chain.diagnostics.is_empty(), "{chain:?}");
+        let Block::Paragraph { content, .. } = &chain.document.nodes[0] else {
+            panic!("expected chain paragraph")
+        };
+        let Inline::DirectiveCall {
+            name,
+            name_span,
+            chain: segments,
+            span,
+            ..
+        } = content
+            .iter()
+            .find(|inline| matches!(inline, Inline::DirectiveCall { .. }))
+            .expect("chain call")
+        else {
+            unreachable!()
+        };
+        assert_eq!(name, "a");
+        assert_eq!(&chain_source[name_span.start..name_span.end], ".a");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].name, "b");
+        assert_eq!(
+            &chain_source[segments[0].name_span.start..segments[0].name_span.end],
+            "b"
+        );
+        assert_eq!(&chain_source[span.start..span.end], ".a {x}::b {y}");
+
+        let with_front_matter = "---\ntitle: spans\n---\n.a::b\n";
+        let front_matter_output = parse_with_diagnostics(with_front_matter);
+        assert!(front_matter_output.diagnostics.is_empty());
+        let Block::DirectiveCall {
+            name_span,
+            chain: segments,
+            span,
+            ..
+        } = &front_matter_output.document.nodes[0]
+        else {
+            panic!("expected front-matter call")
+        };
+        assert_eq!(&with_front_matter[span.start..span.end], ".a::b");
+        assert_eq!(&with_front_matter[name_span.start..name_span.end], ".a");
+        assert_eq!(
+            &with_front_matter[segments[0].name_span.start..segments[0].name_span.end],
+            "b"
+        );
+
+        let markdown = parse_md("H{.text {2}}O\n");
+        assert!(!markdown.nodes.iter().any(|block| match block {
+            Block::Paragraph { content, .. } => content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+            _ => false,
+        }));
+        let markdown = parse_md(".a::b\n{.text}\n");
+        assert!(!markdown.nodes.iter().any(|block| match block {
+            Block::Paragraph { content, .. } => content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+            _ => matches!(block, Block::DirectiveCall { .. }),
+        }));
+
+        let crlf = ".call {\r\n  한글\r\n}\r\n";
+        let crlf_output = parse_with_diagnostics(crlf);
+        assert!(crlf_output.diagnostics.is_empty(), "{crlf_output:?}");
+        let Block::DirectiveCall {
+            positional_args,
+            span,
+            name_span,
+            ..
+        } = &crlf_output.document.nodes[0]
+        else {
+            panic!("expected CRLF multiline call")
+        };
+        assert_eq!(&crlf[span.start..span.end], crlf.trim_end());
+        assert_eq!(&crlf[name_span.start..name_span.end], ".call");
+        assert!(crlf.is_char_boundary(span.start));
+        assert!(crlf.is_char_boundary(span.end));
+        let Value::Content(content) = &positional_args[0] else {
+            panic!("expected CRLF content argument")
+        };
+        assert_eq!(
+            content[0],
+            Inline::Text {
+                content: "\r\n  한글\r\n".to_string(),
+                span: ByteSpan::new(7, 19),
+            }
+        );
+
+        let malformed = concat!(".call {a} \\", "\n\nfollowing\n");
+        let malformed_output = parse_with_diagnostics(malformed);
+        assert!(malformed_output.document.nodes.iter().any(|block| {
+            matches!(block, Block::Paragraph { .. } if paragraph_text(block) == "following")
+        }));
     }
 
     #[test]
