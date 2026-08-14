@@ -53,6 +53,7 @@ pub enum Block {
     DirectiveCall {
         name: String,
         name_span: ByteSpan,
+        head_span: ByteSpan,
         positional_args: Vec<Value>,
         named_args: Vec<(String, Value)>,
         chain: Vec<CallSegment>,
@@ -124,6 +125,7 @@ pub enum Inline {
     DirectiveCall {
         name: String,
         name_span: ByteSpan,
+        head_span: ByteSpan,
         positional_args: Vec<Value>,
         named_args: Vec<(String, Value)>,
         chain: Vec<CallSegment>,

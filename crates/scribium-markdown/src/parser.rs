@@ -799,6 +799,7 @@ fn directive_block(
     Block::DirectiveCall {
         name: call.name,
         name_span: offset_span(call.name_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
+        head_span: offset_span(call.head_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
         positional_args: call
             .positional_args
             .iter()
@@ -957,6 +958,7 @@ fn convert_inline(
             Some(Inline::DirectiveCall {
                 name: call.name,
                 name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
+                head_span: offset_span(call.head_span, base).unwrap_or(ByteSpan::new(0, 0)),
                 positional_args: call
                     .positional_args
                     .iter()
@@ -1114,6 +1116,7 @@ fn convert_content_call(
     Inline::DirectiveCall {
         name: call.name,
         name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
+        head_span: offset_span(call.head_span, base).unwrap_or(ByteSpan::new(0, 0)),
         positional_args: call
             .positional_args
             .iter()
@@ -1864,6 +1867,7 @@ mod tests {
         let Inline::DirectiveCall {
             name,
             name_span,
+            head_span,
             chain: segments,
             span,
             ..
@@ -1876,8 +1880,13 @@ mod tests {
         };
         assert_eq!(name, "a");
         assert_eq!(&chain_source[name_span.start..name_span.end], ".a");
+        assert_eq!(&chain_source[head_span.start..head_span.end], ".a {x}");
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].name, "b");
+        assert_eq!(
+            &chain_source[segments[0].span.start..segments[0].span.end],
+            "b {y}"
+        );
         assert_eq!(
             &chain_source[segments[0].name_span.start..segments[0].name_span.end],
             "b"

@@ -157,10 +157,11 @@ Call syntax has the following properties:
   argument list. The continuation marker and line ending are syntax, not
   argument content; leading spaces or tabs on the continuation line are
   ignored for argument recognition.
-- `::` preserves a parser-level call chain (`.a {x}::b {y}`) with each
-  segment and argument source span. Value-flow evaluation of the chain is
-  deferred to the evaluator compatibility work; this syntax row is not an
-  output-equivalence claim.
+- `::` parses and structurally preserves a call chain (`.a {x}::b {y}`),
+  including each segment and argument source span. Chained value-flow
+  evaluation is deferred to #61; normal compilation reports the explicit
+  `E8001` unsupported-semantics error and produces no Typst/PDF output.
+  Parser preservation is not semantic or output-equivalent support.
 - A complete call may be wrapped in braces to lift word-adjacency boundaries,
   for example `H{.text {2}}O`. The wrapper is consumed by the Quarkdown
   frontend and its source span remains available.

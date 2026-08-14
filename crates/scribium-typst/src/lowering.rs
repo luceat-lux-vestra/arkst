@@ -265,6 +265,10 @@ impl LoweringContext {
                 body,
                 span,
             } => {
+                // This is only a structural/debug rendering of an IR that
+                // already carries the E8001 unsupported-semantics diagnostic.
+                // The normal compile and CLI paths reject that diagnostic
+                // before calling this lowering pass.
                 let before = self.output.len();
                 self.push_str("// Scribium parser-preserved call chain: ");
                 self.lower_chain_label(head, chain);
@@ -395,6 +399,10 @@ impl LoweringContext {
                 body,
                 span,
             } => {
+                // This is only a structural/debug rendering of an IR that
+                // already carries the E8001 unsupported-semantics diagnostic.
+                // The normal compile and CLI paths reject that diagnostic
+                // before calling this lowering pass.
                 let before = self.output.len();
                 self.push_str("/* Scribium parser-preserved call chain: ");
                 self.lower_chain_label(head, chain);
@@ -1450,7 +1458,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_parser_preserved_chain_as_valid_source_backed_comment() {
+    fn debug_render_parser_preserved_chain_after_semantic_gate() {
         let source_id = scribium_core::SourceId(7);
         let whole = SourceSpan::new(source_id, 0, 13);
         let doc = IrDocument {
@@ -1460,7 +1468,7 @@ mod tests {
                     name_span: SourceSpan::new(source_id, 0, 2),
                     positional_args: vec![],
                     named_args: vec![],
-                    span: whole,
+                    span: SourceSpan::new(source_id, 0, 6),
                 },
                 chain: vec![IrCallSegment {
                     name: "b".into(),

@@ -150,6 +150,7 @@ fn block_to_ir(
         Block::DirectiveCall {
             name,
             name_span,
+            head_span,
             positional_args,
             named_args,
             chain,
@@ -179,13 +180,14 @@ fn block_to_ir(
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
+                push_unsupported_chain(diagnostics, span, source_id);
                 Some(IrNode::ChainedFunctionCall {
                     head: IrCallSegment {
                         name: name.clone(),
                         name_span: byte_to_source_span(name_span, source_id),
                         positional_args: ir_positional,
                         named_args: ir_named,
-                        span: byte_to_source_span(span, source_id),
+                        span: byte_to_source_span(head_span, source_id),
                     },
                     chain: chain
                         .iter()
@@ -336,6 +338,7 @@ fn inline_to_ir(
         Inline::DirectiveCall {
             name,
             name_span,
+            head_span,
             positional_args,
             named_args,
             chain,
@@ -362,13 +365,14 @@ fn inline_to_ir(
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
+                push_unsupported_chain(diagnostics, span, source_id);
                 Some(IrInline::ChainedDirectiveCall {
                     head: IrCallSegment {
                         name: name.clone(),
                         name_span: byte_to_source_span(name_span, source_id),
                         positional_args: ir_positional,
                         named_args: ir_named,
-                        span: byte_to_source_span(span, source_id),
+                        span: byte_to_source_span(head_span, source_id),
                     },
                     chain: chain
                         .iter()
@@ -428,6 +432,7 @@ fn value_to_ir(
             if let [Inline::DirectiveCall {
                 name,
                 name_span,
+                head_span,
                 positional_args,
                 named_args,
                 chain,
@@ -458,13 +463,14 @@ fn value_to_ir(
                         span: byte_to_source_span(span, source_id),
                     }])
                 } else {
+                    push_unsupported_chain(diagnostics, span, source_id);
                     crate::ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
                         head: IrCallSegment {
                             name: name.clone(),
                             name_span: byte_to_source_span(name_span, source_id),
                             positional_args: ir_positional,
                             named_args: ir_named,
-                            span: byte_to_source_span(span, source_id),
+                            span: byte_to_source_span(head_span, source_id),
                         },
                         chain: chain
                             .iter()
@@ -504,6 +510,21 @@ fn push_unsupported(
         hints: vec![
             "The source semantics were not coerced into a different Markdown node.".to_string(),
         ],
+    });
+}
+
+fn push_unsupported_chain(
+    diagnostics: &mut Vec<Diagnostic>,
+    span: &crate::source::ByteSpan,
+    source_id: SourceId,
+) {
+    diagnostics.push(Diagnostic {
+        code: "E8001".to_string(),
+        severity: Severity::Error,
+        message: "Quarkdown call chaining was parsed and preserved but chained value-flow evaluation is not implemented yet.".to_string(),
+        primary: Some(byte_to_source_span(span, source_id)),
+        secondary: Vec::new(),
+        hints: vec!["Chained value-flow semantics are deferred to #61.".to_string()],
     });
 }
 
@@ -612,7 +633,13 @@ mod tests {
         let document = scribium_markdown::parse_qd(source);
         let (ir, diagnostics) =
             ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
-        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E8001");
+        assert!(matches!(diagnostics[0].severity, Severity::Error));
+        assert_eq!(
+            diagnostics[0].primary,
+            Some(SourceSpan::new(source_id(), 0, 13))
+        );
         let IrNode::ChainedFunctionCall {
             head, chain, span, ..
         } = &ir.nodes[0]
@@ -624,8 +651,12 @@ mod tests {
         assert_eq!(chain[0].name, "b");
         assert_eq!(*span, SourceSpan::new(source_id(), 0, source.len() - 1));
         assert_eq!(head.name_span, SourceSpan::new(source_id(), 0, 2));
+        assert_eq!(head.span, SourceSpan::new(source_id(), 0, 6));
         assert_eq!(chain[0].name_span, SourceSpan::new(source_id(), 8, 9));
         assert_eq!(chain[0].span, SourceSpan::new(source_id(), 8, 13));
+        assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
+        assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
+        assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
     }
 
     #[test]

@@ -959,6 +959,23 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_chain_fails_before_typst_or_pdf_output() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("chain.qd");
+        fs::write(&input, ".a::b\n").unwrap();
+
+        assert!(check(&input.to_string_lossy()).is_err());
+
+        let typst_result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(typst_result.is_err());
+        assert!(!dir.path().join("chain.typ").exists());
+
+        let pdf_result = build(&input.to_string_lossy(), &["pdf".to_string()], None);
+        assert!(pdf_result.is_err());
+        assert!(!dir.path().join("chain.pdf").exists());
+    }
+
+    #[test]
     fn logical_root_for_bare_filename() {
         assert_eq!(
             logical_project_root(Path::new("document.qd")),

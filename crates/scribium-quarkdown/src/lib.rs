@@ -9,6 +9,8 @@ use scribium_source::ByteSpan;
 pub struct QuarkdownCall {
     pub name: String,
     pub name_span: ByteSpan,
+    /// The exact span of the first call segment, excluding any `::` suffix.
+    pub head_span: ByteSpan,
     pub positional_args: Vec<Arg>,
     pub named_args: Vec<NamedArg>,
     /// Subsequent `::name` segments, in source order.
@@ -135,6 +137,7 @@ pub fn parse_directive_at(
     }
 
     let first = first.0;
+    let head_span = first.span;
     if source.as_bytes().get(end).is_some_and(|b| is_word(*b)) {
         return Ok(None);
     }
@@ -143,6 +146,7 @@ pub fn parse_directive_at(
         QuarkdownCall {
             name: first.name,
             name_span: first.name_span,
+            head_span,
             positional_args: first.positional_args,
             named_args: first.named_args,
             chain,
@@ -837,7 +841,13 @@ mod tests {
         }
         let (call, _) = parse_call(".a {x}::b {y}").unwrap().unwrap();
         assert_eq!(call.name, "a");
+        assert_eq!(call.head_span, ByteSpan::new(0, 6));
+        assert_eq!(
+            &".a {x}::b {y}"[call.head_span.start..call.head_span.end],
+            ".a {x}"
+        );
         assert_eq!(call.chain[0].name, "b");
+        assert_eq!(call.chain[0].span, ByteSpan::new(8, 13));
         assert_eq!(call.positional_args.len(), 1);
         assert_eq!(call.chain[0].positional_args.len(), 1);
     }
