@@ -164,6 +164,79 @@ fn integration_multi_block_list_item_compiles() {
 }
 
 #[test]
+fn integration_markdown_structures_compile_to_valid_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = "> quoted **strong**\n>\n> - [ ] active\n>   - [x] nested\n> - [x] completed\n\nBefore ~removed **content**~ after ~~double~~.\n\n| Left | Center | Right | Default |\n| :--- | :---: | ---: | --- |\n| α | **β** | ~γ~ | tail |\n";
+    for entry in ["main.md", "main.qd"] {
+        let project = VirtualProjectBuilder::new()
+            .entry(entry)
+            .expect("valid entry path")
+            .add_source(entry, source)
+            .expect("valid source path")
+            .build()
+            .expect("valid project");
+        let result = compile(&project, &CompileOptions::default());
+        assert!(
+            result.diagnostics.is_empty(),
+            "{entry} diagnostics: {:?}",
+            result.diagnostics
+        );
+        let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+        assert!(typst_code.contains("#quote(block: true)"));
+        assert!(typst_code.contains("#strike[removed *content*]"));
+        assert!(typst_code.contains("#strike[double]"));
+        assert!(typst_code.contains("☐ active"));
+        assert!(typst_code.contains("☑ nested"));
+        assert!(typst_code.contains("☑ completed"));
+        assert!(typst_code.contains("#table("));
+
+        with_typst(entry, |backend| {
+            let output = backend
+                .compile(&TypstInput {
+                    source: typst_code,
+                    entry_path: entry.to_string(),
+                })
+                .expect("structured Markdown Typst must compile");
+            let pdf = output.pdf.expect("PDF output must be present");
+            assert!(pdf.starts_with(b"%PDF-"));
+        });
+    }
+
+    let body_source =
+        ".if {true}\n  > body **strong**\n  >\n  > - [ ] active\n  > - [x] completed\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("body.qd")
+        .expect("valid entry path")
+        .add_source("body.qd", body_source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "body diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#quote(block: true)"));
+    assert!(typst_code.contains("☐ active"));
+    assert!(typst_code.contains("☑ completed"));
+    with_typst("quarkdown-body-structures", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "body.qd".to_string(),
+            })
+            .expect("Quarkdown body Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_variable_evaluation_before_lowering() {
     // This test validates that variable evaluation happens before Typst lowering.
     // It uses the core compile path directly since the backend doesn't expose

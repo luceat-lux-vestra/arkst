@@ -43,6 +43,11 @@ pub enum IrNode {
         content: Vec<IrInline>,
         span: SourceSpan,
     },
+    /// A block quotation containing recursively structured block content.
+    Blockquote {
+        content: Vec<IrNode>,
+        span: SourceSpan,
+    },
     /// Unordered list with one or more items.
     UnorderedList {
         items: Vec<IrListItem>,
@@ -53,6 +58,12 @@ pub enum IrNode {
         items: Vec<IrListItem>,
         /// The starting ordinal of the list (typically 1).
         start: usize,
+        span: SourceSpan,
+    },
+    /// A Markdown table with an explicit header and body rows.
+    Table {
+        header: IrTableRow,
+        rows: Vec<IrTableRow>,
         span: SourceSpan,
     },
     /// A fenced code block with an optional language tag.
@@ -97,6 +108,11 @@ pub enum IrInline {
         content: Vec<IrInline>,
         span: SourceSpan,
     },
+    /// A Markdown strikethrough inline fragment.
+    Strikethrough {
+        content: Vec<IrInline>,
+        span: SourceSpan,
+    },
     /// An inline function call (`.name {arg}` inside a text flow).
     DirectiveCall {
         name: String,
@@ -126,7 +142,39 @@ pub enum IrInline {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrListItem {
     pub nodes: Vec<IrNode>,
+    pub task: Option<IrTaskStatus>,
     pub span: SourceSpan,
+}
+
+/// Semantic state for a GFM task-list item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTaskStatus {
+    Active,
+    Completed,
+}
+
+/// A table row with source provenance for the complete row.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrTableRow {
+    pub cells: Vec<IrTableCell>,
+    pub span: SourceSpan,
+}
+
+/// A table cell with evaluated inline content and source provenance.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrTableCell {
+    pub content: Vec<IrInline>,
+    pub alignment: IrTableAlignment,
+    pub span: SourceSpan,
+}
+
+/// Backend-neutral table alignment semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrTableAlignment {
+    Left,
+    Center,
+    Right,
+    None,
 }
 
 /// A resolved value used in function call arguments.

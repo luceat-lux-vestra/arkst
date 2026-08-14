@@ -262,16 +262,66 @@ impl Evaluator {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
+            IrNode::Blockquote { content, span } => vec![IrNode::Blockquote {
+                content: self.evaluate_nodes(content, diagnostics, context),
+                span: *span,
+            }],
             IrNode::UnorderedList { items, span } => {
                 let items = items
                     .iter()
                     .map(|item| crate::ir::IrListItem {
                         nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
+                        task: item.task,
                         span: item.span,
                     })
                     .collect();
                 vec![IrNode::UnorderedList { items, span: *span }]
             }
+            IrNode::OrderedList { items, start, span } => {
+                let items = items
+                    .iter()
+                    .map(|item| crate::ir::IrListItem {
+                        nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
+                        task: item.task,
+                        span: item.span,
+                    })
+                    .collect();
+                vec![IrNode::OrderedList {
+                    items,
+                    start: *start,
+                    span: *span,
+                }]
+            }
+            IrNode::Table { header, rows, span } => vec![IrNode::Table {
+                header: crate::ir::IrTableRow {
+                    cells: header
+                        .cells
+                        .iter()
+                        .map(|cell| crate::ir::IrTableCell {
+                            content: self.evaluate_inlines(&cell.content, diagnostics, context),
+                            alignment: cell.alignment,
+                            span: cell.span,
+                        })
+                        .collect(),
+                    span: header.span,
+                },
+                rows: rows
+                    .iter()
+                    .map(|row| crate::ir::IrTableRow {
+                        cells: row
+                            .cells
+                            .iter()
+                            .map(|cell| crate::ir::IrTableCell {
+                                content: self.evaluate_inlines(&cell.content, diagnostics, context),
+                                alignment: cell.alignment,
+                                span: cell.span,
+                            })
+                            .collect(),
+                        span: row.span,
+                    })
+                    .collect(),
+                span: *span,
+            }],
             other => vec![other.clone()],
         }
     }
@@ -303,6 +353,10 @@ impl Evaluator {
                 span: *span,
             }],
             IrInline::Strong { content, span } => vec![IrInline::Strong {
+                content: self.evaluate_inlines(content, diagnostics, context),
+                span: *span,
+            }],
+            IrInline::Strikethrough { content, span } => vec![IrInline::Strikethrough {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 span: *span,
             }],
@@ -894,6 +948,7 @@ impl Evaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::IrListItem;
     use crate::source::SourceId;
 
     fn span(start: usize, end: usize) -> SourceSpan {
@@ -1187,6 +1242,100 @@ mod tests {
                 text_inline(" after")
             ]
         );
+    }
+
+    #[test]
+    fn structures_recurse_through_evaluator_without_losing_semantics() {
+        let document = doc(vec![
+            IrNode::Blockquote {
+                content: vec![if_call(
+                    "if",
+                    IrValue::Boolean(true),
+                    vec![text_paragraph("quoted")],
+                )],
+                span: span(0, 10),
+            },
+            IrNode::UnorderedList {
+                items: vec![IrListItem {
+                    nodes: vec![if_call(
+                        "if",
+                        IrValue::Boolean(true),
+                        vec![text_paragraph("task content")],
+                    )],
+                    task: Some(crate::ir::IrTaskStatus::Completed),
+                    span: span(10, 30),
+                }],
+                span: span(10, 30),
+            },
+            IrNode::Paragraph {
+                content: vec![IrInline::Strikethrough {
+                    content: vec![inline_if_call(
+                        "if",
+                        IrValue::Boolean(true),
+                        vec![text_inline("struck")],
+                    )],
+                    span: span(30, 40),
+                }],
+                span: span(30, 40),
+            },
+            IrNode::Table {
+                header: crate::ir::IrTableRow {
+                    cells: vec![crate::ir::IrTableCell {
+                        content: vec![text_inline("Header")],
+                        alignment: crate::ir::IrTableAlignment::Center,
+                        span: span(40, 46),
+                    }],
+                    span: span(40, 46),
+                },
+                rows: vec![crate::ir::IrTableRow {
+                    cells: vec![crate::ir::IrTableCell {
+                        content: vec![inline_if_call(
+                            "if",
+                            IrValue::Boolean(true),
+                            vec![text_inline("cell")],
+                        )],
+                        alignment: crate::ir::IrTableAlignment::None,
+                        span: span(46, 50),
+                    }],
+                    span: span(46, 50),
+                }],
+                span: span(40, 50),
+            },
+        ]);
+
+        let (evaluated, diagnostics) = Evaluator::new().evaluate(&document);
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+
+        let IrNode::Blockquote { content, .. } = &evaluated.nodes[0] else {
+            panic!("expected blockquote")
+        };
+        assert_eq!(content, &vec![text_paragraph("quoted")]);
+
+        let IrNode::UnorderedList { items, .. } = &evaluated.nodes[1] else {
+            panic!("expected list")
+        };
+        assert_eq!(items[0].task, Some(crate::ir::IrTaskStatus::Completed));
+        assert_eq!(items[0].nodes, vec![text_paragraph("task content")]);
+
+        let IrNode::Paragraph { content, .. } = &evaluated.nodes[2] else {
+            panic!("expected paragraph")
+        };
+        assert_eq!(
+            content,
+            &vec![IrInline::Strikethrough {
+                content: vec![text_inline("struck")],
+                span: span(30, 40),
+            }]
+        );
+
+        let IrNode::Table { header, rows, .. } = &evaluated.nodes[3] else {
+            panic!("expected table")
+        };
+        assert_eq!(header.cells[0].content, vec![text_inline("Header")]);
+        assert_eq!(rows[0].cells[0].content, vec![text_inline("cell")]);
     }
 
     #[test]
