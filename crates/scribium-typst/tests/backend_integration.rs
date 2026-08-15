@@ -317,3 +317,58 @@ fn integration_variable_evaluation_before_lowering() {
         typst_code
     );
 }
+
+#[test]
+fn integration_chain_evaluation_reaches_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = ".sum {10} {5}::multiply {2}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "chain diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("30"), "generated Typst: {typst_code}");
+    assert!(!typst_code.contains("parser-preserved call chain"));
+    assert!(!typst_code.contains("#sum"));
+    assert!(!typst_code.contains("#multiply"));
+
+    let nested_project = VirtualProjectBuilder::new()
+        .entry("nested.qd")
+        .expect("valid path")
+        .add_source("nested.qd", ".multiply {.sum {10} {5}} {2}\n")
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let nested_result = compile(&nested_project, &CompileOptions::default());
+    assert!(
+        nested_result.diagnostics.is_empty(),
+        "nested diagnostics: {:?}",
+        nested_result.diagnostics
+    );
+    let nested_typst_code = scribium_typst::lowering::lower_to_typst_code(&nested_result.ir);
+    assert_eq!(nested_typst_code, typst_code);
+
+    with_typst("chain-evaluation", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "main.qd".to_string(),
+            })
+            .expect("evaluated chain Typst must compile");
+        assert!(output
+            .pdf
+            .expect("chain PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}

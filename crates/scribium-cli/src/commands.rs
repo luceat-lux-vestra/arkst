@@ -959,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_chain_fails_before_typst_or_pdf_output() {
+    fn unimplemented_chain_callee_fails_before_typst_or_pdf_output() {
         let dir = tempdir().unwrap();
         let input = dir.path().join("chain.qd");
         fs::write(&input, ".a::b\n").unwrap();
