@@ -2673,6 +2673,41 @@ mod tests {
     }
 
     #[test]
+    fn function_lambda_header_keeps_container_relative_body_indentation() {
+        let list = parse_with_diagnostics("- .function {greet}\n    name:\n    Hello, .name!\n");
+        assert!(list.diagnostics.is_empty(), "{list:?}");
+        let Block::UnorderedList { items, .. } = &list.document.nodes[0] else {
+            panic!("expected list")
+        };
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &items[0].content[0]
+        else {
+            panic!("expected function declaration inside list")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+
+        let quote = parse_with_diagnostics("> .function {greet}\n>   name:\n>   Hello, .name!\n");
+        assert!(quote.diagnostics.is_empty(), "{quote:?}");
+        let Block::Blockquote { content, .. } = &quote.document.nodes[0] else {
+            panic!("expected blockquote")
+        };
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &content[0]
+        else {
+            panic!("expected function declaration inside blockquote")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+    }
+
+    #[test]
     fn quarkdown_body_rejects_one_space() {
         let output = parse_with_diagnostics(".note\n body\n");
         let Block::DirectiveCall { body, .. } = &output.document.nodes[0] else {

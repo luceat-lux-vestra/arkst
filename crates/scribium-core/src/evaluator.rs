@@ -1292,9 +1292,16 @@ impl Evaluator {
                     );
                 }
                 let before = diagnostics.len();
+                let contains_declaration = nodes
+                    .iter()
+                    .any(|node| matches!(node, IrNode::FunctionDeclaration { .. }));
                 let nodes = self.evaluate_nodes(nodes, diagnostics, context);
                 if diagnostics.len() == before {
-                    CallOutcome::Value(IrValue::Content(nodes))
+                    if nodes.is_empty() && contains_declaration {
+                        CallOutcome::NoValue
+                    } else {
+                        CallOutcome::Value(IrValue::Content(nodes))
+                    }
                 } else {
                     CallOutcome::Failed
                 }
@@ -1418,6 +1425,7 @@ fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
             [IrNode::FunctionCall { span, .. }] | [IrNode::ChainedFunctionCall { span, .. }] => {
                 *span
             }
+            [IrNode::FunctionDeclaration { span, .. }] => *span,
             _ => *fallback,
         },
         _ => *fallback,
@@ -2202,6 +2210,31 @@ mod tests {
         assert_eq!(diagnostics[0].code, "E3001");
         assert_eq!(diagnostics[0].primary, Some(span(9, 14)));
         assert_paragraph_text(&nodes, "3");
+    }
+
+    #[test]
+    fn nested_function_declaration_reports_no_value_once_at_its_span() {
+        let declaration_span = span(10, 24);
+        let declaration = IrValue::Content(vec![IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("declared".to_string()),
+            parameters: Vec::new(),
+            body: vec![text_paragraph("body")],
+            span: declaration_span,
+        }]);
+        let outer = IrNode::FunctionCall {
+            name: "sum".to_string(),
+            positional_args: vec![declaration, IrValue::Number(1.0)],
+            named_args: Vec::new(),
+            body: None,
+            span: span(0, 30),
+        };
+
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![outer]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3001");
+        assert_eq!(diagnostics[0].primary, Some(declaration_span));
+        assert!(diagnostics[0].message.contains("no value"));
     }
 
     #[test]
