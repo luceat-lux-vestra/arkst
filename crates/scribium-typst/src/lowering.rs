@@ -476,6 +476,13 @@ impl LoweringContext {
                 self.push_str(&escaped);
                 self.push('"');
             }
+            IrValue::None => {
+                // None is a semantic value in Scribium. At this backend
+                // boundary its documented observable representation is text.
+                self.push('"');
+                self.push_str("None");
+                self.push('"');
+            }
             IrValue::Content(nodes) => {
                 self.push('[');
                 let saved_item = std::mem::take(&mut self.list_item_indent);
@@ -1464,6 +1471,22 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "#figure(kind: \"table\")[content\n]\n\n");
+    }
+
+    #[test]
+    fn lower_none_value_as_observable_text() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "show-value".into(),
+                positional_args: vec![IrValue::None],
+                named_args: vec![],
+                body: None,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(code, "#show-value(\"None\")\n\n");
     }
 
     #[test]

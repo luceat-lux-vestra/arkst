@@ -241,6 +241,26 @@ pub enum IrValue {
     Boolean(bool),
     Identifier(String),
     Content(Vec<IrNode>),
+    /// The Quarkdown language's explicit absence value.
+    ///
+    /// This is a semantic value, distinct from an evaluator `NoValue`
+    /// outcome. It remains typed until an output boundary materializes it.
+    None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IrValue;
+
+    #[test]
+    fn none_uses_the_stable_externally_tagged_serde_variant() {
+        let encoded = serde_json::to_value(IrValue::None).expect("IrValue serializes");
+        assert_eq!(encoded, serde_json::json!("None"));
+        assert_eq!(
+            serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
+            IrValue::None
+        );
+    }
 }
 
 /// An entry in the source map linking a range of generated output

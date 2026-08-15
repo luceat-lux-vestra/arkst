@@ -853,11 +853,15 @@ impl Evaluator {
 
         for (index, parameter) in binding.parameters.iter().enumerate() {
             if bound[index].is_none() {
-                diagnostics.push(function_error_at(
-                    format!("Missing required argument `{}`", parameter.name),
-                    parameter.name_span,
-                ));
-                return CallOutcome::Failed;
+                if parameter.optional {
+                    bound[index] = Some(IrValue::None);
+                } else {
+                    diagnostics.push(function_error_at(
+                        format!("Missing required argument `{}`", parameter.name),
+                        parameter.name_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
             }
         }
 
@@ -1578,6 +1582,7 @@ fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option
             }
             None
         }
+        IrValue::None => None,
         _ => None,
     }
 }
@@ -1593,6 +1598,7 @@ fn scalar_boolean_value(value: &IrValue) -> Option<bool> {
             "false" | "no" => Some(false),
             _ => None,
         },
+        IrValue::None => None,
         _ => None,
     }
 }
@@ -1671,6 +1677,7 @@ fn scalar_to_text(value: &IrValue) -> String {
         IrValue::Boolean(boolean) => boolean.to_string(),
         IrValue::Identifier(name) => name.clone(),
         IrValue::Content(_) => String::new(),
+        IrValue::None => "None".to_string(),
     }
 }
 
@@ -1730,16 +1737,6 @@ impl Evaluator {
             {
                 diagnostics.push(function_error_at(
                     format!("Duplicate function parameter `{}`", parameter.name),
-                    parameter.span,
-                ));
-                return;
-            }
-            if parameter.optional {
-                diagnostics.push(function_error_at(
-                    format!(
-                        "Optional parameter `{}` is parsed and preserved but optional semantics are not implemented",
-                        parameter.name
-                    ),
                     parameter.span,
                 ));
                 return;

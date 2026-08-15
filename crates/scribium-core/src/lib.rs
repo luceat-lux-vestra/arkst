@@ -771,12 +771,148 @@ mod tests {
     }
 
     #[test]
-    fn compile_optional_user_parameters_are_preserved_but_deferred() {
-        let source = ".function {greet}\n    to from?:\n    .to\n";
+    fn compile_optional_user_parameters_bind_missing_positional_and_named_values() {
+        let source = ".function {greet}\n    to from?:\n    Hello, .to from .from!\n\n.greet {world}\n.greet {world} {John}\n.greet {world} from:{Jane}\n\n.function {ordered}\n    first? second:\n    .first::otherwise {missing} .second\n\n.ordered second:{provided}\n";
         let (result, _) = compile_source(source);
-        assert_eq!(result.diagnostics.len(), 1);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            output_text(&result),
+            "Hello, world from None!\nHello, world from John!\nHello, world from Jane!\nmissing provided"
+        );
+    }
+
+    #[test]
+    fn compile_optional_parameters_support_otherwise_and_preserve_value_types() {
+        let source = ".function {greet}\n    to from?:\n    Hello, .to from .from::otherwise {unnamed}!\n\n.greet {world}\n.greet {world} {John}\n\n.function {f}\n    x?:\n    .x::otherwise {42}\n\n.sum {.f} {1}\n\n.function {g}\n    value?:\n    .value\n\n.uppercase {.g::otherwise {fallback}}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            output_text(&result),
+            "Hello, world from unnamed!\nHello, world from John!\n43\nFALLBACK"
+        );
+    }
+
+    #[test]
+    fn compile_optional_none_is_distinct_from_no_value() {
+        let none_source = ".function {f}\n    x?:\n    .x\n\n.sum {.f} {1}\n";
+        let (none_result, _) = compile_source(none_source);
+        assert_eq!(none_result.diagnostics.len(), 1, "{none_result:?}");
+        assert_eq!(none_result.diagnostics[0].code, "E3001");
+        assert!(none_result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+        assert!(!none_result.diagnostics[0].message.contains("no value"));
+
+        let no_value_source = ".function {f}\n    .var {local} {1}\n\n.sum {.f} {1}\n";
+        let (no_value_result, _) = compile_source(no_value_source);
+        assert_eq!(no_value_result.diagnostics.len(), 1, "{no_value_result:?}");
+        assert_eq!(no_value_result.diagnostics[0].code, "E3001");
+        assert!(no_value_result.diagnostics[0].message.contains("no value"));
+    }
+
+    #[test]
+    fn compile_required_parameter_stays_required_after_optional_support() {
+        let source = ".function {f}\n    required optional?:\n    .required\n\n.f\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3003");
+        assert!(diagnostic
+            .message
+            .contains("Missing required argument `required`"));
+        let parameter_start = source.find("required").expect("required parameter");
+        assert_eq!(
+            diagnostic.primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                parameter_start,
+                parameter_start + "required".len()
+            ))
+        );
+    }
+
+    #[test]
+    fn compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision() {
+        let source = ".function {wrap}\n    title content?:\n    .content::otherwise {empty}\n\n.wrap {Title}\n.wrap {Title}\n    Body\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "empty\nBody");
+
+        let collision =
+            ".function {wrap}\n    content?:\n    .content\n\n.wrap {explicit}\n    body\n";
+        let (result, _) = compile_source(collision);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3003");
-        assert!(result.diagnostics[0].message.contains("optional"));
+        assert!(result.diagnostics[0].message.contains("collides"));
+    }
+
+    #[test]
+    fn compile_optional_none_can_be_stored_locally_without_parent_scope_leak() {
+        let source = ".function {f}\n    value?:\n    .var {local} {.value}\n    .local::otherwise {fallback}\n\n.f\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "fallback");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .any(|node| { matches!(node, IrNode::FunctionCall { name, .. } if name == "local") }));
+    }
+
+    #[test]
+    fn compile_optional_none_direct_output_materializes_as_text() {
+        let source = ".function {f}\n    value?:\n    .value\n\n.f\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "None");
+    }
+
+    #[test]
+    fn compile_isnone_returns_a_semantic_boolean_for_optional_values() {
+        let source = ".function {f}\n    value?:\n    .value::isnone\n\n.f\n.f {hello}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "true\nfalse");
+    }
+
+    #[test]
+    fn optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion() {
+        let source = ".function {greet}\r\n    from? name:\r\n    안녕, .from .name!\r\n\r\n.greet {세계} {친구}\r\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .expect("valid project");
+        let source_id = project
+            .sources()
+            .get_id(project.entry())
+            .expect("source id");
+        let parsed = scribium_markdown::parse_with_diagnostics(source);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let (ir, diagnostics) = crate::ast_to_ir::ast_to_ir_with_diagnostics(
+            &parsed.document,
+            source_id,
+            project.metadata(),
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let IrNode::FunctionDeclaration { parameters, .. } = &ir.nodes[0] else {
+            panic!("expected function declaration")
+        };
+        assert!(parameters[0].optional);
+        assert_eq!(
+            &source[parameters[0].span.start..parameters[0].span.end],
+            "from?"
+        );
+        assert_eq!(
+            &source[parameters[1].span.start..parameters[1].span.end],
+            "name"
+        );
+
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "안녕, 세계 친구!");
     }
 
     #[test]
@@ -784,7 +920,10 @@ mod tests {
         let project = VirtualProjectBuilder::new()
             .entry("main.md")
             .expect("valid path")
-            .add_source("main.md", ".function {hello}\n    Hello\n\n.hello\n")
+            .add_source(
+                "main.md",
+                ".function {hello}\n    value?:\n    Hello .value\n\n.hello\n",
+            )
             .expect("valid path")
             .build()
             .unwrap();

@@ -9,7 +9,10 @@ pub(crate) struct BuiltinError {
 
 /// Returns whether this builtin has an evaluator implementation.
 pub(crate) fn is_supported(name: &str) -> bool {
-    matches!(name, "sum" | "multiply" | "uppercase" | "lowercase")
+    matches!(
+        name,
+        "sum" | "multiply" | "uppercase" | "lowercase" | "otherwise" | "isnone"
+    )
 }
 
 /// Evaluates one supported builtin without source or backend conversion.
@@ -22,8 +25,43 @@ pub(crate) fn evaluate(
     match name {
         "sum" | "multiply" => evaluate_numeric(name, positional_args, named_args, has_body),
         "uppercase" | "lowercase" => evaluate_case(name, positional_args, named_args, has_body),
+        "otherwise" => evaluate_otherwise(positional_args, named_args, has_body),
+        "isnone" => evaluate_isnone(positional_args, named_args, has_body),
         _ => Err(error(format!("`.{name}` has no builtin implementation"))),
     }
+}
+
+fn evaluate_otherwise(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body || !named_args.is_empty() || positional_args.len() != 2 {
+        return Err(error(
+            "`.otherwise` requires exactly two positional arguments".to_string(),
+        ));
+    }
+    if matches!(positional_args[0], IrValue::None) {
+        Ok(positional_args[1].clone())
+    } else {
+        Ok(positional_args[0].clone())
+    }
+}
+
+fn evaluate_isnone(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body || !named_args.is_empty() || positional_args.len() != 1 {
+        return Err(error(
+            "`.isnone` requires exactly one positional argument".to_string(),
+        ));
+    }
+    Ok(IrValue::Boolean(matches!(
+        positional_args[0],
+        IrValue::None
+    )))
 }
 
 fn evaluate_numeric(
@@ -106,6 +144,7 @@ fn adapt_scalar_to_text(value: &IrValue) -> Option<String> {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),
         IrValue::Number(value) => Some(value.to_string()),
+        IrValue::None => None,
         IrValue::Content(nodes) => {
             let mut text = String::new();
             for node in nodes {
