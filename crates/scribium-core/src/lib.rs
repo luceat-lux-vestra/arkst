@@ -426,15 +426,71 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_unresolved_chain_semantics_but_preserves_block_ir() {
+    fn compile_evaluates_block_and_inline_chain_value_flow() {
+        let source = ".sum {10} {5}::multiply {2}\n\nprefix .uppercase {hello}::lowercase suffix\n\n.uppercase {hello}::uppercase::lowercase\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected block-chain paragraph")
+        };
+        assert!(matches!(
+            content.as_slice(),
+            [IrInline::Text { content, .. }] if content == "30"
+        ));
+        let first_span = match &result.ir.nodes[0] {
+            IrNode::Paragraph { span, .. } => *span,
+            _ => panic!("expected paragraph span"),
+        };
+        assert_eq!(
+            first_span,
+            crate::source::SourceSpan::new(source_id, 0, source.find('\n').unwrap())
+        );
+
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[1] else {
+            panic!("expected inline-chain paragraph")
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            IrInline::Text { content, .. } if content == "hello"
+        )));
+
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[2] else {
+            panic!("expected three-chain paragraph")
+        };
+        assert!(matches!(
+            content.as_slice(),
+            [IrInline::Text { content, .. }] if content == "hello"
+        ));
+    }
+
+    #[test]
+    fn compile_evaluates_chain_inside_a_content_argument() {
+        let source = ".var {value} {.uppercase {hello}::lowercase}\n.value\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected content-chain result")
+        };
+        assert!(matches!(
+            content.as_slice(),
+            [IrInline::Text { content, .. }] if content == "hello"
+        ));
+    }
+
+    #[test]
+    fn chain_gate_removal_does_not_remove_other_e8001_diagnostics() {
+        let (result, _) = compile_source("![image](image.png)\n");
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E8001" && diagnostic.message.contains("image")
+        }));
+    }
+
+    #[test]
+    fn compile_reports_unimplemented_chain_callees_with_specific_spans() {
         for source in [".a::b\n", ".a::b::c\n", ".a {x}::b {y}\n"] {
             let parsed = scribium_markdown::parse_qd(source);
-            let scribium_markdown::ast::Block::DirectiveCall {
-                chain,
-                head_span,
-                span,
-                ..
-            } = &parsed.nodes[0]
+            let scribium_markdown::ast::Block::DirectiveCall { chain, .. } = &parsed.nodes[0]
             else {
                 panic!("expected parsed block chain for {source:?}");
             };
@@ -443,44 +499,19 @@ mod tests {
             let (result, source_id) = compile_source(source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}");
             let diagnostic = &result.diagnostics[0];
-            assert_eq!(diagnostic.code, "E8001");
+            assert_eq!(diagnostic.code, "E3001");
             assert!(matches!(diagnostic.severity, Severity::Error));
-            assert_eq!(
-                diagnostic.message,
-                "Quarkdown call chaining was parsed and preserved but chained value-flow evaluation is not implemented yet."
-            );
+            assert!(diagnostic.message.contains("no semantic implementation"));
             assert_eq!(
                 diagnostic.primary,
-                Some(crate::source::SourceSpan::new(
-                    source_id, span.start, span.end
-                ))
+                Some(crate::source::SourceSpan::new(source_id, 0, 2))
             );
-            assert_eq!(diagnostic.primary.unwrap().start, span.start);
-            assert_eq!(diagnostic.primary.unwrap().end, span.end);
-
-            let IrNode::ChainedFunctionCall {
-                head,
-                chain: ir_chain,
-                span: ir_span,
-                ..
-            } = &result.ir.nodes[0]
-            else {
-                panic!("expected preserved IR chain for {source:?}");
-            };
-            assert_eq!(ir_chain.len(), chain.len());
-            assert_eq!(
-                head.span,
-                crate::source::SourceSpan::new(source_id, head_span.start, head_span.end)
-            );
-            assert_eq!(
-                *ir_span,
-                crate::source::SourceSpan::new(source_id, span.start, span.end)
-            );
+            assert!(result.ir.nodes.is_empty());
         }
     }
 
     #[test]
-    fn compile_rejects_unresolved_chain_semantics_in_inline_and_content_paths() {
+    fn compile_reports_chain_failures_in_inline_and_content_paths() {
         let inline_source = "prefix .a {x}::b {y} suffix\n";
         let parsed = scribium_markdown::parse_qd(inline_source);
         let scribium_markdown::ast::Block::Paragraph { content, .. } = &parsed.nodes[0] else {
@@ -493,16 +524,14 @@ mod tests {
         )));
         let (result, source_id) = compile_source(inline_source);
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(result.diagnostics[0].code, "E8001");
+        assert_eq!(result.diagnostics[0].code, "E3001");
         assert!(matches!(result.diagnostics[0].severity, Severity::Error));
         let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
             panic!("expected inline paragraph IR");
         };
-        assert!(content.iter().any(|inline| matches!(
-            inline,
-            IrInline::ChainedDirectiveCall { chain, .. }
-                if !chain.is_empty()
-        )));
+        assert!(content
+            .iter()
+            .all(|inline| !matches!(inline, IrInline::ChainedDirectiveCall { .. })));
         assert_eq!(
             result.diagnostics[0].primary.as_ref().unwrap().source_id,
             source_id
@@ -527,7 +556,7 @@ mod tests {
 
         let (result, source_id) = compile_source(content_source);
         assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(result.diagnostics[0].code, "E8001");
+        assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary.as_ref().unwrap().source_id,
             source_id
@@ -541,10 +570,7 @@ mod tests {
         let crate::ir::IrValue::Content(nodes) = &positional_args[0] else {
             panic!("expected content IR argument");
         };
-        assert!(matches!(
-            nodes.as_slice(),
-            [IrNode::ChainedFunctionCall { chain, .. }] if !chain.is_empty()
-        ));
+        assert!(nodes.is_empty());
     }
 
     #[test]

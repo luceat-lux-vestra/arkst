@@ -265,14 +265,13 @@ impl LoweringContext {
                 body,
                 span,
             } => {
-                // This is only a structural/debug rendering of an IR that
-                // already carries the E8001 unsupported-semantics diagnostic.
-                // The normal compile and CLI paths reject that diagnostic
-                // before calling this lowering pass.
+                // Defensive rendering for manually constructed unresolved IR.
+                // The normal evaluator resolves successful chains before this
+                // lowering pass, and failed chains are rejected by diagnostics.
                 let before = self.output.len();
                 self.push_str("// Scribium parser-preserved call chain: ");
                 self.lower_chain_label(head, chain);
-                self.push_str(" (semantic evaluation pending)\n");
+                self.push_str(" (unresolved chain; evaluator did not resolve it)\n");
                 if let Some(body_nodes) = body {
                     for node in body_nodes {
                         self.lower_node(node);
@@ -399,14 +398,13 @@ impl LoweringContext {
                 body,
                 span,
             } => {
-                // This is only a structural/debug rendering of an IR that
-                // already carries the E8001 unsupported-semantics diagnostic.
-                // The normal compile and CLI paths reject that diagnostic
-                // before calling this lowering pass.
+                // Defensive rendering for manually constructed unresolved IR.
+                // The normal evaluator resolves successful chains before this
+                // lowering pass, and failed chains are rejected by diagnostics.
                 let before = self.output.len();
                 self.push_str("/* Scribium parser-preserved call chain: ");
                 self.lower_chain_label(head, chain);
-                self.push_str("; semantic evaluation pending */");
+                self.push_str("; unresolved chain; evaluator did not resolve it */");
                 if let Some(body_inlines) = body {
                     self.push('[');
                     self.lower_inlines(body_inlines);
@@ -1485,7 +1483,7 @@ mod tests {
         let (code, map) = super::lower_to_typst(&doc);
         assert_eq!(
             code,
-            "// Scribium parser-preserved call chain: .a::b (semantic evaluation pending)\n\n"
+            "// Scribium parser-preserved call chain: .a::b (unresolved chain; evaluator did not resolve it)\n\n"
         );
         assert_eq!(map.len(), 1);
         assert_eq!(map[0].original, whole);

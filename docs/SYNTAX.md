@@ -158,10 +158,15 @@ Call syntax has the following properties:
   argument content; leading spaces or tabs on the continuation line are
   ignored for argument recognition.
 - `::` parses and structurally preserves a call chain (`.a {x}::b {y}`),
-  including each segment and argument source span. Chained value-flow
-  evaluation is deferred to #61; normal compilation reports the explicit
-  `E8001` unsupported-semantics error and produces no Typst/PDF output.
-  Parser preservation is not semantic or output-equivalent support.
+  including each segment and argument source span. The evaluator executes
+  supported chain segments directly in strict left-to-right order: the prior
+  semantic value is injected as the next segment's first positional argument,
+  while explicit positional and named arguments retain their order and names.
+  The current semantic evidence set is `.sum`, `.multiply`, `.uppercase`, and
+  `.lowercase`; an unknown or otherwise unexecutable chain segment reports a
+  source-backed `E3001` evaluation diagnostic and does not fabricate a value.
+  The parser's structural representation is consumed directly; no synthetic
+  source or Markdown/Typst round trip is used.
 - A complete call may be wrapped in braces to lift word-adjacency boundaries,
   for example `H{.text {2}}O`. The wrapper is consumed by the Quarkdown
   frontend and its source span remains available.
@@ -262,6 +267,17 @@ Malformed `.var` declarations (missing name or value) produce `E3002`.
 Invalid variable names (not matching `normal-call-name` grammar) produce `E3002`.
 
 > **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
+
+### Evaluation scope foundation (Implemented foundation)
+
+The evaluator now has explicit parent/child scope APIs with deterministic
+lookup, local variable bindings, and a future-compatible local function slot.
+Child scopes inherit visible parent bindings and local writes do not leak back
+to the parent. Existing `.var` declarations continue to use the document-level
+scope and are evaluated in source order. Standalone lambda headers,
+`.function`, `.let`, `.foreach`, and `.repeat` remain subsequent semantic
+slices; this foundation does not claim those user-facing features are
+implemented.
 
 ### Conditional (Implemented)
 

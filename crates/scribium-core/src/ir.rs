@@ -83,12 +83,13 @@ pub enum IrNode {
         body: Option<Vec<IrNode>>,
         span: SourceSpan,
     },
-    /// A parser-preserved `::` call chain.
+    /// A structurally preserved `::` call chain.
     ///
-    /// Chaining is represented structurally here, but its value-flow
-    /// evaluation is intentionally deferred to the Quarkdown evaluator
-    /// compatibility work. This prevents the grammar adapter from rewriting
-    /// source into synthetic nested calls.
+    /// The evaluator consumes this representation directly and produces an
+    /// ordinary evaluated IR node when every segment is executable. Keeping
+    /// the structural form preserves source provenance and avoids synthetic
+    /// source rewriting; the variant remains available for defensive handling
+    /// of manually constructed unresolved IR.
     ChainedFunctionCall {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
@@ -133,7 +134,7 @@ pub enum IrInline {
         body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
-    /// An inline parser-preserved `::` call chain.
+    /// An inline structurally preserved `::` call chain.
     ChainedDirectiveCall {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,

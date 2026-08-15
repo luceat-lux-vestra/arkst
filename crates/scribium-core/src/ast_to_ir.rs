@@ -1,8 +1,8 @@
 //! AST-to-IR conversion — translates the parsed Markdown AST into the Scribium IR.
 //!
 //! This is the bridge between `scribium-markdown` (parser output) and `ir`
-//! (evaluator input / lowering input). For M1, this is a direct 1:1 mapping
-//! since there is no evaluator yet.
+//! (evaluator input / lowering input). It preserves semantic values and call
+//! structure for the evaluator without rewriting source text.
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
@@ -180,7 +180,6 @@ fn block_to_ir(
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
-                push_unsupported_chain(diagnostics, span, source_id);
                 Some(IrNode::ChainedFunctionCall {
                     head: IrCallSegment {
                         name: name.clone(),
@@ -365,7 +364,6 @@ fn inline_to_ir(
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
-                push_unsupported_chain(diagnostics, span, source_id);
                 Some(IrInline::ChainedDirectiveCall {
                     head: IrCallSegment {
                         name: name.clone(),
@@ -463,7 +461,6 @@ fn value_to_ir(
                         span: byte_to_source_span(span, source_id),
                     }])
                 } else {
-                    push_unsupported_chain(diagnostics, span, source_id);
                     crate::ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
                         head: IrCallSegment {
                             name: name.clone(),
@@ -510,21 +507,6 @@ fn push_unsupported(
         hints: vec![
             "The source semantics were not coerced into a different Markdown node.".to_string(),
         ],
-    });
-}
-
-fn push_unsupported_chain(
-    diagnostics: &mut Vec<Diagnostic>,
-    span: &crate::source::ByteSpan,
-    source_id: SourceId,
-) {
-    diagnostics.push(Diagnostic {
-        code: "E8001".to_string(),
-        severity: Severity::Error,
-        message: "Quarkdown call chaining was parsed and preserved but chained value-flow evaluation is not implemented yet.".to_string(),
-        primary: Some(byte_to_source_span(span, source_id)),
-        secondary: Vec::new(),
-        hints: vec!["Chained value-flow semantics are deferred to #61.".to_string()],
     });
 }
 
@@ -633,13 +615,7 @@ mod tests {
         let document = scribium_markdown::parse_qd(source);
         let (ir, diagnostics) =
             ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(diagnostics[0].code, "E8001");
-        assert!(matches!(diagnostics[0].severity, Severity::Error));
-        assert_eq!(
-            diagnostics[0].primary,
-            Some(SourceSpan::new(source_id(), 0, 13))
-        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::ChainedFunctionCall {
             head, chain, span, ..
         } = &ir.nodes[0]

@@ -1,5 +1,5 @@
-//! M1/M2 evaluator: resolves Quarkdown conditional constructs (`.if` / `.ifnot`)
-//! and document-scope variables (`.var`).
+//! M1/M2 evaluator: resolves Quarkdown conditionals, variables, and the first
+//! value-flow builtins used by `::` call chains.
 //!
 //! Evaluation runs after parsing and `ast_to_ir` and before Typst lowering.
 //! It operates on the IR: a `FunctionCall` / `DirectiveCall` named `if` or
@@ -27,7 +27,13 @@
 //!
 //! Block variables (`.var {name}\n    body\n.name`) store evaluated content
 //! and materialize it at reference sites.
+//!
+//! Chain evaluation is structural: the head is invoked first, its semantic
+//! `IrValue` becomes the first positional argument of the next segment, and
+//! segments continue in source order. No source or backend text is generated
+//! during this process.
 
+use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{IrCallSegment, IrDocument, IrInline, IrNode, IrValue};
 use crate::source::SourceSpan;
@@ -51,6 +57,15 @@ impl VariableValue {
         match value {
             IrValue::Content(nodes) => VariableValue::Content(nodes),
             scalar => VariableValue::Scalar(scalar),
+        }
+    }
+
+    /// Returns the backend-neutral value used when this variable participates
+    /// in a chain.
+    fn to_value(&self) -> IrValue {
+        match self {
+            VariableValue::Scalar(value) => value.clone(),
+            VariableValue::Content(nodes) => IrValue::Content(nodes.clone()),
         }
     }
 }
@@ -99,18 +114,43 @@ impl VariableValue {
     }
 }
 
-/// Evaluation context holding document-scoped variable bindings.
+/// A future-compatible callable binding slot for nested evaluator scopes.
+///
+/// User-facing function declaration is intentionally deferred to a later
+/// slice. Keeping parameter metadata in the scope model now means that the
+/// later lambda implementation does not need a second environment model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionBinding {
+    parameters: Vec<String>,
+}
+
+/// Evaluation context with explicit parent visibility and local bindings.
 ///
 /// Created fresh per `evaluate()` call to ensure isolation and determinism.
-/// Uses `BTreeMap` for deterministic iteration order.
-#[derive(Debug, Default)]
+/// Lookups walk the parent chain without cloning it. A child scope snapshots
+/// the visible parent context at creation time and local writes stay in the
+/// child. The snapshot is deliberate: a lambda observes the bindings visible
+/// when it is entered, while its local declarations cannot leak back.
+#[derive(Debug, Clone, Default)]
 struct EvaluationContext {
+    parent: Option<Box<EvaluationContext>>,
     variables: BTreeMap<String, VariableValue>,
+    functions: BTreeMap<String, FunctionBinding>,
 }
 
 impl EvaluationContext {
     fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a child scope with parent-visible bindings and isolated locals.
+    #[allow(dead_code)]
+    fn child(&self) -> Self {
+        Self {
+            parent: Some(Box::new(self.clone())),
+            variables: BTreeMap::new(),
+            functions: BTreeMap::new(),
+        }
     }
 
     /// Declares or reassigns a variable with content (block variable).
@@ -124,18 +164,36 @@ impl EvaluationContext {
             .insert(name, VariableValue::from_evaluated_value(value));
     }
 
+    /// Installs a future user-function binding in the current local scope.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn set_function(&mut self, name: String, parameters: Vec<String>) {
+        self.functions.insert(name, FunctionBinding { parameters });
+    }
+
     /// Gets a variable value if it exists.
     fn get(&self, name: &str) -> Option<&VariableValue> {
-        self.variables.get(name)
+        self.variables
+            .get(name)
+            .or_else(|| self.parent.as_deref().and_then(|parent| parent.get(name)))
     }
 
     /// Checks if a name is bound as a variable.
     fn contains(&self, name: &str) -> bool {
-        self.variables.contains_key(name)
+        self.get(name).is_some()
+    }
+
+    /// Looks up a function binding through the visible scope chain.
+    fn get_function(&self, name: &str) -> Option<&FunctionBinding> {
+        self.functions.get(name).or_else(|| {
+            self.parent
+                .as_deref()
+                .and_then(|parent| parent.get_function(name))
+        })
     }
 }
 
-/// Evaluates Quarkdown conditional constructs and document-scope variables in the IR.
+/// Evaluates Quarkdown conditionals, document-scope variables, and the
+/// currently supported semantic chain builtins in the IR.
 #[derive(Debug, Default)]
 pub struct Evaluator {}
 
@@ -145,7 +203,7 @@ impl Evaluator {
         Self::default()
     }
 
-    /// Evaluates the document, resolving `.if` / `.ifnot` and `.var` constructs.
+    /// Evaluates the document, resolving conditionals, variables, and chains.
     ///
     /// Returns the resolved document and any evaluation diagnostics.
     pub fn evaluate(&self, document: &IrDocument) -> (IrDocument, Vec<Diagnostic>) {
@@ -233,6 +291,24 @@ impl Evaluator {
                         diagnostics,
                         context,
                     )
+                } else if builtins::is_supported(name) {
+                    let evaluated_positional =
+                        self.evaluate_values(positional_args, diagnostics, context);
+                    let evaluated_named = self.evaluate_named(named_args, diagnostics, context);
+                    let evaluated_body = body
+                        .as_ref()
+                        .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context));
+                    self.materialize_block_value(
+                        self.invoke_builtin(
+                            name,
+                            &evaluated_positional,
+                            &evaluated_named,
+                            evaluated_body.as_deref(),
+                            span,
+                            diagnostics,
+                        ),
+                        span,
+                    )
                 } else {
                     vec![IrNode::FunctionCall {
                         name: name.clone(),
@@ -254,17 +330,7 @@ impl Evaluator {
                 chain,
                 body,
                 span,
-            } => vec![IrNode::ChainedFunctionCall {
-                head: self.evaluate_call_segment(head, diagnostics, context),
-                chain: chain
-                    .iter()
-                    .map(|segment| self.evaluate_call_segment(segment, diagnostics, context))
-                    .collect(),
-                body: body
-                    .as_ref()
-                    .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context)),
-                span: *span,
-            }],
+            } => self.evaluate_block_chain(head, chain, body, span, diagnostics, context),
             IrNode::Heading {
                 level,
                 content,
@@ -436,6 +502,27 @@ impl Evaluator {
                         diagnostics,
                         context,
                     )
+                } else if builtins::is_supported(name) {
+                    let evaluated_positional =
+                        self.evaluate_values(positional_args, diagnostics, context);
+                    let evaluated_named = self.evaluate_named(named_args, diagnostics, context);
+                    let evaluated_body = body.as_ref().map(|inlines| {
+                        vec![IrNode::Paragraph {
+                            content: self.evaluate_inlines(inlines, diagnostics, context),
+                            span: *span,
+                        }]
+                    });
+                    self.materialize_inline_value(
+                        self.invoke_builtin(
+                            name,
+                            &evaluated_positional,
+                            &evaluated_named,
+                            evaluated_body.as_deref(),
+                            span,
+                            diagnostics,
+                        ),
+                        span,
+                    )
                 } else {
                     vec![IrInline::DirectiveCall {
                         name: name.clone(),
@@ -457,17 +544,7 @@ impl Evaluator {
                 chain,
                 body,
                 span,
-            } => vec![IrInline::ChainedDirectiveCall {
-                head: self.evaluate_call_segment(head, diagnostics, context),
-                chain: chain
-                    .iter()
-                    .map(|segment| self.evaluate_call_segment(segment, diagnostics, context))
-                    .collect(),
-                body: body
-                    .as_ref()
-                    .map(|inlines| self.evaluate_inlines(inlines, diagnostics, context)),
-                span: *span,
-            }],
+            } => self.evaluate_inline_chain(head, chain, body, span, diagnostics, context),
             IrInline::Code { content, span } => {
                 // Code spans are opaque: the content is never resolved,
                 // recursed into, or evaluated. It passes straight through.
@@ -477,6 +554,235 @@ impl Evaluator {
                 }]
             }
             other => vec![other.clone()],
+        }
+    }
+
+    /// Evaluates a block chain and materializes its final semantic value.
+    fn evaluate_block_chain(
+        &self,
+        head: &IrCallSegment,
+        chain: &[IrCallSegment],
+        body: &Option<Vec<IrNode>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Vec<IrNode> {
+        // A chain body belongs to the final call. Evaluate it once before
+        // dispatch so it remains an ordinary semantic content value.
+        let evaluated_body = body
+            .as_ref()
+            .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context));
+        self.materialize_block_value(
+            self.evaluate_chain_value(head, chain, evaluated_body.as_deref(), diagnostics, context),
+            span,
+        )
+    }
+
+    /// Evaluates an inline chain and materializes its final semantic value.
+    fn evaluate_inline_chain(
+        &self,
+        head: &IrCallSegment,
+        chain: &[IrCallSegment],
+        body: &Option<Vec<IrInline>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Vec<IrInline> {
+        let evaluated_body = body.as_ref().map(|inlines| {
+            vec![IrNode::Paragraph {
+                content: self.evaluate_inlines(inlines, diagnostics, context),
+                span: *span,
+            }]
+        });
+        self.materialize_inline_value(
+            self.evaluate_chain_value(head, chain, evaluated_body.as_deref(), diagnostics, context),
+            span,
+        )
+    }
+
+    /// Evaluates a chain strictly left-to-right using semantic `IrValue`s.
+    fn evaluate_chain_value(
+        &self,
+        head: &IrCallSegment,
+        chain: &[IrCallSegment],
+        body: Option<&[IrNode]>,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Option<IrValue> {
+        let evaluated_head = self.evaluate_call_segment(head, diagnostics, context);
+        let mut value =
+            self.invoke_chain_segment(&evaluated_head, None, None, diagnostics, context)?;
+
+        for (index, source_segment) in chain.iter().enumerate() {
+            let segment = self.evaluate_call_segment(source_segment, diagnostics, context);
+            let mut positional_args = Vec::with_capacity(1 + segment.positional_args.len());
+            // The previous result is always first. Explicit positional
+            // arguments follow it in their original order; named arguments
+            // remain in the named collection untouched.
+            positional_args.push(value);
+            positional_args.extend(segment.positional_args.iter().cloned());
+            let final_body = (index + 1 == chain.len()).then_some(body).flatten();
+            value = self.invoke_chain_segment(
+                &segment,
+                Some(positional_args),
+                final_body,
+                diagnostics,
+                context,
+            )?;
+        }
+
+        Some(value)
+    }
+
+    /// Invokes a segment that is participating in a chain.
+    ///
+    /// Unknown calls are intentionally an error here. An ordinary unresolved
+    /// call remains preserved by the existing evaluator behavior, but a chain
+    /// cannot fabricate an intermediate value and continue safely.
+    fn invoke_chain_segment(
+        &self,
+        segment: &IrCallSegment,
+        injected_positional: Option<Vec<IrValue>>,
+        body: Option<&[IrNode]>,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Option<IrValue> {
+        let positional_args =
+            injected_positional.unwrap_or_else(|| segment.positional_args.clone());
+        let body = body.map(|nodes| nodes.to_vec());
+
+        if is_conditional(&segment.name) {
+            let condition = resolve_condition(
+                &segment.name,
+                &positional_args,
+                &segment.named_args,
+                &segment.span,
+                diagnostics,
+                context,
+            );
+            let nodes = if take_branch(&segment.name, condition) {
+                self.conditional_block_content(
+                    &positional_args,
+                    &segment.named_args,
+                    &body,
+                    &segment.span,
+                    diagnostics,
+                    context,
+                )
+            } else {
+                Vec::new()
+            };
+            return Some(IrValue::Content(nodes));
+        }
+
+        if is_var_declaration(&segment.name) {
+            self.handle_var_declaration(
+                &segment.name,
+                &positional_args,
+                &segment.named_args,
+                &body,
+                &segment.span,
+                diagnostics,
+                context,
+            );
+            return None;
+        }
+
+        if is_variable_reference(
+            &segment.name,
+            &positional_args,
+            &segment.named_args,
+            &body,
+            context,
+        ) {
+            return context.get(&segment.name).map(VariableValue::to_value);
+        }
+
+        if is_variable_reassignment(
+            &segment.name,
+            &positional_args,
+            &segment.named_args,
+            &body,
+            context,
+        ) {
+            self.handle_variable_reassignment(
+                &segment.name,
+                &positional_args,
+                &segment.span,
+                diagnostics,
+                context,
+            );
+            return None;
+        }
+
+        if builtins::is_supported(&segment.name) {
+            return self.invoke_builtin(
+                &segment.name,
+                &positional_args,
+                &segment.named_args,
+                body.as_deref(),
+                &segment.span,
+                diagnostics,
+            );
+        }
+
+        let message = if let Some(binding) = context.get_function(&segment.name) {
+            format!(
+                "Function `{}` is visible in this scope but callable function declarations are not implemented yet ({} parameter(s))",
+                segment.name,
+                binding.parameters.len()
+            )
+        } else {
+            format!(
+                "Cannot evaluate chained call segment `.{}`: no semantic implementation is available",
+                segment.name
+            )
+        };
+        diagnostics.push(chain_evaluation_error(message, segment.name_span));
+        None
+    }
+
+    /// Evaluates one of the small deterministic builtins used by this slice.
+    fn invoke_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<&[IrNode]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<IrValue> {
+        match builtins::evaluate(name, positional_args, named_args, body.is_some()) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                diagnostics.push(chain_evaluation_error(error.message, *span));
+                None
+            }
+        }
+    }
+
+    fn materialize_block_value(&self, value: Option<IrValue>, span: &SourceSpan) -> Vec<IrNode> {
+        match value {
+            Some(IrValue::Content(nodes)) => nodes,
+            Some(value) => vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: scalar_to_text(&value),
+                    span: *span,
+                }],
+                span: *span,
+            }],
+            None => Vec::new(),
+        }
+    }
+
+    fn materialize_inline_value(&self, value: Option<IrValue>, span: &SourceSpan) -> Vec<IrInline> {
+        match value {
+            Some(IrValue::Content(nodes)) => VariableValue::Content(nodes).materialize_inline(span),
+            Some(value) => vec![IrInline::Text {
+                content: scalar_to_text(&value),
+                span: *span,
+            }],
+            None => Vec::new(),
         }
     }
 
@@ -628,6 +934,17 @@ impl Evaluator {
 /// Returns true for the conditional constructs this evaluator resolves.
 fn is_conditional(name: &str) -> bool {
     name == "if" || name == "ifnot"
+}
+
+fn chain_evaluation_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["The evaluator did not fabricate a value for the failed call.".to_string()],
+    }
 }
 
 /// Resolves the condition of a conditional call.
@@ -1051,10 +1368,50 @@ mod tests {
         Evaluator::new().evaluate(&doc(nodes)).0.nodes
     }
 
+    fn chain_segment(
+        name: &str,
+        start: usize,
+        end: usize,
+        positional_args: Vec<IrValue>,
+    ) -> IrCallSegment {
+        IrCallSegment {
+            name: name.to_string(),
+            name_span: span(start, start + name.len() + usize::from(start == 0)),
+            positional_args,
+            named_args: Vec::new(),
+            span: span(start, end),
+        }
+    }
+
+    fn chain_node(head: IrCallSegment, chain: Vec<IrCallSegment>) -> IrNode {
+        let span = span(
+            head.span.start,
+            chain
+                .last()
+                .map_or(head.span.end, |segment| segment.span.end),
+        );
+        IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body: None,
+            span,
+        }
+    }
+
+    fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
+        let [IrNode::Paragraph { content, .. }] = nodes else {
+            panic!("expected one paragraph, got {nodes:?}");
+        };
+        let [IrInline::Text { content, .. }] = content.as_slice() else {
+            panic!("expected one text fragment, got {content:?}");
+        };
+        assert_eq!(content, expected);
+    }
+
     #[test]
-    fn parser_preserved_chain_recurses_without_applying_value_flow() {
+    fn unknown_chain_callee_reports_a_segment_diagnostic() {
         let whole = span(0, 13);
-        let nodes = evaluate(vec![IrNode::ChainedFunctionCall {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![IrNode::ChainedFunctionCall {
             head: IrCallSegment {
                 name: "a".into(),
                 name_span: span(0, 2),
@@ -1072,15 +1429,190 @@ mod tests {
             body: None,
             span: whole,
         }]);
-        let IrNode::ChainedFunctionCall { head, chain, .. } = &nodes[0] else {
-            panic!("expected parser-preserved chain")
-        };
-        assert_eq!(head.name, "a");
-        assert_eq!(chain[0].name, "b");
-        assert_eq!(head.positional_args, vec![IrValue::Identifier("x".into())]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3001");
+        assert_eq!(diagnostics[0].primary, Some(span(0, 2)));
+    }
+
+    #[test]
+    fn unknown_middle_and_tail_segments_fail_at_their_names() {
+        let cases = [
+            (
+                vec![
+                    chain_segment(
+                        "uppercase",
+                        0,
+                        17,
+                        vec![IrValue::Identifier("hello".into())],
+                    ),
+                    chain_segment("unknown", 19, 28, Vec::new()),
+                    chain_segment("lowercase", 30, 39, Vec::new()),
+                ],
+                span(19, 26),
+            ),
+            (
+                vec![
+                    chain_segment(
+                        "uppercase",
+                        0,
+                        17,
+                        vec![IrValue::Identifier("hello".into())],
+                    ),
+                    chain_segment("lowercase", 19, 29, Vec::new()),
+                    chain_segment("unknown", 31, 40, Vec::new()),
+                ],
+                span(31, 38),
+            ),
+        ];
+
+        for (segments, expected_span) in cases {
+            let (nodes, diagnostics) = evaluate_with_diagnostics(vec![chain_node(
+                segments[0].clone(),
+                segments[1..].to_vec(),
+            )]);
+            assert!(nodes.is_empty());
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].code, "E3001");
+            assert_eq!(diagnostics[0].primary, Some(expected_span));
+        }
+    }
+
+    #[test]
+    fn chain_arity_and_type_failures_are_deterministic() {
+        let cases = [
+            chain_node(
+                chain_segment("uppercase", 0, 10, Vec::new()),
+                vec![chain_segment("lowercase", 12, 21, Vec::new())],
+            ),
+            chain_node(
+                chain_segment("sum", 0, 8, vec![IrValue::Boolean(true)]),
+                vec![chain_segment(
+                    "multiply",
+                    10,
+                    19,
+                    vec![IrValue::Number(2.0)],
+                )],
+            ),
+        ];
+        for input in cases {
+            let first = Evaluator::new().evaluate(&doc(vec![input.clone()]));
+            let second = Evaluator::new().evaluate(&doc(vec![input]));
+            assert!(first.0.nodes.is_empty());
+            assert_eq!(first.1.len(), 1);
+            assert_eq!(second.1.len(), 1);
+            assert_eq!(first.1[0].code, "E3001");
+            assert_eq!(first.1[0].message, second.1[0].message);
+            assert_eq!(first.1[0].primary, second.1[0].primary);
+        }
+    }
+
+    #[test]
+    fn chain_value_flow_is_left_to_right_and_injects_first() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![chain_node(
+            chain_segment(
+                "sum",
+                0,
+                12,
+                vec![IrValue::Number(10.0), IrValue::Number(5.0)],
+            ),
+            vec![chain_segment(
+                "multiply",
+                14,
+                27,
+                vec![IrValue::Number(2.0)],
+            )],
+        )]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_paragraph_text(&nodes, "30");
+    }
+
+    #[test]
+    fn chain_zero_argument_segments_compose_scalar_values() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![chain_node(
+            chain_segment(
+                "uppercase",
+                0,
+                17,
+                vec![IrValue::Identifier("hello".into())],
+            ),
+            vec![
+                chain_segment("uppercase", 19, 28, Vec::new()),
+                chain_segment("lowercase", 30, 39, Vec::new()),
+            ],
+        )]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_paragraph_text(&nodes, "hello");
+    }
+
+    #[test]
+    fn chain_preserves_explicit_positional_arguments_after_previous_value() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![chain_node(
+            chain_segment(
+                "sum",
+                0,
+                12,
+                vec![IrValue::Number(10.0), IrValue::Number(5.0)],
+            ),
+            vec![chain_segment(
+                "multiply",
+                14,
+                27,
+                vec![IrValue::Number(2.0)],
+            )],
+        )]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        // multiply receives [sum(10, 5), 2], not [2, sum(10, 5)].
+        assert_paragraph_text(&nodes, "30");
+    }
+
+    #[test]
+    fn chain_keeps_named_arguments_named_while_injecting_previous_value() {
+        let mut segment = chain_segment("multiply", 14, 29, Vec::new());
+        segment.named_args.push(("by".into(), IrValue::Number(2.0)));
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![chain_node(
+            chain_segment(
+                "sum",
+                0,
+                12,
+                vec![IrValue::Number(10.0), IrValue::Number(5.0)],
+            ),
+            vec![segment],
+        )]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_paragraph_text(&nodes, "30");
+    }
+
+    #[test]
+    fn child_scope_inherits_parent_and_isolates_local_bindings() {
+        let mut parent = EvaluationContext::new();
+        parent.set_value("visible".into(), IrValue::String("parent".into()));
+        parent.set_function("inherited".into(), vec!["value".into()]);
+
+        let mut child = parent.child();
         assert_eq!(
-            chain[0].positional_args,
-            vec![IrValue::Identifier("y".into())]
+            child.get("visible").map(VariableValue::to_value),
+            Some(IrValue::String("parent".into()))
+        );
+        assert_eq!(
+            child
+                .get_function("inherited")
+                .map(|binding| binding.parameters.as_slice()),
+            Some(["value".to_string()].as_slice())
+        );
+        child.set_value("local".into(), IrValue::String("child".into()));
+        child.set_function("future".into(), vec!["value".into()]);
+
+        assert!(parent.get("local").is_none());
+        assert_eq!(
+            child.get("local").map(VariableValue::to_value),
+            Some(IrValue::String("child".into()))
+        );
+        assert_eq!(
+            child
+                .get_function("future")
+                .map(|binding| binding.parameters.as_slice()),
+            Some(["value".to_string()].as_slice())
         );
     }
 
