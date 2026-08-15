@@ -78,8 +78,8 @@ fn assert_block_spans(block: &Block, source: &str) {
                     }
                 }
             }
-            for (_, argument) in named_args {
-                if let scribium_markdown::ast::Value::Content(content) = argument {
+            for argument in named_args {
+                if let scribium_markdown::ast::Value::Content(content) = &argument.value {
                     for inline in content {
                         assert_inline_spans(inline, source);
                     }
@@ -135,8 +135,8 @@ fn assert_inline_spans(inline: &Inline, source: &str) {
                     }
                 }
             }
-            for (_, argument) in named_args {
-                if let scribium_markdown::ast::Value::Content(content) = argument {
+            for argument in named_args {
+                if let scribium_markdown::ast::Value::Content(content) = &argument.value {
                     for child in content {
                         assert_inline_spans(child, source);
                     }

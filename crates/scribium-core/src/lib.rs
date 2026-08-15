@@ -415,6 +415,19 @@ mod tests {
             .join("\n")
     }
 
+    fn inline_text(content: &[IrInline]) -> String {
+        content
+            .iter()
+            .map(|inline| match inline {
+                IrInline::Text { content, .. } => content.clone(),
+                IrInline::Strong { content, .. }
+                | IrInline::Emphasis { content, .. }
+                | IrInline::Strikethrough { content, .. } => inline_text(content),
+                other => panic!("unexpected inline {other:?}"),
+            })
+            .collect()
+    }
+
     #[test]
     fn compile_propagates_parser_diagnostics() {
         for (input, expected_code) in [
@@ -520,6 +533,268 @@ mod tests {
             assert_eq!(output_text(&chain), expected);
             assert_eq!(output_text(&nested), expected);
         }
+    }
+
+    #[test]
+    fn compile_user_functions_support_zero_and_required_parameters() {
+        let source = ".function {hello}\n    Hello\n\n.hello\n\n.function {greet}\n    to from:\n    .to from .from\n\n.greet {world} {John}\n.greet {world} from:{John}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            output_text(&result),
+            "Hello\nworld from John\nworld from John"
+        );
+    }
+
+    #[test]
+    fn compile_user_functions_keep_scalar_values_for_nested_and_chain_calls() {
+        let source = ".function {area}\n    width height:\n    .multiply {.width} by:{.height}\n\n.sum {.area {4} {2}} {1}\n\n.area {4} {2}::sum {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "9\n9");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| { !matches!(node, IrNode::FunctionDeclaration { .. }) }));
+    }
+
+    #[test]
+    fn compile_user_function_multi_statement_body_preserves_last_semantic_value() {
+        let source = ".function {f}\n    .var {x} {2}\n    .sum {.x} {1}\n\n.sum {.f} {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "4");
+
+        let source = ".function {f}\n    .function {local}\n        body\n    .sum {2} {1}\n\n.sum {.f} {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "4");
+    }
+
+    #[test]
+    fn compile_user_function_multi_statement_body_stops_after_first_failure() {
+        let source = ".function {bad}\n    .multiply {true} {true}\n    .var {after} {ran}\n\n.sum {.bad} {1}\n.after\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+        assert!(!output_text(&result).contains("ran"));
+    }
+
+    #[test]
+    fn compile_user_function_multi_statement_rich_content_keeps_source_spans() {
+        let source = ".function {rich}\n    First **one**\n\n    Second *two*\n\n.rich\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        // Rushdown's original inline spans are retained verbatim; in
+        // particular, the closing delimiter is not part of these paragraph
+        // ranges, so assert against the exact source-backed range.
+        let expected = ["First **one", "Second *two"];
+        assert_eq!(result.ir.nodes.len(), expected.len());
+        for (node, expected) in result.ir.nodes.iter().zip(expected) {
+            let IrNode::Paragraph { span, .. } = node else {
+                panic!("expected paragraph, got {node:?}")
+            };
+            assert_eq!(span.source_id, source_id);
+            assert_eq!(&source[span.start..span.end], expected);
+        }
+    }
+
+    #[test]
+    fn compile_user_function_rich_and_block_results_keep_markdown_structure() {
+        let rich_source = ".function {greet}\n    name:\n    **Hello, .name!**\n\n.greet {world}\n";
+        let (rich, _) = compile_source(rich_source);
+        assert!(rich.diagnostics.is_empty(), "{:?}", rich.diagnostics);
+        let IrNode::Paragraph { content, .. } = &rich.ir.nodes[0] else {
+            panic!("expected rich function result")
+        };
+        assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
+        assert_eq!(inline_text(content), "Hello, world!");
+
+        let block_source = ".function {wrapper}\n    title content:\n    .content\n\n.wrapper {Title}\n    **Body**\n";
+        let (block, _) = compile_source(block_source);
+        assert!(block.diagnostics.is_empty(), "{:?}", block.diagnostics);
+        let IrNode::Paragraph { content, .. } = &block.ir.nodes[0] else {
+            panic!("expected block function result")
+        };
+        assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
+        assert_eq!(inline_text(content), "Body");
+
+        let inline_source = ".function {inline_greet}\n    name:\n    **Hello, .name!**\n\nprefix .inline_greet {world} suffix\n";
+        let (inline, _) = compile_source(inline_source);
+        assert!(inline.diagnostics.is_empty(), "{:?}", inline.diagnostics);
+        let IrNode::Paragraph { content, .. } = &inline.ir.nodes[0] else {
+            panic!("expected inline function result")
+        };
+        assert!(content
+            .iter()
+            .any(|inline| { matches!(inline, IrInline::Strong { .. }) }));
+
+        let unsupported_inline = ".function {heading}\n    # Heading\n\nprefix .heading suffix\n";
+        let (unsupported, _) = compile_source(unsupported_inline);
+        assert_eq!(unsupported.diagnostics.len(), 1);
+        assert_eq!(unsupported.diagnostics[0].code, "E3003");
+        assert!(unsupported.diagnostics[0]
+            .message
+            .contains("Rich block content"));
+
+        let multiple_paragraphs =
+            ".function {two}\n    First\n\n    Second\n\nprefix .two suffix\n";
+        let (multiple, _) = compile_source(multiple_paragraphs);
+        assert_eq!(multiple.diagnostics.len(), 1, "{multiple:?}");
+        assert!(!output_text(&multiple).contains("First"));
+        assert!(!output_text(&multiple).contains("Second"));
+    }
+
+    #[test]
+    fn compile_user_functions_use_source_order_and_override_builtins() {
+        let redeclaration = ".function {answer}\n    first\n\n.answer\n\n.function {answer}\n    second\n\n.answer\n";
+        let (result, _) = compile_source(redeclaration);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "first\nsecond");
+
+        let override_source = ".uppercase {Quarkdown}\n\n.function {uppercase}\n    text:\n    .text::lowercase\n\n.uppercase {Quarkdown}\n";
+        let (result, _) = compile_source(override_source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "QUARKDOWN\nquarkdown");
+    }
+
+    #[test]
+    fn compile_user_functions_bind_block_last_and_isolate_child_scope() {
+        let source = ".var {outside} {A}\n.var {value} {parent}\n.function {inner}\n    inherited\n\n.function {demo}\n    value:\n    .function {local}\n        local\n    .outside\n    .value\n    .inner\n    .var {local_value} {.value}\n    .local\n\n.demo {B}\n\n.outside\n.value\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let output = output_text(&result);
+        assert!(output.contains("A"), "{output:?}");
+        assert!(output.contains("B"), "{output:?}");
+        assert!(output.contains("inherited"), "{output:?}");
+        assert!(
+            output.ends_with("parent"),
+            "shadowed parent changed: {output:?}"
+        );
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .any(|node| { matches!(node, IrNode::FunctionCall { name, .. } if name == "local") }));
+    }
+
+    #[test]
+    fn compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic() {
+        let no_value = ".function {noop}\n    .var {temporary} {value}\n\n.sum {.noop} {1}\n";
+        let (result, _) = compile_source(no_value);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert!(result.diagnostics[0].message.contains("no value"));
+
+        let declaration_no_value =
+            ".function {noop}\n    .function {local}\n        body\n\n.sum {.noop} {1}\n";
+        let (result, _) = compile_source(declaration_no_value);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert!(result.diagnostics[0].message.contains("no value"));
+
+        let failed = ".function {bad}\n    .multiply {true} {true}\n\n.sum {.bad} {1}\n";
+        let (result, _) = compile_source(failed);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+    }
+
+    #[test]
+    fn compile_user_function_argument_failures_are_single_and_body_is_not_run() {
+        for (source, expected_message) in [
+            (
+                ".function {needs}\n    first:\n    .multiply {true} {true}\n\n.needs\n",
+                "Missing required argument",
+            ),
+            (
+                ".function {needs}\n    first:\n    .multiply {true} {true}\n\n.needs {one} {two}\n",
+                "too many positional arguments",
+            ),
+            (
+                ".function {needs}\n    first:\n    .multiply {true} {true}\n\n.needs unknown:{one}\n",
+                "Unknown named parameter",
+            ),
+            (
+                ".function {needs}\n    first:\n    .multiply {true} {true}\n\n.needs {one} first:{two}\n",
+                "bound more than once",
+            ),
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003");
+            assert!(result.diagnostics[0].message.contains(expected_message));
+            assert!(!result.diagnostics[0].message.contains("requires numeric arguments"));
+        }
+    }
+
+    #[test]
+    fn compile_user_function_declaration_errors_are_explicit_and_source_backed() {
+        for source in [
+            ".function {1invalid}\n    body\n",
+            ".function {duplicate}\n    first first:\n    body\n",
+            ".function {missing-body}\n",
+            ".function {named} extra:{value}\n    body\n",
+            ".function {named}::sum {1}\n    body\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003");
+            assert_eq!(
+                result.diagnostics[0]
+                    .primary
+                    .as_ref()
+                    .map(|span| span.source_id),
+                Some(source_id)
+            );
+        }
+
+        let source = ".function {named}\n    value:\n    body\n\n.named unknown:{value}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3003");
+        let start = source.find("unknown").expect("named argument name");
+        assert_eq!(
+            diagnostic.primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                start,
+                start + "unknown".len()
+            ))
+        );
+    }
+
+    #[test]
+    fn compile_optional_user_parameters_are_preserved_but_deferred() {
+        let source = ".function {greet}\n    to from?:\n    .to\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert!(result.diagnostics[0].message.contains("optional"));
+    }
+
+    #[test]
+    fn compile_markdown_mode_does_not_enable_quarkdown_functions() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.md")
+            .expect("valid path")
+            .add_source("main.md", ".function {hello}\n    Hello\n\n.hello\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| { !matches!(node, IrNode::FunctionDeclaration { .. }) }));
     }
 
     #[test]
@@ -1055,6 +1330,16 @@ mod tests {
         assert!(content
             .iter()
             .all(|inline| !matches!(inline, IrInline::Strong { .. })));
+    }
+
+    #[test]
+    fn compile_variable_multiple_paragraphs_inline_reference_is_not_flattened() {
+        let source = ".var {x}\n    First\n\n    Second\n\nprefix .x suffix\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert!(!output_text(&result).contains("First"));
+        assert!(!output_text(&result).contains("Second"));
     }
 
     #[test]

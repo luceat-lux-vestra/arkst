@@ -1,6 +1,6 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
-use crate::ir::{IrInline, IrNode, IrValue};
+use crate::ir::{IrInline, IrNamedArg, IrNode, IrValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
@@ -16,7 +16,7 @@ pub(crate) fn is_supported(name: &str) -> bool {
 pub(crate) fn evaluate(
     name: &str,
     positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
+    named_args: &[IrNamedArg],
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     match name {
@@ -29,7 +29,7 @@ pub(crate) fn evaluate(
 fn evaluate_numeric(
     name: &str,
     positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
+    named_args: &[IrNamedArg],
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -40,13 +40,14 @@ fn evaluate_numeric(
 
     let mut values = Vec::with_capacity(positional_args.len() + named_args.len());
     values.extend(positional_args.iter().cloned());
-    for (key, value) in named_args {
-        if key != "by" {
+    for arg in named_args {
+        if arg.name != "by" {
             return Err(error(format!(
-                "`.{name}` does not support named argument `{key}`"
+                "`.{name}` does not support named argument `{}`",
+                arg.name
             )));
         }
-        values.push(value.clone());
+        values.push(arg.value.clone());
     }
     if values.is_empty() {
         return Err(error(format!(
@@ -72,7 +73,7 @@ fn evaluate_numeric(
 fn evaluate_case(
     name: &str,
     positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
+    named_args: &[IrNamedArg],
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body || !named_args.is_empty() || positional_args.len() != 1 {

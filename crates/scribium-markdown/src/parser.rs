@@ -16,8 +16,8 @@ use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue
 use scribium_source::ByteSpan;
 
 use crate::ast::{
-    Block, CallSegment, Document, FrontMatter, Inline, ListItem, TableCell, TableRow, TaskStatus,
-    Value,
+    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, TableCell, TableRow,
+    TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -424,7 +424,12 @@ pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
     if mode == Mode::Quarkdown {
         let original = std::mem::take(&mut nodes);
         for mut node in original {
-            nodes.extend(normalize_block(&mut node, &body_line_ranges));
+            nodes.extend(normalize_block(
+                &mut node,
+                &body_line_ranges,
+                source,
+                &mut diagnostics,
+            ));
         }
     }
     ParseOutput {
@@ -437,9 +442,15 @@ pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
     }
 }
 
-fn normalize_block(block: &mut Block, body_line_ranges: &BodyLineRanges) -> Vec<Block> {
+fn normalize_block(
+    block: &mut Block,
+    body_line_ranges: &BodyLineRanges,
+    source: &str,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Vec<Block> {
     match block {
         Block::DirectiveCall {
+            name,
             body: Some(body),
             span,
             ..
@@ -451,7 +462,12 @@ fn normalize_block(block: &mut Block, body_line_ranges: &BodyLineRanges) -> Vec<
             let children = std::mem::take(body);
             let mut normalized_children = Vec::new();
             for mut child in children {
-                normalized_children.extend(normalize_block(&mut child, body_line_ranges));
+                normalized_children.extend(normalize_block(
+                    &mut child,
+                    body_line_ranges,
+                    source,
+                    diagnostics,
+                ));
             }
 
             let Some(accepted_lines) = accepted_lines else {
@@ -471,17 +487,20 @@ fn normalize_block(block: &mut Block, body_line_ranges: &BodyLineRanges) -> Vec<
                 }
             }
             *body = kept;
+            if name == "function" {
+                contextualize_function_body(block, accepted_lines, source, diagnostics);
+            }
             let mut result = vec![block.clone()];
             result.extend(promoted);
             result
         }
         Block::Blockquote { content, .. } => {
-            normalize_children(content, body_line_ranges);
+            normalize_children(content, body_line_ranges, source, diagnostics);
             vec![block.clone()]
         }
         Block::UnorderedList { items, .. } | Block::OrderedList { items, .. } => {
             for item in items {
-                normalize_children(&mut item.content, body_line_ranges);
+                normalize_children(&mut item.content, body_line_ranges, source, diagnostics);
             }
             vec![block.clone()]
         }
@@ -489,10 +508,123 @@ fn normalize_block(block: &mut Block, body_line_ranges: &BodyLineRanges) -> Vec<
     }
 }
 
-fn normalize_children(children: &mut Vec<Block>, body_line_ranges: &BodyLineRanges) {
+fn normalize_children(
+    children: &mut Vec<Block>,
+    body_line_ranges: &BodyLineRanges,
+    source: &str,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) {
     let original = std::mem::take(children);
     for mut child in original {
-        children.extend(normalize_block(&mut child, body_line_ranges));
+        children.extend(normalize_block(
+            &mut child,
+            body_line_ranges,
+            source,
+            diagnostics,
+        ));
+    }
+}
+
+fn contextualize_function_body(
+    block: &mut Block,
+    accepted_lines: &[ByteSpan],
+    source: &str,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) {
+    let Some(first_line) = accepted_lines.first().copied() else {
+        return;
+    };
+    let header = match scribium_quarkdown::parse_lambda_header(source, first_line) {
+        Ok(header) => header,
+        Err(error) => {
+            diagnostics.push(ParserDiagnostic {
+                code: error.code,
+                message: error.message,
+                span: error.span,
+            });
+            return;
+        }
+    };
+    let Some(header) = header else {
+        return;
+    };
+
+    let frontend_header = crate::ast::LambdaHeader {
+        parameters: header
+            .parameters
+            .into_iter()
+            .map(|parameter| crate::ast::LambdaParameter {
+                name: parameter.name,
+                name_span: parameter.name_span,
+                span: parameter.span,
+                optional: parameter.optional,
+            })
+            .collect(),
+        span: header.span,
+    };
+    let line_end = line_end_with_terminator(first_line, source);
+    let Block::DirectiveCall {
+        body: Some(body),
+        lambda_header,
+        ..
+    } = block
+    else {
+        return;
+    };
+    *lambda_header = Some(frontend_header);
+    strip_lambda_header_line(body, line_end, source);
+}
+
+fn line_end_with_terminator(line: ByteSpan, source: &str) -> usize {
+    let mut end = line.end.min(source.len());
+    if source
+        .get(end..)
+        .is_some_and(|rest| rest.starts_with("\r\n"))
+    {
+        end += 2;
+    } else if source.get(end..).is_some_and(|rest| rest.starts_with('\n')) {
+        end += 1;
+    }
+    end
+}
+
+fn strip_lambda_header_line(body: &mut Vec<Block>, line_end: usize, source: &str) {
+    let Some(Block::Paragraph { content, span }) = body.first_mut() else {
+        return;
+    };
+    let original = std::mem::take(content);
+    let mut kept = Vec::new();
+    for inline in original {
+        let start = inline_start(&inline);
+        let end = inline_end(&inline);
+        if end <= line_end {
+            continue;
+        }
+        if start < line_end {
+            if let Inline::Text { content, span } = inline {
+                if line_end <= span.end && source.is_char_boundary(line_end) {
+                    if let Some(suffix) = source.get(line_end..span.end) {
+                        kept.push(Inline::Text {
+                            content: suffix.to_string(),
+                            span: ByteSpan::new(line_end, span.end),
+                        });
+                    }
+                } else if !content.is_empty() {
+                    kept.push(Inline::Text { content, span });
+                }
+            }
+            continue;
+        }
+        kept.push(inline);
+    }
+    *content = kept;
+    if content.is_empty() {
+        body.remove(0);
+    } else {
+        // The paragraph originally covered the header and the surviving body
+        // text. Re-anchor it to the original spans of the remaining inline
+        // nodes so provenance does not retain the removed header bytes.
+        *span = paragraph_span(content);
     }
 }
 
@@ -808,12 +940,7 @@ fn directive_block(
         named_args: call
             .named_args
             .iter()
-            .map(|arg| {
-                (
-                    arg.name.clone(),
-                    convert_arg(&arg.value, source, base, call_base, diagnostics),
-                )
-            })
+            .map(|arg| convert_named_arg(arg, source, base, call_base, diagnostics))
             .collect(),
         chain: call
             .chain
@@ -821,6 +948,7 @@ fn directive_block(
             .map(|segment| convert_call_segment(segment, source, base, call_base, diagnostics))
             .collect(),
         body: (!body_nodes.is_empty()).then_some(body_nodes),
+        lambda_header: None,
         span,
     }
 }
@@ -967,12 +1095,7 @@ fn convert_inline(
                 named_args: call
                     .named_args
                     .iter()
-                    .map(|arg| {
-                        (
-                            arg.name.clone(),
-                            convert_arg(&arg.value, source, base, 0, diagnostics),
-                        )
-                    })
+                    .map(|arg| convert_named_arg(arg, source, base, 0, diagnostics))
                     .collect(),
                 chain: call
                     .chain
@@ -1125,12 +1248,7 @@ fn convert_content_call(
         named_args: call
             .named_args
             .iter()
-            .map(|arg| {
-                (
-                    arg.name.clone(),
-                    convert_arg(&arg.value, source, base, 0, diagnostics),
-                )
-            })
+            .map(|arg| convert_named_arg(arg, source, base, 0, diagnostics))
             .collect(),
         chain: call
             .chain
@@ -1164,15 +1282,26 @@ fn convert_call_segment(
         named_args: segment
             .named_args
             .iter()
-            .map(|arg| {
-                (
-                    arg.name.clone(),
-                    convert_arg(&arg.value, source, base, call_base, diagnostics),
-                )
-            })
+            .map(|arg| convert_named_arg(arg, source, base, call_base, diagnostics))
             .collect(),
         span: offset_span(segment.span, base.checked_add(call_base).unwrap_or(base))
             .unwrap_or(ByteSpan::new(0, 0)),
+    }
+}
+
+fn convert_named_arg(
+    arg: &scribium_quarkdown::NamedArg,
+    source: &str,
+    base: usize,
+    call_base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> NamedArg {
+    let offset = base.checked_add(call_base).unwrap_or(base);
+    NamedArg {
+        name: arg.name.clone(),
+        name_span: offset_span(arg.name_span, offset).unwrap_or(ByteSpan::new(0, 0)),
+        value: convert_arg(&arg.value, source, base, call_base, diagnostics),
+        span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
     }
 }
 
@@ -2478,6 +2607,7 @@ mod tests {
                         other => panic!("unexpected nested inline {other:?}"),
                     })
                     .collect(),
+                Inline::DirectiveCall { name, .. } => format!(".{name}"),
                 other => panic!("unexpected inline {other:?}"),
             })
             .collect()
@@ -2497,6 +2627,136 @@ mod tests {
             let output = parse_with_diagnostics(&source);
             assert!(output.diagnostics.is_empty(), "{output:?}");
             assert_eq!(paragraph_text(&directive_body(&output.document)[0]), "body");
+        }
+    }
+
+    #[test]
+    fn function_body_uses_contextual_source_backed_lambda_header() {
+        let source = ".function {greet}\r\n\tto from?:\r\n\tHello, .to from .from!\r\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected function lambda metadata")
+        };
+        assert_eq!(header.parameters.len(), 2);
+        assert_eq!(header.parameters[0].name, "to");
+        assert_eq!(header.parameters[1].name, "from");
+        assert!(header.parameters[1].optional);
+        assert_eq!(
+            &source[header.parameters[0].name_span.start..header.parameters[0].name_span.end],
+            "to"
+        );
+        assert_eq!(
+            &source[header.parameters[1].span.start..header.parameters[1].span.end],
+            "from?"
+        );
+        assert_eq!(&source[header.span.start..header.span.end], "to from?:");
+        assert_eq!(paragraph_text(&body[0]), "Hello, .to from .from!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected surviving lambda body paragraph")
+        };
+        assert_eq!(&source[span.start..span.end], "Hello, .to from .from!");
+        assert!(source.is_char_boundary(header.span.start));
+        assert!(source.is_char_boundary(header.span.end));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+    }
+
+    #[test]
+    fn ordinary_call_body_colon_is_not_a_lambda_header() {
+        let output = parse_with_diagnostics(".note\n  Hello:\n  body\n");
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            lambda_header,
+            body,
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected ordinary call")
+        };
+        assert!(lambda_header.is_none());
+        assert_eq!(paragraph_text(&body.as_ref().unwrap()[0]), "Hello:body");
+    }
+
+    #[test]
+    fn function_lambda_header_keeps_container_relative_body_indentation() {
+        let list_source = "- .function {greet}\n    name:\n    Hello, .name!\n";
+        let list = parse_with_diagnostics(list_source);
+        assert!(list.diagnostics.is_empty(), "{list:?}");
+        let Block::UnorderedList { items, .. } = &list.document.nodes[0] else {
+            panic!("expected list")
+        };
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &items[0].content[0]
+        else {
+            panic!("expected function declaration inside list")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected list lambda body paragraph")
+        };
+        let body_start = list_source.find("Hello").expect("list body text");
+        assert_eq!(&list_source[span.start..span.end], "Hello, .name!");
+        assert_eq!(span.start, body_start);
+
+        let quote_source = "> .function {greet}\n>   name:\n>   Hello, .name!\n";
+        let quote = parse_with_diagnostics(quote_source);
+        assert!(quote.diagnostics.is_empty(), "{quote:?}");
+        let Block::Blockquote { content, .. } = &quote.document.nodes[0] else {
+            panic!("expected blockquote")
+        };
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &content[0]
+        else {
+            panic!("expected function declaration inside blockquote")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected blockquote lambda body paragraph")
+        };
+        let body_start = quote_source.find("Hello").expect("quote body text");
+        assert_eq!(&quote_source[span.start..span.end], "Hello, .name!");
+        assert_eq!(span.start, body_start);
+    }
+
+    #[test]
+    fn function_lambda_header_reanchors_surviving_utf8_body_span() {
+        for ending in ["\n", "\r\n"] {
+            for indent in ["  ", "   ", "    ", "        ", "\t"] {
+                let source = format!(
+                    ".function {{greet}}{ending}{indent}name:{ending}{indent}안녕, .name!{ending}"
+                );
+                let output = parse_with_diagnostics(&source);
+                assert!(output.diagnostics.is_empty(), "{output:?}");
+                let Block::DirectiveCall {
+                    body: Some(body), ..
+                } = &output.document.nodes[0]
+                else {
+                    panic!("expected function body")
+                };
+                let Block::Paragraph { span, .. } = &body[0] else {
+                    panic!("expected surviving body paragraph")
+                };
+                let start = source.find("안녕").expect("body text");
+                let end = start + "안녕, .name!".len();
+                assert_eq!((span.start, span.end), (start, end));
+                assert_eq!(&source[span.start..span.end], "안녕, .name!");
+                assert!(source.is_char_boundary(span.start));
+                assert!(source.is_char_boundary(span.end));
+            }
         }
     }
 

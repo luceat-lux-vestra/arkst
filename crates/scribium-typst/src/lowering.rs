@@ -214,6 +214,12 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrNode::FunctionDeclaration { .. } => {
+                // Declarations are consumed by the evaluator and are
+                // intentionally outputless. This arm keeps direct lowering of
+                // pre-evaluation IR deterministic without inventing backend
+                // syntax for source-defined functions.
+            }
             IrNode::FunctionCall {
                 name,
                 positional_args,
@@ -234,13 +240,13 @@ impl LoweringContext {
                         self.lower_value(arg);
                         first = false;
                     }
-                    for (key, val) in named_args {
+                    for arg in named_args {
                         if !first {
                             self.push_str(", ");
                         }
-                        self.push_str(key);
+                        self.push_str(&arg.name);
                         self.push_str(": ");
-                        self.lower_value(val);
+                        self.lower_value(&arg.value);
                         first = false;
                     }
                     self.push(')');
@@ -372,13 +378,13 @@ impl LoweringContext {
                         self.lower_value(arg);
                         first = false;
                     }
-                    for (key, val) in named_args {
+                    for arg in named_args {
                         if !first {
                             self.push_str(", ");
                         }
-                        self.push_str(key);
+                        self.push_str(&arg.name);
                         self.push_str(": ");
-                        self.lower_value(val);
+                        self.lower_value(&arg.value);
                         first = false;
                     }
                     self.push(')');
@@ -623,8 +629,8 @@ fn escape_typst_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use scribium_core::ir::{
-        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment,
-        IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode,
+        IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
 
@@ -1442,7 +1448,12 @@ mod tests {
             nodes: vec![IrNode::FunctionCall {
                 name: "figure".into(),
                 positional_args: vec![],
-                named_args: vec![("kind".into(), IrValue::String("table".into()))],
+                named_args: vec![IrNamedArg {
+                    name: "kind".into(),
+                    name_span: empty_span(),
+                    value: IrValue::String("table".into()),
+                    span: empty_span(),
+                }],
                 body: Some(vec![IrNode::Paragraph {
                     content: vec![text("content")],
                     span: empty_span(),

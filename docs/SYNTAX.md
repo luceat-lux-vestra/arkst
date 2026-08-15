@@ -271,16 +271,53 @@ Invalid variable names (not matching `normal-call-name` grammar) produce `E3002`
 
 > **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
 
-### Evaluation scope foundation (Implemented foundation)
+## User-defined functions (Implemented slice)
+
+Scribium evaluates the documented `.function` declaration form for
+zero-parameter and required explicit-parameter functions. A declaration is
+source-order state and produces no document output:
+
+```
+.function {hello}
+    Hello, world!
+
+.function {greet}
+    to from:
+    Hello, .to from .from!
+
+.hello
+.greet {world} from:{John}
+```
+
+The first body line of `.function` is contextually parsed by the Quarkdown
+grammar as a structured lambda header only when it ends in `:`. Ordinary call
+bodies keep their normal Markdown interpretation. Parameter names and the
+optional marker retain original source spans through the frontend and IR;
+optional parameters are diagnosed as deferred semantics in this slice.
+
+Supported invocation semantics are positional and named binding, a block body
+bound to the final parameter, parent-visible/child-local scope, source-order
+redeclaration, and user-defined bindings taking precedence over an evidenced
+builtin after declaration. Outputless body statements update the child scope;
+one substantive semantic value remains typed across the function boundary,
+while multiple rich or Markdown outputs become structured content only when
+composition requires it. Nested and chained calls use the same evaluator value
+path.
+
+Implicit lambda parameters (`.1`, `.2`, ...), optional `None` values, generic
+standalone lambdas, iteration, and components remain outside this slice. A
+rich block result that cannot be represented in an inline context is rejected
+with a source-backed diagnostic rather than flattened or dropped.
+
+### Evaluation scope (Implemented)
 
 The evaluator now has explicit parent/child scope APIs with deterministic
-lookup, local variable bindings, and a future-compatible local function slot.
+lookup, local variable bindings, and source-backed local function bindings.
 Child scopes inherit visible parent bindings and local writes do not leak back
 to the parent. Existing `.var` declarations continue to use the document-level
 scope and are evaluated in source order. Standalone lambda headers,
-`.function`, `.let`, `.foreach`, and `.repeat` remain subsequent semantic
-slices; this foundation does not claim those user-facing features are
-implemented.
+`.let`, `.foreach`, and `.repeat` remain subsequent semantic slices; this
+slice does not claim those user-facing features are implemented.
 
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
@@ -289,6 +326,11 @@ remain lazy until the callee selects a branch. The current case-transform
 builtins use a deliberately small invocation-boundary adaptation contract for
 strings, identifiers, booleans, numbers, and plain text content; this is not a
 claim of complete Quarkdown `DynamicValue` or standard-library compatibility.
+
+For a user-defined call, positional and named arguments are evaluated in
+source order before the callee body can run. A successful argument set creates
+a child scope, binds parameters, and then evaluates the body. Any argument
+failure prevents body execution.
 
 Evaluator outcomes distinguish a successful value, a successful outputless
 side effect, a failed evaluation, and an unresolved call. A terminal

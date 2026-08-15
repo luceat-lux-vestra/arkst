@@ -79,7 +79,7 @@ pub enum IrNode {
     FunctionCall {
         name: String,
         positional_args: Vec<IrValue>,
-        named_args: Vec<(String, IrValue)>,
+        named_args: Vec<IrNamedArg>,
         body: Option<Vec<IrNode>>,
         span: SourceSpan,
     },
@@ -94,6 +94,14 @@ pub enum IrNode {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
         body: Option<Vec<IrNode>>,
+        span: SourceSpan,
+    },
+    /// A source-order user-defined function declaration. The evaluator
+    /// registers it in the current scope and produces no document output.
+    FunctionDeclaration {
+        name: IrValue,
+        parameters: Vec<IrParameter>,
+        body: Vec<IrNode>,
         span: SourceSpan,
     },
     /// A thematic break (horizontal rule).
@@ -130,7 +138,7 @@ pub enum IrInline {
     DirectiveCall {
         name: String,
         positional_args: Vec<IrValue>,
-        named_args: Vec<(String, IrValue)>,
+        named_args: Vec<IrNamedArg>,
         body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
@@ -172,8 +180,26 @@ pub struct IrCallSegment {
     pub name: String,
     pub name_span: SourceSpan,
     pub positional_args: Vec<IrValue>,
-    pub named_args: Vec<(String, IrValue)>,
+    pub named_args: Vec<IrNamedArg>,
     pub span: SourceSpan,
+}
+
+/// One source-backed named call argument.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrNamedArg {
+    pub name: String,
+    pub name_span: SourceSpan,
+    pub value: IrValue,
+    pub span: SourceSpan,
+}
+
+/// One source-backed explicit parameter in a user-defined function.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrParameter {
+    pub name: String,
+    pub name_span: SourceSpan,
+    pub span: SourceSpan,
+    pub optional: bool,
 }
 
 /// Semantic state for a GFM task-list item.

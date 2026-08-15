@@ -6,8 +6,8 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
-    IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment,
-    IrTableCell, IrTableRow, IrTaskStatus,
+    IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
 use crate::source::{SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
@@ -155,6 +155,7 @@ fn block_to_ir(
             named_args,
             chain,
             body,
+            lambda_header,
             span,
         } => {
             let ir_positional: Vec<_> = positional_args
@@ -163,7 +164,12 @@ fn block_to_ir(
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
+                .map(|arg| IrNamedArg {
+                    name: arg.name.clone(),
+                    name_span: byte_to_source_span(&arg.name_span, source_id),
+                    value: value_to_ir(&arg.value, source_id, diagnostics),
+                    span: byte_to_source_span(&arg.span, source_id),
+                })
                 .collect();
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
@@ -171,6 +177,38 @@ fn block_to_ir(
                     .filter_map(|b| block_to_ir(b, source_id, diagnostics))
                     .collect::<Vec<_>>()
             });
+            if name == "function" {
+                if positional_args.len() != 1 || !named_args.is_empty() || !chain.is_empty() {
+                    diagnostics.push(invalid_function_declaration(
+                        "`.function` requires exactly one positional name argument, no named arguments, and no chain",
+                        span,
+                        source_id,
+                    ));
+                    return None;
+                }
+                let declaration_name = ir_positional.first().cloned()?;
+                let parameters = lambda_header
+                    .as_ref()
+                    .map(|header| {
+                        header
+                            .parameters
+                            .iter()
+                            .map(|parameter| IrParameter {
+                                name: parameter.name.clone(),
+                                name_span: byte_to_source_span(&parameter.name_span, source_id),
+                                span: byte_to_source_span(&parameter.span, source_id),
+                                optional: parameter.optional,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                return Some(IrNode::FunctionDeclaration {
+                    name: declaration_name,
+                    parameters,
+                    body: ir_body.unwrap_or_default(),
+                    span: byte_to_source_span(span, source_id),
+                });
+            }
             if chain.is_empty() {
                 Some(IrNode::FunctionCall {
                     name: name.clone(),
@@ -289,7 +327,12 @@ fn call_segment_to_ir(
         named_args: segment
             .named_args
             .iter()
-            .map(|(name, value)| (name.clone(), value_to_ir(value, source_id, diagnostics)))
+            .map(|arg| IrNamedArg {
+                name: arg.name.clone(),
+                name_span: byte_to_source_span(&arg.name_span, source_id),
+                value: value_to_ir(&arg.value, source_id, diagnostics),
+                span: byte_to_source_span(&arg.span, source_id),
+            })
             .collect(),
         span: byte_to_source_span(&segment.span, source_id),
     }
@@ -350,7 +393,12 @@ fn inline_to_ir(
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
-                .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
+                .map(|arg| IrNamedArg {
+                    name: arg.name.clone(),
+                    name_span: byte_to_source_span(&arg.name_span, source_id),
+                    value: value_to_ir(&arg.value, source_id, diagnostics),
+                    span: byte_to_source_span(&arg.span, source_id),
+                })
                 .collect();
             let ir_body = body
                 .as_ref()
@@ -444,7 +492,12 @@ fn value_to_ir(
                     .collect();
                 let ir_named: Vec<_> = named_args
                     .iter()
-                    .map(|(k, v)| (k.clone(), value_to_ir(v, source_id, diagnostics)))
+                    .map(|arg| IrNamedArg {
+                        name: arg.name.clone(),
+                        name_span: byte_to_source_span(&arg.name_span, source_id),
+                        value: value_to_ir(&arg.value, source_id, diagnostics),
+                        span: byte_to_source_span(&arg.span, source_id),
+                    })
                     .collect();
                 let ir_body = body.as_ref().map(|b| {
                     vec![IrNode::Paragraph {
@@ -508,6 +561,21 @@ fn push_unsupported(
             "The source semantics were not coerced into a different Markdown node.".to_string(),
         ],
     });
+}
+
+fn invalid_function_declaration(
+    message: &str,
+    span: &crate::source::ByteSpan,
+    source_id: SourceId,
+) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(byte_to_source_span(span, source_id)),
+        secondary: Vec::new(),
+        hints: vec!["A user-defined function needs one positional name argument.".to_string()],
+    }
 }
 
 fn inline_span_start(inline: &Inline) -> usize {
