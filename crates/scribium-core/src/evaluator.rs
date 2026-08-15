@@ -91,9 +91,67 @@ impl VariableValue {
 /// A source-backed callable definition stored in an evaluator scope.
 #[derive(Debug, Clone, PartialEq)]
 struct FunctionBinding {
-    parameters: Vec<IrParameter>,
+    parameters: LambdaParameters,
     body: Vec<IrNode>,
     declaration_span: SourceSpan,
+}
+
+/// The parameter mode of a callable body.
+///
+/// Explicit parameters retain their source-backed names and optionality.
+/// Headerless lambdas expose the invocation's positional values through the
+/// invocation-local implicit scope. Keeping this distinction in the callable
+/// representation lets both modes use the same argument evaluation and body
+/// invocation path without aliasing `.1` onto an explicit parameter.
+#[derive(Debug, Clone, PartialEq)]
+enum LambdaParameters {
+    Explicit(Vec<IrParameter>),
+    Implicit,
+}
+
+impl LambdaParameters {
+    #[cfg(test)]
+    fn explicit(&self) -> Option<&[IrParameter]> {
+        match self {
+            Self::Explicit(parameters) => Some(parameters),
+            Self::Implicit => None,
+        }
+    }
+
+    fn description(&self) -> String {
+        match self {
+            Self::Explicit(parameters) => format!("{} explicit parameter(s)", parameters.len()),
+            Self::Implicit => "implicit positional parameters".to_string(),
+        }
+    }
+}
+
+enum BoundLambdaArguments {
+    Explicit(Vec<IrValue>),
+    Implicit(Vec<IrValue>),
+}
+
+/// The implicit-parameter boundary installed for one callable invocation.
+///
+/// An explicit invocation deliberately masks any outer implicit scope. This
+/// prevents `.1` in an explicit lambda from accidentally capturing an outer
+/// lambda's argument.
+#[derive(Debug, Clone, PartialEq)]
+enum LambdaScope {
+    Explicit,
+    Implicit(Vec<IrValue>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImplicitParameterIndex {
+    Valid(usize),
+    Overflow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImplicitParameterError {
+    Missing,
+    Overflow,
 }
 
 /// A call body that has not been evaluated yet.
@@ -201,6 +259,7 @@ struct EvaluationContext {
     parent: Option<Box<EvaluationContext>>,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, FunctionBinding>,
+    lambda_scope: Option<LambdaScope>,
 }
 
 impl EvaluationContext {
@@ -215,6 +274,7 @@ impl EvaluationContext {
             parent: Some(Box::new(self.clone())),
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
+            lambda_scope: None,
         }
     }
 
@@ -228,7 +288,7 @@ impl EvaluationContext {
     fn set_function_binding(
         &mut self,
         name: String,
-        parameters: Vec<IrParameter>,
+        parameters: LambdaParameters,
         body: Vec<IrNode>,
         declaration_span: SourceSpan,
     ) {
@@ -255,10 +315,14 @@ impl EvaluationContext {
             .collect();
         self.set_function_binding(
             name,
-            parameters,
+            LambdaParameters::Explicit(parameters),
             Vec::new(),
             SourceSpan::new(crate::source::SourceId(0), 0, 0),
         );
+    }
+
+    fn set_lambda_scope(&mut self, scope: LambdaScope) {
+        self.lambda_scope = Some(scope);
     }
 
     /// Gets a variable value if it exists.
@@ -280,6 +344,30 @@ impl EvaluationContext {
                 .as_deref()
                 .and_then(|parent| parent.get_function(name))
         })
+    }
+
+    /// Resolves a numeric implicit parameter only inside the nearest lambda
+    /// invocation. Explicit lambda scopes are a hard boundary and do not
+    /// synthesize `.1` aliases.
+    fn get_implicit_parameter(
+        &self,
+        name: &str,
+    ) -> Option<Result<IrValue, ImplicitParameterError>> {
+        let index = implicit_parameter_index(name)?;
+        match self.lambda_scope.as_ref() {
+            Some(LambdaScope::Explicit) => None,
+            Some(LambdaScope::Implicit(arguments)) => Some(match index {
+                ImplicitParameterIndex::Valid(index) => arguments
+                    .get(index.saturating_sub(1))
+                    .cloned()
+                    .ok_or(ImplicitParameterError::Missing),
+                ImplicitParameterIndex::Overflow => Err(ImplicitParameterError::Overflow),
+            }),
+            None => self
+                .parent
+                .as_deref()
+                .and_then(|parent| parent.get_implicit_parameter(name)),
+        }
     }
 }
 
@@ -660,6 +748,16 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
+        if let Some(result) = context.get_implicit_parameter(name) {
+            return match result {
+                Ok(value) => CallOutcome::Value(value),
+                Err(error) => {
+                    diagnostics.push(implicit_parameter_error(name, error, *span));
+                    CallOutcome::Failed
+                }
+            };
+        }
+
         if is_conditional(name) {
             let condition = match self.resolve_call_condition(
                 name,
@@ -781,97 +879,152 @@ impl Evaluator {
             Ok(values) => values,
             Err(outcome) => return outcome,
         };
-
-        let mut bound: Vec<Option<IrValue>> = vec![None; binding.parameters.len()];
-        for (index, value) in positional.into_iter().enumerate() {
-            let Some(slot) = bound.get_mut(index) else {
-                diagnostics.push(function_error(
-                    format!(
-                        "Function call has too many positional arguments (received at least {})",
-                        index + 1
-                    ),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            };
-            *slot = Some(value);
-        }
-
-        for argument in &named {
-            let Some(index) = binding
-                .parameters
-                .iter()
-                .position(|parameter| parameter.name == argument.name)
-            else {
-                diagnostics.push(function_error_at(
-                    format!("Unknown named parameter `{}`", argument.name),
-                    argument.name_span,
-                ));
-                return CallOutcome::Failed;
-            };
-            if bound[index].is_some() {
-                diagnostics.push(function_error_at(
-                    format!("Parameter `{}` was bound more than once", argument.name),
-                    argument.name_span,
-                ));
-                return CallOutcome::Failed;
-            }
-            bound[index] = Some(argument.value.clone());
-        }
-
-        let body_value = if let Some(body) = body {
-            let Some(last) = bound.last() else {
-                diagnostics.push(function_error(
-                    "A block argument requires a final function parameter".to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            };
-            if last.is_some() {
-                diagnostics.push(function_error(
-                    "A block argument collides with the function's final parameter binding"
-                        .to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
-            match self.evaluate_call_body(body, span, diagnostics, context) {
-                CallOutcome::Value(value) => Some(value),
-                CallOutcome::NoValue => return CallOutcome::NoValue,
-                CallOutcome::Failed => return CallOutcome::Failed,
-                CallOutcome::Unresolved => return CallOutcome::Unresolved,
-            }
-        } else {
-            None
+        let bound = match self.bind_callable_arguments(
+            &binding.parameters,
+            positional,
+            named,
+            body,
+            span,
+            diagnostics,
+            context,
+        ) {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
         };
-
-        if let Some(value) = body_value {
-            if let Some(last) = bound.last_mut() {
-                *last = Some(value);
-            }
-        }
-
-        for (index, parameter) in binding.parameters.iter().enumerate() {
-            if bound[index].is_none() {
-                if parameter.optional {
-                    bound[index] = Some(IrValue::None);
-                } else {
-                    diagnostics.push(function_error_at(
-                        format!("Missing required argument `{}`", parameter.name),
-                        parameter.name_span,
-                    ));
-                    return CallOutcome::Failed;
+        let mut child = context.child();
+        match bound {
+            BoundLambdaArguments::Explicit(values) => {
+                child.set_lambda_scope(LambdaScope::Explicit);
+                if let LambdaParameters::Explicit(parameters) = &binding.parameters {
+                    for (parameter, value) in parameters.iter().zip(values) {
+                        child.set_value(parameter.name.clone(), value);
+                    }
                 }
             }
-        }
-
-        let mut child = context.child();
-        for (parameter, value) in binding.parameters.iter().zip(bound) {
-            if let Some(value) = value {
-                child.set_value(parameter.name.clone(), value);
+            BoundLambdaArguments::Implicit(values) => {
+                child.set_lambda_scope(LambdaScope::Implicit(values));
             }
         }
         self.evaluate_callable_body_value(&binding.body, diagnostics, &mut child)
+    }
+
+    /// Evaluates and binds one callable's arguments for either parameter mode.
+    /// The result is consumed by the shared child-scope/body invocation path.
+    #[allow(clippy::too_many_arguments)]
+    fn bind_callable_arguments(
+        &self,
+        parameters: &LambdaParameters,
+        positional: Vec<IrValue>,
+        named: Vec<IrNamedArg>,
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Result<BoundLambdaArguments, CallOutcome> {
+        match parameters {
+            LambdaParameters::Implicit => {
+                if let Some(argument) = named.first() {
+                    diagnostics.push(function_error_at(
+                        "Implicit lambda parameters are positional only".to_string(),
+                        argument.name_span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                let mut arguments = positional;
+                if let Some(body) = body {
+                    let value = match self.evaluate_call_body(body, span, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        CallOutcome::NoValue => return Err(CallOutcome::NoValue),
+                        CallOutcome::Failed => return Err(CallOutcome::Failed),
+                        CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
+                    };
+                    arguments.push(value);
+                }
+                Ok(BoundLambdaArguments::Implicit(arguments))
+            }
+            LambdaParameters::Explicit(parameters) => {
+                let mut bound: Vec<Option<IrValue>> = vec![None; parameters.len()];
+                for (index, value) in positional.into_iter().enumerate() {
+                    let Some(slot) = bound.get_mut(index) else {
+                        diagnostics.push(function_error(
+                            format!(
+                                "Function call has too many positional arguments (received at least {})",
+                                index + 1
+                            ),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    };
+                    *slot = Some(value);
+                }
+
+                for argument in &named {
+                    let Some(index) = parameters
+                        .iter()
+                        .position(|parameter| parameter.name == argument.name)
+                    else {
+                        diagnostics.push(function_error_at(
+                            format!("Unknown named parameter `{}`", argument.name),
+                            argument.name_span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    };
+                    if bound[index].is_some() {
+                        diagnostics.push(function_error_at(
+                            format!("Parameter `{}` was bound more than once", argument.name),
+                            argument.name_span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                    bound[index] = Some(argument.value.clone());
+                }
+
+                if let Some(body) = body {
+                    let Some(last) = bound.last() else {
+                        diagnostics.push(function_error(
+                            "A block argument requires a final function parameter".to_string(),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    };
+                    if last.is_some() {
+                        diagnostics.push(function_error(
+                            "A block argument collides with the function's final parameter binding"
+                                .to_string(),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                    let value = match self.evaluate_call_body(body, span, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        CallOutcome::NoValue => return Err(CallOutcome::NoValue),
+                        CallOutcome::Failed => return Err(CallOutcome::Failed),
+                        CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
+                    };
+                    if let Some(last) = bound.last_mut() {
+                        *last = Some(value);
+                    }
+                }
+
+                for (index, parameter) in parameters.iter().enumerate() {
+                    if bound[index].is_none() {
+                        if parameter.optional {
+                            bound[index] = Some(IrValue::None);
+                        } else {
+                            diagnostics.push(function_error_at(
+                                format!("Missing required argument `{}`", parameter.name),
+                                parameter.name_span,
+                            ));
+                            return Err(CallOutcome::Failed);
+                        }
+                    }
+                }
+
+                Ok(BoundLambdaArguments::Explicit(
+                    bound.into_iter().flatten().collect(),
+                ))
+            }
+        }
     }
 
     fn evaluate_callable_body_value(
@@ -1043,9 +1196,9 @@ impl Evaluator {
             CallOutcome::Unresolved => {
                 let message = if let Some(binding) = context.get_function(&segment.name) {
                     format!(
-                        "Function `{}` is visible in this scope but callable function declarations are not implemented yet ({} parameter(s))",
+                        "Function `{}` is visible in this scope but callable function declarations are not implemented yet ({})",
                         segment.name,
-                        binding.parameters.len()
+                        binding.parameters.description()
                     )
                 } else {
                     format!(
@@ -1499,6 +1652,56 @@ fn is_conditional(name: &str) -> bool {
     name == "if" || name == "ifnot"
 }
 
+/// Parses the numeric part of a parser-preserved implicit parameter call.
+///
+/// The frontend already enforces the token boundary and rejects `.0`/leading
+/// zero spellings. This checked conversion keeps oversized decimal indices
+/// deterministic instead of allowing an integer conversion panic.
+fn implicit_parameter_index(name: &str) -> Option<ImplicitParameterIndex> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes[0] == b'0' || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut index = 0usize;
+    for &byte in bytes {
+        let digit = usize::from(byte - b'0');
+        let Some(next) = index
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(digit))
+        else {
+            return Some(ImplicitParameterIndex::Overflow);
+        };
+        index = next;
+    }
+    Some(ImplicitParameterIndex::Valid(index))
+}
+
+fn implicit_parameter_error(
+    name: &str,
+    error: ImplicitParameterError,
+    span: SourceSpan,
+) -> Diagnostic {
+    let message = match error {
+        ImplicitParameterError::Missing => {
+            format!("Implicit lambda parameter `.{name}` is not bound for this invocation")
+        }
+        ImplicitParameterError::Overflow => {
+            format!("Implicit lambda parameter `.{name}` is too large for this evaluator")
+        }
+    };
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Provide the positional argument required by the implicit lambda parameter."
+                .to_string(),
+        ],
+    }
+}
+
 fn chain_evaluation_error(message: String, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3001".to_string(),
@@ -1742,9 +1945,14 @@ impl Evaluator {
                 return;
             }
         }
+        let lambda_parameters = if parameters.is_empty() {
+            LambdaParameters::Implicit
+        } else {
+            LambdaParameters::Explicit(parameters.to_vec())
+        };
         context.set_function_binding(
             function_name.clone(),
-            parameters.to_vec(),
+            lambda_parameters,
             body.to_vec(),
             *span,
         );
@@ -2579,11 +2787,13 @@ mod tests {
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child.get_function("inherited").map(|binding| binding
-                .parameters
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()),
+            child
+                .get_function("inherited")
+                .and_then(|binding| binding.parameters.explicit())
+                .map(|parameters| parameters
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()),
             Some(vec!["value"])
         );
         child.set_value("local".into(), IrValue::String("child".into()));
@@ -2595,11 +2805,13 @@ mod tests {
             Some(IrValue::String("child".into()))
         );
         assert_eq!(
-            child.get_function("future").map(|binding| binding
-                .parameters
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()),
+            child
+                .get_function("future")
+                .and_then(|binding| binding.parameters.explicit())
+                .map(|parameters| parameters
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()),
             Some(vec!["value"])
         );
         child.set_value("visible".into(), IrValue::String("shadowed".into()));
@@ -2613,19 +2825,23 @@ mod tests {
             Some(IrValue::String("parent".into()))
         );
         assert_eq!(
-            child.get_function("inherited").map(|binding| binding
-                .parameters
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()),
+            child
+                .get_function("inherited")
+                .and_then(|binding| binding.parameters.explicit())
+                .map(|parameters| parameters
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()),
             Some(vec!["shadowed"])
         );
         assert_eq!(
-            parent.get_function("inherited").map(|binding| binding
-                .parameters
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect::<Vec<_>>()),
+            parent
+                .get_function("inherited")
+                .and_then(|binding| binding.parameters.explicit())
+                .map(|parameters| parameters
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()),
             Some(vec!["value"])
         );
     }

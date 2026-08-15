@@ -479,3 +479,43 @@ fn integration_optional_function_parameters_reach_typst_and_pdf() {
         assert!(pdf.starts_with(b"%PDF-"), "PDF must start with %PDF-");
     });
 }
+
+#[test]
+fn integration_implicit_lambda_parameter_reaches_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = ".function {triple}\n    .multiply {.1} {3}\n\nImplicit result: .triple {2}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("implicit.qd")
+        .expect("valid path")
+        .add_source("implicit.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "implicit diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("Implicit result: 6"),
+        "generated Typst: {typst_code}"
+    );
+    assert!(!typst_code.contains(".triple"));
+
+    with_typst("implicit-lambda-parameter", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "implicit.qd".to_string(),
+            })
+            .expect("implicit-parameter Typst must compile");
+        let pdf = output
+            .pdf
+            .expect("implicit-parameter PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"), "PDF must start with %PDF-");
+    });
+}

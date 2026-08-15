@@ -547,6 +547,116 @@ mod tests {
     }
 
     #[test]
+    fn compile_implicit_lambda_parameters_use_the_shared_callable_path() {
+        let source = ".function {identity}\n    .1\n\n.identity {first}\n.identity {second}\n\n.function {pair}\n    .1\n    .2\n\n.pair {one} {two}\n\n.identity {2}::multiply {3}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "first\nsecond\none\ntwo\n6");
+    }
+
+    #[test]
+    fn compile_implicit_parameters_preserve_typed_values() {
+        let numeric = ".function {triple}\n    .multiply {.1} {3}\n\n.triple {2}\n";
+        let (result, _) = compile_source(numeric);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "6");
+
+        let boolean = ".function {truth}\n    .if {.1}\n        yes\n\n.truth {true}\n";
+        let (result, _) = compile_source(boolean);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "yes");
+
+        let none = ".function {optional}\n    value?:\n    .value\n\n.function {identity}\n    .1\n\n.function {is-none}\n    .isnone {.1}\n\n.is-none {.identity {.optional}}\n.is-none {\"None\"}\n";
+        let (result, _) = compile_source(none);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "true\nfalse");
+    }
+
+    #[test]
+    fn compile_implicit_parameter_content_keeps_markdown_structure() {
+        let source = ".function {identity}\n    .1\n\n.identity\n    **rich**\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected rich implicit parameter result")
+        };
+        assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
+        assert_eq!(inline_text(content), "rich");
+    }
+
+    #[test]
+    fn compile_implicit_lambda_scopes_are_nested_and_reusable() {
+        let source = ".function {inner}\n    .1\n\n.function {outer}\n    .inner {inner}\n    .1\n\n.outer {outer}\n.outer {again}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "inner\nouter\ninner\nagain");
+    }
+
+    #[test]
+    fn compile_implicit_parameter_missing_and_zero_argument_are_diagnostics() {
+        for source in [
+            ".function {missing}\n    .2\n\n.missing {one}\n",
+            ".function {zero}\n    .1\n\n.zero\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E3003");
+            assert_eq!(
+                diagnostic.primary.map(|span| span.source_id),
+                Some(source_id)
+            );
+            assert!(diagnostic.message.contains("Implicit lambda parameter"));
+            assert!(result.ir.nodes.is_empty());
+        }
+    }
+
+    #[test]
+    fn compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span() {
+        let source = ".function {missing}\r\n    .2\r\n\r\n.missing {세계}\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let start = source.find(".2").expect("implicit parameter span");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(source_id, start, start + 2))
+        );
+    }
+
+    #[test]
+    fn compile_implicit_parameters_keep_container_and_md_boundaries() {
+        let source = ".function {identity}\n    .1\n\n- .identity {list}\n\n> .identity {quote}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(matches!(
+            result.ir.nodes.first(),
+            Some(IrNode::UnorderedList { items, .. }) if items.len() == 1
+        ));
+        assert!(matches!(
+            result.ir.nodes.get(1),
+            Some(IrNode::Blockquote { content, .. }) if !content.is_empty()
+        ));
+
+        let md_source = ".function {identity}\n    .1\n\n.identity {value}\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.md")
+            .expect("valid path")
+            .add_source("main.md", md_source)
+            .expect("valid source")
+            .build()
+            .expect("valid project");
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| !matches!(node, IrNode::FunctionDeclaration { .. })));
+        assert!(output_text(&result).contains(".function"));
+        assert!(output_text(&result).contains(".identity"));
+    }
+
+    #[test]
     fn compile_user_functions_keep_scalar_values_for_nested_and_chain_calls() {
         let source = ".function {area}\n    width height:\n    .multiply {.width} by:{.height}\n\n.sum {.area {4} {2}} {1}\n\n.area {4} {2}::sum {1}\n";
         let (result, _) = compile_source(source);

@@ -42,7 +42,7 @@ provenance records.
 | Feature                        | Syntax                           | Compatibility            | Status           |
 |--------------------------------|----------------------------------|--------------------------|------------------|
 | Dot-prefixed call              | `.note`                          | Parsed                   | Implemented      |
-| Implicit positional refs       | `.1`, `.2`, ...                  | Parsed                   | Implemented      |
+| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Implemented      |
 | Named arguments                | `.panel width:{320}`             | Parsed                   | Implemented      |
 | Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Implemented      |
@@ -53,7 +53,7 @@ provenance records.
 | Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Implemented      |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
-| User-defined functions         | `.function {name}`, explicit parameters, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
+| User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Iteration                      | —                                | —                        | Planned          |
 | Functions/components            | —                                | —                        | Planned          |
@@ -118,7 +118,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Feature                         | Evidence (unit tests) |
 |---------------------------------|------------------------|
 | Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `scribium-quarkdown/src/lib.rs::parses_normal_call_names_and_spans`, `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
-| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `scribium-quarkdown/src/lib.rs::implicit_references_do_not_consume_arguments` |
+| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `implicit_references_do_not_consume_arguments`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
 | Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
 | Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
 | Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
@@ -132,7 +132,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | M2 blockquotes / strikethrough / task lists / tables | `scribium-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `scribium-core/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `scribium-core/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `scribium-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `scribium-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
 | v2.5.1 call syntax slice | `scribium-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `scribium-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `scribium-core/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`, `scribium-core/src/lib.rs::compile_evaluates_block_and_inline_chain_value_flow`, `compile_evaluates_chain_inside_a_content_argument`, `compile_chain_and_nested_call_are_semantically_equivalent`, `compile_variable_values_keep_types_across_chain_and_nested_forms`, `compile_numeric_variable_reassignment_preserves_numeric_value_context`, `compile_chain_and_ordinary_conditional_are_equally_lazy`, `compile_reports_unimplemented_chain_callees_with_specific_spans`, `compile_reports_chain_failures_in_inline_and_content_paths`; `scribium-core/src/evaluator.rs::nested_call_and_chain_share_the_same_value_context`, `nested_and_chained_case_transforms_share_dynamic_scalar_adaptation`, `variable_values_remain_semantic_through_nested_and_chained_calls`, `chain_value_flow_is_left_to_right_and_injects_first`, `chain_preserves_explicit_positional_arguments_after_previous_value`, `chain_keeps_named_arguments_named_while_injecting_previous_value`, `false_final_conditional_chain_does_not_evaluate_its_body`, `false_final_inline_conditional_chain_does_not_evaluate_its_body`, `child_scope_inherits_parent_and_isolates_local_bindings`; `scribium-cli/src/commands.rs::unimplemented_chain_callee_fails_before_typst_or_pdf_output`; `scribium-typst/tests/backend_integration.rs::integration_chain_evaluation_reaches_typst_and_pdf`; `fixtures/markdown/quarkdown_v251_syntax.qd` syntax/provenance fixture |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
-| User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_call_body_colon_is_not_a_lambda_header`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
+| User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_call_body_colon_is_not_a_lambda_header`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
 | Optional parameter values      | `scribium-core/src/ir.rs::none_uses_the_stable_externally_tagged_serde_variant`, `scribium-core/src/lib.rs::compile_optional_parameters_support_otherwise_and_preserve_value_types`, `compile_optional_none_is_distinct_from_no_value`, `compile_optional_none_can_be_stored_locally_without_parent_scope_leak`, `compile_optional_none_direct_output_materializes_as_text`, `compile_isnone_returns_a_semantic_boolean_for_optional_values` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 
@@ -184,10 +184,20 @@ the header and parameter spans, binds required parameters in a child scope,
 and preserves scalar or structured-content results through the shared value
 evaluator.
 
+The v2.5.1 [lambda reference](https://quarkdown.com/wiki/lambda/) explicitly
+defines a headerless lambda's positional parameters as `.1`, `.2`, `.3`, and
+so on, and states that lambdas fork nested scopes. The official
+[v2.5.1 release](https://github.com/iamgio/quarkdown/releases/tag/v2.5.1)
+was also probed as a black box: an out-of-range implicit reference and a
+reference in a zero-argument lambda fail as unresolved references. Scribium
+preserves that observable failure class as a deterministic source-backed
+`E3003`; it never substitutes `None` or evaluator `NoValue`.
+
 The claim is deliberately limited to required and optional explicit parameters,
-the tested scalar/content shapes, and the small `.otherwise`/`.isnone` builtin
-surface. Implicit `.1`/`.2` parameters, standalone lambda values, iteration,
-components, and complete DynamicValue compatibility remain compatibility debt.
+headerless implicit positional references, the tested scalar/content shapes,
+and the small `.otherwise`/`.isnone` builtin surface. Standalone lambda values,
+iteration, components, and complete DynamicValue compatibility remain
+compatibility debt.
 
 - **Unsupported:** Syntax may be parsed and preserved, but normal compilation
   produces an explicit `E8xxx` error diagnostic for the unsupported semantics
@@ -210,14 +220,16 @@ strict left-to-right value flow; an unimplemented chain callee reports a
 source-backed `E3001` evaluation error. The case builtins' small scalar
 adaptation contract is evidenced, not complete DynamicValue compatibility.
 **User-defined functions are also semantically supported for the evidenced
-slice**: zero-parameter, required, and optional explicit-parameter
-declarations, positional/named binding, block-last-parameter binding, child
-scope, source-order redeclaration, builtin override, and scalar/structured-
-content results. Missing optional parameters bind semantic `None`, which is
-consumed by `.otherwise` and `.isnone` without string conversion in value
-context. **Conditional evaluation (`.if` / `.ifnot`) with boolean literals and
-variable references (`.if {.name}`) is implemented**. Implicit lambda
-parameters, standalone lambda values, iteration, components, and complete
+slice**: headerless implicit and required/optional explicit-parameter
+declarations, positional/named binding where applicable, block-last-parameter
+binding, child scope, source-order redeclaration, builtin override, and
+scalar/structured-content results. Missing optional parameters bind semantic
+`None`, which is consumed by `.otherwise` and `.isnone` without string
+conversion in value context. Headerless `.1`/`.2` references are 1-based,
+invocation-local, and preserve typed `IrValue`s; missing indices produce a
+source-backed `E3003` diagnostic. **Conditional evaluation (`.if` / `.ifnot`)
+with boolean literals and variable references (`.if {.name}`) is implemented**.
+Standalone lambda values, iteration, components, and complete
 programmable-document compatibility remain unimplemented. A matrix row can
 therefore represent only the evidenced
 forms at its stated level; an input form that currently fails to parse (for
@@ -247,10 +259,10 @@ recovers as ordinary text.
 Quarkdown has documented features represented in the v2.5.0/v2.5.1 evidence set that
 Scribium has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
-debt against the complete target. Implicit/standalone lambda semantics,
-iteration, layout semantics, resource/data loading, and other v2.5.0 built-ins
-remain additional gaps. The evidenced function row does not promote those
-later semantic surfaces.
+debt against the complete target. Standalone lambda values, iteration, layout
+semantics, resource/data loading, and other v2.5.0 built-ins remain additional
+gaps. The evidenced function row does not promote those later semantic
+surfaces.
 
 ## Specification Record Format
 
