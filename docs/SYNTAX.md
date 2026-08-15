@@ -282,18 +282,18 @@ source-order state and produces no document output:
     Hello, world!
 
 .function {greet}
-    to from:
-    Hello, .to from .from!
+    to from?:
+    Hello, .to from .from::otherwise {unnamed}!
 
 .hello
+.greet {world}
 .greet {world} from:{John}
 ```
 
 The first body line of `.function` is contextually parsed by the Quarkdown
 grammar as a structured lambda header only when it ends in `:`. Ordinary call
 bodies keep their normal Markdown interpretation. Parameter names and the
-optional marker retain original source spans through the frontend and IR;
-optional parameters are diagnosed as deferred semantics in this slice.
+optional marker retain original source spans through the frontend and IR.
 
 Supported invocation semantics are positional and named binding, a block body
 bound to the final parameter, parent-visible/child-local scope, source-order
@@ -302,10 +302,26 @@ builtin after declaration. Outputless body statements update the child scope;
 one substantive semantic value remains typed across the function boundary,
 while multiple rich or Markdown outputs become structured content only when
 composition requires it. Nested and chained calls use the same evaluator value
-path.
+path. An omitted `parameter?` binds the semantic value `None`; it is not an
+outputless evaluator result. At an output boundary it materializes as the text
+`None`.
 
-Implicit lambda parameters (`.1`, `.2`, ...), optional `None` values, generic
-standalone lambdas, iteration, and components remain outside this slice. A
+Optional values can use the evidenced builtins below:
+
+```
+.from::otherwise {unnamed}
+.value::isnone
+```
+
+`.otherwise` returns its original value when it is not `None`, otherwise it
+returns its fallback value. Both branches retain their semantic type until
+the surrounding output context materializes them. `.isnone` returns a semantic
+boolean. A `None` value is distinct from an outputless `NoValue` result: the
+latter remains an evaluator control outcome and is still an error when a
+nested value-required context needs a value.
+
+Implicit lambda parameters (`.1`, `.2`, ...), generic standalone lambdas,
+iteration, and components remain outside this slice. A
 rich block result that cannot be represented in an inline context is rejected
 with a source-backed diagnostic rather than flattened or dropped.
 

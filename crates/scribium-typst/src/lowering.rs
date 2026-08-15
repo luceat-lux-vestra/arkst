@@ -476,6 +476,11 @@ impl LoweringContext {
                 self.push_str(&escaped);
                 self.push('"');
             }
+            IrValue::None => {
+                // Semantic None remains distinct from the observable text
+                // materialized by the evaluator at an output boundary.
+                self.push_str("none");
+            }
             IrValue::Content(nodes) => {
                 self.push('[');
                 let saved_item = std::mem::take(&mut self.list_item_indent);
@@ -1464,6 +1469,44 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "#figure(kind: \"table\")[content\n]\n\n");
+    }
+
+    #[test]
+    fn lower_none_value_as_typst_none_and_preserve_string_distinction() {
+        let doc = IrDocument {
+            nodes: vec![
+                IrNode::FunctionCall {
+                    name: "show-value".into(),
+                    positional_args: vec![IrValue::None],
+                    named_args: vec![IrNamedArg {
+                        name: "value".into(),
+                        name_span: empty_span(),
+                        value: IrValue::None,
+                        span: empty_span(),
+                    }],
+                    body: None,
+                    span: empty_span(),
+                },
+                IrNode::FunctionCall {
+                    name: "show-value".into(),
+                    positional_args: vec![IrValue::String("None".into())],
+                    named_args: vec![IrNamedArg {
+                        name: "value".into(),
+                        name_span: empty_span(),
+                        value: IrValue::String("None".into()),
+                        span: empty_span(),
+                    }],
+                    body: None,
+                    span: empty_span(),
+                },
+            ],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert_eq!(
+            code,
+            "#show-value(none, value: none)\n\n#show-value(\"None\", value: \"None\")\n\n"
+        );
     }
 
     #[test]

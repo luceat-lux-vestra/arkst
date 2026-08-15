@@ -440,3 +440,42 @@ fn integration_user_function_evaluation_reaches_typst_and_pdf() {
         assert!(pdf.starts_with(b"%PDF-"), "PDF must start with %PDF-");
     });
 }
+
+#[test]
+fn integration_optional_function_parameters_reach_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = ".function {greet}\n    name?:\n    Hello, .name::otherwise {anonymous}!\n\n.greet\n.greet {John}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("optional.qd")
+        .expect("valid path")
+        .add_source("optional.qd", source)
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "optional diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("Hello, anonymous!") && typst_code.contains("Hello, John!"),
+        "generated Typst: {typst_code}"
+    );
+
+    with_typst("optional-function-parameters", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "optional.qd".to_string(),
+            })
+            .expect("optional-parameter Typst must compile");
+        let pdf = output
+            .pdf
+            .expect("optional-parameter PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"), "PDF must start with %PDF-");
+    });
+}
