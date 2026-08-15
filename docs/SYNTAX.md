@@ -162,9 +162,12 @@ Call syntax has the following properties:
   supported chain segments directly in strict left-to-right order: the prior
   semantic value is injected as the next segment's first positional argument,
   while explicit positional and named arguments retain their order and names.
-  The current semantic evidence set is `.sum`, `.multiply`, `.uppercase`, and
-  `.lowercase`; an unknown or otherwise unexecutable chain segment reports a
-  source-backed `E3001` evaluation diagnostic and does not fabricate a value.
+  For the evidenced surface, `.a::b` and its documented nested equivalent
+  `.b {.a}` use the same value-context invocation path and therefore produce
+  equivalent semantic values and observable output. The current semantic
+  evidence set is `.sum`, `.multiply`, `.uppercase`, and `.lowercase`; an
+  unknown or otherwise unexecutable chain segment reports a source-backed
+  `E3001` evaluation diagnostic and does not fabricate a value.
   The parser's structural representation is consumed directly; no synthetic
   source or Markdown/Typst round trip is used.
 - A complete call may be wrapped in braces to lift word-adjacency boundaries,
@@ -278,6 +281,14 @@ scope and are evaluated in source order. Standalone lambda headers,
 `.function`, `.let`, `.foreach`, and `.repeat` remain subsequent semantic
 slices; this foundation does not claim those user-facing features are
 implemented.
+
+Function arguments and chain intermediates are evaluated in value context,
+which preserves scalar values and evaluated content until a final document
+output context materializes them as nodes or inline text. Conditional bodies
+remain lazy until the callee selects a branch. The current case-transform
+builtins use a deliberately small invocation-boundary adaptation contract for
+strings, identifiers, booleans, numbers, and plain text content; this is not a
+claim of complete Quarkdown `DynamicValue` or standard-library compatibility.
 
 ### Conditional (Implemented)
 

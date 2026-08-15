@@ -1,6 +1,6 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
-use crate::ir::IrValue;
+use crate::ir::{IrInline, IrNode, IrValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
@@ -80,14 +80,11 @@ fn evaluate_case(
             "`.{name}` requires exactly one positional text argument"
         )));
     }
-    let text = match &positional_args[0] {
-        IrValue::String(text) | IrValue::Identifier(text) => text,
-        _ => {
-            return Err(error(format!(
-                "`.{name}` requires a string or identifier argument"
-            )))
-        }
-    };
+    let text = adapt_scalar_to_text(&positional_args[0]).ok_or_else(|| {
+        error(format!(
+            "`.{name}` requires a scalar value that can adapt to text"
+        ))
+    })?;
     let transformed = if name == "uppercase" {
         text.to_uppercase()
     } else {
@@ -98,4 +95,30 @@ fn evaluate_case(
 
 fn error(message: String) -> BuiltinError {
     BuiltinError { message }
+}
+
+/// Applies the small invocation-boundary text adaptation contract used by the
+/// evidenced case builtins. Plain text content is adapted structurally; rich
+/// content is not rendered or round-tripped through a backend.
+fn adapt_scalar_to_text(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
+        IrValue::Boolean(value) => Some(value.to_string()),
+        IrValue::Number(value) => Some(value.to_string()),
+        IrValue::Content(nodes) => {
+            let mut text = String::new();
+            for node in nodes {
+                let IrNode::Paragraph { content, .. } = node else {
+                    return None;
+                };
+                for inline in content {
+                    let IrInline::Text { content, .. } = inline else {
+                        return None;
+                    };
+                    text.push_str(content);
+                }
+            }
+            Some(text)
+        }
+    }
 }

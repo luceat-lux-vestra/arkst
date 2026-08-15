@@ -343,6 +343,22 @@ fn integration_chain_evaluation_reaches_typst_and_pdf() {
     assert!(!typst_code.contains("#sum"));
     assert!(!typst_code.contains("#multiply"));
 
+    let nested_project = VirtualProjectBuilder::new()
+        .entry("nested.qd")
+        .expect("valid path")
+        .add_source("nested.qd", ".multiply {.sum {10} {5}} {2}\n")
+        .expect("valid path")
+        .build()
+        .unwrap();
+    let nested_result = compile(&nested_project, &CompileOptions::default());
+    assert!(
+        nested_result.diagnostics.is_empty(),
+        "nested diagnostics: {:?}",
+        nested_result.diagnostics
+    );
+    let nested_typst_code = scribium_typst::lowering::lower_to_typst_code(&nested_result.ir);
+    assert_eq!(nested_typst_code, typst_code);
+
     with_typst("chain-evaluation", |backend| {
         let output = backend
             .compile(&TypstInput {

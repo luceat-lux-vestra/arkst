@@ -71,20 +71,6 @@ impl VariableValue {
 }
 
 impl VariableValue {
-    /// Materializes the variable value as block nodes at a reference site.
-    fn materialize_block(&self, span: &SourceSpan) -> Vec<IrNode> {
-        match self {
-            VariableValue::Scalar(scalar) => vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(scalar),
-                    span: *span,
-                }],
-                span: *span,
-            }],
-            VariableValue::Content(nodes) => nodes.clone(),
-        }
-    }
-
     /// Materializes the variable value as inline nodes at a reference site.
     fn materialize_inline(&self, span: &SourceSpan) -> Vec<IrInline> {
         match self {
@@ -122,6 +108,28 @@ impl VariableValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FunctionBinding {
     parameters: Vec<String>,
+}
+
+/// A call body that has not been evaluated yet.
+///
+/// Keeping the source body in this form lets the callee decide whether it is
+/// eager or lazy. In particular, conditionals must inspect their condition
+/// before evaluating an unreachable body.
+#[derive(Clone, Copy)]
+enum CallBody<'a> {
+    Block(&'a [IrNode]),
+    Inline(&'a [IrInline]),
+}
+
+/// Result of invoking a call in value context.
+///
+/// `Unresolved` is distinct from an empty content value: an ordinary output
+/// context may preserve it, while a chain must reject it because it cannot
+/// inject a fabricated intermediate value.
+enum CallOutcome {
+    Value(IrValue),
+    NoValue,
+    Unresolved,
 }
 
 /// Evaluation context with explicit parent visibility and local bindings.
@@ -247,84 +255,15 @@ impl Evaluator {
                 named_args,
                 body,
                 span,
-            } => {
-                if is_conditional(name) {
-                    let condition = resolve_condition(
-                        name,
-                        positional_args,
-                        named_args,
-                        span,
-                        diagnostics,
-                        context,
-                    );
-                    let take = take_branch(name, condition);
-                    if take {
-                        self.conditional_block_content(
-                            positional_args,
-                            named_args,
-                            body,
-                            span,
-                            diagnostics,
-                            context,
-                        )
-                    } else {
-                        Vec::new()
-                    }
-                } else if is_var_declaration(name) {
-                    self.handle_var_declaration(
-                        name,
-                        positional_args,
-                        named_args,
-                        body,
-                        span,
-                        diagnostics,
-                        context,
-                    )
-                } else if is_variable_reference(name, positional_args, named_args, body, context) {
-                    self.handle_variable_reference(name, span, diagnostics, context)
-                } else if is_variable_reassignment(name, positional_args, named_args, body, context)
-                {
-                    self.handle_variable_reassignment(
-                        name,
-                        positional_args,
-                        span,
-                        diagnostics,
-                        context,
-                    )
-                } else if builtins::is_supported(name) {
-                    let evaluated_positional =
-                        self.evaluate_values(positional_args, diagnostics, context);
-                    let evaluated_named = self.evaluate_named(named_args, diagnostics, context);
-                    let evaluated_body = body
-                        .as_ref()
-                        .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context));
-                    self.materialize_block_value(
-                        self.invoke_builtin(
-                            name,
-                            &evaluated_positional,
-                            &evaluated_named,
-                            evaluated_body.as_deref(),
-                            span,
-                            diagnostics,
-                        ),
-                        span,
-                    )
-                } else {
-                    vec![IrNode::FunctionCall {
-                        name: name.clone(),
-                        positional_args: self.evaluate_values(
-                            positional_args,
-                            diagnostics,
-                            context,
-                        ),
-                        named_args: self.evaluate_named(named_args, diagnostics, context),
-                        body: body
-                            .as_ref()
-                            .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context)),
-                        span: *span,
-                    }]
-                }
-            }
+            } => self.evaluate_block_call(
+                name,
+                positional_args,
+                named_args,
+                body.as_deref(),
+                span,
+                diagnostics,
+                context,
+            ),
             IrNode::ChainedFunctionCall {
                 head,
                 chain,
@@ -457,88 +396,15 @@ impl Evaluator {
                 named_args,
                 body,
                 span,
-            } => {
-                if is_conditional(name) {
-                    let condition = resolve_condition(
-                        name,
-                        positional_args,
-                        named_args,
-                        span,
-                        diagnostics,
-                        context,
-                    );
-                    let take = if *name == "if" { condition } else { !condition };
-                    if take {
-                        self.conditional_inline_content(
-                            positional_args,
-                            named_args,
-                            body,
-                            span,
-                            diagnostics,
-                            context,
-                        )
-                    } else {
-                        Vec::new()
-                    }
-                } else if is_inline_variable_reference(
-                    name,
-                    positional_args,
-                    named_args,
-                    body,
-                    context,
-                ) {
-                    self.handle_inline_variable_reference(name, span, diagnostics, context)
-                } else if is_inline_variable_reassignment(
-                    name,
-                    positional_args,
-                    named_args,
-                    body,
-                    context,
-                ) {
-                    self.handle_inline_variable_reassignment(
-                        name,
-                        positional_args,
-                        span,
-                        diagnostics,
-                        context,
-                    )
-                } else if builtins::is_supported(name) {
-                    let evaluated_positional =
-                        self.evaluate_values(positional_args, diagnostics, context);
-                    let evaluated_named = self.evaluate_named(named_args, diagnostics, context);
-                    let evaluated_body = body.as_ref().map(|inlines| {
-                        vec![IrNode::Paragraph {
-                            content: self.evaluate_inlines(inlines, diagnostics, context),
-                            span: *span,
-                        }]
-                    });
-                    self.materialize_inline_value(
-                        self.invoke_builtin(
-                            name,
-                            &evaluated_positional,
-                            &evaluated_named,
-                            evaluated_body.as_deref(),
-                            span,
-                            diagnostics,
-                        ),
-                        span,
-                    )
-                } else {
-                    vec![IrInline::DirectiveCall {
-                        name: name.clone(),
-                        positional_args: self.evaluate_values(
-                            positional_args,
-                            diagnostics,
-                            context,
-                        ),
-                        named_args: self.evaluate_named(named_args, diagnostics, context),
-                        body: body
-                            .as_ref()
-                            .map(|inlines| self.evaluate_inlines(inlines, diagnostics, context)),
-                        span: *span,
-                    }]
-                }
-            }
+            } => self.evaluate_inline_call(
+                name,
+                positional_args,
+                named_args,
+                body.as_deref(),
+                span,
+                diagnostics,
+                context,
+            ),
             IrInline::ChainedDirectiveCall {
                 head,
                 chain,
@@ -557,6 +423,76 @@ impl Evaluator {
         }
     }
 
+    /// Evaluates an ordinary block call in output context.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_block_call(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<&[IrNode]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Vec<IrNode> {
+        match self.evaluate_call_value(
+            name,
+            positional_args,
+            named_args,
+            body.map(CallBody::Block),
+            span,
+            diagnostics,
+            context,
+        ) {
+            CallOutcome::Value(value) => self.materialize_block_value(Some(value), span),
+            CallOutcome::NoValue => Vec::new(),
+            CallOutcome::Unresolved => self.preserve_block_call(
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            ),
+        }
+    }
+
+    /// Evaluates an ordinary inline call in output context.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_inline_call(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<&[IrInline]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Vec<IrInline> {
+        match self.evaluate_call_value(
+            name,
+            positional_args,
+            named_args,
+            body.map(CallBody::Inline),
+            span,
+            diagnostics,
+            context,
+        ) {
+            CallOutcome::Value(value) => self.materialize_inline_value(Some(value), span),
+            CallOutcome::NoValue => Vec::new(),
+            CallOutcome::Unresolved => self.preserve_inline_call(
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            ),
+        }
+    }
+
     /// Evaluates a block chain and materializes its final semantic value.
     fn evaluate_block_chain(
         &self,
@@ -567,13 +503,14 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Vec<IrNode> {
-        // A chain body belongs to the final call. Evaluate it once before
-        // dispatch so it remains an ordinary semantic content value.
-        let evaluated_body = body
-            .as_ref()
-            .map(|nodes| self.evaluate_nodes(nodes, diagnostics, context));
         self.materialize_block_value(
-            self.evaluate_chain_value(head, chain, evaluated_body.as_deref(), diagnostics, context),
+            self.evaluate_chain_value(
+                head,
+                chain,
+                body.as_deref().map(CallBody::Block),
+                diagnostics,
+                context,
+            ),
             span,
         )
     }
@@ -588,16 +525,109 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Vec<IrInline> {
-        let evaluated_body = body.as_ref().map(|inlines| {
-            vec![IrNode::Paragraph {
-                content: self.evaluate_inlines(inlines, diagnostics, context),
-                span: *span,
-            }]
-        });
         self.materialize_inline_value(
-            self.evaluate_chain_value(head, chain, evaluated_body.as_deref(), diagnostics, context),
+            self.evaluate_chain_value(
+                head,
+                chain,
+                body.as_deref().map(CallBody::Inline),
+                diagnostics,
+                context,
+            ),
             span,
         )
+    }
+
+    /// Invokes a call in value context. Ordinary nested calls and chain
+    /// segments use this exact contract; only their surrounding syntax differs.
+    /// Bodies remain unevaluated until the callee selects an evaluation policy.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_call_value(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if is_conditional(name) {
+            let condition = self.resolve_call_condition(
+                name,
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+            );
+            return CallOutcome::Value(if take_branch(name, condition) {
+                self.conditional_content_value(
+                    positional_args,
+                    named_args,
+                    body,
+                    span,
+                    diagnostics,
+                    context,
+                )
+            } else {
+                IrValue::Content(Vec::new())
+            });
+        }
+
+        if is_var_declaration(name) {
+            return self.handle_var_declaration(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if is_variable_reference_call(name, positional_args, named_args, body, context) {
+            return context
+                .get(name)
+                .map(|value| CallOutcome::Value(value.to_value()))
+                .unwrap_or(CallOutcome::NoValue);
+        }
+
+        if is_variable_reassignment_call(name, positional_args, named_args, body, context) {
+            return self.handle_variable_reassignment_value(
+                name,
+                positional_args,
+                diagnostics,
+                context,
+            );
+        }
+
+        if builtins::is_supported(name) {
+            let Some(evaluated_positional) =
+                self.evaluate_values(positional_args, diagnostics, context)
+            else {
+                return CallOutcome::NoValue;
+            };
+            let Some(evaluated_named) = self.evaluate_named(named_args, diagnostics, context)
+            else {
+                return CallOutcome::NoValue;
+            };
+            return match builtins::evaluate(
+                name,
+                &evaluated_positional,
+                &evaluated_named,
+                body.is_some(),
+            ) {
+                Ok(value) => CallOutcome::Value(value),
+                Err(error) => {
+                    diagnostics.push(chain_evaluation_error(error.message, *span));
+                    CallOutcome::NoValue
+                }
+            };
+        }
+
+        // Ordinary output context preserves unresolved calls. A chain wrapper
+        // converts this outcome into an explicit source-backed E3001 instead.
+        CallOutcome::Unresolved
     }
 
     /// Evaluates a chain strictly left-to-right using semantic `IrValue`s.
@@ -605,27 +635,44 @@ impl Evaluator {
         &self,
         head: &IrCallSegment,
         chain: &[IrCallSegment],
-        body: Option<&[IrNode]>,
+        body: Option<CallBody<'_>>,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Option<IrValue> {
-        let evaluated_head = self.evaluate_call_segment(head, diagnostics, context);
-        let mut value =
-            self.invoke_chain_segment(&evaluated_head, None, None, diagnostics, context)?;
+        let mut value = self.chain_outcome(
+            self.evaluate_call_value(
+                &head.name,
+                &head.positional_args,
+                &head.named_args,
+                None,
+                &head.span,
+                diagnostics,
+                context,
+            ),
+            head,
+            diagnostics,
+            context,
+        )?;
 
         for (index, source_segment) in chain.iter().enumerate() {
-            let segment = self.evaluate_call_segment(source_segment, diagnostics, context);
-            let mut positional_args = Vec::with_capacity(1 + segment.positional_args.len());
+            let mut positional_args = Vec::with_capacity(1 + source_segment.positional_args.len());
             // The previous result is always first. Explicit positional
             // arguments follow it in their original order; named arguments
             // remain in the named collection untouched.
             positional_args.push(value);
-            positional_args.extend(segment.positional_args.iter().cloned());
+            positional_args.extend(source_segment.positional_args.iter().cloned());
             let final_body = (index + 1 == chain.len()).then_some(body).flatten();
-            value = self.invoke_chain_segment(
-                &segment,
-                Some(positional_args),
-                final_body,
+            value = self.chain_outcome(
+                self.evaluate_call_value(
+                    &source_segment.name,
+                    &positional_args,
+                    &source_segment.named_args,
+                    final_body,
+                    &source_segment.span,
+                    diagnostics,
+                    context,
+                ),
+                source_segment,
                 diagnostics,
                 context,
             )?;
@@ -634,116 +681,136 @@ impl Evaluator {
         Some(value)
     }
 
-    /// Invokes a segment that is participating in a chain.
-    ///
-    /// Unknown calls are intentionally an error here. An ordinary unresolved
-    /// call remains preserved by the existing evaluator behavior, but a chain
-    /// cannot fabricate an intermediate value and continue safely.
-    fn invoke_chain_segment(
+    fn chain_outcome(
         &self,
+        outcome: CallOutcome,
         segment: &IrCallSegment,
-        injected_positional: Option<Vec<IrValue>>,
-        body: Option<&[IrNode]>,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &EvaluationContext,
     ) -> Option<IrValue> {
-        let positional_args =
-            injected_positional.unwrap_or_else(|| segment.positional_args.clone());
-        let body = body.map(|nodes| nodes.to_vec());
-
-        if is_conditional(&segment.name) {
-            let condition = resolve_condition(
-                &segment.name,
-                &positional_args,
-                &segment.named_args,
-                &segment.span,
-                diagnostics,
-                context,
-            );
-            let nodes = if take_branch(&segment.name, condition) {
-                self.conditional_block_content(
-                    &positional_args,
-                    &segment.named_args,
-                    &body,
-                    &segment.span,
-                    diagnostics,
-                    context,
-                )
-            } else {
-                Vec::new()
-            };
-            return Some(IrValue::Content(nodes));
+        match outcome {
+            CallOutcome::Value(value) => Some(value),
+            CallOutcome::NoValue => None,
+            CallOutcome::Unresolved => {
+                let message = if let Some(binding) = context.get_function(&segment.name) {
+                    format!(
+                        "Function `{}` is visible in this scope but callable function declarations are not implemented yet ({} parameter(s))",
+                        segment.name,
+                        binding.parameters.len()
+                    )
+                } else {
+                    format!(
+                        "Cannot evaluate chained call segment `.{}`: no semantic implementation is available",
+                        segment.name
+                    )
+                };
+                diagnostics.push(chain_evaluation_error(message, segment.name_span));
+                None
+            }
         }
-
-        if is_var_declaration(&segment.name) {
-            self.handle_var_declaration(
-                &segment.name,
-                &positional_args,
-                &segment.named_args,
-                &body,
-                &segment.span,
-                diagnostics,
-                context,
-            );
-            return None;
-        }
-
-        if is_variable_reference(
-            &segment.name,
-            &positional_args,
-            &segment.named_args,
-            &body,
-            context,
-        ) {
-            return context.get(&segment.name).map(VariableValue::to_value);
-        }
-
-        if is_variable_reassignment(
-            &segment.name,
-            &positional_args,
-            &segment.named_args,
-            &body,
-            context,
-        ) {
-            self.handle_variable_reassignment(
-                &segment.name,
-                &positional_args,
-                &segment.span,
-                diagnostics,
-                context,
-            );
-            return None;
-        }
-
-        if builtins::is_supported(&segment.name) {
-            return self.invoke_builtin(
-                &segment.name,
-                &positional_args,
-                &segment.named_args,
-                body.as_deref(),
-                &segment.span,
-                diagnostics,
-            );
-        }
-
-        let message = if let Some(binding) = context.get_function(&segment.name) {
-            format!(
-                "Function `{}` is visible in this scope but callable function declarations are not implemented yet ({} parameter(s))",
-                segment.name,
-                binding.parameters.len()
-            )
-        } else {
-            format!(
-                "Cannot evaluate chained call segment `.{}`: no semantic implementation is available",
-                segment.name
-            )
-        };
-        diagnostics.push(chain_evaluation_error(message, segment.name_span));
-        None
     }
 
-    /// Evaluates one of the small deterministic builtins used by this slice.
-    fn invoke_builtin(
+    /// Evaluates a call body only after its callee has selected that strategy.
+    fn evaluate_call_body(
+        &self,
+        body: CallBody<'_>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> IrValue {
+        match body {
+            CallBody::Block(nodes) => {
+                IrValue::Content(self.evaluate_nodes(nodes, diagnostics, context))
+            }
+            CallBody::Inline(inlines) => IrValue::Content(vec![IrNode::Paragraph {
+                content: self.evaluate_inlines(inlines, diagnostics, context),
+                span: *span,
+            }]),
+        }
+    }
+
+    /// Resolves only a conditional's condition. Body and content arguments
+    /// remain lazy until the branch is known.
+    fn resolve_call_condition(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> bool {
+        let raw_condition = named_args
+            .iter()
+            .find(|(key, _)| key == "condition")
+            .map(|(_, value)| value)
+            .or_else(|| positional_args.first());
+        let Some(raw_condition) = raw_condition else {
+            diagnostics.push(unresolvable_condition(name, span));
+            return false;
+        };
+        let Some(condition) = self.evaluate_value(raw_condition, diagnostics, context) else {
+            diagnostics.push(unresolvable_condition(name, span));
+            return false;
+        };
+        match resolve_boolean_value(&condition, context) {
+            Some(value) => value,
+            None => {
+                diagnostics.push(unresolvable_condition(name, span));
+                false
+            }
+        }
+    }
+
+    /// Produces conditional content after the condition has selected the
+    /// branch. The body and body-like arguments are evaluated here, not before
+    /// dispatch.
+    fn conditional_content_value(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> IrValue {
+        if let Some(body) = body {
+            return self.evaluate_call_body(body, span, diagnostics, context);
+        }
+        if let Some((_, value)) = named_args.iter().find(|(key, _)| key == "body") {
+            return self
+                .evaluate_value(value, diagnostics, context)
+                .map_or_else(
+                    || IrValue::Content(Vec::new()),
+                    |value| self.scalar_or_content(value, span),
+                );
+        }
+        if let Some(value) = positional_args.get(1) {
+            return self
+                .evaluate_value(value, diagnostics, context)
+                .map_or_else(
+                    || IrValue::Content(Vec::new()),
+                    |value| self.scalar_or_content(value, span),
+                );
+        }
+        IrValue::Content(Vec::new())
+    }
+
+    fn scalar_or_content(&self, value: IrValue, span: &SourceSpan) -> IrValue {
+        match value {
+            IrValue::Content(nodes) => IrValue::Content(nodes),
+            scalar => IrValue::Content(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: scalar_to_text(&scalar),
+                    span: *span,
+                }],
+                span: *span,
+            }]),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_block_call(
         &self,
         name: &str,
         positional_args: &[IrValue],
@@ -751,14 +818,41 @@ impl Evaluator {
         body: Option<&[IrNode]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Option<IrValue> {
-        match builtins::evaluate(name, positional_args, named_args, body.is_some()) {
-            Ok(value) => Some(value),
-            Err(error) => {
-                diagnostics.push(chain_evaluation_error(error.message, *span));
-                None
-            }
-        }
+        context: &mut EvaluationContext,
+    ) -> Vec<IrNode> {
+        let positional_args =
+            self.evaluate_values_for_preservation(positional_args, diagnostics, context);
+        let named_args = self.evaluate_named_for_preservation(named_args, diagnostics, context);
+        vec![IrNode::FunctionCall {
+            name: name.to_string(),
+            positional_args,
+            named_args,
+            body: body.map(|nodes| self.evaluate_nodes(nodes, diagnostics, context)),
+            span: *span,
+        }]
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_inline_call(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[(String, IrValue)],
+        body: Option<&[IrInline]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Vec<IrInline> {
+        let positional_args =
+            self.evaluate_values_for_preservation(positional_args, diagnostics, context);
+        let named_args = self.evaluate_named_for_preservation(named_args, diagnostics, context);
+        vec![IrInline::DirectiveCall {
+            name: name.to_string(),
+            positional_args,
+            named_args,
+            body: body.map(|inlines| self.evaluate_inlines(inlines, diagnostics, context)),
+            span: *span,
+        }]
     }
 
     fn materialize_block_value(&self, value: Option<IrValue>, span: &SourceSpan) -> Vec<IrNode> {
@@ -786,24 +880,97 @@ impl Evaluator {
         }
     }
 
-    /// Evaluates value arguments (recursing into content values).
-    fn evaluate_call_segment(
+    /// Evaluates a value without entering document-output context.
+    fn evaluate_value(
         &self,
-        segment: &IrCallSegment,
+        value: &IrValue,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> IrCallSegment {
-        IrCallSegment {
-            name: segment.name.clone(),
-            name_span: segment.name_span,
-            positional_args: self.evaluate_values(&segment.positional_args, diagnostics, context),
-            named_args: self.evaluate_named(&segment.named_args, diagnostics, context),
-            span: segment.span,
+    ) -> Option<IrValue> {
+        match value {
+            IrValue::Content(nodes) => {
+                if let [IrNode::FunctionCall {
+                    name,
+                    positional_args,
+                    named_args,
+                    body,
+                    span,
+                }] = nodes.as_slice()
+                {
+                    return match self.evaluate_call_value(
+                        name,
+                        positional_args,
+                        named_args,
+                        body.as_deref().map(CallBody::Block),
+                        span,
+                        diagnostics,
+                        context,
+                    ) {
+                        CallOutcome::Value(value) => Some(value),
+                        CallOutcome::NoValue => None,
+                        CallOutcome::Unresolved => {
+                            Some(IrValue::Content(self.preserve_block_call(
+                                name,
+                                positional_args,
+                                named_args,
+                                body.as_deref(),
+                                span,
+                                diagnostics,
+                                context,
+                            )))
+                        }
+                    };
+                }
+                if let [IrNode::ChainedFunctionCall {
+                    head, chain, body, ..
+                }] = nodes.as_slice()
+                {
+                    return self.evaluate_chain_value(
+                        head,
+                        chain,
+                        body.as_deref().map(CallBody::Block),
+                        diagnostics,
+                        context,
+                    );
+                }
+                Some(IrValue::Content(self.evaluate_nodes(
+                    nodes,
+                    diagnostics,
+                    context,
+                )))
+            }
+            scalar => Some(scalar.clone()),
         }
     }
 
-    /// Evaluates value arguments (recursing into content values).
     fn evaluate_values(
+        &self,
+        values: &[IrValue],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Option<Vec<IrValue>> {
+        values
+            .iter()
+            .map(|value| self.evaluate_value(value, diagnostics, context))
+            .collect()
+    }
+
+    fn evaluate_named(
+        &self,
+        named: &[(String, IrValue)],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Option<Vec<(String, IrValue)>> {
+        named
+            .iter()
+            .map(|(key, value)| {
+                self.evaluate_value(value, diagnostics, context)
+                    .map(|value| (key.clone(), value))
+            })
+            .collect()
+    }
+
+    fn evaluate_values_for_preservation(
         &self,
         values: &[IrValue],
         diagnostics: &mut Vec<Diagnostic>,
@@ -811,17 +978,14 @@ impl Evaluator {
     ) -> Vec<IrValue> {
         values
             .iter()
-            .map(|value| match value {
-                IrValue::Content(nodes) => {
-                    IrValue::Content(self.evaluate_nodes(nodes, diagnostics, context))
-                }
-                other => other.clone(),
+            .map(|value| {
+                self.evaluate_value(value, diagnostics, context)
+                    .unwrap_or_else(|| IrValue::Content(Vec::new()))
             })
             .collect()
     }
 
-    /// Evaluates named arguments (recursing into content values).
-    fn evaluate_named(
+    fn evaluate_named_for_preservation(
         &self,
         named: &[(String, IrValue)],
         diagnostics: &mut Vec<Diagnostic>,
@@ -832,102 +996,11 @@ impl Evaluator {
             .map(|(key, value)| {
                 (
                     key.clone(),
-                    match value {
-                        IrValue::Content(nodes) => {
-                            IrValue::Content(self.evaluate_nodes(nodes, diagnostics, context))
-                        }
-                        other => other.clone(),
-                    },
+                    self.evaluate_value(value, diagnostics, context)
+                        .unwrap_or_else(|| IrValue::Content(Vec::new())),
                 )
             })
             .collect()
-    }
-
-    /// Content of a conditional block call: the body if present, otherwise
-    /// the named `body` argument if present, otherwise the second positional
-    /// argument (content or scalar), otherwise nothing.
-    fn conditional_block_content(
-        &self,
-        positional_args: &[IrValue],
-        named_args: &[(String, IrValue)],
-        body: &Option<Vec<IrNode>>,
-        span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
-        if let Some(nodes) = body {
-            return self.evaluate_nodes(nodes, diagnostics, context);
-        }
-        // Check named "body" argument
-        if let Some((_, IrValue::Content(nodes))) = named_args.iter().find(|(k, _)| k == "body") {
-            return self.evaluate_nodes(nodes, diagnostics, context);
-        }
-        if let Some((_, scalar)) = named_args.iter().find(|(k, _)| k == "body") {
-            return vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(scalar),
-                    span: *span,
-                }],
-                span: *span,
-            }];
-        }
-        match positional_args.get(1) {
-            Some(IrValue::Content(nodes)) => self.evaluate_nodes(nodes, diagnostics, context),
-            Some(scalar) => vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(scalar),
-                    span: *span,
-                }],
-                span: *span,
-            }],
-            None => Vec::new(),
-        }
-    }
-
-    /// Content of a conditional inline call: the body if present, otherwise
-    /// the named `body` argument if present, otherwise the second positional
-    /// argument (a single-paragraph content value or a bare scalar),
-    /// otherwise nothing.
-    fn conditional_inline_content(
-        &self,
-        positional_args: &[IrValue],
-        named_args: &[(String, IrValue)],
-        body: &Option<Vec<IrInline>>,
-        span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> Vec<IrInline> {
-        if let Some(inlines) = body {
-            return self.evaluate_inlines(inlines, diagnostics, context);
-        }
-        // Check named "body" argument
-        if let Some((_, IrValue::Content(nodes))) = named_args.iter().find(|(k, _)| k == "body") {
-            return match nodes.as_slice() {
-                [IrNode::Paragraph { content, .. }] => {
-                    self.evaluate_inlines(content, diagnostics, context)
-                }
-                _ => Vec::new(),
-            };
-        }
-        if let Some((_, scalar)) = named_args.iter().find(|(k, _)| k == "body") {
-            return vec![IrInline::Text {
-                content: scalar_to_text(scalar),
-                span: *span,
-            }];
-        }
-        match positional_args.get(1) {
-            Some(IrValue::Content(nodes)) => match nodes.as_slice() {
-                [IrNode::Paragraph { content, .. }] => {
-                    self.evaluate_inlines(content, diagnostics, context)
-                }
-                _ => Vec::new(),
-            },
-            Some(scalar) => vec![IrInline::Text {
-                content: scalar_to_text(scalar),
-                span: *span,
-            }],
-            None => Vec::new(),
-        }
     }
 }
 
@@ -944,46 +1017,6 @@ fn chain_evaluation_error(message: String, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["The evaluator did not fabricate a value for the failed call.".to_string()],
-    }
-}
-
-/// Resolves the condition of a conditional call.
-///
-/// A missing or non-boolean condition produces an `E3001` diagnostic and
-/// is treated as `false` (deterministic output).
-/// The condition can be provided as the first positional argument or as
-/// a named argument `condition`. Variable references (`.name`) are resolved.
-fn resolve_condition(
-    name: &str,
-    positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
-    span: &SourceSpan,
-    diagnostics: &mut Vec<Diagnostic>,
-    context: &mut EvaluationContext,
-) -> bool {
-    // First check named argument "condition"
-    if let Some((_, value)) = named_args.iter().find(|(k, _)| k == "condition") {
-        return match resolve_boolean_value(value, context) {
-            Some(value) => value,
-            None => {
-                diagnostics.push(unresolvable_condition(name, span));
-                false
-            }
-        };
-    }
-    // Fall back to first positional argument
-    match positional_args.first() {
-        Some(value) => match resolve_boolean_value(value, context) {
-            Some(value) => value,
-            None => {
-                diagnostics.push(unresolvable_condition(name, span));
-                false
-            }
-        },
-        None => {
-            diagnostics.push(unresolvable_condition(name, span));
-            false
-        }
     }
 }
 
@@ -1055,24 +1088,11 @@ fn is_var_declaration(name: &str) -> bool {
 }
 
 /// Returns true if a call is a variable reference (parameterless call to a known variable).
-fn is_variable_reference(
+fn is_variable_reference_call(
     name: &str,
     positional_args: &[IrValue],
     named_args: &[(String, IrValue)],
-    body: &Option<Vec<IrNode>>,
-    context: &EvaluationContext,
-) -> bool {
-    // Variable reference: parameterless call (no positional args, no named args, no body)
-    // to a name that exists in the variable environment.
-    positional_args.is_empty() && named_args.is_empty() && body.is_none() && context.contains(name)
-}
-
-/// Returns true if an inline call is a variable reference (parameterless call to a known variable).
-fn is_inline_variable_reference(
-    name: &str,
-    positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
-    body: &Option<Vec<IrInline>>,
+    body: Option<CallBody<'_>>,
     context: &EvaluationContext,
 ) -> bool {
     // Variable reference: parameterless call (no positional args, no named args, no body)
@@ -1081,24 +1101,11 @@ fn is_inline_variable_reference(
 }
 
 /// Returns true if a call is a variable reassignment (`.name {value}` where `name` is a known variable).
-fn is_variable_reassignment(
+fn is_variable_reassignment_call(
     name: &str,
     positional_args: &[IrValue],
     named_args: &[(String, IrValue)],
-    body: &Option<Vec<IrNode>>,
-    context: &EvaluationContext,
-) -> bool {
-    // Variable reassignment: call to a known variable name with exactly one
-    // positional argument (the new value), no named args, no body.
-    context.contains(name) && positional_args.len() == 1 && named_args.is_empty() && body.is_none()
-}
-
-/// Returns true if an inline call is a variable reassignment (`.name {value}` where `name` is a known variable).
-fn is_inline_variable_reassignment(
-    name: &str,
-    positional_args: &[IrValue],
-    named_args: &[(String, IrValue)],
-    body: &Option<Vec<IrInline>>,
+    body: Option<CallBody<'_>>,
     context: &EvaluationContext,
 ) -> bool {
     // Variable reassignment: call to a known variable name with exactly one
@@ -1160,153 +1167,87 @@ fn unresolvable_condition(name: &str, span: &SourceSpan) -> Diagnostic {
 impl Evaluator {
     // Variable handling methods
 
-    /// Handles a `.var` declaration (block level).
+    /// Handles a `.var` declaration in value context.
     #[allow(clippy::too_many_arguments)]
     fn handle_var_declaration(
         &self,
-        _name: &str,
         positional_args: &[IrValue],
         named_args: &[(String, IrValue)],
-        body: &Option<Vec<IrNode>>,
+        body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
+    ) -> CallOutcome {
         // Check for malformed declaration: must have a name (first positional arg)
         let var_name = match positional_args.first() {
             Some(IrValue::Identifier(name)) => name.clone(),
             Some(IrValue::String(name)) => name.clone(),
             _ => {
                 diagnostics.push(invalid_var_declaration(span));
-                return Vec::new();
+                return CallOutcome::NoValue;
             }
         };
         // Validate variable name
         if !is_valid_normal_call_name(&var_name) {
             diagnostics.push(invalid_var_name(&var_name, span));
-            return Vec::new();
+            return CallOutcome::NoValue;
         }
 
         // Determine the value: body > named "body" > second positional > named "value" > empty
-        if let Some(nodes) = body {
-            // Block variable: evaluate the body content
-            let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
-            context.set_content(var_name, evaluated);
-            return Vec::new();
+        if let Some(body) = body {
+            if let IrValue::Content(nodes) =
+                self.evaluate_call_body(body, span, diagnostics, context)
+            {
+                context.set_content(var_name, nodes);
+                return CallOutcome::NoValue;
+            }
         }
 
         // Check named "body" argument
-        if let Some((_, IrValue::Content(nodes))) = named_args.iter().find(|(k, _)| k == "body") {
-            let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
-            context.set_content(var_name, evaluated);
-            return Vec::new();
+        if let Some((_, value)) = named_args.iter().find(|(key, _)| key == "body") {
+            if let Some(value) = self.evaluate_value(value, diagnostics, context) {
+                match value {
+                    IrValue::Content(nodes) => context.set_content(var_name, nodes),
+                    scalar => context.set_value(var_name, scalar),
+                }
+                return CallOutcome::NoValue;
+            }
         }
 
         // Check named "value" argument
-        if let Some((_, value)) = named_args.iter().find(|(k, _)| k == "value") {
-            let evaluated = self.evaluate_value(value, diagnostics, context);
-            context.set_value(var_name, evaluated);
-            return Vec::new();
+        if let Some((_, value)) = named_args.iter().find(|(key, _)| key == "value") {
+            if let Some(value) = self.evaluate_value(value, diagnostics, context) {
+                context.set_value(var_name, value);
+                return CallOutcome::NoValue;
+            }
         }
 
         // Fall back to second positional argument
         if let Some(value) = positional_args.get(1) {
-            let evaluated = self.evaluate_value(value, diagnostics, context);
-            context.set_value(var_name, evaluated);
-            return Vec::new();
+            if let Some(value) = self.evaluate_value(value, diagnostics, context) {
+                context.set_value(var_name, value);
+                return CallOutcome::NoValue;
+            }
         }
 
         // No value provided - invalid declaration
         diagnostics.push(invalid_var_declaration(span));
-        Vec::new()
+        CallOutcome::NoValue
     }
 
-    /// Evaluates a single value for variable declaration.
-    fn evaluate_value(
-        &self,
-        value: &IrValue,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> IrValue {
-        match value {
-            IrValue::Content(nodes) => {
-                IrValue::Content(self.evaluate_nodes(nodes, diagnostics, context))
-            }
-            other => other.clone(),
-        }
-    }
-
-    /// Handles a variable reference (block level parameterless call to known variable).
-    fn handle_variable_reference(
-        &self,
-        name: &str,
-        span: &SourceSpan,
-        _diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
-        if let Some(var) = context.get(name) {
-            var.materialize_block(span)
-        } else {
-            // Should not happen if is_variable_reference returned true
-            vec![IrNode::FunctionCall {
-                name: name.to_string(),
-                positional_args: Vec::new(),
-                named_args: Vec::new(),
-                body: None,
-                span: *span,
-            }]
-        }
-    }
-
-    /// Handles a variable reference (inline level parameterless call to known variable).
-    fn handle_inline_variable_reference(
-        &self,
-        name: &str,
-        span: &SourceSpan,
-        _diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> Vec<IrInline> {
-        if let Some(var) = context.get(name) {
-            var.materialize_inline(span)
-        } else {
-            vec![IrInline::DirectiveCall {
-                name: name.to_string(),
-                positional_args: Vec::new(),
-                named_args: Vec::new(),
-                body: None,
-                span: *span,
-            }]
-        }
-    }
-
-    /// Handles a variable reassignment (block level).
-    fn handle_variable_reassignment(
+    /// Handles a variable reassignment in value context.
+    fn handle_variable_reassignment_value(
         &self,
         name: &str,
         positional_args: &[IrValue],
-        _span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
-        // Reassignment: evaluate the new value and update the variable
-        let new_value = self.evaluate_value(&positional_args[0], diagnostics, context);
+    ) -> CallOutcome {
+        let Some(new_value) = self.evaluate_value(&positional_args[0], diagnostics, context) else {
+            return CallOutcome::NoValue;
+        };
         context.set_value(name.to_string(), new_value);
-        Vec::new() // Reassignment produces no output
-    }
-
-    /// Handles a variable reassignment (inline level).
-    fn handle_inline_variable_reassignment(
-        &self,
-        name: &str,
-        positional_args: &[IrValue],
-        _span: &SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
-    ) -> Vec<IrInline> {
-        // Reassignment: evaluate the new value and update the variable
-        let new_value = self.evaluate_value(&positional_args[0], diagnostics, context);
-        context.set_value(name.to_string(), new_value);
-        Vec::new() // Reassignment produces no output
+        CallOutcome::NoValue
     }
 }
 
@@ -1396,6 +1337,35 @@ mod tests {
             body: None,
             span,
         }
+    }
+
+    fn chain_node_with_body(
+        head: IrCallSegment,
+        chain: Vec<IrCallSegment>,
+        body: Vec<IrNode>,
+    ) -> IrNode {
+        let span = span(
+            head.span.start,
+            chain
+                .last()
+                .map_or(head.span.end, |segment| segment.span.end),
+        );
+        IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body: Some(body),
+            span,
+        }
+    }
+
+    fn call_value(name: &str, positional_args: Vec<IrValue>) -> IrValue {
+        IrValue::Content(vec![IrNode::FunctionCall {
+            name: name.to_string(),
+            positional_args,
+            named_args: Vec::new(),
+            body: None,
+            span: span(0, 1),
+        }])
     }
 
     fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
@@ -1584,6 +1554,189 @@ mod tests {
     }
 
     #[test]
+    fn nested_call_and_chain_share_the_same_value_context() {
+        let nested = IrNode::FunctionCall {
+            name: "multiply".into(),
+            positional_args: vec![
+                call_value("sum", vec![IrValue::Number(10.0), IrValue::Number(5.0)]),
+                IrValue::Number(2.0),
+            ],
+            named_args: Vec::new(),
+            body: None,
+            span: span(0, 1),
+        };
+        let chain = chain_node(
+            chain_segment(
+                "sum",
+                0,
+                12,
+                vec![IrValue::Number(10.0), IrValue::Number(5.0)],
+            ),
+            vec![chain_segment(
+                "multiply",
+                14,
+                27,
+                vec![IrValue::Number(2.0)],
+            )],
+        );
+        let (nested_nodes, nested_diagnostics) = Evaluator::new().evaluate(&doc(vec![nested]));
+        let (chain_nodes, chain_diagnostics) = Evaluator::new().evaluate(&doc(vec![chain]));
+        assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
+        assert!(chain_diagnostics.is_empty(), "{chain_diagnostics:?}");
+        assert_paragraph_text(&nested_nodes.nodes, "30");
+        assert_paragraph_text(&chain_nodes.nodes, "30");
+    }
+
+    #[test]
+    fn nested_and_chained_case_transforms_share_dynamic_scalar_adaptation() {
+        let nested = IrNode::FunctionCall {
+            name: "lowercase".into(),
+            positional_args: vec![call_value(
+                "uppercase",
+                vec![IrValue::Identifier("hello".into())],
+            )],
+            named_args: Vec::new(),
+            body: None,
+            span: span(0, 1),
+        };
+        let chain = chain_node(
+            chain_segment(
+                "uppercase",
+                0,
+                17,
+                vec![IrValue::Identifier("hello".into())],
+            ),
+            vec![chain_segment("lowercase", 19, 28, Vec::new())],
+        );
+        let (nested_nodes, nested_diagnostics) = Evaluator::new().evaluate(&doc(vec![nested]));
+        let (chain_nodes, chain_diagnostics) = Evaluator::new().evaluate(&doc(vec![chain]));
+        assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
+        assert!(chain_diagnostics.is_empty(), "{chain_diagnostics:?}");
+        assert_paragraph_text(&nested_nodes.nodes, "hello");
+        assert_paragraph_text(&chain_nodes.nodes, "hello");
+    }
+
+    #[test]
+    fn variable_values_remain_semantic_through_nested_and_chained_calls() {
+        let nested = vec![
+            var_declaration("myvar", IrValue::Boolean(true)),
+            IrNode::FunctionCall {
+                name: "uppercase".into(),
+                positional_args: vec![call_value("myvar", Vec::new())],
+                named_args: Vec::new(),
+                body: None,
+                span: span(0, 1),
+            },
+        ];
+        let chained = vec![
+            var_declaration("myvar", IrValue::Boolean(true)),
+            chain_node(
+                chain_segment("myvar", 0, 6, Vec::new()),
+                vec![chain_segment("uppercase", 8, 18, Vec::new())],
+            ),
+        ];
+        let (nested_nodes, nested_diagnostics) = Evaluator::new().evaluate(&doc(nested));
+        let (chain_nodes, chain_diagnostics) = Evaluator::new().evaluate(&doc(chained));
+        assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
+        assert!(chain_diagnostics.is_empty(), "{chain_diagnostics:?}");
+        assert_paragraph_text(&nested_nodes.nodes, "TRUE");
+        assert_paragraph_text(&chain_nodes.nodes, "TRUE");
+    }
+
+    #[test]
+    fn false_final_conditional_chain_does_not_evaluate_its_body() {
+        let chain = vec![
+            var_declaration("flag", IrValue::Boolean(false)),
+            var_declaration("x", IrValue::Identifier("before".into())),
+            chain_node_with_body(
+                chain_segment("flag", 0, 5, Vec::new()),
+                vec![chain_segment("if", 7, 10, Vec::new())],
+                vec![var_reassignment("x", IrValue::Identifier("after".into()))],
+            ),
+            var_ref("x"),
+        ];
+        let ordinary = vec![
+            var_declaration("flag", IrValue::Boolean(false)),
+            var_declaration("x", IrValue::Identifier("before".into())),
+            if_call(
+                "if",
+                IrValue::Boolean(false),
+                vec![var_reassignment("x", IrValue::Identifier("after".into()))],
+            ),
+            var_ref("x"),
+        ];
+        let (chain_nodes, chain_diagnostics) = Evaluator::new().evaluate(&doc(chain));
+        let (ordinary_nodes, ordinary_diagnostics) = Evaluator::new().evaluate(&doc(ordinary));
+        assert!(chain_diagnostics.is_empty(), "{chain_diagnostics:?}");
+        assert!(ordinary_diagnostics.is_empty(), "{ordinary_diagnostics:?}");
+        assert_paragraph_text(&chain_nodes.nodes, "before");
+        assert_paragraph_text(&ordinary_nodes.nodes, "before");
+    }
+
+    #[test]
+    fn false_final_inline_conditional_chain_does_not_evaluate_its_body() {
+        let chain = vec![
+            var_declaration("flag", IrValue::Boolean(false)),
+            var_declaration("x", IrValue::Identifier("before".into())),
+            IrNode::Paragraph {
+                content: vec![
+                    IrInline::ChainedDirectiveCall {
+                        head: chain_segment("flag", 0, 5, Vec::new()),
+                        chain: vec![chain_segment("if", 7, 10, Vec::new())],
+                        body: Some(vec![IrInline::DirectiveCall {
+                            name: "x".into(),
+                            positional_args: vec![IrValue::Identifier("after".into())],
+                            named_args: Vec::new(),
+                            body: None,
+                            span: span(0, 1),
+                        }]),
+                        span: span(0, 10),
+                    },
+                    inline_var_ref("x"),
+                ],
+                span: span(0, 10),
+            },
+        ];
+        let ordinary = vec![
+            var_declaration("flag", IrValue::Boolean(false)),
+            var_declaration("x", IrValue::Identifier("before".into())),
+            IrNode::Paragraph {
+                content: vec![
+                    inline_if_call(
+                        "if",
+                        IrValue::Boolean(false),
+                        vec![IrInline::DirectiveCall {
+                            name: "x".into(),
+                            positional_args: vec![IrValue::Identifier("after".into())],
+                            named_args: Vec::new(),
+                            body: None,
+                            span: span(0, 1),
+                        }],
+                    ),
+                    inline_var_ref("x"),
+                ],
+                span: span(0, 10),
+            },
+        ];
+        let (chain_nodes, chain_diagnostics) = Evaluator::new().evaluate(&doc(chain));
+        let (ordinary_nodes, ordinary_diagnostics) = Evaluator::new().evaluate(&doc(ordinary));
+        assert!(chain_diagnostics.is_empty(), "{chain_diagnostics:?}");
+        assert!(ordinary_diagnostics.is_empty(), "{ordinary_diagnostics:?}");
+        let text = |nodes: &IrDocument| match &nodes.nodes[0] {
+            IrNode::Paragraph { content, .. } => content
+                .iter()
+                .filter_map(|inline| match inline {
+                    IrInline::Text { content, .. } => Some(content.as_str()),
+                    _ => None,
+                })
+                .collect::<String>(),
+            _ => String::new(),
+        };
+        assert_eq!(text(&chain_nodes), "before");
+        assert_eq!(text(&ordinary_nodes), "before");
+    }
+
+    #[test]
     fn child_scope_inherits_parent_and_isolates_local_bindings() {
         let mut parent = EvaluationContext::new();
         parent.set_value("visible".into(), IrValue::String("parent".into()));
@@ -1611,6 +1764,28 @@ mod tests {
         assert_eq!(
             child
                 .get_function("future")
+                .map(|binding| binding.parameters.as_slice()),
+            Some(["value".to_string()].as_slice())
+        );
+        child.set_value("visible".into(), IrValue::String("shadowed".into()));
+        child.set_function("inherited".into(), vec!["shadowed".into()]);
+        assert_eq!(
+            child.get("visible").map(VariableValue::to_value),
+            Some(IrValue::String("shadowed".into()))
+        );
+        assert_eq!(
+            parent.get("visible").map(VariableValue::to_value),
+            Some(IrValue::String("parent".into()))
+        );
+        assert_eq!(
+            child
+                .get_function("inherited")
+                .map(|binding| binding.parameters.as_slice()),
+            Some(["shadowed".to_string()].as_slice())
+        );
+        assert_eq!(
+            parent
+                .get_function("inherited")
                 .map(|binding| binding.parameters.as_slice()),
             Some(["value".to_string()].as_slice())
         );

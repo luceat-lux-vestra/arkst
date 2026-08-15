@@ -394,6 +394,27 @@ mod tests {
         )
     }
 
+    fn output_text(result: &crate::CompileResult) -> String {
+        result
+            .ir
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                IrNode::Paragraph { content, .. } => Some(
+                    content
+                        .iter()
+                        .filter_map(|inline| match inline {
+                            IrInline::Text { content, .. } => Some(content.as_str()),
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn compile_propagates_parser_diagnostics() {
         for (input, expected_code) in [
@@ -476,6 +497,74 @@ mod tests {
             content.as_slice(),
             [IrInline::Text { content, .. }] if content == "hello"
         ));
+    }
+
+    #[test]
+    fn compile_chain_and_nested_call_are_semantically_equivalent() {
+        for (chain_source, nested_source, expected) in [
+            (
+                ".sum {10} {5}::multiply {2}\n",
+                ".multiply {.sum {10} {5}} {2}\n",
+                "30",
+            ),
+            (
+                ".uppercase {hello}::lowercase\n",
+                ".lowercase {.uppercase {hello}}\n",
+                "hello",
+            ),
+        ] {
+            let (chain, _) = compile_source(chain_source);
+            let (nested, _) = compile_source(nested_source);
+            assert!(chain.diagnostics.is_empty(), "{chain:?}");
+            assert!(nested.diagnostics.is_empty(), "{nested:?}");
+            assert_eq!(output_text(&chain), expected);
+            assert_eq!(output_text(&nested), expected);
+        }
+    }
+
+    #[test]
+    fn compile_variable_values_keep_types_across_chain_and_nested_forms() {
+        for (chain_source, nested_source, expected) in [
+            (
+                ".var {myvar} {hello!}\n.myvar::uppercase\n",
+                ".var {myvar} {hello!}\n.uppercase {.myvar}\n",
+                "HELLO!",
+            ),
+            (
+                ".var {myvar} {true}\n.myvar::uppercase\n",
+                ".var {myvar} {true}\n.uppercase {.myvar}\n",
+                "TRUE",
+            ),
+        ] {
+            let (chain, _) = compile_source(chain_source);
+            let (nested, _) = compile_source(nested_source);
+            assert!(chain.diagnostics.is_empty(), "{chain:?}");
+            assert!(nested.diagnostics.is_empty(), "{nested:?}");
+            assert_eq!(output_text(&chain), expected);
+            assert_eq!(output_text(&nested), expected);
+        }
+    }
+
+    #[test]
+    fn compile_numeric_variable_reassignment_preserves_numeric_value_context() {
+        let source = ".var {mynumber} {5}\n.mynumber {.mynumber::sum {1}}\n.mynumber::sum {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "7");
+    }
+
+    #[test]
+    fn compile_chain_and_ordinary_conditional_are_equally_lazy() {
+        let chain_source =
+            ".var {flag} {false}\n.var {x} {before}\n.flag::if\n    .x {after}\n.x\n";
+        let ordinary_source =
+            ".var {flag} {false}\n.var {x} {before}\n.if {.flag}\n    .x {after}\n.x\n";
+        let (chain, _) = compile_source(chain_source);
+        let (ordinary, _) = compile_source(ordinary_source);
+        assert!(chain.diagnostics.is_empty(), "{chain:?}");
+        assert!(ordinary.diagnostics.is_empty(), "{ordinary:?}");
+        assert_eq!(output_text(&chain), "before");
+        assert_eq!(output_text(&ordinary), "before");
     }
 
     #[test]
