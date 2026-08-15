@@ -372,3 +372,71 @@ fn integration_chain_evaluation_reaches_typst_and_pdf() {
             .starts_with(b"%PDF-"));
     });
 }
+
+#[test]
+fn integration_user_function_evaluation_reaches_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let declaration = ".function {area}\n    width height:\n    .multiply {.width} by:{.height}\n\n# Result\n\nArea: ";
+    let direct_source = format!("{declaration}.area {{4}} {{2}}\n");
+    let nested_source = format!("{declaration}.sum {{.area {{4}} {{2}}}} {{1}}\n");
+    let chain_source = format!("{declaration}.area {{4}} {{2}}::sum {{1}}\n");
+
+    let compile_source = |entry: &str, source: &str| {
+        let project = VirtualProjectBuilder::new()
+            .entry(entry)
+            .expect("valid path")
+            .add_source(entry, source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        compile(&project, &CompileOptions::default())
+    };
+
+    let direct = compile_source("direct.qd", &direct_source);
+    let nested = compile_source("nested.qd", &nested_source);
+    let chained = compile_source("chained.qd", &chain_source);
+    assert!(
+        direct.diagnostics.is_empty(),
+        "direct: {:?}",
+        direct.diagnostics
+    );
+    assert!(
+        nested.diagnostics.is_empty(),
+        "nested: {:?}",
+        nested.diagnostics
+    );
+    assert!(
+        chained.diagnostics.is_empty(),
+        "chain: {:?}",
+        chained.diagnostics
+    );
+
+    let direct_typst = scribium_typst::lowering::lower_to_typst_code(&direct.ir);
+    let nested_typst = scribium_typst::lowering::lower_to_typst_code(&nested.ir);
+    let chained_typst = scribium_typst::lowering::lower_to_typst_code(&chained.ir);
+    assert_eq!(nested_typst, chained_typst);
+    assert!(
+        direct_typst.contains("Area: 8"),
+        "generated Typst: {direct_typst}"
+    );
+    assert!(
+        nested_typst.contains("Area: 9"),
+        "generated Typst: {nested_typst}"
+    );
+    assert!(!direct_typst.contains(".function"));
+    assert!(!direct_typst.contains(".area"));
+
+    with_typst("user-function-evaluation", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: direct_typst,
+                entry_path: "user-function.qd".to_string(),
+            })
+            .expect("user-function Typst must compile");
+        let pdf = output
+            .pdf
+            .expect("user-function PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"), "PDF must start with %PDF-");
+    });
+}

@@ -55,9 +55,12 @@ pub enum Block {
         name_span: ByteSpan,
         head_span: ByteSpan,
         positional_args: Vec<Value>,
-        named_args: Vec<(String, Value)>,
+        named_args: Vec<NamedArg>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
+        /// Contextual lambda metadata for a `.function` declaration. Other
+        /// call bodies deliberately remain ordinary Markdown structures.
+        lambda_header: Option<LambdaHeader>,
         span: ByteSpan,
     },
     Metadata {
@@ -127,7 +130,7 @@ pub enum Inline {
         name_span: ByteSpan,
         head_span: ByteSpan,
         positional_args: Vec<Value>,
-        named_args: Vec<(String, Value)>,
+        named_args: Vec<NamedArg>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Inline>>,
         span: ByteSpan,
@@ -175,6 +178,28 @@ pub enum Value {
     Content(Vec<Inline>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedArg {
+    pub name: String,
+    pub name_span: ByteSpan,
+    pub value: Value,
+    pub span: ByteSpan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaHeader {
+    pub parameters: Vec<LambdaParameter>,
+    pub span: ByteSpan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaParameter {
+    pub name: String,
+    pub name_span: ByteSpan,
+    pub span: ByteSpan,
+    pub optional: bool,
+}
+
 /// A parser-preserved `::` call-chain segment.
 ///
 /// This frontend representation records syntax and source provenance only.
@@ -185,6 +210,6 @@ pub struct CallSegment {
     pub name: String,
     pub name_span: ByteSpan,
     pub positional_args: Vec<Value>,
-    pub named_args: Vec<(String, Value)>,
+    pub named_args: Vec<NamedArg>,
     pub span: ByteSpan,
 }

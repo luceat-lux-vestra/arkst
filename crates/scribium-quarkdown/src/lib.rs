@@ -56,6 +56,23 @@ pub struct NamedArg {
     pub span: ByteSpan,
 }
 
+/// A source-backed explicit lambda header used by contextual constructs such
+/// as `.function`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaHeader {
+    pub parameters: Vec<LambdaParameter>,
+    pub span: ByteSpan,
+}
+
+/// One parameter in a [`LambdaHeader`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaParameter {
+    pub name: String,
+    pub name_span: ByteSpan,
+    pub span: ByteSpan,
+    pub optional: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     String(String),
@@ -236,6 +253,115 @@ pub fn needs_more_input(source: &str) -> bool {
 pub fn has_trailing_continuation(source: &str) -> bool {
     let line_end = source.trim_end_matches(['\r', '\n']);
     line_end.as_bytes().last() == Some(&b'\\')
+}
+
+/// Parse one contextual lambda header from an original source line.
+///
+/// The function deliberately does not classify arbitrary call bodies. The
+/// caller selects the construct (`.function` for the current slice) and passes
+/// the parser-observed body-line span. Returned spans remain absolute in the
+/// supplied source; no normalized or generated text is involved.
+pub fn parse_lambda_header(
+    source: &str,
+    line_span: ByteSpan,
+) -> Result<Option<LambdaHeader>, ParseError> {
+    let Some(line) = line_span.checked_str(source) else {
+        return Err(ParseError::new(
+            "E9002",
+            "lambda header line is outside the source",
+            line_span,
+        ));
+    };
+    let line_without_terminator = line.trim_end_matches(['\r', '\n']);
+    let Some(colon_offset) = line_without_terminator.rfind(':') else {
+        return Ok(None);
+    };
+    if !line_without_terminator[colon_offset + 1..]
+        .trim()
+        .is_empty()
+    {
+        return Ok(None);
+    }
+
+    let header_end = line_span
+        .start
+        .checked_add(colon_offset + 1)
+        .ok_or_else(|| ParseError::new("E9002", "lambda header span overflowed", line_span))?;
+    let content = &line_without_terminator[..colon_offset];
+    let leading = content.len() - content.trim_start_matches([' ', '\t']).len();
+    let content = content.trim();
+    let header_start = line_span
+        .start
+        .checked_add(leading)
+        .ok_or_else(|| ParseError::new("E9002", "lambda header span overflowed", line_span))?;
+    if content.is_empty() {
+        return Err(ParseError::new(
+            "E2005",
+            "lambda header must contain at least one parameter",
+            ByteSpan::new(header_start, header_end),
+        ));
+    }
+
+    let mut parameters = Vec::new();
+    let mut cursor = 0usize;
+    for token in content.split_whitespace() {
+        let token_start = content[cursor..]
+            .find(token)
+            .and_then(|offset| cursor.checked_add(offset))
+            .ok_or_else(|| {
+                ParseError::new(
+                    "E9002",
+                    "lambda parameter span could not be mapped",
+                    line_span,
+                )
+            })?;
+        let token_end = token_start.checked_add(token.len()).ok_or_else(|| {
+            ParseError::new("E9002", "lambda parameter span overflowed", line_span)
+        })?;
+        cursor = token_end;
+
+        let optional = token.ends_with('?');
+        let name = if optional {
+            token.strip_suffix('?').unwrap_or_default()
+        } else {
+            token
+        };
+        if !is_valid_normal_call_name(name) {
+            let absolute_start = header_start.checked_add(token_start).ok_or_else(|| {
+                ParseError::new("E9002", "lambda parameter span overflowed", line_span)
+            })?;
+            let absolute_end = header_start.checked_add(token_end).ok_or_else(|| {
+                ParseError::new("E9002", "lambda parameter span overflowed", line_span)
+            })?;
+            return Err(ParseError::new(
+                "E2005",
+                format!("invalid lambda parameter name `{token}`"),
+                ByteSpan::new(absolute_start, absolute_end),
+            ));
+        }
+        let absolute_start = header_start.checked_add(token_start).ok_or_else(|| {
+            ParseError::new("E9002", "lambda parameter span overflowed", line_span)
+        })?;
+        let absolute_end = header_start.checked_add(token_end).ok_or_else(|| {
+            ParseError::new("E9002", "lambda parameter span overflowed", line_span)
+        })?;
+        let token_span = ByteSpan::new(absolute_start, absolute_end);
+        let name_span = ByteSpan::new(
+            token_span.start,
+            token_span.end - if optional { 1 } else { 0 },
+        );
+        parameters.push(LambdaParameter {
+            name: name.to_string(),
+            name_span,
+            span: token_span,
+            optional,
+        });
+    }
+
+    Ok(Some(LambdaHeader {
+        parameters,
+        span: ByteSpan::new(header_start, header_end),
+    }))
 }
 
 fn parse_segment(
@@ -962,6 +1088,61 @@ mod tests {
         assert_eq!(&source[call.span.start..call.span.end], ".text {빨강}");
         assert!(source.is_char_boundary(call.name_span.start));
         assert!(source.is_char_boundary(call.name_span.end));
+    }
+
+    #[test]
+    fn parses_contextual_lambda_headers_with_exact_spans() {
+        let source = "한글\r\n  alpha beta?:\r\n  body\r\n";
+        let line_start = source.find("alpha").unwrap() - 2;
+        let line_end = source[line_start..].find("\r\n").unwrap() + line_start;
+        let header = parse_lambda_header(source, ByteSpan::new(line_start, line_end))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(header.parameters.len(), 2);
+        assert_eq!(header.parameters[0].name, "alpha");
+        assert_eq!(header.parameters[1].name, "beta");
+        assert!(header.parameters[1].optional);
+        assert_eq!(
+            &source[header.parameters[0].name_span.start..header.parameters[0].name_span.end],
+            "alpha"
+        );
+        assert_eq!(
+            &source[header.parameters[1].span.start..header.parameters[1].span.end],
+            "beta?"
+        );
+        assert_eq!(&source[header.span.start..header.span.end], "alpha beta?:");
+        for parameter in &header.parameters {
+            assert!(parameter.name_span.is_valid_for(source));
+            assert!(parameter.span.is_valid_for(source));
+        }
+    }
+
+    #[test]
+    fn lambda_header_parser_is_contextual_and_rejects_malformed_headers() {
+        let source = "Hello:\n\nalpha beta??:\n\n:\n";
+        let hello_end = source.find('\n').unwrap();
+        assert_eq!(
+            parse_lambda_header(source, ByteSpan::new(0, hello_end)).unwrap(),
+            Some(LambdaHeader {
+                parameters: vec![LambdaParameter {
+                    name: "Hello".into(),
+                    name_span: ByteSpan::new(0, 5),
+                    span: ByteSpan::new(0, 5),
+                    optional: false,
+                }],
+                span: ByteSpan::new(0, 6),
+            })
+        );
+        let malformed_start = source.find("alpha").unwrap();
+        let malformed_end = source[malformed_start..].find('\n').unwrap() + malformed_start;
+        let error =
+            parse_lambda_header(source, ByteSpan::new(malformed_start, malformed_end)).unwrap_err();
+        assert_eq!(error.code, "E2005");
+        let empty_start = source.rfind(':').unwrap();
+        let error =
+            parse_lambda_header(source, ByteSpan::new(empty_start, source.len())).unwrap_err();
+        assert_eq!(error.code, "E2005");
     }
 
     fn scalar(arg: &Arg) -> Value {

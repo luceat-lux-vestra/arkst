@@ -56,8 +56,10 @@ fn check_inline(inline: &Inline, source: &str) {
             for value in positional_args {
                 check_value(value, source);
             }
-            for (_, value) in named_args {
-                check_value(value, source);
+            for argument in named_args {
+                assert!(valid(argument.name_span, source));
+                assert!(valid(argument.span, source));
+                check_value(&argument.value, source);
             }
             if let Some(body) = body {
                 for child in body {
@@ -117,13 +119,23 @@ fn check_block(block: &Block, source: &str) {
             positional_args,
             named_args,
             body,
+            lambda_header,
             ..
         } => {
             for value in positional_args {
                 check_value(value, source);
             }
-            for (_, value) in named_args {
-                check_value(value, source);
+            for argument in named_args {
+                assert!(valid(argument.name_span, source));
+                assert!(valid(argument.span, source));
+                check_value(&argument.value, source);
+            }
+            if let Some(header) = lambda_header {
+                assert!(valid(header.span, source));
+                for parameter in &header.parameters {
+                    assert!(valid(parameter.name_span, source));
+                    assert!(valid(parameter.span, source));
+                }
             }
             if let Some(body) = body {
                 for child in body {
