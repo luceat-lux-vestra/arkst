@@ -641,8 +641,14 @@ fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
                 .replace("\\\\", "\\"),
         ));
     }
-    if let Ok(number) = raw.parse::<f64>() {
-        return Some(Value::Number(number));
+    // `.1`, `.2`, ... are implicit lambda references even when nested in a
+    // braced value such as `{.1}`. Keep them as content so the frontend can
+    // preserve the call node and the evaluator can resolve it semantically;
+    // do not let the generic floating-point parser classify `.1` as `0.1`.
+    if !is_implicit_positional_reference_token(raw) {
+        if let Ok(number) = raw.parse::<f64>() {
+            return Some(Value::Number(number));
+        }
     }
     match raw {
         "true" => return Some(Value::Boolean(true)),
@@ -660,6 +666,14 @@ fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
         return Some(Value::Identifier(raw.to_string()));
     }
     None
+}
+
+fn is_implicit_positional_reference_token(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.len() >= 2
+        && bytes[0] == b'.'
+        && matches!(bytes[1], b'1'..=b'9')
+        && bytes[2..].iter().all(u8::is_ascii_digit)
 }
 
 fn skip_horizontal(bytes: &[u8], mut cursor: usize) -> usize {
@@ -766,6 +780,20 @@ mod tests {
         assert!(call.named_args.is_empty());
         assert_eq!(call.span, ByteSpan::new(0, 2));
         assert_eq!(end, 2);
+    }
+
+    #[test]
+    fn braced_implicit_reference_is_not_classified_as_a_decimal() {
+        let (call, end) = parse_call(".multiply {.1} {3}").unwrap().unwrap();
+        assert_eq!(end, ".multiply {.1} {3}".len());
+        assert!(matches!(
+            call.positional_args.first().map(|argument| &argument.content),
+            Some(ArgContent::Content(span)) if *span == ByteSpan::new(11, 13)
+        ));
+        assert!(matches!(
+            call.positional_args.get(1).map(|argument| &argument.content),
+            Some(ArgContent::Scalar(Value::Number(value))) if *value == 3.0
+        ));
     }
 
     #[test]

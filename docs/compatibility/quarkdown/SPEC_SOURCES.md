@@ -23,7 +23,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown wiki — "Variables"                   | https://quarkdown.com/wiki/variables/ | Variable declaration (`.var`), reference (`.name`), reassignment (`.name {value}`), block variables, boolean use in conditionals | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call" (v2.5.1 syntax review) | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Behavior specification for the #60 multiline-argument, continuation, chaining, tight-call, and block/inline boundary fixtures | 2026-08-14 |
-| Quarkdown wiki — "Lambda"                      | https://quarkdown.com/wiki/lambda/ | Implicit positional references (`.1`, `.2`, ...) in lambdas | 2026-08-08 |
+| Quarkdown wiki — "Lambda" (v2.5.1)              | https://quarkdown.com/wiki/lambda/ | Headerless lambda implicit positional references (`.1`, `.2`, ...), nested scope behavior | 2026-08-16 |
 | Quarkdown quickstart                          | https://quarkdown.com/                      | Call examples (`.pow {5} to:{2}`, `.align {center}` with an indented body) | 2026-08-08 |
 | Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
@@ -49,10 +49,9 @@ is recorded per source:
 
 - The **function-call syntax** page carries a `2.5.0` badge as of
   2026-08-08.
-- The **Lambda** wiki page carries a `2.4.1` badge as of 2026-08-08 and is
-  used only as documentation for implicit positional references; it
-  documents already existing behavior and is not evidence that the feature
-  was introduced in v2.5.0.
+- The **Lambda** wiki page carries a `2.5.1` badge as of 2026-08-16 and
+  documents headerless implicit positional references and nested lambda
+  scopes.
 - The **Conditional statements** wiki page carries a `2.5.0` badge as of
   2026-08-08 and documents `.if` / `.ifnot` conditional semantics.
 - The **Boolean** wiki page carries a `2.5.0` badge as of 2026-08-08 and
@@ -71,9 +70,10 @@ the v2.5.1 impact review.
 
 ## Observational Method
 
-- Implemented from public documentation only; no Quarkdown binary black-box
-  observation was required because the release note and CommonMark rules made
-  the expected D2/D3 behavior explicit
+- Implemented from public documentation and a permitted black-box probe of the
+  official v2.5.1 macOS arm64 release; the probe checked successful `.1`
+  binding and observed unresolved-reference failures for missing and
+  zero-argument `.N` references
 - No Quarkdown source code is read or copied
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs

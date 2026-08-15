@@ -271,11 +271,11 @@ Invalid variable names (not matching `normal-call-name` grammar) produce `E3002`
 
 > **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
 
-## User-defined functions (Implemented slice)
+## User-defined functions and lambda parameters (Implemented slice)
 
 Scribium evaluates the documented `.function` declaration form for
-zero-parameter and required explicit-parameter functions. A declaration is
-source-order state and produces no document output:
+headerless implicit-parameter and explicit-parameter functions. A declaration
+is source-order state and produces no document output:
 
 ```
 .function {hello}
@@ -293,7 +293,10 @@ source-order state and produces no document output:
 The first body line of `.function` is contextually parsed by the Quarkdown
 grammar as a structured lambda header only when it ends in `:`. Ordinary call
 bodies keep their normal Markdown interpretation. Parameter names and the
-optional marker retain original source spans through the frontend and IR.
+optional marker retain original source spans through the frontend and IR. A
+headerless callable uses implicit positional parameters; the parser preserves
+`.1`, `.2`, and later references as call nodes so the evaluator can resolve
+them without source rewriting.
 
 Supported invocation semantics are positional and named binding, a block body
 bound to the final parameter, parent-visible/child-local scope, source-order
@@ -320,8 +323,17 @@ boolean. A `None` value is distinct from an outputless `NoValue` result: the
 latter remains an evaluator control outcome and is still an error when a
 nested value-required context needs a value.
 
-Implicit lambda parameters (`.1`, `.2`, ...), generic standalone lambdas,
-iteration, and components remain outside this slice. A
+Implicit lambda parameters are 1-based and invocation-local. `.1` is the
+first positional argument, `.2` the second, and so on; `.0`, leading-zero
+spellings, and word-adjacent forms are not implicit references. An explicit
+header is an explicit binding mode and does not synthesize `.1` aliases. A
+missing implicit argument produces a deterministic source-backed `E3003`
+diagnostic rather than `None`, `NoValue`, or a panic. The callable body keeps
+the same semantic accumulator as explicit functions, so numbers, booleans,
+strings, `None`, and structured content remain typed until an output boundary.
+
+Generic standalone lambdas, iteration, and components remain outside this
+slice. A
 rich block result that cannot be represented in an inline context is rejected
 with a source-backed diagnostic rather than flattened or dropped.
 
@@ -331,9 +343,13 @@ The evaluator now has explicit parent/child scope APIs with deterministic
 lookup, local variable bindings, and source-backed local function bindings.
 Child scopes inherit visible parent bindings and local writes do not leak back
 to the parent. Existing `.var` declarations continue to use the document-level
-scope and are evaluated in source order. Standalone lambda headers,
-`.let`, `.foreach`, and `.repeat` remain subsequent semantic slices; this
-slice does not claim those user-facing features are implemented.
+scope and are evaluated in source order. The evaluator represents callable
+parameters as either explicit source-backed bindings or an implicit positional
+binding mode. Each invocation installs its own lambda-local argument scope;
+nested invocations therefore shadow only while active and restore the outer
+implicit arguments afterward. Standalone lambda syntax, `.let`, `.foreach`,
+and `.repeat` remain subsequent semantic slices; this slice does not claim
+those user-facing features are implemented.
 
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
