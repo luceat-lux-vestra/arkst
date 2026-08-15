@@ -426,6 +426,128 @@ mod tests {
     }
 
     #[test]
+    fn compile_rejects_unresolved_chain_semantics_but_preserves_block_ir() {
+        for source in [".a::b\n", ".a::b::c\n", ".a {x}::b {y}\n"] {
+            let parsed = scribium_markdown::parse_qd(source);
+            let scribium_markdown::ast::Block::DirectiveCall {
+                chain,
+                head_span,
+                span,
+                ..
+            } = &parsed.nodes[0]
+            else {
+                panic!("expected parsed block chain for {source:?}");
+            };
+            assert!(!chain.is_empty(), "{source:?}");
+
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E8001");
+            assert!(matches!(diagnostic.severity, Severity::Error));
+            assert_eq!(
+                diagnostic.message,
+                "Quarkdown call chaining was parsed and preserved but chained value-flow evaluation is not implemented yet."
+            );
+            assert_eq!(
+                diagnostic.primary,
+                Some(crate::source::SourceSpan::new(
+                    source_id, span.start, span.end
+                ))
+            );
+            assert_eq!(diagnostic.primary.unwrap().start, span.start);
+            assert_eq!(diagnostic.primary.unwrap().end, span.end);
+
+            let IrNode::ChainedFunctionCall {
+                head,
+                chain: ir_chain,
+                span: ir_span,
+                ..
+            } = &result.ir.nodes[0]
+            else {
+                panic!("expected preserved IR chain for {source:?}");
+            };
+            assert_eq!(ir_chain.len(), chain.len());
+            assert_eq!(
+                head.span,
+                crate::source::SourceSpan::new(source_id, head_span.start, head_span.end)
+            );
+            assert_eq!(
+                *ir_span,
+                crate::source::SourceSpan::new(source_id, span.start, span.end)
+            );
+        }
+    }
+
+    #[test]
+    fn compile_rejects_unresolved_chain_semantics_in_inline_and_content_paths() {
+        let inline_source = "prefix .a {x}::b {y} suffix\n";
+        let parsed = scribium_markdown::parse_qd(inline_source);
+        let scribium_markdown::ast::Block::Paragraph { content, .. } = &parsed.nodes[0] else {
+            panic!("expected inline paragraph");
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            scribium_markdown::ast::Inline::DirectiveCall { chain, .. }
+                if !chain.is_empty()
+        )));
+        let (result, source_id) = compile_source(inline_source);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "E8001");
+        assert!(matches!(result.diagnostics[0].severity, Severity::Error));
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected inline paragraph IR");
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            IrInline::ChainedDirectiveCall { chain, .. }
+                if !chain.is_empty()
+        )));
+        assert_eq!(
+            result.diagnostics[0].primary.as_ref().unwrap().source_id,
+            source_id
+        );
+
+        let content_source = ".outer {.a::b}\n";
+        let parsed = scribium_markdown::parse_qd(content_source);
+        let scribium_markdown::ast::Block::DirectiveCall {
+            positional_args, ..
+        } = &parsed.nodes[0]
+        else {
+            panic!("expected outer call");
+        };
+        let scribium_markdown::ast::Value::Content(content) = &positional_args[0] else {
+            panic!("expected content argument");
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            scribium_markdown::ast::Inline::DirectiveCall { chain, .. }
+                if !chain.is_empty()
+        )));
+
+        let (result, source_id) = compile_source(content_source);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "E8001");
+        assert_eq!(
+            result.diagnostics[0].primary.as_ref().unwrap().source_id,
+            source_id
+        );
+        let IrNode::FunctionCall {
+            positional_args, ..
+        } = &result.ir.nodes[0]
+        else {
+            panic!("expected outer call IR");
+        };
+        let crate::ir::IrValue::Content(nodes) = &positional_args[0] else {
+            panic!("expected content IR argument");
+        };
+        assert!(matches!(
+            nodes.as_slice(),
+            [IrNode::ChainedFunctionCall { chain, .. }] if !chain.is_empty()
+        ));
+    }
+
+    #[test]
     fn compile_qd_uses_the_production_frontend_pipeline() {
         let project = VirtualProjectBuilder::new()
             .entry("main.qd")

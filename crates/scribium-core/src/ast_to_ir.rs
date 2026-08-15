@@ -6,12 +6,14 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
-    IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus,
+    IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment,
+    IrTableCell, IrTableRow, IrTaskStatus,
 };
 use crate::source::{SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
-use scribium_markdown::ast::{Block, Document, Inline, TableAlignment, TaskStatus, Value};
+use scribium_markdown::ast::{
+    Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
+};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
@@ -147,8 +149,11 @@ fn block_to_ir(
         }),
         Block::DirectiveCall {
             name,
+            name_span,
+            head_span,
             positional_args,
             named_args,
+            chain,
             body,
             span,
         } => {
@@ -166,13 +171,32 @@ fn block_to_ir(
                     .filter_map(|b| block_to_ir(b, source_id, diagnostics))
                     .collect::<Vec<_>>()
             });
-            Some(IrNode::FunctionCall {
-                name: name.clone(),
-                positional_args: ir_positional,
-                named_args: ir_named,
-                body: ir_body,
-                span: byte_to_source_span(span, source_id),
-            })
+            if chain.is_empty() {
+                Some(IrNode::FunctionCall {
+                    name: name.clone(),
+                    positional_args: ir_positional,
+                    named_args: ir_named,
+                    body: ir_body,
+                    span: byte_to_source_span(span, source_id),
+                })
+            } else {
+                push_unsupported_chain(diagnostics, span, source_id);
+                Some(IrNode::ChainedFunctionCall {
+                    head: IrCallSegment {
+                        name: name.clone(),
+                        name_span: byte_to_source_span(name_span, source_id),
+                        positional_args: ir_positional,
+                        named_args: ir_named,
+                        span: byte_to_source_span(head_span, source_id),
+                    },
+                    chain: chain
+                        .iter()
+                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .collect(),
+                    body: ir_body,
+                    span: byte_to_source_span(span, source_id),
+                })
+            }
         }
         Block::Metadata { .. } => {
             // Metadata is handled via front_matter on the Document; skip as a block node.
@@ -250,6 +274,28 @@ fn table_alignment_to_ir(alignment: TableAlignment) -> IrTableAlignment {
     }
 }
 
+fn call_segment_to_ir(
+    segment: &CallSegment,
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> IrCallSegment {
+    IrCallSegment {
+        name: segment.name.clone(),
+        name_span: byte_to_source_span(&segment.name_span, source_id),
+        positional_args: segment
+            .positional_args
+            .iter()
+            .map(|value| value_to_ir(value, source_id, diagnostics))
+            .collect(),
+        named_args: segment
+            .named_args
+            .iter()
+            .map(|(name, value)| (name.clone(), value_to_ir(value, source_id, diagnostics)))
+            .collect(),
+        span: byte_to_source_span(&segment.span, source_id),
+    }
+}
+
 fn inlines_to_ir(
     inlines: &[Inline],
     source_id: SourceId,
@@ -291,8 +337,11 @@ fn inline_to_ir(
         }),
         Inline::DirectiveCall {
             name,
+            name_span,
+            head_span,
             positional_args,
             named_args,
+            chain,
             body,
             span,
         } => {
@@ -307,13 +356,32 @@ fn inline_to_ir(
             let ir_body = body
                 .as_ref()
                 .map(|b| inlines_to_ir(b, source_id, diagnostics));
-            Some(IrInline::DirectiveCall {
-                name: name.clone(),
-                positional_args: ir_positional,
-                named_args: ir_named,
-                body: ir_body,
-                span: byte_to_source_span(span, source_id),
-            })
+            if chain.is_empty() {
+                Some(IrInline::DirectiveCall {
+                    name: name.clone(),
+                    positional_args: ir_positional,
+                    named_args: ir_named,
+                    body: ir_body,
+                    span: byte_to_source_span(span, source_id),
+                })
+            } else {
+                push_unsupported_chain(diagnostics, span, source_id);
+                Some(IrInline::ChainedDirectiveCall {
+                    head: IrCallSegment {
+                        name: name.clone(),
+                        name_span: byte_to_source_span(name_span, source_id),
+                        positional_args: ir_positional,
+                        named_args: ir_named,
+                        span: byte_to_source_span(head_span, source_id),
+                    },
+                    chain: chain
+                        .iter()
+                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .collect(),
+                    body: ir_body,
+                    span: byte_to_source_span(span, source_id),
+                })
+            }
         }
         Inline::HardBreak { span } | Inline::SoftBreak { span } => {
             // Breaks become whitespace in the text flow for M1
@@ -363,8 +431,11 @@ fn value_to_ir(
         Value::Content(inlines) => {
             if let [Inline::DirectiveCall {
                 name,
+                name_span,
+                head_span,
                 positional_args,
                 named_args,
+                chain,
                 body,
                 span,
             }] = inlines.as_slice()
@@ -383,13 +454,32 @@ fn value_to_ir(
                         span: byte_to_source_span(span, source_id),
                     }]
                 });
-                crate::ir::IrValue::Content(vec![IrNode::FunctionCall {
-                    name: name.clone(),
-                    positional_args: ir_positional,
-                    named_args: ir_named,
-                    body: ir_body,
-                    span: byte_to_source_span(span, source_id),
-                }])
+                if chain.is_empty() {
+                    crate::ir::IrValue::Content(vec![IrNode::FunctionCall {
+                        name: name.clone(),
+                        positional_args: ir_positional,
+                        named_args: ir_named,
+                        body: ir_body,
+                        span: byte_to_source_span(span, source_id),
+                    }])
+                } else {
+                    push_unsupported_chain(diagnostics, span, source_id);
+                    crate::ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
+                        head: IrCallSegment {
+                            name: name.clone(),
+                            name_span: byte_to_source_span(name_span, source_id),
+                            positional_args: ir_positional,
+                            named_args: ir_named,
+                            span: byte_to_source_span(head_span, source_id),
+                        },
+                        chain: chain
+                            .iter()
+                            .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                            .collect(),
+                        body: ir_body,
+                        span: byte_to_source_span(span, source_id),
+                    }])
+                }
             } else {
                 let start = inlines.first().map(inline_span_start);
                 let end = inlines.last().map(inline_span_end);
@@ -420,6 +510,21 @@ fn push_unsupported(
         hints: vec![
             "The source semantics were not coerced into a different Markdown node.".to_string(),
         ],
+    });
+}
+
+fn push_unsupported_chain(
+    diagnostics: &mut Vec<Diagnostic>,
+    span: &crate::source::ByteSpan,
+    source_id: SourceId,
+) {
+    diagnostics.push(Diagnostic {
+        code: "E8001".to_string(),
+        severity: Severity::Error,
+        message: "Quarkdown call chaining was parsed and preserved but chained value-flow evaluation is not implemented yet.".to_string(),
+        primary: Some(byte_to_source_span(span, source_id)),
+        secondary: Vec::new(),
+        hints: vec!["Chained value-flow semantics are deferred to #61.".to_string()],
     });
 }
 
@@ -520,6 +625,38 @@ mod tests {
             }
             _ => panic!("expected Heading"),
         }
+    }
+
+    #[test]
+    fn preserve_call_chain_segments_and_provenance_in_ir() {
+        let source = ".a {x}::b {y}\n";
+        let document = scribium_markdown::parse_qd(source);
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E8001");
+        assert!(matches!(diagnostics[0].severity, Severity::Error));
+        assert_eq!(
+            diagnostics[0].primary,
+            Some(SourceSpan::new(source_id(), 0, 13))
+        );
+        let IrNode::ChainedFunctionCall {
+            head, chain, span, ..
+        } = &ir.nodes[0]
+        else {
+            panic!("expected parser-preserved chain, got {:?}", ir.nodes)
+        };
+        assert_eq!(head.name, "a");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].name, "b");
+        assert_eq!(*span, SourceSpan::new(source_id(), 0, source.len() - 1));
+        assert_eq!(head.name_span, SourceSpan::new(source_id(), 0, 2));
+        assert_eq!(head.span, SourceSpan::new(source_id(), 0, 6));
+        assert_eq!(chain[0].name_span, SourceSpan::new(source_id(), 8, 9));
+        assert_eq!(chain[0].span, SourceSpan::new(source_id(), 8, 13));
+        assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
+        assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
+        assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
     }
 
     #[test]

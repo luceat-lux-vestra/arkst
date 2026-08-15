@@ -4,8 +4,8 @@
 //! records source map entries as it generates code.
 
 use scribium_core::ir::{
-    IrDocument, IrInline, IrNode, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
-    SourceMapEntry,
+    IrCallSegment, IrDocument, IrInline, IrNode, IrTableAlignment, IrTableCell, IrTableRow,
+    IrTaskStatus, IrValue, SourceMapEntry,
 };
 use scribium_core::source::SourceSpan;
 
@@ -259,6 +259,29 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrNode::ChainedFunctionCall {
+                head,
+                chain,
+                body,
+                span,
+            } => {
+                // This is only a structural/debug rendering of an IR that
+                // already carries the E8001 unsupported-semantics diagnostic.
+                // The normal compile and CLI paths reject that diagnostic
+                // before calling this lowering pass.
+                let before = self.output.len();
+                self.push_str("// Scribium parser-preserved call chain: ");
+                self.lower_chain_label(head, chain);
+                self.push_str(" (semantic evaluation pending)\n");
+                if let Some(body_nodes) = body {
+                    for node in body_nodes {
+                        self.lower_node(node);
+                    }
+                }
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrNode::ThematicBreak { span } => {
                 let before = self.output.len();
                 self.push_str("---\n");
@@ -370,6 +393,29 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::ChainedDirectiveCall {
+                head,
+                chain,
+                body,
+                span,
+            } => {
+                // This is only a structural/debug rendering of an IR that
+                // already carries the E8001 unsupported-semantics diagnostic.
+                // The normal compile and CLI paths reject that diagnostic
+                // before calling this lowering pass.
+                let before = self.output.len();
+                self.push_str("/* Scribium parser-preserved call chain: ");
+                self.lower_chain_label(head, chain);
+                self.push_str("; semantic evaluation pending */");
+                if let Some(body_inlines) = body {
+                    self.push('[');
+                    self.lower_inlines(body_inlines);
+                    self.push(']');
+                }
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::Link {
                 content,
                 destination,
@@ -435,6 +481,15 @@ impl LoweringContext {
                 self.list_item_indent = saved_item;
                 self.push(']');
             }
+        }
+    }
+
+    fn lower_chain_label(&mut self, head: &IrCallSegment, chain: &[IrCallSegment]) {
+        self.push('.');
+        self.push_str(&head.name);
+        for segment in chain {
+            self.push_str("::");
+            self.push_str(&segment.name);
         }
     }
 
@@ -570,8 +625,8 @@ fn escape_typst_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use scribium_core::ir::{
-        IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment, IrTableCell,
-        IrTableRow, IrTaskStatus, IrValue,
+        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNode, IrTableAlignment,
+        IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
 
@@ -1400,6 +1455,41 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "#figure(kind: \"table\")[content\n]\n\n");
+    }
+
+    #[test]
+    fn debug_render_parser_preserved_chain_after_semantic_gate() {
+        let source_id = scribium_core::SourceId(7);
+        let whole = SourceSpan::new(source_id, 0, 13);
+        let doc = IrDocument {
+            nodes: vec![IrNode::ChainedFunctionCall {
+                head: IrCallSegment {
+                    name: "a".into(),
+                    name_span: SourceSpan::new(source_id, 0, 2),
+                    positional_args: vec![],
+                    named_args: vec![],
+                    span: SourceSpan::new(source_id, 0, 6),
+                },
+                chain: vec![IrCallSegment {
+                    name: "b".into(),
+                    name_span: SourceSpan::new(source_id, 8, 9),
+                    positional_args: vec![],
+                    named_args: vec![],
+                    span: SourceSpan::new(source_id, 8, 13),
+                }],
+                body: None,
+                span: whole,
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let (code, map) = super::lower_to_typst(&doc);
+        assert_eq!(
+            code,
+            "// Scribium parser-preserved call chain: .a::b (semantic evaluation pending)\n\n"
+        );
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[0].original, whole);
+        assert!(map[0].generated_end <= code.len());
     }
 
     #[test]

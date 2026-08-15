@@ -52,8 +52,11 @@ pub enum Block {
     },
     DirectiveCall {
         name: String,
+        name_span: ByteSpan,
+        head_span: ByteSpan,
         positional_args: Vec<Value>,
         named_args: Vec<(String, Value)>,
+        chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
         span: ByteSpan,
     },
@@ -121,8 +124,11 @@ pub enum Inline {
     },
     DirectiveCall {
         name: String,
+        name_span: ByteSpan,
+        head_span: ByteSpan,
         positional_args: Vec<Value>,
         named_args: Vec<(String, Value)>,
+        chain: Vec<CallSegment>,
         body: Option<Vec<Inline>>,
         span: ByteSpan,
     },
@@ -167,4 +173,18 @@ pub enum Value {
     Boolean(bool),
     Identifier(String),
     Content(Vec<Inline>),
+}
+
+/// A parser-preserved `::` call-chain segment.
+///
+/// This frontend representation records syntax and source provenance only.
+/// Evaluation of the chained result remains outside the grammar adaptation
+/// slice.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallSegment {
+    pub name: String,
+    pub name_span: ByteSpan,
+    pub positional_args: Vec<Value>,
+    pub named_args: Vec<(String, Value)>,
+    pub span: ByteSpan,
 }
