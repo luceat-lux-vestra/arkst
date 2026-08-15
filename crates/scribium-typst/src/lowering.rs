@@ -477,11 +477,9 @@ impl LoweringContext {
                 self.push('"');
             }
             IrValue::None => {
-                // None is a semantic value in Scribium. At this backend
-                // boundary its documented observable representation is text.
-                self.push('"');
-                self.push_str("None");
-                self.push('"');
+                // Semantic None remains distinct from the observable text
+                // materialized by the evaluator at an output boundary.
+                self.push_str("none");
             }
             IrValue::Content(nodes) => {
                 self.push('[');
@@ -1474,19 +1472,41 @@ mod tests {
     }
 
     #[test]
-    fn lower_none_value_as_observable_text() {
+    fn lower_none_value_as_typst_none_and_preserve_string_distinction() {
         let doc = IrDocument {
-            nodes: vec![IrNode::FunctionCall {
-                name: "show-value".into(),
-                positional_args: vec![IrValue::None],
-                named_args: vec![],
-                body: None,
-                span: empty_span(),
-            }],
+            nodes: vec![
+                IrNode::FunctionCall {
+                    name: "show-value".into(),
+                    positional_args: vec![IrValue::None],
+                    named_args: vec![IrNamedArg {
+                        name: "value".into(),
+                        name_span: empty_span(),
+                        value: IrValue::None,
+                        span: empty_span(),
+                    }],
+                    body: None,
+                    span: empty_span(),
+                },
+                IrNode::FunctionCall {
+                    name: "show-value".into(),
+                    positional_args: vec![IrValue::String("None".into())],
+                    named_args: vec![IrNamedArg {
+                        name: "value".into(),
+                        name_span: empty_span(),
+                        value: IrValue::String("None".into()),
+                        span: empty_span(),
+                    }],
+                    body: None,
+                    span: empty_span(),
+                },
+            ],
             metadata: IrMetadata::default(),
         };
         let code = super::lower_to_typst_code(&doc);
-        assert_eq!(code, "#show-value(\"None\")\n\n");
+        assert_eq!(
+            code,
+            "#show-value(none, value: none)\n\n#show-value(\"None\", value: \"None\")\n\n"
+        );
     }
 
     #[test]
