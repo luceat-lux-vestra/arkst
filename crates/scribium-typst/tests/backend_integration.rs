@@ -237,6 +237,53 @@ fn integration_markdown_structures_compile_to_valid_pdf() {
 }
 
 #[test]
+fn integration_commonmark_gfm_baseline_fixture_compiles_to_valid_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = include_str!("../../../fixtures/markdown/commonmark_gfm_baseline.md");
+    let project = VirtualProjectBuilder::new()
+        .entry("commonmark_gfm_baseline.md")
+        .expect("valid entry path")
+        .add_source("commonmark_gfm_baseline.md", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "baseline fixture diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("= Scribium Markdown baseline"));
+    assert!(typst_code.contains("== Setext heading"));
+    assert!(typst_code.contains("#link(\"https://example.com/docs\")"));
+    assert!(typst_code.contains("#strike[strikethrough]"));
+    assert!(typst_code.contains("```rust\nfn main()"));
+    assert!(typst_code.contains("#table("));
+    assert!(typst_code.contains("☐ open task"));
+    assert!(typst_code.contains("☑ completed task"));
+    assert!(result.ir.nodes.iter().any(|node| matches!(
+        node,
+        scribium_core::ir::IrNode::CodeBlock {
+            info: Some(info),
+            ..
+        } if info == "rust extra-info"
+    )));
+
+    with_typst("commonmark-gfm-baseline", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "commonmark_gfm_baseline.qd".to_string(),
+            })
+            .expect("CommonMark/GFM baseline Typst must compile");
+        let pdf = output.pdf.expect("PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_variable_evaluation_before_lowering() {
     // This test validates that variable evaluation happens before Typst lowering.
     // It uses the core compile path directly since the backend doesn't expose
@@ -299,10 +346,11 @@ fn integration_variable_evaluation_before_lowering() {
     );
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    // The source-backed content is retained as literal text; it is not
+    // The source-backed content is retained as literal text; Typst markup
+    // delimiters are escaped at the backend boundary rather than being
     // falsely represented as Strong after synthetic reparsing was removed.
     assert!(
-        typst_code.contains("**Scribium**"),
+        typst_code.contains("\\*\\*Scribium\\*\\*"),
         "unsupported rich content must remain source text: {}",
         typst_code
     );

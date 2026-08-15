@@ -182,6 +182,7 @@ impl LoweringContext {
             }
             IrNode::CodeBlock {
                 language,
+                info: _info,
                 source,
                 span,
             } => {
@@ -326,7 +327,7 @@ impl LoweringContext {
         match inline {
             IrInline::Text { content, span } => {
                 let before = self.output.len();
-                self.push_str(content);
+                self.push_str(&escape_typst_text(content));
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -423,6 +424,7 @@ impl LoweringContext {
             IrInline::Link {
                 content,
                 destination,
+                title: _title,
                 span,
             } => {
                 let before = self.output.len();
@@ -434,6 +436,38 @@ impl LoweringContext {
                 self.push('[');
                 self.lower_inlines(content);
                 self.push(']');
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::Image {
+                destination,
+                title,
+                span,
+                ..
+            } => {
+                let before = self.output.len();
+                self.push_str("/* Scribium image resource deferred: ");
+                self.push_str(&escape_typst_comment(destination));
+                if let Some(title) = title {
+                    self.push_str("; title: ");
+                    self.push_str(&escape_typst_comment(title));
+                }
+                self.push_str(" */");
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::SoftBreak { span } => {
+                let before = self.output.len();
+                self.push('\n');
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
+            IrInline::HardBreak { span } => {
+                let before = self.output.len();
+                self.push_str("\\\n");
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -629,6 +663,30 @@ fn table_alignment_name(alignment: IrTableAlignment) -> &'static str {
 /// backslashes and double quotes.
 fn escape_typst_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Escape Markdown text before inserting it into Typst markup. The frontend
+/// has already removed Markdown escapes, so this boundary must prevent those
+/// literal characters from becoming Typst formatting or labels.
+fn escape_typst_text(s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    for character in s.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '*' | '_' | '~' | '#' | '$' | '<' | '>' | '@' | '[' | ']' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn escape_typst_comment(s: &str) -> String {
+    s.replace("*/", "* /")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 #[cfg(test)]
@@ -843,6 +901,7 @@ mod tests {
                 content: vec![IrInline::Link {
                     content: vec![text("Example")],
                     destination: "https://example.com".into(),
+                    title: None,
                     span: empty_span(),
                 }],
                 span: empty_span(),
@@ -863,6 +922,7 @@ mod tests {
                         span: empty_span(),
                     }],
                     destination: "https://example.com".into(),
+                    title: None,
                     span: empty_span(),
                 }],
                 span: empty_span(),
@@ -880,6 +940,7 @@ mod tests {
                 content: vec![IrInline::Link {
                     content: vec![text("x")],
                     destination: "https://example.com/a\\b\"c".into(),
+                    title: None,
                     span: empty_span(),
                 }],
                 span: empty_span(),
@@ -900,6 +961,7 @@ mod tests {
                 content: vec![IrInline::Link {
                     content: vec![text("Example")],
                     destination: "https://example.com".into(),
+                    title: None,
                     span: link_span,
                 }],
                 span: empty_span(),
@@ -1032,6 +1094,7 @@ mod tests {
         let doc = IrDocument {
             nodes: vec![IrNode::CodeBlock {
                 language: Some("rust".into()),
+                info: Some("rust".into()),
                 source: "fn main() {}".into(),
                 span: empty_span(),
             }],
@@ -1309,6 +1372,7 @@ mod tests {
                             },
                             IrNode::CodeBlock {
                                 language: None,
+                                info: None,
                                 source: "code".into(),
                                 span: empty_span(),
                             },
@@ -1346,6 +1410,7 @@ mod tests {
                             },
                             IrNode::CodeBlock {
                                 language: None,
+                                info: None,
                                 source: "code".into(),
                                 span: empty_span(),
                             },
@@ -1384,6 +1449,7 @@ mod tests {
                             },
                             IrNode::CodeBlock {
                                 language: None,
+                                info: None,
                                 source: "code".into(),
                                 span: empty_span(),
                             },

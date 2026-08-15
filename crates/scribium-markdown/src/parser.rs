@@ -3,7 +3,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use rushdown::ast::{
     Arena, CodeBlockKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TableCellAlignment,
-    Task, TypeData,
+    Task, TextQualifier, TypeData,
 };
 use rushdown::parser::{
     gfm, parser_extension, BlockParser, Context, GfmOptions, InlineParser, NoParserOptions,
@@ -762,11 +762,16 @@ fn convert_block(
         KindData::Table(_) => Some(convert_table(arena, node, source, base, span, diagnostics)),
         KindData::CodeBlock(code) => {
             let raw = source.get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?;
-            let language = code_language(code, source);
+            let info = code_info(code, source);
+            let language = info
+                .as_deref()
+                .and_then(|value| value.split_whitespace().next())
+                .map(ToOwned::to_owned);
             let body =
                 code_block_source(arena, node, code, source).unwrap_or_else(|| code_source(raw));
             Some(Block::CodeBlock {
                 language,
+                info,
                 source: body,
                 span,
             })
@@ -986,9 +991,84 @@ fn convert_inlines(
         if let Some(inline) = convert_inline(arena, child, source, base, diagnostics) {
             inlines.push(inline);
         }
+        if let Some(line_break) = text_line_break(arena, child, source, base) {
+            inlines.push(line_break);
+        }
         previous = Some(child);
     }
     inlines
+}
+
+fn text_line_break(arena: &Arena, node: NodeRef, source: &str, base: usize) -> Option<Inline> {
+    let KindData::Text(text) = arena[node].kind_data() else {
+        return None;
+    };
+    let qualifier = if text.has_qualifiers(TextQualifier::HARD_LINE_BREAK) {
+        Some(true)
+    } else if text.has_qualifiers(TextQualifier::SOFT_LINE_BREAK) {
+        Some(false)
+    } else {
+        None
+    }?;
+    let local = text
+        .index()
+        .and_then(|index| checked_index(*index, source))?;
+    let newline_offset = source.get(local.end..)?.find('\n')?;
+    let end = local.end.checked_add(newline_offset)?.checked_add(1)?;
+    let span = offset_span(ByteSpan::new(local.end, end), base)?;
+    if qualifier {
+        Some(Inline::HardBreak { span })
+    } else {
+        Some(Inline::SoftBreak { span })
+    }
+}
+
+/// Convert parser-owned Markdown text into the semantic text that enters the
+/// Scribium AST. The source span remains the original byte range.
+fn normalize_text_content(raw: &str) -> String {
+    let mut normalized = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\'
+            && bytes
+                .get(cursor + 1)
+                .is_some_and(|byte| byte.is_ascii_punctuation())
+        {
+            normalized.push(bytes[cursor + 1] as char);
+            cursor += 2;
+            continue;
+        }
+        if bytes[cursor] == b'&' {
+            if let Some((end, replacement)) = resolve_entity_at(raw, cursor) {
+                normalized.push_str(&replacement);
+                cursor = end;
+                continue;
+            }
+        }
+        let Some(character) = raw.get(cursor..).and_then(|value| value.chars().next()) else {
+            break;
+        };
+        normalized.push(character);
+        cursor += character.len_utf8();
+    }
+    normalized
+}
+
+fn resolve_entity_at(raw: &str, start: usize) -> Option<(usize, String)> {
+    let end = raw
+        .get(start..)?
+        .find(';')
+        .and_then(|offset| start.checked_add(offset)?.checked_add(1))?;
+    if end.checked_sub(start)? > 64 {
+        return None;
+    }
+    let candidate = raw.get(start..end)?;
+    let resolved = rushdown::util::resolve_numeric_references(
+        rushdown::util::resolve_entity_references(candidate.as_bytes()),
+    );
+    (resolved.as_ref() != candidate.as_bytes())
+        .then(|| (end, String::from_utf8_lossy(resolved.as_ref()).into_owned()))
 }
 
 fn convert_inline(
@@ -1013,7 +1093,7 @@ fn convert_inline(
                 .and_then(|index| checked_index(*index, source))
                 .or_else(|| node_span(arena, node, source))?;
             Some(Inline::Text {
-                content: source.get(local.start..local.end)?.to_string(),
+                content: normalize_text_content(source.get(local.start..local.end)?),
                 span: offset_span(local, base)?,
             })
         }
@@ -1034,18 +1114,20 @@ fn convert_inline(
         KindData::Link(link) => Some(Inline::Link {
             content: {
                 let content = convert_inlines(arena, node, source, base, diagnostics);
-                if content.is_empty() {
+                if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
                     auto_link_content(link, source, base).unwrap_or(content)
                 } else {
                     content
                 }
             },
             destination: convert_link_destination(link, source)?,
+            title: link.title_str(source).map(|title| title.into_owned()),
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
             content: convert_inlines(arena, node, source, base, diagnostics),
             destination: checked_value(image.destination(), source)?.to_string(),
+            title: image.title_str(source).map(|title| title.into_owned()),
             span,
         }),
         KindData::RawHtml(_html) => Some(Inline::RawHtml {
@@ -1761,10 +1843,8 @@ fn offset_span(span: ByteSpan, offset: usize) -> Option<ByteSpan> {
     ))
 }
 
-fn code_language(code: &rushdown::ast::CodeBlock, source: &str) -> Option<String> {
-    checked_value(code.info()?, source)
-        .and_then(|value| value.split_whitespace().next())
-        .map(ToOwned::to_owned)
+fn code_info(code: &rushdown::ast::CodeBlock, source: &str) -> Option<String> {
+    checked_value(code.info()?, source).map(ToOwned::to_owned)
 }
 
 fn code_block_source(
@@ -2354,6 +2434,56 @@ mod tests {
     }
 
     #[test]
+    fn commonmark_semantics_preserve_breaks_entities_titles_and_code_info() {
+        let source = "# ATX\n\nSetext\n=======\n\nText &amp; \\*escaped\\*\nsoft\nhard  \nnext\n\n[link](https://example.test \"title\") ![alt](image.png \"image title\")\n\n```rust extra-info\nfn main() {}\n```\n";
+        let document = parse_md(source);
+        assert!(matches!(document.nodes[0], Block::Heading { level: 1, .. }));
+        assert!(matches!(document.nodes[1], Block::Heading { level: 1, .. }));
+
+        let Block::Paragraph { content, .. } = &document.nodes[2] else {
+            panic!("expected paragraph")
+        };
+        assert!(
+            content.iter().any(|inline| matches!(
+                inline,
+                Inline::Text { content, .. } if content == "Text &"
+            )),
+            "{content:?}"
+        );
+        assert!(
+            content.iter().any(|inline| matches!(
+                inline,
+                Inline::Text { content, .. } if content == " *escaped*"
+            )),
+            "{content:?}"
+        );
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::SoftBreak { .. })));
+        assert!(content
+            .iter()
+            .any(|inline| matches!(inline, Inline::HardBreak { .. })));
+
+        let Block::Paragraph { content, .. } = &document.nodes[3] else {
+            panic!("expected link paragraph")
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Link { title: Some(title), .. } if title == "title"
+        )));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Image { title: Some(title), .. } if title == "image title"
+        )));
+
+        let Block::CodeBlock { language, info, .. } = &document.nodes[4] else {
+            panic!("expected fenced code block")
+        };
+        assert_eq!(language.as_deref(), Some("rust"));
+        assert_eq!(info.as_deref(), Some("rust extra-info"));
+    }
+
+    #[test]
     fn blockquote_preserves_all_child_blocks() {
         let document = parse_md("> first\n>\n> second\n>\n> third\n");
         let Block::Blockquote { content, .. } = &document.nodes[0] else {
@@ -2608,6 +2738,7 @@ mod tests {
                     })
                     .collect(),
                 Inline::DirectiveCall { name, .. } => format!(".{name}"),
+                Inline::HardBreak { .. } | Inline::SoftBreak { .. } => String::new(),
                 other => panic!("unexpected inline {other:?}"),
             })
             .collect()
