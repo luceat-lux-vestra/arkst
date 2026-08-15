@@ -589,7 +589,7 @@ fn line_end_with_terminator(line: ByteSpan, source: &str) -> usize {
 }
 
 fn strip_lambda_header_line(body: &mut Vec<Block>, line_end: usize, source: &str) {
-    let Some(Block::Paragraph { content, .. }) = body.first_mut() else {
+    let Some(Block::Paragraph { content, span }) = body.first_mut() else {
         return;
     };
     let original = std::mem::take(content);
@@ -620,6 +620,11 @@ fn strip_lambda_header_line(body: &mut Vec<Block>, line_end: usize, source: &str
     *content = kept;
     if content.is_empty() {
         body.remove(0);
+    } else {
+        // The paragraph originally covered the header and the surviving body
+        // text. Re-anchor it to the original spans of the remaining inline
+        // nodes so provenance does not retain the removed header bytes.
+        *span = paragraph_span(content);
     }
 }
 
@@ -2652,8 +2657,14 @@ mod tests {
         );
         assert_eq!(&source[header.span.start..header.span.end], "to from?:");
         assert_eq!(paragraph_text(&body[0]), "Hello, .to from .from!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected surviving lambda body paragraph")
+        };
+        assert_eq!(&source[span.start..span.end], "Hello, .to from .from!");
         assert!(source.is_char_boundary(header.span.start));
         assert!(source.is_char_boundary(header.span.end));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
     }
 
     #[test]
@@ -2674,7 +2685,8 @@ mod tests {
 
     #[test]
     fn function_lambda_header_keeps_container_relative_body_indentation() {
-        let list = parse_with_diagnostics("- .function {greet}\n    name:\n    Hello, .name!\n");
+        let list_source = "- .function {greet}\n    name:\n    Hello, .name!\n";
+        let list = parse_with_diagnostics(list_source);
         assert!(list.diagnostics.is_empty(), "{list:?}");
         let Block::UnorderedList { items, .. } = &list.document.nodes[0] else {
             panic!("expected list")
@@ -2689,8 +2701,15 @@ mod tests {
         };
         assert_eq!(header.parameters[0].name, "name");
         assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected list lambda body paragraph")
+        };
+        let body_start = list_source.find("Hello").expect("list body text");
+        assert_eq!(&list_source[span.start..span.end], "Hello, .name!");
+        assert_eq!(span.start, body_start);
 
-        let quote = parse_with_diagnostics("> .function {greet}\n>   name:\n>   Hello, .name!\n");
+        let quote_source = "> .function {greet}\n>   name:\n>   Hello, .name!\n";
+        let quote = parse_with_diagnostics(quote_source);
         assert!(quote.diagnostics.is_empty(), "{quote:?}");
         let Block::Blockquote { content, .. } = &quote.document.nodes[0] else {
             panic!("expected blockquote")
@@ -2705,6 +2724,40 @@ mod tests {
         };
         assert_eq!(header.parameters[0].name, "name");
         assert_eq!(paragraph_text(&body[0]), "Hello, .name!");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected blockquote lambda body paragraph")
+        };
+        let body_start = quote_source.find("Hello").expect("quote body text");
+        assert_eq!(&quote_source[span.start..span.end], "Hello, .name!");
+        assert_eq!(span.start, body_start);
+    }
+
+    #[test]
+    fn function_lambda_header_reanchors_surviving_utf8_body_span() {
+        for ending in ["\n", "\r\n"] {
+            for indent in ["  ", "   ", "    ", "        ", "\t"] {
+                let source = format!(
+                    ".function {{greet}}{ending}{indent}name:{ending}{indent}안녕, .name!{ending}"
+                );
+                let output = parse_with_diagnostics(&source);
+                assert!(output.diagnostics.is_empty(), "{output:?}");
+                let Block::DirectiveCall {
+                    body: Some(body), ..
+                } = &output.document.nodes[0]
+                else {
+                    panic!("expected function body")
+                };
+                let Block::Paragraph { span, .. } = &body[0] else {
+                    panic!("expected surviving body paragraph")
+                };
+                let start = source.find("안녕").expect("body text");
+                let end = start + "안녕, .name!".len();
+                assert_eq!((span.start, span.end), (start, end));
+                assert_eq!(&source[span.start..span.end], "안녕, .name!");
+                assert!(source.is_char_boundary(span.start));
+                assert!(source.is_char_boundary(span.end));
+            }
+        }
     }
 
     #[test]

@@ -298,9 +298,10 @@ optional parameters are diagnosed as deferred semantics in this slice.
 Supported invocation semantics are positional and named binding, a block body
 bound to the final parameter, parent-visible/child-local scope, source-order
 redeclaration, and user-defined bindings taking precedence over an evidenced
-builtin after declaration. A single semantic expression remains a scalar
-value across a function boundary, while rich or multi-node Markdown becomes
-structured content. Nested and chained calls use the same evaluator value
+builtin after declaration. Outputless body statements update the child scope;
+one substantive semantic value remains typed across the function boundary,
+while multiple rich or Markdown outputs become structured content only when
+composition requires it. Nested and chained calls use the same evaluator value
 path.
 
 Implicit lambda parameters (`.1`, `.2`, ...), optional `None` values, generic

@@ -30,9 +30,11 @@
 //!
 //! User-defined functions are registered in source order. A call evaluates
 //! positional and named arguments first, creates a child scope, binds its
-//! parameters, and then evaluates the body in value context. A single
-//! semantic call or chain remains an `IrValue` at that boundary; only a
-//! multi-node or Markdown body becomes `IrValue::Content`.
+//! parameters, and then evaluates the body statement-by-statement in value
+//! context. Outputless statements update the child scope, one substantive
+//! semantic value remains an `IrValue` at that boundary, and multiple
+//! structured outputs become `IrValue::Content` only when composition requires
+//! it.
 //!
 //! Chain evaluation is structural: the head is invoked first, its semantic
 //! `IrValue` becomes the first positional argument of the next segment, and
@@ -115,6 +117,76 @@ enum CallOutcome {
     NoValue,
     Failed,
     Unresolved,
+}
+
+/// Accumulates the observable result of a callable body without converting a
+/// semantic value to document content until a second observable output makes
+/// that conversion necessary.
+enum CallableBodyValueAccumulator {
+    Empty,
+    Semantic { value: IrValue, span: SourceSpan },
+    Content(Vec<IrNode>),
+}
+
+impl CallableBodyValueAccumulator {
+    fn append_value(&mut self, value: IrValue, span: SourceSpan) {
+        if matches!(self, Self::Empty) {
+            *self = Self::Semantic { value, span };
+            return;
+        }
+
+        let current = std::mem::replace(self, Self::Empty);
+        let mut nodes = current.into_content_nodes();
+        nodes.extend(value_into_content_nodes(value, span));
+        *self = Self::Content(nodes);
+    }
+
+    fn finish(self) -> CallOutcome {
+        match self {
+            Self::Empty => CallOutcome::NoValue,
+            Self::Semantic { value, .. } => CallOutcome::Value(value),
+            Self::Content(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+        }
+    }
+
+    fn into_content_nodes(self) -> Vec<IrNode> {
+        match self {
+            Self::Empty => Vec::new(),
+            Self::Semantic { value, span } => value_into_content_nodes(value, span),
+            Self::Content(nodes) => nodes,
+        }
+    }
+}
+
+fn value_into_content_nodes(value: IrValue, span: SourceSpan) -> Vec<IrNode> {
+    match value {
+        IrValue::Content(nodes) => nodes,
+        scalar => vec![IrNode::Paragraph {
+            content: vec![IrInline::Text {
+                content: scalar_to_text(&scalar),
+                span,
+            }],
+            span,
+        }],
+    }
+}
+
+fn ir_node_source_span(node: &IrNode) -> SourceSpan {
+    match node {
+        IrNode::Heading { span, .. }
+        | IrNode::Paragraph { span, .. }
+        | IrNode::Blockquote { span, .. }
+        | IrNode::UnorderedList { span, .. }
+        | IrNode::OrderedList { span, .. }
+        | IrNode::Table { span, .. }
+        | IrNode::CodeBlock { span, .. }
+        | IrNode::RawTypst { span, .. }
+        | IrNode::FunctionCall { span, .. }
+        | IrNode::ChainedFunctionCall { span, .. }
+        | IrNode::FunctionDeclaration { span, .. }
+        | IrNode::ThematicBreak { span }
+        | IrNode::Math { span, .. } => *span,
+    }
 }
 
 /// Evaluation context with explicit parent visibility and local bindings.
@@ -804,20 +876,44 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
-        if let [IrNode::FunctionCall {
-            name,
-            positional_args,
-            named_args,
-            body,
-            span: call_span,
-        }] = nodes
-        {
-            return match self.evaluate_call_value(
+        let mut result = CallableBodyValueAccumulator::Empty;
+        for node in nodes {
+            let span = ir_node_source_span(node);
+            match self.evaluate_callable_statement_value(node, diagnostics, context) {
+                CallOutcome::Value(value) => result.append_value(value, span),
+                CallOutcome::NoValue => {}
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            }
+        }
+        result.finish()
+    }
+
+    /// Evaluates one callable-body statement in semantic value context.
+    ///
+    /// Function calls and chains use the same shared dispatch as every other
+    /// call site. Markdown nodes are retained as structured content, while
+    /// declarations and outputless calls contribute state without becoming a
+    /// fabricated empty value.
+    fn evaluate_callable_statement_value(
+        &self,
+        node: &IrNode,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        match node {
+            IrNode::FunctionCall {
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+            } => match self.evaluate_call_value(
                 name,
                 positional_args,
                 named_args,
                 body.as_deref().map(CallBody::Block),
-                call_span,
+                span,
                 diagnostics,
                 context,
             ) {
@@ -827,42 +923,34 @@ impl Evaluator {
                         positional_args,
                         named_args,
                         body.as_deref(),
-                        call_span,
+                        span,
                         diagnostics,
                         context,
                     )
                     .map(IrValue::Content)
                     .map_or(CallOutcome::Failed, CallOutcome::Value),
                 outcome => outcome,
-            };
-        }
-        if let [IrNode::ChainedFunctionCall {
-            head, chain, body, ..
-        }] = nodes
-        {
-            return self.evaluate_chain_value(
+            },
+            IrNode::ChainedFunctionCall {
+                head, chain, body, ..
+            } => self.evaluate_chain_value(
                 head,
                 chain,
                 body.as_deref().map(CallBody::Block),
                 diagnostics,
                 context,
-            );
-        }
-
-        let before = diagnostics.len();
-        let evaluated = self.evaluate_nodes(nodes, diagnostics, context);
-        if diagnostics.len() == before {
-            if evaluated.is_empty()
-                && nodes
-                    .iter()
-                    .any(|node| matches!(node, IrNode::FunctionDeclaration { .. }))
-            {
-                CallOutcome::NoValue
-            } else {
-                CallOutcome::Value(IrValue::Content(evaluated))
+            ),
+            _ => {
+                let before = diagnostics.len();
+                let evaluated = self.evaluate_node(node, diagnostics, context);
+                if diagnostics.len() != before {
+                    CallOutcome::Failed
+                } else if evaluated.is_empty() {
+                    CallOutcome::NoValue
+                } else {
+                    CallOutcome::Value(IrValue::Content(evaluated))
+                }
             }
-        } else {
-            CallOutcome::Failed
         }
     }
 
@@ -1226,29 +1314,46 @@ impl Evaluator {
     ) -> Vec<IrInline> {
         match value {
             Some(IrValue::Content(nodes)) => {
-                if nodes
-                    .iter()
-                    .any(|node| !matches!(node, IrNode::Paragraph { .. }))
-                {
-                    diagnostics.push(function_error(
-                        "Rich block content cannot be inserted into an inline context".to_string(),
-                        *span,
-                    ));
-                    return Vec::new();
-                }
-                nodes
-                    .into_iter()
-                    .flat_map(|node| match node {
-                        IrNode::Paragraph { content, .. } => content,
-                        _ => Vec::new(),
-                    })
-                    .collect()
+                self.materialize_inline_content(nodes, span, diagnostics)
             }
             Some(value) => vec![IrInline::Text {
                 content: scalar_to_text(&value),
                 span: *span,
             }],
             None => Vec::new(),
+        }
+    }
+
+    /// Materializes only content that has an unambiguous inline shape.
+    ///
+    /// A paragraph boundary or any other block node must remain observable;
+    /// silently concatenating or dropping it would change the document.
+    fn materialize_inline_content(
+        &self,
+        nodes: Vec<IrNode>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Vec<IrInline> {
+        let mut nodes = nodes.into_iter();
+        let Some(first) = nodes.next() else {
+            return Vec::new();
+        };
+        if nodes.next().is_some() {
+            diagnostics.push(function_error(
+                "Rich block content cannot be inserted into an inline context unless it is exactly one paragraph".to_string(),
+                *span,
+            ));
+            return Vec::new();
+        }
+        match first {
+            IrNode::Paragraph { content, .. } => content,
+            _ => {
+                diagnostics.push(function_error(
+                    "Rich block content cannot be inserted into an inline context unless it is exactly one paragraph".to_string(),
+                    *span,
+                ));
+                Vec::new()
+            }
         }
     }
 

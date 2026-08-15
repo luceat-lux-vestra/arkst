@@ -560,6 +560,49 @@ mod tests {
     }
 
     #[test]
+    fn compile_user_function_multi_statement_body_preserves_last_semantic_value() {
+        let source = ".function {f}\n    .var {x} {2}\n    .sum {.x} {1}\n\n.sum {.f} {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "4");
+
+        let source = ".function {f}\n    .function {local}\n        body\n    .sum {2} {1}\n\n.sum {.f} {1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "4");
+    }
+
+    #[test]
+    fn compile_user_function_multi_statement_body_stops_after_first_failure() {
+        let source = ".function {bad}\n    .multiply {true} {true}\n    .var {after} {ran}\n\n.sum {.bad} {1}\n.after\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+        assert!(!output_text(&result).contains("ran"));
+    }
+
+    #[test]
+    fn compile_user_function_multi_statement_rich_content_keeps_source_spans() {
+        let source = ".function {rich}\n    First **one**\n\n    Second *two*\n\n.rich\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        // Rushdown's original inline spans are retained verbatim; in
+        // particular, the closing delimiter is not part of these paragraph
+        // ranges, so assert against the exact source-backed range.
+        let expected = ["First **one", "Second *two"];
+        assert_eq!(result.ir.nodes.len(), expected.len());
+        for (node, expected) in result.ir.nodes.iter().zip(expected) {
+            let IrNode::Paragraph { span, .. } = node else {
+                panic!("expected paragraph, got {node:?}")
+            };
+            assert_eq!(span.source_id, source_id);
+            assert_eq!(&source[span.start..span.end], expected);
+        }
+    }
+
+    #[test]
     fn compile_user_function_rich_and_block_results_keep_markdown_structure() {
         let rich_source = ".function {greet}\n    name:\n    **Hello, .name!**\n\n.greet {world}\n";
         let (rich, _) = compile_source(rich_source);
@@ -596,6 +639,13 @@ mod tests {
         assert!(unsupported.diagnostics[0]
             .message
             .contains("Rich block content"));
+
+        let multiple_paragraphs =
+            ".function {two}\n    First\n\n    Second\n\nprefix .two suffix\n";
+        let (multiple, _) = compile_source(multiple_paragraphs);
+        assert_eq!(multiple.diagnostics.len(), 1, "{multiple:?}");
+        assert!(!output_text(&multiple).contains("First"));
+        assert!(!output_text(&multiple).contains("Second"));
     }
 
     #[test]
@@ -1280,6 +1330,16 @@ mod tests {
         assert!(content
             .iter()
             .all(|inline| !matches!(inline, IrInline::Strong { .. })));
+    }
+
+    #[test]
+    fn compile_variable_multiple_paragraphs_inline_reference_is_not_flattened() {
+        let source = ".var {x}\n    First\n\n    Second\n\nprefix .x suffix\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert!(!output_text(&result).contains("First"));
+        assert!(!output_text(&result).contains("Second"));
     }
 
     #[test]
