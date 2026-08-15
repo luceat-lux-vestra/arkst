@@ -554,6 +554,33 @@ mod tests {
     }
 
     #[test]
+    fn compile_final_chain_no_value_is_legal_but_non_final_is_not() {
+        let (final_result, _) = compile_source(".var {x} {0}\n.sum {1} {2}::x\n.x\n");
+        assert!(final_result.diagnostics.is_empty(), "{final_result:?}");
+        assert_eq!(output_text(&final_result), "3");
+
+        let (non_final_result, _) = compile_source(".var {x} {0}\n.sum {1} {2}::x::sum {1}\n.x\n");
+        assert_eq!(non_final_result.diagnostics.len(), 1);
+        assert_eq!(non_final_result.diagnostics[0].code, "E3001");
+        assert_eq!(output_text(&non_final_result), "3");
+    }
+
+    #[test]
+    fn compile_nested_no_value_matches_chain_failure_classification() {
+        let (nested_result, _) = compile_source(".var {x} {0}\n.multiply {.x {3}} {2}\n.x\n");
+        assert_eq!(nested_result.diagnostics.len(), 1, "{nested_result:?}");
+        assert_eq!(nested_result.diagnostics[0].code, "E3001");
+        assert_eq!(output_text(&nested_result), "3");
+
+        let (failed_child, _) = compile_source(".multiply {.sum {true}} {2}\n");
+        assert_eq!(failed_child.diagnostics.len(), 1, "{failed_child:?}");
+        assert_eq!(failed_child.diagnostics[0].code, "E3001");
+        assert!(failed_child.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+    }
+
+    #[test]
     fn compile_chain_and_ordinary_conditional_are_equally_lazy() {
         let chain_source =
             ".var {flag} {false}\n.var {x} {before}\n.flag::if\n    .x {after}\n.x\n";
@@ -650,16 +677,7 @@ mod tests {
             result.diagnostics[0].primary.as_ref().unwrap().source_id,
             source_id
         );
-        let IrNode::FunctionCall {
-            positional_args, ..
-        } = &result.ir.nodes[0]
-        else {
-            panic!("expected outer call IR");
-        };
-        let crate::ir::IrValue::Content(nodes) = &positional_args[0] else {
-            panic!("expected content IR argument");
-        };
-        assert!(nodes.is_empty());
+        assert!(result.ir.nodes.is_empty());
     }
 
     #[test]

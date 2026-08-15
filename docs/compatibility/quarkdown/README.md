@@ -147,7 +147,11 @@ evaluator consumes those segments structurally and applies the documented
 left-to-right value-flow transformation for the four evidenced builtin
 callees. Their documented nested-call equivalents share the same evaluator
 invocation contract and are covered by paired semantic and generated-Typst
-tests. Value-context type preservation, the small documented scalar adaptation
+tests. Successful terminal outputless calls (such as variable reassignment)
+remain legal, but a no-value result in a nested value-required argument or
+non-final chain segment reports source-backed `E3001`; an already-failed child
+propagates its original diagnostic without a duplicate no-value error.
+Value-context type preservation, the small documented scalar adaptation
 surface, lazy conditional bodies, provenance, failure, and Typst/PDF tests
 support this slice only; complete `DynamicValue` and general programmable
 document compatibility are not claimed here.

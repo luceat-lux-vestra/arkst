@@ -290,6 +290,16 @@ builtins use a deliberately small invocation-boundary adaptation contract for
 strings, identifiers, booleans, numbers, and plain text content; this is not a
 claim of complete Quarkdown `DynamicValue` or standard-library compatibility.
 
+Evaluator outcomes distinguish a successful value, a successful outputless
+side effect, a failed evaluation, and an unresolved call. A terminal
+outputless call such as variable declaration or reassignment is legal and
+produces no document nodes. The same outputless result is an `E3001` when a
+nested argument or non-final chain segment requires a value; failures
+propagate their original diagnostic without an additional generic no-value
+error. Unresolved ordinary calls remain preservable, while unresolved chain
+segments report source-backed `E3001` because a chain cannot fabricate an
+intermediate value.
+
 ### Conditional (Implemented)
 
 ```
