@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["*.lock", "target/*"]
+extend-exclude = ["*.lock", "target/*", "tests/compat/corpus/*"]
 
 [default]
 extend-ignore-re = [
