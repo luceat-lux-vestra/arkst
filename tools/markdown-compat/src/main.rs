@@ -106,6 +106,110 @@ struct BaselineCase {
     reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Classification {
+    Pass,
+    KnownMismatch,
+    Unsupported,
+}
+
+impl Classification {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "PASS" => Some(Self::Pass),
+            "KNOWN_MISMATCH" => Some(Self::KnownMismatch),
+            "UNSUPPORTED" => Some(Self::Unsupported),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::KnownMismatch => "KNOWN_MISMATCH",
+            Self::Unsupported => "UNSUPPORTED",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BaselineGateStatus {
+    Accepted,
+    NewMismatch,
+    StaleException,
+    ClassificationChanged,
+    InvalidBaseline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BaselineGateDecision {
+    status: BaselineGateStatus,
+    new_mismatch: bool,
+    improvement: bool,
+}
+
+fn evaluate_baseline_gate(
+    baseline_classification: Option<&str>,
+    current: Classification,
+) -> BaselineGateDecision {
+    let Some(baseline_classification) = baseline_classification else {
+        return BaselineGateDecision {
+            status: if current == Classification::Pass {
+                BaselineGateStatus::Accepted
+            } else {
+                BaselineGateStatus::NewMismatch
+            },
+            new_mismatch: current != Classification::Pass,
+            improvement: false,
+        };
+    };
+
+    let Some(expected) = Classification::parse(baseline_classification) else {
+        return BaselineGateDecision {
+            status: BaselineGateStatus::InvalidBaseline,
+            new_mismatch: false,
+            improvement: false,
+        };
+    };
+    if expected == Classification::Pass {
+        return BaselineGateDecision {
+            status: BaselineGateStatus::InvalidBaseline,
+            new_mismatch: false,
+            improvement: false,
+        };
+    }
+    if current == Classification::Pass {
+        return BaselineGateDecision {
+            status: BaselineGateStatus::StaleException,
+            new_mismatch: false,
+            improvement: true,
+        };
+    }
+    if expected == current {
+        return BaselineGateDecision {
+            status: BaselineGateStatus::Accepted,
+            new_mismatch: false,
+            improvement: false,
+        };
+    }
+
+    BaselineGateDecision {
+        status: BaselineGateStatus::ClassificationChanged,
+        new_mismatch: true,
+        improvement: false,
+    }
+}
+
+fn missing_baseline_case_ids<'a>(
+    baseline_ids: impl Iterator<Item = &'a String>,
+    corpus_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    baseline_ids
+        .filter(|id| !corpus_ids.contains(*id))
+        .cloned()
+        .collect()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ReferenceConfig {
     schema_version: u32,
@@ -342,7 +446,7 @@ fn main() -> Result<()> {
     for suite in [&commonmark, &gfm] {
         errors.extend(suite.baseline_errors.iter().cloned());
         for case in &suite.cases {
-            if case.new_mismatch || case.result == "HARNESS_ERROR" {
+            if case.new_mismatch || case.error.is_some() || case.result == "HARNESS_ERROR" {
                 errors.push(format!(
                     "{} {}: {}",
                     suite.name,
@@ -473,14 +577,12 @@ fn run_suite(
         );
     }
 
-    let corpus_ids: BTreeSet<_> = corpus.iter().map(|case| case.id.as_str()).collect();
+    let corpus_ids: BTreeSet<String> = corpus.iter().map(|case| case.id.clone()).collect();
     let mut baseline_errors = Vec::new();
-    for baseline_id in baseline.cases.keys() {
-        if !corpus_ids.contains(baseline_id.as_str()) {
-            baseline_errors.push(format!(
-                "{name} baseline case {baseline_id} is absent from the pinned corpus"
-            ));
-        }
+    for baseline_id in missing_baseline_case_ids(baseline.cases.keys(), &corpus_ids) {
+        baseline_errors.push(format!(
+            "{name} baseline case {baseline_id} is absent from the pinned corpus"
+        ));
     }
 
     let mut summary = SuiteSummary::new();
@@ -501,15 +603,36 @@ fn run_suite(
                 } else {
                     "PASS"
                 };
-                let improvement = current == "PASS" && baseline_case.is_some();
-                let classification_changed = baseline_case
-                    .is_some_and(|entry| current != "PASS" && entry.classification != current);
-                let new_mismatch =
-                    current != "PASS" && (baseline_case.is_none() || classification_changed);
+                let current = Classification::parse(current).context("invalid current result")?;
+                let gate = evaluate_baseline_gate(
+                    baseline_case.map(|entry| entry.classification.as_str()),
+                    current,
+                );
                 let diff = if equal {
                     None
                 } else {
                     Some(compact_diff(&reference_tree, &scribium_tree))
+                };
+                let gate_error = match gate.status {
+                    BaselineGateStatus::Accepted => None,
+                    BaselineGateStatus::NewMismatch => None,
+                    BaselineGateStatus::StaleException => Some(format!(
+                        "stale baseline exception for {}: current result is PASS; remove the baseline entry",
+                        case.id
+                    )),
+                    BaselineGateStatus::ClassificationChanged => Some(format!(
+                        "baseline classification changed from {} to {}",
+                        baseline_case
+                            .map(|entry| entry.classification.as_str())
+                            .unwrap_or("<missing>"),
+                        current.as_str()
+                    )),
+                    BaselineGateStatus::InvalidBaseline => Some(format!(
+                        "baseline entry must be an accepted non-PASS classification, got {}",
+                        baseline_case
+                            .map(|entry| entry.classification.as_str())
+                            .unwrap_or("<missing>")
+                    )),
                 };
                 CaseReport {
                     id: case.id.clone(),
@@ -518,21 +641,14 @@ fn run_suite(
                     markdown: case.markdown.clone(),
                     reference: Some(reference_tree),
                     scribium: Some(scribium_tree),
-                    result: current.to_string(),
+                    result: current.as_str().to_string(),
                     baseline_classification: baseline_case
                         .map(|entry| entry.classification.clone()),
                     baseline_reason: baseline_case.map(|entry| entry.reason.clone()),
-                    new_mismatch,
-                    improvement,
+                    new_mismatch: gate.new_mismatch,
+                    improvement: gate.improvement,
                     diff,
-                    error: baseline_case
-                        .filter(|_| classification_changed)
-                        .map(|entry| {
-                            format!(
-                                "baseline classification changed from {} to {current}",
-                                entry.classification
-                            )
-                        }),
+                    error: gate_error,
                 }
             }
             Err(error) => CaseReport {
@@ -1428,4 +1544,79 @@ fn print_summary(report: &FullReport) {
         report.real_documents.summary.expected_unsupported,
         report.real_documents.summary.harness_error
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pass_without_baseline_is_ok() {
+        let decision = evaluate_baseline_gate(None, Classification::Pass);
+        assert_eq!(decision.status, BaselineGateStatus::Accepted);
+        assert!(!decision.new_mismatch);
+        assert!(!decision.improvement);
+    }
+
+    #[test]
+    fn new_mismatch_without_baseline_fails() {
+        let decision = evaluate_baseline_gate(None, Classification::KnownMismatch);
+        assert_eq!(decision.status, BaselineGateStatus::NewMismatch);
+        assert!(decision.new_mismatch);
+        assert!(!decision.improvement);
+    }
+
+    #[test]
+    fn existing_known_mismatch_is_accepted() {
+        let decision =
+            evaluate_baseline_gate(Some("KNOWN_MISMATCH"), Classification::KnownMismatch);
+        assert_eq!(decision.status, BaselineGateStatus::Accepted);
+        assert!(!decision.new_mismatch);
+        assert!(!decision.improvement);
+    }
+
+    #[test]
+    fn resolved_known_mismatch_is_detected_as_stale() {
+        let decision = evaluate_baseline_gate(Some("KNOWN_MISMATCH"), Classification::Pass);
+        assert_eq!(decision.status, BaselineGateStatus::StaleException);
+        assert!(!decision.new_mismatch);
+        assert!(decision.improvement);
+    }
+
+    #[test]
+    fn resolved_case_then_regressed_is_rejected() {
+        let resolved = evaluate_baseline_gate(None, Classification::Pass);
+        let regressed = evaluate_baseline_gate(None, Classification::KnownMismatch);
+        assert_eq!(resolved.status, BaselineGateStatus::Accepted);
+        assert_eq!(regressed.status, BaselineGateStatus::NewMismatch);
+        assert!(regressed.new_mismatch);
+    }
+
+    #[test]
+    fn mismatch_classification_change_is_rejected() {
+        let known_to_unsupported =
+            evaluate_baseline_gate(Some("KNOWN_MISMATCH"), Classification::Unsupported);
+        let unsupported_to_known =
+            evaluate_baseline_gate(Some("UNSUPPORTED"), Classification::KnownMismatch);
+        assert_eq!(
+            known_to_unsupported.status,
+            BaselineGateStatus::ClassificationChanged
+        );
+        assert_eq!(
+            unsupported_to_known.status,
+            BaselineGateStatus::ClassificationChanged
+        );
+        assert!(known_to_unsupported.new_mismatch);
+        assert!(unsupported_to_known.new_mismatch);
+    }
+
+    #[test]
+    fn removed_corpus_case_in_baseline_is_rejected() {
+        let baseline_ids = ["present".to_string(), "removed".to_string()];
+        let corpus_ids = BTreeSet::from(["present".to_string()]);
+        assert_eq!(
+            missing_baseline_case_ids(baseline_ids.iter(), &corpus_ids),
+            vec!["removed".to_string()]
+        );
+    }
 }

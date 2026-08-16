@@ -50,10 +50,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
     },
-    "commonmark-0028": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
     "commonmark-0032": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
@@ -409,10 +405,6 @@
     "commonmark-0340": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Code spans section."
-    },
-    "commonmark-0354": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
     },
     "commonmark-0432": {
       "classification": "KNOWN_MISMATCH",

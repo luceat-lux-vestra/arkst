@@ -180,15 +180,19 @@ revisions is:
 The baseline files
 [`commonmark.json`](../../../tests/compat/baselines/commonmark.json) and
 [`gfm.json`](../../../tests/compat/baselines/gfm.json) store stable case IDs,
-the corpus/reference revisions, and the accepted mismatch classification.
-They are reviewed data, never automatically updated by CI.
+the corpus/reference revisions, and the explicitly accepted current non-PASS
+exception set. They are reviewed data, never automatically updated by CI.
 
 CI fails when a prior pass becomes a mismatch, when a new mismatch appears,
 when a corpus case disappears, or when a pinned revision changes without a
 review-visible baseline/corpus update. Existing known mismatches remain
 visible in the report. A known mismatch that becomes a pass is reported as an
-improvement and does not require a baseline rewrite. The mismatch count is
-therefore a snapshot of measured gaps, not a completeness score.
+improvement but also makes the baseline exception stale, so CI requires the
+entry to be explicitly removed. After removal, the pass is accepted without an
+exception and any later mismatch is a new mismatch that fails CI. A change
+between `KNOWN_MISMATCH` and `UNSUPPORTED` also fails until the baseline is
+reviewed. The mismatch count is therefore a snapshot of measured gaps, not a
+completeness score.
 
 The current differences are concentrated in existing parser-boundary gaps
 such as tabs and container/newline handling, thematic breaks and heading
