@@ -42,10 +42,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the HTML blocks section."
     },
-    "gfm-0196": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Paragraphs section."
-    },
     "gfm-0199": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Tables (extension) section."
@@ -97,10 +93,6 @@
     "gfm-0623": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Autolinks (extension) section."
-    },
-    "gfm-0655": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Hard line breaks section."
     }
   }
 }
