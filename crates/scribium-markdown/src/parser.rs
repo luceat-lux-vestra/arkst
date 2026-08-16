@@ -1178,7 +1178,12 @@ fn normalize_source_value(raw: &str, escaped_space: bool) -> String {
                         rushdown::util::resolve_entity_references(reference)
                     }
                     MetadataReferenceKind::Numeric => {
-                        rushdown::util::resolve_numeric_references(reference)
+                        let replacement = rushdown::util::resolve_numeric_references(reference);
+                        if replacement.as_ref() == [0] {
+                            std::borrow::Cow::Borrowed("�".as_bytes())
+                        } else {
+                            replacement
+                        }
                     }
                 };
                 normalized.extend_from_slice(replacement.as_ref());
@@ -2018,17 +2023,30 @@ fn code_block_span(
     source: &str,
 ) -> Option<ByteSpan> {
     let start = arena[node].pos()?;
-    let end = match code.value() {
+    let body_end = match code.value() {
         Lines::Segments(segments) => segments.iter().map(Segment::stop).max(),
         _ => None,
-    }?;
-    let end = if code.code_block_kind() == CodeBlockKind::Fenced {
-        fenced_code_end(source, start).unwrap_or(end)
-    } else {
-        end
     };
+    let end = if code.code_block_kind() == CodeBlockKind::Fenced {
+        let limit = next_node_boundary(arena, node).unwrap_or(source.len());
+        fenced_code_end(source, start, limit)
+            .or(body_end)
+            .or_else(|| fenced_opening_end(source, start))
+    } else {
+        body_end
+    }?;
     let span = ByteSpan::new(start, end);
     span.is_valid_for(source).then_some(span)
+}
+
+fn next_node_boundary(arena: &Arena, node: NodeRef) -> Option<usize> {
+    let mut current = node;
+    loop {
+        if let Some(next) = arena[current].next_sibling() {
+            return arena[next].pos();
+        }
+        current = arena[current].parent()?;
+    }
 }
 
 fn html_block_span(
@@ -2061,11 +2079,14 @@ fn html_block_span(
     span.is_valid_for(source).then_some(span)
 }
 
-fn fenced_code_end(source: &str, start: usize) -> Option<usize> {
+fn fenced_code_end(source: &str, start: usize, limit: usize) -> Option<usize> {
     let first_end = source
         .get(start..)?
         .find('\n')
         .map_or(source.len(), |offset| start + offset + 1);
+    if first_end > limit {
+        return None;
+    }
     let opening = source
         .get(start..first_end)?
         .trim_start_matches([' ', '\t']);
@@ -2078,11 +2099,14 @@ fn fenced_code_end(source: &str, start: usize) -> Option<usize> {
         return None;
     }
     let mut line_start = first_end;
-    while line_start < source.len() {
+    while line_start < limit {
         let line_end = source
             .get(line_start..)?
             .find('\n')
             .map_or(source.len(), |offset| line_start + offset + 1);
+        if line_end > limit {
+            return None;
+        }
         let line = source
             .get(line_start..line_end)?
             .trim_start_matches([' ', '\t']);
@@ -2097,6 +2121,15 @@ fn fenced_code_end(source: &str, start: usize) -> Option<usize> {
         line_start = line_end;
     }
     None
+}
+
+fn fenced_opening_end(source: &str, start: usize) -> Option<usize> {
+    let line_end = source
+        .get(start..)?
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset + 1);
+    source.get(start..line_end)?;
+    Some(line_end)
 }
 
 fn checked_index(index: rushdown::text::Index, source: &str) -> Option<ByteSpan> {

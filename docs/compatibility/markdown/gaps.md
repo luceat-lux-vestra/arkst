@@ -80,9 +80,9 @@ cases; only those four hard-break entries were removed from the baselines.
 | Positioned empty/marker-only node spans | 34 / 32 resolved | `SCRIBIUM_FRONTEND` | P1 | RESOLVED | Recover source-backed line/delimiter spans from Rushdown position and metadata; retain UTF-8/CRLF and nested-container checks. |
 | Leading `---` front-matter policy boundary | 2 / 2 | `INTENTIONAL_POLICY` | P2 | Accepted | Keep the current front-matter detector; it owns the leading document prologue before Markdown parsing. |
 | Empty inline text nodes | 7 / 7 | `SCRIBIUM_FRONTEND` | P2 | Fixed | Do not emit empty `Inline::Text`; structural, nested, UTF-8, LF/CRLF, and provenance regressions are present. |
-| Empty or unclosed fenced nodes | 4 / 4 | `RUSHDOWN_BEHAVIOR` | P2 | Accepted | Do not synthesize missing code nodes; pinned Rushdown lacks the source-backed value/end data required by the frontend. |
+| Empty or unclosed fenced nodes | 4 / 4 | `SCRIBIUM_FRONTEND` | P2 | Fixed | Recover the original fenced opening/closing line span from the existing Rushdown CodeBlock node; do not synthesize a missing node. |
 | Link/code metadata escape and entity normalization, including inline-link entity cases | 9 / 9 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Normalize destination, title, and info values through one source-backed policy without reparsing; preserve original spans. |
-| Text entity/reference normalization | 1 fixed / 2 accepted per suite | `SCRIBIUM_FRONTEND` / `RUSHDOWN_BEHAVIOR` | P1 | Split: fixed / accepted | Normalize escaped source spelling once; retain pinned numeric NUL and LF segmentation boundaries. |
+| Text entity/reference normalization | 3 / 3 fixed | `SCRIBIUM_FRONTEND` / `CANONICAL_MAPPING` | P1 | Fixed | Adapt numeric zero to U+FFFD at the frontend boundary and preserve entity-produced LF inside one canonical text node. |
 | Code-span delimiter matching | 4 / 4 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Match maximal backtick runs with the opener's exact length while keeping the original span. |
 | Hard-break trailing whitespace | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Exclude parser-classified delimiter spaces from semantic text; keep the original text/enclosing source spans. |
 | HTML block canonicalization | 1 / 1 | `CANONICAL_MAPPING` | P3 | Accepted | Keep source-backed raw HTML; do not normalize blockquote markers into a production semantic HTML string. |
@@ -194,17 +194,24 @@ All fourteen cases now pass. Independent regressions cover adjacent emphasis,
 code spans, links, images, escapes, UTF-8, LF, CRLF, nested containers, and
 source-span invariants.
 
-### Empty or unclosed fenced nodes — Rushdown boundary
+### Empty or unclosed fenced nodes — fixed frontend span recovery
 
 Structural signature: cmark exposes an empty fenced code block while the
-pinned Rushdown tree does not produce a source-backed code node that the
-adapter can safely convert. The affected cases include unclosed fences and
-empty fence bodies inside blockquotes. No source is synthesized and no
-Markdown is reparsed.
+pinned Rushdown tree exposes the corresponding `CodeBlockKind::Fenced` node,
+position, info string, and empty `Lines::Segments([])`. The previous frontend
+discarded that node because `code_block_span()` required a non-empty segment
+maximum before considering the fenced delimiter. The adapter now recovers the
+original opening/closing line boundary from the existing node position and
+the source context, including a blockquote boundary, without creating a new
+parser node or rewriting Markdown.
 
 CommonMark: `commonmark-0126`, `0130`, `0144`, `0237`.
 
 GFM: `gfm-0096`, `0100`, `0114`, `0215`.
+
+All eight suite cases now pass. Focused regressions assert empty, closed,
+info-bearing, unclosed, and blockquote fences retain original byte spans and
+do not absorb sibling source.
 
 ### Metadata escape/entity normalization — fixed frontend batch
 
@@ -261,18 +268,22 @@ parser ownership or span algorithm was observed. There are no Rushdown-owned
 leftovers in this selected metadata group; text entity/reference behavior and
 other pinned Rushdown groups remain separate gaps below.
 
-### Text entity/reference normalization — mixed ownership
+### Text entity/reference normalization — fixed frontend and canonical mapping
 
-Structural signature: escaped `&` was decoded twice, `&#0;` becomes a NUL
-instead of the replacement character, or a numeric line-feed reference stays
-inside one text node instead of becoming two soft breaks. The escaped-reference
-case is fixed frontend normalization; the latter two follow the pinned
-Rushdown utility and AST segmentation behavior and cannot be fixed by changing
-the backend.
+Structural signature: escaped `&` was decoded twice, `&#0;` became a NUL
+instead of the replacement character, or a numeric line-feed reference was
+projected as soft-break nodes by the compatibility harness. Escaped references
+are normalized once from the original source; numeric zero is adapted to
+U+FFFD at the Scribium frontend semantic boundary; and entity-produced LF
+bytes remain inside one canonical text node. Explicit cmark `<softbreak>` nodes
+continue to map to canonical soft breaks.
 
 CommonMark: `commonmark-0014`, `0026`, `0039`.
 
 GFM: `gfm-0310`, `0322`, `0335`.
+
+All six cases now pass. The Rushdown utility/segmentation observations remain
+covered as evidence, but they are no longer accepted Markdown mismatches.
 
 ### Code-span delimiter matching — fixed frontend adapter
 
@@ -370,12 +381,12 @@ profile's `none` body alignment without changing production table semantics.
 retaining the original source span for `` `\|` ``. Both cases pass without
 source scanning or reparsing.
 
-## Deferred priority work
+## Historical deferred priority work
 
-The remaining P1/P2 gaps are separate frontend, canonical-mapping, policy,
-and Rushdown-boundary questions. The leading front-matter boundary remains a
-separate policy decision and is not implied by the resolved span, metadata,
-code-span, or hard-break batches.
+At the intermediate 632/20 and 648/22 baseline, the remaining P1/P2 gaps were
+separate frontend, canonical-mapping, policy, and Rushdown-boundary questions.
+The final review follow-up below resolves the actionable frontend and mapping
+items; the leading front-matter boundary remains a separate policy decision.
 
 The following remain explicitly outside this remediation batch: Rushdown
 upgrade/fork/patch, parser replacement, source preprocessing or reparsing,
@@ -399,12 +410,12 @@ PASS result, and no expected result was changed.
 
 | Suite | Total | PASS | Accepted mismatch | UNSUPPORTED | New mismatch |
 |---|---:|---:|---:|---:|---:|
-| CommonMark | 652 | 643 | 9 | 0 | 0 |
-| GFM | 670 | 658 | 12 | 0 | 0 |
+| CommonMark | 652 | 649 | 3 | 0 | 0 |
+| GFM | 670 | 664 | 6 | 0 | 0 |
 
 The real-document corpus remained `12 successful_pdf / 2 expected_unsupported
-/ 0 harness_error`. The final checked-in baseline contains exactly the nine
-CommonMark and twelve GFM accepted cases shown below.
+/ 0 harness_error`. The final checked-in baseline contains exactly the three
+CommonMark and six GFM accepted cases shown below.
 
 ### Case-level evidence contract
 
@@ -433,22 +444,25 @@ original Markdown in the source catalog immediately below each table.
 | `gfm-0199` | S21 | Header cells center/right; body cells `align=none`. | Same after fix. Before: canonical projection copied header alignment to body cells. | Rushdown AST has header and body cells carrying Center/Right column metadata. | Production table AST remains `TableRow 35..45` with body Center/Right cells; projection maps body alignment to `none` only. | `CANONICAL_MAPPING` | Fixed in the differential projection; production semantics were not changed. |
 | `gfm-0200` | S22 | Inline code value `|`; escaped pipe in strong text also `|`. | Same after fix. Before: code value was `\\|` because the adapter used the raw source slice. | Rushdown public `CodeSpan::str(source)` returns `|`; raw source span is `` `\\|` ``. | Table `0..49`; code span `26..30`, raw source `` `\\|` ``, semantic value `|`. | `SCRIBIUM_FRONTEND` | Fixed by using the pinned public code-span value while retaining the original span. |
 
-#### Accepted remaining cases
+#### Final case decisions after review follow-up
 
 | Corpus case ID | Source | Reference canonical result | Scribium canonical result / first structural difference | Rushdown observable AST/value | Scribium frontend AST/value and source span | Final ownership | Decision |
 |---|---|---|---|---|---|---|---|
-| `commonmark-0026` / `gfm-0322` | S2 | `D[P[T("# Ӓ Ϡ �")]]` | `D[P[T("# Ӓ Ϡ \\u{0000}")]]`; first difference is U+FFFD versus U+0000. | Text index covers `&#0;`; `resolve_numeric_references("&#0;")` returns byte U+0000 in the pinned utility. | CM Text `0..25`; GFM Text is split `0..20` and `20..25`; both preserve original source ranges. | `RUSHDOWN_BEHAVIOR` | Accepted pinned utility behavior; no source rescanning or replacement-character patch. |
-| `commonmark-0039` / `gfm-0335` | S3 | `D[P[T("foo"),SB,SB,T("bar")]]` | `D[P[T("foo\\n\\nbar")]]`; first difference is missing soft-break node segmentation. | One Rushdown Text segment covers `foo&#10;&#10;bar`; no soft-break qualifiers are exposed. | Paragraph/Text source span `0..16`, value `foo\n\nbar`. | `RUSHDOWN_BEHAVIOR` | Accepted pinned segmentation; no synthetic break reconstruction or reparse. |
+| `commonmark-0026` / `gfm-0322` | S2 | `D[P[T("# Ӓ Ϡ �")]]` | Same after fix. Before: semantic value ended in U+0000. | Text index covers `&#0;`; pinned utility returns U+0000, which is the observed substrate value. | CM Text `0..25`; GFM Text `0..20` plus `20..25`; both retain original source spans and now expose U+FFFD semantically. | `SCRIBIUM_FRONTEND` | Fixed by mapping numeric-zero utility output to U+FFFD at the existing one-pass source normalization boundary. |
+| `commonmark-0039` / `gfm-0335` | S3 | `D[P[T("foo\\n\\nbar")]]` | Same after fix. Before: `xml_text_nodes()` split a text value's entity-produced LF bytes into soft breaks. | One Rushdown Text segment covers `foo&#10;&#10;bar`; no parser soft-break qualifiers are required. | Paragraph/Text source span `0..16`, value `foo\n\nbar`. | `CANONICAL_MAPPING` | Fixed by preserving non-empty `<text>` values as one canonical text node; explicit `<softbreak>` nodes remain soft breaks. |
 | `commonmark-0096` / `gfm-0066` | S4 | Thematic break, H2 `Foo`, H2 `Bar`, paragraph `Baz`. | H2 `Bar`, paragraph `Baz`; leading prologue is consumed before Markdown parsing. | Raw Rushdown would expose thematic break `0`, H2 `Foo` `4`, H2 `Bar` `12`, paragraph `Baz` `20`; document entry policy consumes `0..12`. | Front matter `0..12`; H2 `12..15`; paragraph `20..23`. | `INTENTIONAL_POLICY` | Accepted intentional Markdown-profile deviation; changing it changes document ownership policy. |
 | `commonmark-0098` / `gfm-0068` | S5 | Two thematic breaks. | Empty document after leading front-matter consumption. | Raw Rushdown exposes thematic breaks at `0` and `4`; the document entry policy consumes the leading block. | No Markdown frontend nodes; consumed source remains owned by document policy. | `INTENTIONAL_POLICY` | Accepted intentional Markdown-profile deviation. |
-| `commonmark-0126` / `gfm-0096` | S6 | Empty fenced code block, `info=""`, value empty. | Empty document; no synthesized code block. | Rushdown CodeBlock kind Fenced, `pos=0`, `Lines::Segments([])`, no source-backed value segment/end. | No frontend CodeBlock; no invented span. | `RUSHDOWN_BEHAVIOR` | Accepted parser/API boundary; source scanning or synthetic fenced spans are prohibited. |
-| `commonmark-0130` / `gfm-0100` | S7 | Empty closed fenced code block, value empty. | Empty document; no synthesized code block. | Fenced CodeBlock `pos=0`, empty segments, no source-backed closing/value range. | No frontend CodeBlock. | `RUSHDOWN_BEHAVIOR` | Accepted pinned Rushdown boundary. |
-| `commonmark-0144` / `gfm-0114` | S8 | Empty fenced code block, `info=";"`, value empty. | Empty document; no synthesized code block. | Fenced CodeBlock `pos=0`, `info=";"`, empty segments, no source-backed value/end. | No frontend CodeBlock or synthetic info span. | `RUSHDOWN_BEHAVIOR` | Accepted pinned Rushdown boundary. |
+| `commonmark-0126` / `gfm-0096` | S6 | Empty fenced code block, `info=""`, value empty. | Same after fix: empty CodeBlock with original span `0..4`. Before: `code_block_span()` returned `None` on empty segments. | Rushdown CodeBlock kind Fenced, `pos=0`, `Lines::Segments([])`, and no body segment; opener node is present. | Frontend CodeBlock span `0..4`, empty body, original opening line retained. | `SCRIBIUM_FRONTEND` | Fixed by recovering the fenced opening-line span from the existing parser node. |
+| `commonmark-0130` / `gfm-0100` | S7 | Empty closed fenced code block, value empty. | Same after fix: CodeBlock span `0..8`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, empty segments; source context contains the closing fence. | Frontend CodeBlock span `0..8`, empty body, original opening/closing source retained. | `SCRIBIUM_FRONTEND` | Fixed without synthesizing a parser node or changing the AST ownership. |
+| `commonmark-0144` / `gfm-0114` | S8 | Empty fenced code block, `info=";"`, value empty. | Same after fix: CodeBlock span `0..11`, info `;`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, `info=";"`, empty segments. | Frontend CodeBlock span `0..11`, info `;`, empty body, original source retained. | `SCRIBIUM_FRONTEND` | Fixed by source-backed span recovery at the frontend boundary. |
 | `commonmark-0174` / `gfm-0143` | S11 | Block raw HTML value `<div>\nfoo\n` inside a blockquote. | Block raw HTML preserves `<div>\n> foo\n`; first difference is canonical quote-marker removal. | Rushdown HtmlBlock kind 6 exposes semantic value without quote markers. | RawHtml value is original source-backed `<div>\n> foo\n`, span `2..14`; enclosing blockquote `0..14`. | `CANONICAL_MAPPING` | Accepted canonical/provenance boundary; production raw HTML is not rewritten to match cmark XML. |
-| `commonmark-0237` / `gfm-0215` | S13 | Blockquote contains an empty code block, then paragraph `foo`, then empty code block. | Blockquote is empty, paragraph `foo` is `6..9`; fenced nodes are omitted. | Rushdown exposes code nodes at positions `2` and `10`, both empty `Lines::Segments([])`, but no source-backed value spans. | Blockquote `0..6`, paragraph/text `6..9`; no synthesized CodeBlock spans. | `RUSHDOWN_BEHAVIOR` | Accepted pinned node/value boundary; no source scan or reparse. |
+| `commonmark-0237` / `gfm-0215` | S13 | Blockquote contains an empty code block, then paragraph `foo`, then empty code block. | Same after fix: blockquote CodeBlock `2..6`, paragraph `6..9`, root CodeBlock `10..14`. Before: both fenced nodes were omitted. | Rushdown exposes code nodes at positions `2` and `10`, both empty `Lines::Segments([])`, with the parser-owned container boundary visible through siblings. | Frontend retains both CodeBlocks and their original source spans; sibling paragraph is not absorbed. | `SCRIBIUM_FRONTEND` | Fixed with boundary-aware recovery from existing node position and source context. |
 | `gfm-0610` | S23 | Partial autolink for `http://foo.bar/baz` followed by text ` bim>`. | Plain Text split at the same parser boundary; no Link node. | Rushdown GFM emits Text `<http://foo.bar/baz` span `0..19` and Text ` bim>` span `19..24`. | Frontend retains those original spans and values; no linkifier is added. | `RUSHDOWN_BEHAVIOR` | Accepted pinned invalid-autolink behavior. |
 | `gfm-0614` | S24 | Email autolink for `foo+@bar.example.com`. | Plain Text `<foo+@bar.example.com>`; no Link node. | Rushdown GFM emits one source-backed Text value for the escaped-plus form and no Link. | Frontend Text span `0..23`, original source-backed value. | `RUSHDOWN_BEHAVIOR` | Accepted pinned invalid-autolink behavior; no independent email scanner. |
 | `gfm-0623` | S25 | `www.commonmark.org/a.b` is linkified as the complete URL. | Rushdown links only `www.commonmark.org/a`, leaving `.b.` as Text. | Rushdown Link destination is `http://www.commonmark.org/a`; following `.b.` remains Text. | Frontend preserves the parser Link/source span and trailing Text spans. | `RUSHDOWN_BEHAVIOR` | Accepted pinned linkify boundary; no production URL scanner. |
+
+The final accepted case set is CommonMark `0096`, `0098`, `0174` and GFM
+`0066`, `0068`, `0143`, `0610`, `0614`, `0623`.
 
 All 42 originally listed mismatches therefore have a concrete final
 classification and decision. `UNKNOWN` is not present. The fixed cases are
@@ -652,21 +666,26 @@ Visit www.commonmark.org/a.b.
   compatibility-only hiding rule. It has independently authored LF, CRLF,
   UTF-8, nested-container, adjacent-inline, link, image, escape, and source
   span regressions in `crates/scribium-markdown/tests/empty_inline_text.rs`.
-- Entity/reference normalization is independently split: escaped source
-  spelling is a `SCRIBIUM_FRONTEND` one-pass fix; NUL replacement semantics
-  and numeric-LF segmentation remain separate `RUSHDOWN_BEHAVIOR` boundaries.
+- Entity/reference normalization is independently evidenced: escaped source
+  spelling and numeric-zero replacement are `SCRIBIUM_FRONTEND` one-pass
+  adaptations, while entity-produced LF is a `CANONICAL_MAPPING` projection
+  fix. None of these remains a known mismatch.
+- Empty/unclosed fenced cases are `SCRIBIUM_FRONTEND` fixes: Rushdown already
+  exposes the fenced nodes, positions, info values, and empty segment vectors;
+  the adapter now retains their original source spans.
 - Canonical mapping fixes are confined to the compatibility projection. The
   GFM table body alignment change does not alter the production table AST;
   CommonMark/GFM profile selection does not add a production linkifier.
 - No source rewrite, preprocessing, generated-Markdown reparse, reference
-  parser in production, parser duplication, or synthetic source span was
-  introduced. Original byte-span provenance remains intact.
+  parser in production, parser duplication, or synthetic parser node was
+  introduced. Recovered fenced spans are original source ranges. Original
+  byte-span provenance remains intact.
 - Rushdown remains pinned at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`.
 
 No remaining known mismatch is an actionable Scribium-owned Markdown defect.
-The remaining cases are limited to verified pinned Rushdown behavior,
-intentional Scribium document policy, and an accepted canonical/provenance
-boundary. Markdown remediation is therefore considered closed. Future
-changes to these accepted boundaries require new evidence or an intentional
-parser/profile policy change.
+The remaining cases are limited to verified pinned GFM autolink/linkify
+behavior, intentional Scribium document policy, and an accepted
+canonical/provenance boundary. Markdown remediation is therefore considered
+closed. Future changes to these accepted boundaries require new evidence or
+an intentional parser/profile policy change.

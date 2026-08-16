@@ -2,6 +2,7 @@ use rushdown::ast::{Arena, CodeBlockKind, KindData, NodeRef, TextQualifier};
 use rushdown::parser::{gfm, GfmOptions, Options, Parser};
 use rushdown::text::{BasicReader, Lines};
 use rushdown::util::resolve_numeric_references;
+use scribium_markdown::{parse_md, Block, Inline};
 
 fn parse(source: &str, gfm_mode: bool) -> (Arena, NodeRef) {
     let parser = if gfm_mode {
@@ -60,9 +61,21 @@ fn blockquote_fence_boundary_has_positions_but_no_empty_value_segments() {
 }
 
 #[test]
-fn pinned_numeric_reference_and_text_segmentation_are_observable_boundaries() {
+fn pinned_numeric_reference_is_adapted_at_the_frontend_boundary() {
     assert_eq!(resolve_numeric_references(b"&#0;").as_ref(), b"\0");
 
+    let document = parse_md("&#0;\n");
+    let Block::Paragraph { content, .. } = &document.nodes[0] else {
+        panic!("expected a paragraph");
+    };
+    let Inline::Text { content, .. } = &content[0] else {
+        panic!("expected a text node");
+    };
+    assert_eq!(content, "�");
+}
+
+#[test]
+fn pinned_numeric_lf_stays_text_until_canonical_projection() {
     let source = "foo&#10;&#10;bar\n";
     let (arena, root) = parse(source, false);
     let mut text_nodes = Vec::new();

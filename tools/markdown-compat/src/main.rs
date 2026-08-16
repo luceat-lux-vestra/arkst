@@ -978,17 +978,11 @@ fn xml_inline(node: &XmlNode) -> Result<Vec<CanonicalNode>> {
 }
 
 fn xml_text_nodes(value: &str) -> Vec<CanonicalNode> {
-    let parts: Vec<_> = value.split('\n').collect();
-    let mut nodes = Vec::new();
-    for (index, part) in parts.iter().enumerate() {
-        if !part.is_empty() {
-            nodes.push(CanonicalNode::value("text", *part));
-        }
-        if index + 1 < parts.len() {
-            nodes.push(CanonicalNode::new("soft_break"));
-        }
+    if value.is_empty() {
+        Vec::new()
+    } else {
+        vec![CanonicalNode::value("text", value)]
     }
-    nodes
 }
 
 fn link_node(node: &XmlNode, kind: &str) -> Result<CanonicalNode> {
@@ -1242,6 +1236,15 @@ mod profile_tests {
         let body = &tree.children[0].children[1];
         assert_eq!(body.children[0].attrs["align"], "none");
         assert_eq!(body.children[1].attrs["align"], "none");
+    }
+
+    #[test]
+    fn xml_text_node_preserves_entity_newlines_as_text() {
+        assert_eq!(
+            xml_text_nodes("foo\n\nbar"),
+            vec![CanonicalNode::value("text", "foo\n\nbar")]
+        );
+        assert!(xml_text_nodes("").is_empty());
     }
 }
 

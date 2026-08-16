@@ -57,3 +57,49 @@ fn code_blocks_keep_utf8_crlf_body_and_original_range() {
     assert_eq!(*span, ByteSpan::new(0, source.len()));
     assert_eq!(source.get(span.start..span.end), Some(source));
 }
+
+#[test]
+fn empty_and_unclosed_fenced_nodes_keep_original_opening_spans() {
+    for (source, expected_span, expected_info) in [
+        ("```\n", ByteSpan::new(0, 4), None),
+        ("```\n```\n", ByteSpan::new(0, 8), None),
+        ("````;\n````\n", ByteSpan::new(0, 11), Some(";")),
+    ] {
+        let document = parse_md(source);
+        let Block::CodeBlock {
+            language,
+            info,
+            source: body,
+            span,
+        } = &document.nodes[0]
+        else {
+            panic!("expected an empty fenced code block for {source:?}");
+        };
+        assert_eq!(*span, expected_span);
+        assert_eq!(source.get(span.start..span.end), Some(source));
+        assert_eq!(body, "");
+        assert_eq!(info.as_deref(), expected_info);
+        assert_eq!(language.as_deref(), expected_info);
+    }
+}
+
+#[test]
+fn blockquote_empty_fences_do_not_absorb_sibling_source() {
+    let source = "> ```\nfoo\n```\n";
+    let document = parse_md(source);
+
+    let Block::Blockquote { content, .. } = &document.nodes[0] else {
+        panic!("expected a blockquote");
+    };
+    let Block::CodeBlock { span, .. } = &content[0] else {
+        panic!("expected the blockquote's empty fenced node");
+    };
+    assert_eq!(*span, ByteSpan::new(2, 6));
+    assert_eq!(source.get(span.start..span.end), Some("```\n"));
+
+    let Block::CodeBlock { span, .. } = &document.nodes[2] else {
+        panic!("expected the following empty fenced node");
+    };
+    assert_eq!(*span, ByteSpan::new(10, 14));
+    assert_eq!(source.get(span.start..span.end), Some("```\n"));
+}
