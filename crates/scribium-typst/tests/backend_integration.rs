@@ -147,7 +147,7 @@ fn integration_multi_block_list_item_compiles() {
     assert!(result.diagnostics.is_empty());
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
     assert!(
-        typst_code.contains("   ```\n code\n   ```"),
+        typst_code.contains("   ```\ncode\n   ```"),
         "code block must be inside the first item: {:?}",
         typst_code
     );

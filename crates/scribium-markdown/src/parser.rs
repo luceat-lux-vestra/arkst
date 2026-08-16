@@ -767,8 +767,7 @@ fn convert_block(
                 .as_deref()
                 .and_then(|value| value.split_whitespace().next())
                 .map(ToOwned::to_owned);
-            let body =
-                code_block_source(arena, node, code, source).unwrap_or_else(|| code_source(raw));
+            let body = code_block_source(code, source).unwrap_or_else(|| code_source(raw));
             Some(Block::CodeBlock {
                 language,
                 info,
@@ -1827,46 +1826,18 @@ fn code_info(code: &rushdown::ast::CodeBlock, source: &str) -> Option<String> {
     checked_value(code.info()?, source).map(ToOwned::to_owned)
 }
 
-fn code_block_source(
-    arena: &Arena,
-    node: NodeRef,
-    code: &rushdown::ast::CodeBlock,
-    source: &str,
-) -> Option<String> {
+fn code_block_source(code: &rushdown::ast::CodeBlock, source: &str) -> Option<String> {
     let Lines::Segments(segments) = code.value() else {
         return None;
     };
-    let lines = segments
+    segments
         .iter()
         .map(|segment| {
-            checked_segment(*segment, source)?
-                .checked_str(source)
-                .map(str::to_owned)
+            checked_segment(*segment, source)?;
+            String::from_utf8(segment.bytes(source).into_owned()).ok()
         })
-        .collect::<Option<Vec<_>>>()?;
-    let content = lines.join("\n");
-    if is_nested_in_list(arena, node) {
-        Some(
-            content
-                .lines()
-                .map(|line| format!(" {line}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    } else {
-        Some(content)
-    }
-}
-
-fn is_nested_in_list(arena: &Arena, node: NodeRef) -> bool {
-    let mut parent = arena[node].parent();
-    while let Some(parent_ref) = parent {
-        if matches!(arena[parent_ref].kind_data(), KindData::ListItem(_)) {
-            return true;
-        }
-        parent = arena[parent_ref].parent();
-    }
-    false
+        .collect::<Option<Vec<_>>>()
+        .map(|lines| lines.concat())
 }
 
 fn code_source(raw: &str) -> String {
