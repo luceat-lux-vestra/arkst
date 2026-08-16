@@ -7,6 +7,12 @@ This is the root-cause analysis of the differential baseline that was live on
 performed against the checked-in corpus and the pinned reference executables;
 it does not infer causes from section totals alone.
 
+The latest-main revalidation used `origin/main` at
+`7d9a0cf9ea60b6a89a6eebd057cf25eb34553549` after PR #73. The positioned-empty
+span remediation was then measured against the same pinned corpus and
+reference executables; its real-document run includes the independently
+authored `13-positioned-empty.md` fixture.
+
 ## Evidence and method
 
 The actual run used:
@@ -24,6 +30,15 @@ range behavior were inspected. The generated report is the detailed evidence
 record for a run; the lists below make the reviewed exception set and its
 root-cause grouping durable in the repository.
 
+For the selected group, each affected source was also checked against the
+Rushdown AST's node kind, `pos`, children, block source segments, and link/image
+metadata before comparing the production frontend mapping. The resolved cases
+all had source-backed Rushdown nodes whose information was lost only when the
+adapter required a non-empty child/source range. The four `---`-leading cases
+were the exception: front matter was consumed before Rushdown parsing, so they
+were reclassified as a separate policy boundary rather than forced through
+span recovery.
+
 `SCRIBIUM_FRONTEND` means the pinned parser already exposes enough information
 for a source-backed adapter fix. `RUSHDOWN_BEHAVIOR` means the pinned parser's
 observable construction or public utility behavior is the limiting boundary.
@@ -34,10 +49,10 @@ case review.
 
 ## Baseline and selected remediation
 
-| Suite | Before | After selected batch | Remaining known mismatches |
+| Suite | At PR #73 merge | After positioned-empty batch | Remaining known mismatches |
 |---|---:|---:|---:|
-| CommonMark | 539 PASS / 113 KNOWN_MISMATCH | 583 PASS / 69 KNOWN_MISMATCH | 69 |
-| GFM | 557 PASS / 113 KNOWN_MISMATCH | 601 PASS / 69 KNOWN_MISMATCH | 69 |
+| CommonMark | 583 PASS / 69 KNOWN_MISMATCH | 617 PASS / 35 KNOWN_MISMATCH | 35 |
+| GFM | 601 PASS / 69 KNOWN_MISMATCH | 633 PASS / 37 KNOWN_MISMATCH | 37 |
 
 The selected batch is `code-segment-semantics`. Rushdown's code values are
 `Lines::Segments`; each `Segment` carries source padding and a forced newline.
@@ -47,16 +62,18 @@ extra blank lines, dropped final line terminators, and changed indentation.
 The fix consumes the public segment byte representation, concatenates the
 segments without synthetic separators, and keeps the original AST span.
 
-Resolved case counts are 44 CommonMark and 44 corresponding GFM cases. The
-full case lists are retained below. No unrelated mismatch was removed from a
-baseline.
+PR #73 resolved 44 CommonMark and 44 corresponding GFM cases. The current
+positioned-empty batch resolves 34 CommonMark and 32 GFM cases. Only those
+improvements were removed from the baselines; no unrelated mismatch was
+reclassified.
 
 ## Root-cause groups
 
-| Group | Affected cases (CommonMark / GFM) | Ownership | Priority | Status | Recommended action |
+| Group | Cases (CommonMark / GFM) | Ownership | Priority | Status | Recommended action |
 |---|---:|---|---|---|---|
 | Code-segment semantics | 44 / 44 | `SCRIBIUM_FRONTEND` | P0 | Fixed | Keep segment padding/newline semantics and retain source spans. |
-| Positioned empty/marker-only node spans | 36 / 34 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Add narrow span recovery from Rushdown node position and the original line boundary; prove UTF-8/CRLF and nested containers first. |
+| Positioned empty/marker-only node spans | 34 / 32 resolved | `SCRIBIUM_FRONTEND` | P1 | RESOLVED | Recover source-backed line/delimiter spans from Rushdown position and metadata; retain UTF-8/CRLF and nested-container checks. |
+| Leading `---` front-matter policy boundary | 2 / 2 | `INTENTIONAL_POLICY` | P2 | Deferred | Keep the current front-matter detector; decide its Markdown-profile interaction separately before changing document ownership. |
 | Empty inline text nodes | 7 / 7 | `SCRIBIUM_FRONTEND` | P2 | Deferred | Do not emit empty `Inline::Text`; add structural and provenance regressions. |
 | Empty or unclosed fenced nodes | 4 / 4 | `RUSHDOWN_BEHAVIOR` | P2 | Deferred | Do not synthesize missing code nodes; record a Rushdown/API boundary and revisit only with reviewed evidence. |
 | Link/code metadata escape and entity normalization | 7 / 7 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Normalize destination, title, and info values through a single source-backed policy without reparsing. |
@@ -71,7 +88,10 @@ baseline.
 Priority reflects ordinary-document frequency and semantic damage, not case
 count. Code blocks were selected first because one small adapter correction
 fixed 88 suite cases, affects executable/documentation examples, and does not
-cross the Rushdown, IR, evaluator, or Typst boundaries.
+cross the Rushdown, IR, evaluator, or Typst boundaries. Positioned empty nodes
+were selected next because the revalidated AST evidence showed one frontend
+span invariant affecting ordinary separators and empty containers, while
+remaining within the same source-provenance boundary.
 
 ## Case-level root-cause index
 
@@ -105,30 +125,53 @@ GFM:
 `0209`, `0232`, `0241`, `0242`, `0248`, `0249`, `0251`, `0252`, `0256`,
 `0264`, `0265`, `0266`, `0267`, `0268`, `0298`, `0301`, `0304`.
 
-### Positioned empty/marker-only node spans — deferred frontend fix
+### Positioned empty/marker-only node spans — RESOLVED in this batch
 
 Structural signature: reference has a thematic break, empty heading,
 empty blockquote/list item, or empty-label link/image; the canonical Scribium
-tree omits the node because `node_span` has only a parser position and no
-child/source segment. This is visible in the frontend AST as an omitted
-`Block`/`Inline`, not as a backend or evaluator difference. A future fix must
-derive only the original line or delimiter boundary and must reject any span
-that is not a valid UTF-8 range.
+tree previously omitted the node because `node_span` had only a parser
+position and no child/source segment. Rushdown already exposed the node kind,
+position, container relationship, and (for links/images) destination metadata.
 
-CommonMark:
+The frontend now recovers a block's original line boundary only for a
+position-only Rushdown block node, and completes an empty-label link/image
+span only from parser-owned destination/title metadata. Every recovered span
+is checked against the original source and UTF-8 boundaries. No source is
+rewritten, no Markdown is reparsed, and no Rushdown code or revision changed.
 
-`commonmark-0011`, `0043`, `0047`, `0050`, `0051`, `0052`, `0053`, `0054`,
-`0057`, `0058`, `0060`, `0061`, `0077`, `0079`, `0085`, `0088`, `0092`,
-`0094`, `0096`, `0098`, `0099`, `0100`, `0101`, `0104`, `0105`, `0115`,
-`0218`, `0234`, `0239`, `0240`, `0246`, `0280`, `0284`, `0484`, `0487`,
-`0581`.
+Resolved case counts: 34 CommonMark and 32 GFM. The corresponding baseline
+entries were removed in this batch.
 
-GFM:
+CommonMark resolved IDs:
 
-`gfm-0011`, `0013`, `0017`, `0020`, `0021`, `0022`, `0023`, `0024`, `0027`,
+`0011`, `0043`, `0047`, `0050`, `0051`, `0052`, `0053`, `0054`, `0057`,
+`0058`, `0060`, `0061`, `0077`, `0079`, `0085`, `0088`, `0092`, `0094`,
+`0099`, `0100`, `0101`, `0104`, `0105`, `0115`, `0218`, `0234`, `0239`,
+`0240`, `0246`, `0280`, `0284`, `0484`, `0487`, `0581`.
+
+GFM resolved IDs:
+
+`0011`, `0013`, `0017`, `0020`, `0021`, `0022`, `0023`, `0024`, `0027`,
 `0028`, `0030`, `0031`, `0047`, `0049`, `0055`, `0058`, `0062`, `0064`,
-`0066`, `0068`, `0069`, `0070`, `0071`, `0074`, `0075`, `0085`, `0187`,
-`0212`, `0217`, `0218`, `0224`, `0258`, `0262`, `0589`.
+`0069`, `0070`, `0071`, `0074`, `0075`, `0085`, `0187`, `0212`, `0217`,
+`0218`, `0224`, `0258`, `0262`, `0589`.
+
+The remaining `---`-leading cases are a separate front-matter policy boundary,
+not unresolved span recovery; they are recorded immediately below.
+
+### Leading `---` front-matter policy boundary — deferred
+
+The reference treats `---`-leading examples as thematic breaks or headings,
+while Scribium's document entry point recognizes a leading front-matter block
+before invoking the Markdown frontend. The Rushdown AST therefore never
+contains the reference-visible nodes for these inputs. Changing this would
+alter the accepted front-matter policy and is not a safe span recovery.
+
+Ownership: `INTENTIONAL_POLICY`.
+
+CommonMark: `commonmark-0096`, `0098`.
+
+GFM: `gfm-0066`, `0068`.
 
 ### Empty inline text nodes — deferred frontend fix
 
@@ -242,11 +285,12 @@ parser behavior and has no safe frontend workaround that avoids reparsing.
 
 ## Deferred priority work
 
-The next high-value candidates are the positioned empty-node span recovery and
-metadata normalization. The former affects ordinary thematic breaks and
-container boundaries; the latter affects links and displayed code languages.
-They require separate source-span regressions and should not be combined with
-the selected code-segment change until their provenance contracts are proven.
+The next high-value candidate is metadata normalization, followed by
+code-span delimiter matching and hard-break whitespace semantics. Metadata
+normalization affects link destinations/titles and displayed code languages;
+the other two affect inline or paragraph semantics in ordinary documents.
+The leading front-matter boundary remains a separate policy decision and is
+not implied by the resolved span batch.
 
 The following remain explicitly outside this remediation batch: Rushdown
 upgrade/fork/patch, parser replacement, source preprocessing or reparsing,
