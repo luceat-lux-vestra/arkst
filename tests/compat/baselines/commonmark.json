@@ -10,31 +10,7 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Backslash escapes section."
     },
-    "commonmark-0022": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
-    "commonmark-0023": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
-    "commonmark-0024": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
     "commonmark-0026": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "commonmark-0032": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "commonmark-0033": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "commonmark-0034": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
     },
@@ -78,10 +54,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the HTML blocks section."
     },
-    "commonmark-0202": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Link reference definitions section."
-    },
     "commonmark-0226": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Paragraphs section."
@@ -110,15 +82,7 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
     },
-    "commonmark-0503": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
     "commonmark-0505": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "commonmark-0506": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Links section."
     },

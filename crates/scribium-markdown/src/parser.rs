@@ -762,7 +762,8 @@ fn convert_block(
         KindData::Table(_) => Some(convert_table(arena, node, source, base, span, diagnostics)),
         KindData::CodeBlock(code) => {
             let raw = source.get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?;
-            let info = code_info(code, source);
+            let info = code_info(code, source)
+                .map(|value| normalize_metadata(&value, MetadataKind::CodeInfo));
             let language = info
                 .as_deref()
                 .and_then(|value| value.split_whitespace().next())
@@ -1034,6 +1035,103 @@ fn normalize_text_content(raw: &str) -> String {
     String::from_utf8_lossy(resolved.as_ref()).into_owned()
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MetadataKind {
+    LinkDestination,
+    LinkTitle,
+    CodeInfo,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MetadataReferenceKind {
+    Named,
+    Numeric,
+}
+
+/// Normalize a source-backed semantic metadata value without changing its
+/// source span. The three modes are explicit because their Markdown grammar
+/// ownership differs, even though the pinned CommonMark/GFM behavior currently
+/// gives them the same narrow escape/entity policy.
+fn normalize_metadata(raw: &str, kind: MetadataKind) -> String {
+    let escaped_space = match kind {
+        MetadataKind::LinkDestination | MetadataKind::LinkTitle | MetadataKind::CodeInfo => false,
+    };
+    let unescaped = rushdown::util::unescape_puncts(raw.as_bytes(), escaped_space);
+    decode_metadata_references_once(unescaped.as_ref())
+}
+
+/// Decode references in one pass after applying CommonMark punctuation
+/// escapes. Calling Rushdown's numeric and named helpers over the whole value
+/// in sequence can decode a reference introduced by the first pass a second
+/// time (for example, `&#38;amp;`). Scanning only the original reference token
+/// and delegating each token to Rushdown's public utility preserves the
+/// source-backed value and the parser's invalid-reference behavior.
+fn decode_metadata_references_once(value: &[u8]) -> String {
+    let mut decoded = Vec::with_capacity(value.len());
+    let mut cursor = 0;
+    while cursor < value.len() {
+        let Some((end, reference_kind)) = metadata_reference_end(value, cursor) else {
+            decoded.push(value[cursor]);
+            cursor += 1;
+            continue;
+        };
+        let reference = &value[cursor..end];
+        let replacement = match reference_kind {
+            MetadataReferenceKind::Named => rushdown::util::resolve_entity_references(reference),
+            MetadataReferenceKind::Numeric => rushdown::util::resolve_numeric_references(reference),
+        };
+        decoded.extend_from_slice(replacement.as_ref());
+        cursor = end;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn metadata_reference_end(value: &[u8], start: usize) -> Option<(usize, MetadataReferenceKind)> {
+    if value.get(start) != Some(&b'&') {
+        return None;
+    }
+    let mut cursor = start.checked_add(1)?;
+    match value.get(cursor).copied() {
+        Some(b'#') => {
+            cursor = cursor.checked_add(1)?;
+            let hexadecimal = matches!(value.get(cursor), Some(b'x' | b'X'));
+            if hexadecimal {
+                cursor = cursor.checked_add(1)?;
+            }
+            let digit_start = cursor;
+            while let Some(byte) = value.get(cursor) {
+                let is_digit = if hexadecimal {
+                    byte.is_ascii_hexdigit()
+                } else {
+                    byte.is_ascii_digit()
+                };
+                if !is_digit {
+                    break;
+                }
+                cursor = cursor.checked_add(1)?;
+            }
+            (cursor > digit_start && value.get(cursor) == Some(&b';'))
+                .then_some((cursor.checked_add(1)?, MetadataReferenceKind::Numeric))
+        }
+        Some(byte) if byte.is_ascii_alphanumeric() => {
+            let name_start = cursor;
+            while value
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            {
+                cursor = cursor.checked_add(1)?;
+            }
+            if cursor == name_start || value.get(cursor) != Some(&b';') {
+                return None;
+            }
+            let name = std::str::from_utf8(value.get(name_start..cursor)?).ok()?;
+            rushdown::util::look_up_html5_entity_by_name(name)?;
+            Some((cursor.checked_add(1)?, MetadataReferenceKind::Named))
+        }
+        _ => None,
+    }
+}
+
 fn convert_inline(
     arena: &Arena,
     node: NodeRef,
@@ -1085,7 +1183,9 @@ fn convert_inline(
                 }
             },
             destination: convert_link_destination(link, source)?,
-            title: link.title_str(source).map(|title| title.into_owned()),
+            title: link
+                .title_str(source)
+                .map(|title| normalize_metadata(title.as_ref(), MetadataKind::LinkTitle)),
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
@@ -1396,9 +1496,10 @@ fn convert_value(value: &QuarkdownValue) -> Value {
 
 fn convert_link_destination(link: &rushdown::ast::Link, source: &str) -> Option<String> {
     let raw = checked_value(link.destination(), source)?;
-    let destination = match link.link_kind() {
-        rushdown::ast::LinkKind::Inline => unescape_inline_link_destination(raw),
-        _ => raw.to_string(),
+    let destination = if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
+        raw.to_string()
+    } else {
+        normalize_metadata(raw, MetadataKind::LinkDestination)
     };
     Some(destination)
 }
@@ -1429,11 +1530,6 @@ fn auto_link_content(link: &rushdown::ast::Link, source: &str, base: usize) -> O
         content: source.get(start..end)?.to_string(),
         span: offset_span(span, base)?,
     }])
-}
-
-fn unescape_inline_link_destination(destination: &str) -> String {
-    let unescaped = rushdown::util::unescape_puncts(destination.as_bytes(), false);
-    String::from_utf8_lossy(unescaped.as_ref()).into_owned()
 }
 
 fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {

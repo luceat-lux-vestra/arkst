@@ -3,15 +3,15 @@
 Audit date: 2026-08-16
 
 This is the root-cause analysis of the differential baseline that was live on
-`origin/main` at `f70b77fbebe9427cd57f43b3197fcef9f6c76839`. The analysis was
+`origin/main` at `89863edee4d7713ddb44e9e466d382c00779372c`. The analysis was
 performed against the checked-in corpus and the pinned reference executables;
 it does not infer causes from section totals alone.
 
-The latest-main revalidation used `origin/main` at
-`7d9a0cf9ea60b6a89a6eebd057cf25eb34553549` after PR #73. The positioned-empty
-span remediation was then measured against the same pinned corpus and
-reference executables; its real-document run includes the independently
-authored `13-positioned-empty.md` fixture.
+The latest-main revalidation used that live `origin/main` after the
+positioned-empty span remediation. The metadata remediation was then measured
+against the same pinned corpus and reference executables; its real-document
+run includes the independently authored `14-metadata-normalization.md`
+fixture.
 
 ## Evidence and method
 
@@ -30,14 +30,14 @@ range behavior were inspected. The generated report is the detailed evidence
 record for a run; the lists below make the reviewed exception set and its
 root-cause grouping durable in the repository.
 
-For the selected group, each affected source was also checked against the
-Rushdown AST's node kind, `pos`, children, block source segments, and link/image
-metadata before comparing the production frontend mapping. The resolved cases
-all had source-backed Rushdown nodes whose information was lost only when the
-adapter required a non-empty child/source range. The four `---`-leading cases
-were the exception: front matter was consumed before Rushdown parsing, so they
-were reclassified as a separate policy boundary rather than forced through
-span recovery.
+For the selected metadata group, each affected source was checked against the
+original bytes, cmark/cmark-gfm XML value, Rushdown node kind and source-backed
+metadata value, Scribium frontend value, canonical tree, and enclosing source
+span. Rushdown exposes link destinations/titles and fenced-code info as
+source-backed values; the selected defect was the Scribium adapter retaining
+that source spelling instead of deriving the semantic metadata value. The
+earlier positioned-empty span batch remains separately recorded below; its
+four `---`-leading cases are an intentional front-matter policy boundary.
 
 `SCRIBIUM_FRONTEND` means the pinned parser already exposes enough information
 for a source-backed adapter fix. `RUSHDOWN_BEHAVIOR` means the pinned parser's
@@ -49,10 +49,10 @@ case review.
 
 ## Baseline and selected remediation
 
-| Suite | At PR #73 merge | After positioned-empty batch | Remaining known mismatches |
-|---|---:|---:|---:|
-| CommonMark | 583 PASS / 69 KNOWN_MISMATCH | 617 PASS / 35 KNOWN_MISMATCH | 35 |
-| GFM | 601 PASS / 69 KNOWN_MISMATCH | 633 PASS / 37 KNOWN_MISMATCH | 37 |
+| Suite | At PR #73 merge | After positioned-empty batch (live base) | After metadata batch | Remaining known mismatches |
+|---|---:|---:|---:|---:|
+| CommonMark | 583 PASS / 69 KNOWN_MISMATCH | 617 PASS / 35 KNOWN_MISMATCH | 626 PASS / 26 KNOWN_MISMATCH | 26 |
+| GFM | 601 PASS / 69 KNOWN_MISMATCH | 633 PASS / 37 KNOWN_MISMATCH | 642 PASS / 28 KNOWN_MISMATCH | 28 |
 
 The selected batch is `code-segment-semantics`. Rushdown's code values are
 `Lines::Segments`; each `Segment` carries source padding and a forced newline.
@@ -65,7 +65,8 @@ segments without synthetic separators, and keeps the original AST span.
 PR #73 resolved 44 CommonMark and 44 corresponding GFM cases. The current
 positioned-empty batch resolves 34 CommonMark and 32 GFM cases. Only those
 improvements were removed from the baselines; no unrelated mismatch was
-reclassified.
+reclassified. The metadata batch resolves 9 CommonMark and 9 GFM cases; the
+baseline entries removed for this batch are listed in the fixed group below.
 
 ## Root-cause groups
 
@@ -76,12 +77,12 @@ reclassified.
 | Leading `---` front-matter policy boundary | 2 / 2 | `INTENTIONAL_POLICY` | P2 | Deferred | Keep the current front-matter detector; decide its Markdown-profile interaction separately before changing document ownership. |
 | Empty inline text nodes | 7 / 7 | `SCRIBIUM_FRONTEND` | P2 | Deferred | Do not emit empty `Inline::Text`; add structural and provenance regressions. |
 | Empty or unclosed fenced nodes | 4 / 4 | `RUSHDOWN_BEHAVIOR` | P2 | Deferred | Do not synthesize missing code nodes; record a Rushdown/API boundary and revisit only with reviewed evidence. |
-| Link/code metadata escape and entity normalization | 7 / 7 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Normalize destination, title, and info values through a single source-backed policy without reparsing. |
+| Link/code metadata escape and entity normalization, including inline-link entity cases | 9 / 9 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Normalize destination, title, and info values through one source-backed policy without reparsing; preserve original spans. |
 | Text entity/reference normalization | 3 / 3 | Mixed: `SCRIBIUM_FRONTEND` / `RUSHDOWN_BEHAVIOR` | P1 | Deferred | Separate escaped-reference handling from Rushdown numeric/newline utility behavior. |
 | Code-span delimiter matching | 4 / 4 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Correct delimiter-run boundary detection while keeping the original span. |
 | Hard-break trailing whitespace | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Exclude delimiter spaces from text content; keep them in the enclosing source span. |
 | HTML block canonicalization | 1 / 1 | `CANONICAL_MAPPING` + `INTENTIONAL_POLICY` | P3 | Deferred | Keep source-backed raw HTML; do not normalize blockquote markers into a semantic HTML string. |
-| Link destination/title entities | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Apply the same entity/escape policy to inline link metadata. |
+| Inline link destination/title entity sub-group | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed with metadata group | Included because inline destination/title uses the same source-backed adapter policy; no separate parser or span cause was found. |
 | Autolink profile and linkify | 3 / 3 | `CANONICAL_MAPPING` / `RUSHDOWN_BEHAVIOR` | P2 | Deferred | Give CommonMark and GFM explicit harness profiles; track invalid-autolink/linkify behavior as Rushdown debt. |
 | GFM table alignment and escaped pipe | 0 / 2 | `CANONICAL_MAPPING` / `RUSHDOWN_BEHAVIOR` | P2 | Deferred | Correct the canonical alignment projection separately from Rushdown table text behavior. |
 
@@ -195,17 +196,58 @@ CommonMark: `commonmark-0126`, `0130`, `0144`, `0237`.
 
 GFM: `gfm-0096`, `0100`, `0114`, `0215`.
 
-### Metadata escape/entity normalization — deferred frontend fix
+### Metadata escape/entity normalization — fixed frontend batch
 
-Structural signature: link destination/title or fenced-code info retains the
-source escape/entity spelling instead of the reference semantic value. The
-frontend nodes are `Inline::Link` or `Block::CodeBlock`; their enclosing spans
-remain source-backed, but the metadata values need one consistent adapter
-normalization policy.
+Ownership is `SCRIBIUM_FRONTEND`. The pinned Rushdown parser exposes the
+destination, title, and fenced-code info as source-backed values, so the
+source spelling was not a Rushdown behavior limitation. The previous adapter
+used partial punctuation unescaping for inline destinations and otherwise
+copied raw metadata into the frontend AST. The fix adds one narrow
+`normalize_metadata` policy with explicit `LinkDestination`, `LinkTitle`, and
+`CodeInfo` modes.
 
-CommonMark: `commonmark-0022`, `0023`, `0024`, `0032`, `0033`, `0034`, `0202`.
+The policy is deliberately metadata-only:
 
-GFM: `gfm-0171`, `0318`, `0319`, `0320`, `0328`, `0329`, `0330`.
+1. Rushdown's public `unescape_puncts(..., false)` removes only escapable
+   punctuation escapes; non-escapable characters, escaped backslashes, and
+   escaped spaces retain their CommonMark behavior.
+2. Named and numeric references are decoded once using Rushdown's public
+   utilities. Invalid entity-like text remains unchanged, and the single-pass
+   token boundary prevents a decoded character from starting a second
+   reference decode.
+3. Link destination/title normalization applies to ordinary inline and
+   reference links. Auto-link destinations remain on their existing parser
+   path. Code info is normalized before `split_whitespace().next()` derives
+   `language`, while the complete normalized info string remains in the AST.
+
+Semantic metadata is therefore normalized while provenance remains original:
+the existing `ByteSpan` is still validated and indexed against the original
+UTF-8 source, including CRLF and nested-container context. Inline link and
+code tests assert that `source[span]` still contains the original escaped or
+entity spelling. Reference-definition metadata remains source-backed by
+Rushdown; its link-use span retains the established parser-produced use-site
+range, while the definition bytes remain unchanged in the original document.
+No source is rewritten and no Markdown is reparsed.
+
+The independently authored regression suite covers escaped punctuation, named
+and numeric references, invalid entity-like sequences, quoted and
+parenthesized titles, UTF-8, LF, CRLF, adjacent inline content, reference
+definitions, and normalized code-language extraction. The real-document
+fixture `14-metadata-normalization.md` passes the full frontend → IR →
+evaluator → Typst → PDF pipeline.
+
+Resolved CommonMark IDs: `commonmark-0022`, `0023`, `0024`, `0032`, `0033`,
+`0034`, `0202`, `0503`, `0506`.
+
+Resolved GFM IDs: `gfm-0171`, `0318`, `0319`, `0320`, `0328`, `0329`, `0330`,
+`0511`, `0514`.
+
+The inline entity cases (`0503`, `0506`, `0511`, `0514`) are included in this
+batch because their differential signatures are the same missing entity/escape
+normalization in the inline link destination/title adapter path. No distinct
+parser ownership or span algorithm was observed. There are no Rushdown-owned
+leftovers in this selected metadata group; text entity/reference behavior and
+other pinned Rushdown groups remain separate gaps below.
 
 ### Text entity/reference normalization — mixed ownership
 
@@ -253,11 +295,13 @@ CommonMark: `commonmark-0174`.
 
 GFM: `gfm-0143`.
 
-### Link destination/title entities — deferred frontend fix
+### Inline link destination/title entities — merged into metadata batch
 
-Structural signature: entity spelling remains in inline link metadata while
-the reference value is decoded. This is separate from the reference-definition
-and fence-info cases above because it is the inline destination/title path.
+These cases are retained as a visible sub-group because they were separately
+listed in the earlier audit. Their ownership and fix are the same as the
+metadata group above: entity spelling remained in source-backed inline link
+metadata, while the reference semantic value was decoded. They are resolved
+and are not separate baseline exceptions.
 
 CommonMark: `commonmark-0503`, `0506`.
 
@@ -285,12 +329,10 @@ parser behavior and has no safe frontend workaround that avoids reparsing.
 
 ## Deferred priority work
 
-The next high-value candidate is metadata normalization, followed by
-code-span delimiter matching and hard-break whitespace semantics. Metadata
-normalization affects link destinations/titles and displayed code languages;
-the other two affect inline or paragraph semantics in ordinary documents.
-The leading front-matter boundary remains a separate policy decision and is
-not implied by the resolved span batch.
+The next high-value candidates are code-span delimiter matching and hard-break
+whitespace semantics. They affect inline or paragraph semantics in ordinary
+documents. The leading front-matter boundary remains a separate policy
+decision and is not implied by the resolved span or metadata batches.
 
 The following remain explicitly outside this remediation batch: Rushdown
 upgrade/fork/patch, parser replacement, source preprocessing or reparsing,

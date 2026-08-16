@@ -42,10 +42,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the HTML blocks section."
     },
-    "gfm-0171": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Link reference definitions section."
-    },
     "gfm-0196": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Paragraphs section."
@@ -66,31 +62,7 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Backslash escapes section."
     },
-    "gfm-0318": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
-    "gfm-0319": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
-    "gfm-0320": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
     "gfm-0322": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "gfm-0328": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "gfm-0329": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "gfm-0330": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
     },
@@ -118,15 +90,7 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
     },
-    "gfm-0511": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
     "gfm-0513": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "gfm-0514": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Links section."
     },

@@ -174,8 +174,8 @@ revisions is:
 
 | Suite | Total | PASS | KNOWN_MISMATCH | UNSUPPORTED | New mismatch |
 |---|---:|---:|---:|---:|---:|
-| CommonMark | 652 | 617 | 35 | 0 | 0 |
-| GFM | 670 | 633 | 37 | 0 | 0 |
+| CommonMark | 652 | 626 | 26 | 0 | 0 |
+| GFM | 670 | 642 | 28 | 0 | 0 |
 
 The baseline files
 [`commonmark.json`](../../../tests/compat/baselines/commonmark.json) and
@@ -206,28 +206,37 @@ the original source-backed line or delimiter span, resolving 34 CommonMark and
 32 GFM cases. The batch adds independently authored UTF-8, LF, CRLF, nested,
 empty, adjacent, and real-document coverage without changing the Rushdown pin.
 
+The current metadata remediation batch normalizes source-backed link
+destination/title values, including reference-definition metadata, and fenced
+code info strings at the frontend boundary. It resolves 9 CommonMark and 9 GFM
+cases, including the inline-link entity sub-group, without changing source
+spans, the Rushdown pin, or the IR/evaluator/backend pipeline. The independently
+authored metadata regression suite covers escapes, named and numeric entities,
+invalid entity-like text, UTF-8, CRLF, nested title forms, and language
+extraction; real-document smoke now includes `14-metadata-normalization.md`.
+
 The complete 113-case root-cause analysis, priority rationale, ownership
 classification, and deferred groups are in
 [`gaps.md`](gaps.md). Remaining differences cover the leading front-matter
-policy boundary, metadata normalization, code-span delimiter boundaries,
-hard-break whitespace, autolink profiles, GFM tables, and pinned Rushdown
-behavior. `.let` evaluator semantics remain deferred.
+policy boundary, code-span delimiter boundaries, hard-break whitespace,
+autolink profiles, GFM tables, text/reference normalization, and pinned
+Rushdown behavior. `.let` evaluator semantics remain deferred.
 
 ### Real document corpus and output smoke
 
 The independently authored mixed-feature corpus is in
 [`fixtures/markdown/real`](../../../fixtures/markdown/real) and is described
 by its [`manifest.json`](../../../fixtures/markdown/real/manifest.json). It
-contains 13 documents covering headings, nested containers, lists, tables,
+contains 14 documents covering headings, nested containers, lists, tables,
 task items, strikethrough, code/info strings, links, autolinks, bounded HTML,
-Unicode, LF, and CRLF. The supported eleven documents are required to complete
+Unicode, metadata escapes/entities, LF, and CRLF. The supported twelve documents are required to complete
 the normal pipeline and produce a non-empty valid PDF:
 
 ```text
 Markdown -> frontend AST -> IR -> evaluator -> Typst -> Typst compiler -> PDF
 ```
 
-The current smoke result is 11/11 successful PDFs. Two HTML-policy fixtures
+The current smoke result is 12/12 successful PDFs. Two HTML-policy fixtures
 are expected unsupported and must produce E8001; they are evidence of the
 bounded output policy, not silently accepted documents. PDFs are generated in
 CI artifacts and are not committed. Validation checks the PDF header and
