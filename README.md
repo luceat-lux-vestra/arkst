@@ -150,6 +150,7 @@ author: Alice
 |-----------------------------------------|--------------|
 | Markdown heading, paragraph             | Experimental |
 | Emphasis, strong                        | Experimental |
+| Bounded inline raw HTML (`em`, `strong`, `del`, `s`, `br`) | Experimental / Partial |
 | Lists                                   | Experimental |
 | Inline links (`[text](url)`)               | Experimental |
 | Inline code spans (`` `code` ``)           | Experimental |
