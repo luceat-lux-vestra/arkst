@@ -1023,52 +1023,16 @@ fn text_line_break(arena: &Arena, node: NodeRef, source: &str, base: usize) -> O
     }
 }
 
-/// Convert parser-owned Markdown text into the semantic text that enters the
-/// Scribium AST. The source span remains the original byte range.
+/// Adapt Rushdown's parser-owned text into the semantic text that enters the
+/// Scribium AST. The source span remains the original byte range. These
+/// transformations are Rushdown's public utilities; Scribium does not
+/// tokenize Markdown escapes or entity references itself.
 fn normalize_text_content(raw: &str) -> String {
-    let mut normalized = String::with_capacity(raw.len());
-    let bytes = raw.as_bytes();
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        if bytes[cursor] == b'\\'
-            && bytes
-                .get(cursor + 1)
-                .is_some_and(|byte| byte.is_ascii_punctuation())
-        {
-            normalized.push(bytes[cursor + 1] as char);
-            cursor += 2;
-            continue;
-        }
-        if bytes[cursor] == b'&' {
-            if let Some((end, replacement)) = resolve_entity_at(raw, cursor) {
-                normalized.push_str(&replacement);
-                cursor = end;
-                continue;
-            }
-        }
-        let Some(character) = raw.get(cursor..).and_then(|value| value.chars().next()) else {
-            break;
-        };
-        normalized.push(character);
-        cursor += character.len_utf8();
-    }
-    normalized
-}
-
-fn resolve_entity_at(raw: &str, start: usize) -> Option<(usize, String)> {
-    let end = raw
-        .get(start..)?
-        .find(';')
-        .and_then(|offset| start.checked_add(offset)?.checked_add(1))?;
-    if end.checked_sub(start)? > 64 {
-        return None;
-    }
-    let candidate = raw.get(start..end)?;
-    let resolved = rushdown::util::resolve_numeric_references(
-        rushdown::util::resolve_entity_references(candidate.as_bytes()),
+    let unescaped = rushdown::util::unescape_puncts(raw.as_bytes(), false);
+    let resolved = rushdown::util::resolve_entity_references(
+        rushdown::util::resolve_numeric_references(unescaped),
     );
-    (resolved.as_ref() != candidate.as_bytes())
-        .then(|| (end, String::from_utf8_lossy(resolved.as_ref()).into_owned()))
+    String::from_utf8_lossy(resolved.as_ref()).into_owned()
 }
 
 fn convert_inline(
@@ -1468,25 +1432,8 @@ fn auto_link_content(link: &rushdown::ast::Link, source: &str, base: usize) -> O
 }
 
 fn unescape_inline_link_destination(destination: &str) -> String {
-    let mut result = String::with_capacity(destination.len());
-    let mut chars = destination.chars();
-    while let Some(character) = chars.next() {
-        if character == '\\' {
-            if let Some(next) = chars.next() {
-                if next.is_ascii_punctuation() {
-                    result.push(next);
-                } else {
-                    result.push(character);
-                    result.push(next);
-                }
-            } else {
-                result.push(character);
-            }
-        } else {
-            result.push(character);
-        }
-    }
-    result
+    let unescaped = rushdown::util::unescape_puncts(destination.as_bytes(), false);
+    String::from_utf8_lossy(unescaped.as_ref()).into_owned()
 }
 
 fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
@@ -2435,7 +2382,7 @@ mod tests {
 
     #[test]
     fn commonmark_semantics_preserve_breaks_entities_titles_and_code_info() {
-        let source = "# ATX\n\nSetext\n=======\n\nText &amp; \\*escaped\\*\nsoft\nhard  \nnext\n\n[link](https://example.test \"title\") ![alt](image.png \"image title\")\n\n```rust extra-info\nfn main() {}\n```\n";
+        let source = "# ATX\n\nSetext\n=======\n\nText &amp; &#x41; \\*escaped\\*\nsoft\nhard  \nnext\n\n[link](https://example.test \"title\") ![alt](image.png \"image title\")\n\n```rust extra-info\nfn main() {}\n```\n";
         let document = parse_md(source);
         assert!(matches!(document.nodes[0], Block::Heading { level: 1, .. }));
         assert!(matches!(document.nodes[1], Block::Heading { level: 1, .. }));
@@ -2446,7 +2393,7 @@ mod tests {
         assert!(
             content.iter().any(|inline| matches!(
                 inline,
-                Inline::Text { content, .. } if content == "Text &"
+                Inline::Text { content, .. } if content == "Text & A"
             )),
             "{content:?}"
         );
@@ -2481,6 +2428,39 @@ mod tests {
         };
         assert_eq!(language.as_deref(), Some("rust"));
         assert_eq!(info.as_deref(), Some("rust extra-info"));
+    }
+
+    #[test]
+    fn utf8_crlf_breaks_keep_semantic_nodes_and_original_byte_spans() {
+        let source = "한글\r\n다음  \r\n끝";
+        let document = parse_md(source);
+        let Block::Paragraph { content, .. } = &document.nodes[0] else {
+            panic!("expected paragraph")
+        };
+        match content.as_slice() {
+            [Inline::Text {
+                content: first,
+                span: first_span,
+            }, Inline::SoftBreak { span: soft_span }, Inline::Text {
+                content: second,
+                span: second_span,
+            }, Inline::HardBreak { span: hard_span }, Inline::Text {
+                content: third,
+                span: third_span,
+            }] => {
+                assert_eq!(first, "한글");
+                assert_eq!(second, "다음");
+                assert_eq!(third, "끝");
+                assert_eq!(*first_span, ByteSpan::new(0, 6));
+                assert_eq!(*soft_span, ByteSpan::new(6, 8));
+                assert_eq!(*second_span, ByteSpan::new(8, 14));
+                assert_eq!(*hard_span, ByteSpan::new(14, 18));
+                assert_eq!(*third_span, ByteSpan::new(18, 21));
+                assert_eq!(&source[soft_span.start..soft_span.end], "\r\n");
+                assert_eq!(&source[hard_span.start..hard_span.end], "  \r\n");
+            }
+            other => panic!("unexpected inline structure: {other:?}"),
+        }
     }
 
     #[test]

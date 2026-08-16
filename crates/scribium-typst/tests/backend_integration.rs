@@ -284,6 +284,39 @@ fn integration_commonmark_gfm_baseline_fixture_compiles_to_valid_pdf() {
 }
 
 #[test]
+fn integration_markdown_utf8_crlf_breaks_lower_and_compile_to_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = "한글\r\n다음  \r\n끝";
+    let project = VirtualProjectBuilder::new()
+        .entry("crlf.md")
+        .expect("valid entry path")
+        .add_source("crlf.md", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "CRLF fixture diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("한글\n다음\\\n끝"), "{typst_code:?}");
+
+    with_typst("markdown-utf8-crlf-breaks", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "crlf.qd".to_string(),
+            })
+            .expect("UTF-8 CRLF break Typst must compile");
+        let pdf = output.pdf.expect("PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_variable_evaluation_before_lowering() {
     // This test validates that variable evaluation happens before Typst lowering.
     // It uses the core compile path directly since the backend doesn't expose

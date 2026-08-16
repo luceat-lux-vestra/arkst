@@ -61,6 +61,9 @@ scribium inspect examples/hello/main.qd --emit typst
 
 # Build a Markdown input (report.md → report.typ)
 scribium build report.md
+
+# Build a Markdown input all the way to PDF (report.md → report.pdf)
+scribium build report.md --format pdf
 ```
 
 > Supported inputs are `.qd`, `.scrib`, and `.md` (case-insensitive; files
@@ -95,6 +98,9 @@ scribium build report.md
 > — never through a shell. A `--format typst` build does not require a Typst
 > install. Generated PDFs are validated for non-empty output and a `%PDF-`
 > header before being written.
+
+The Markdown/CommonMark+GFM baseline and its evidence-backed feature matrix
+are documented in [`docs/compatibility/markdown/`](docs/compatibility/markdown/).
 
 ## Example (.qd)
 

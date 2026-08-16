@@ -1240,6 +1240,55 @@ mod tests {
     }
 
     #[test]
+    fn compile_md_preserves_utf8_crlf_break_semantics_and_spans() {
+        let source = "한글\r\n다음  \r\n끝";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.md")
+            .expect("valid path")
+            .add_source("main.md", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let source_id = project.sources().get_id(project.entry()).unwrap();
+        let result = super::compile(&project, &CompileOptions::default());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+            panic!("expected paragraph")
+        };
+        match content.as_slice() {
+            [IrInline::Text {
+                content: first,
+                span: first_span,
+            }, IrInline::SoftBreak { span: soft_span }, IrInline::Text {
+                content: second,
+                span: second_span,
+            }, IrInline::HardBreak { span: hard_span }, IrInline::Text {
+                content: third,
+                span: third_span,
+            }] => {
+                assert_eq!(first, "한글");
+                assert_eq!(second, "다음");
+                assert_eq!(third, "끝");
+                assert_eq!(*first_span, crate::source::SourceSpan::new(source_id, 0, 6));
+                assert_eq!(*soft_span, crate::source::SourceSpan::new(source_id, 6, 8));
+                assert_eq!(
+                    *second_span,
+                    crate::source::SourceSpan::new(source_id, 8, 14)
+                );
+                assert_eq!(
+                    *hard_span,
+                    crate::source::SourceSpan::new(source_id, 14, 18)
+                );
+                assert_eq!(
+                    *third_span,
+                    crate::source::SourceSpan::new(source_id, 18, 21)
+                );
+            }
+            other => panic!("unexpected inline structure: {other:?}"),
+        }
+    }
+
+    #[test]
     fn compile_evaluates_if_true() {
         let (result, _) = compile_source(".if {true}\n    hello\n");
         assert!(result.diagnostics.is_empty());

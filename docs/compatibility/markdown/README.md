@@ -21,6 +21,9 @@ end-to-end Scribium compatibility claim.
 - Frontend and source-span coverage:
   `crates/scribium-markdown/src/parser.rs` and
   `crates/scribium-markdown/tests/range_invariants.rs`
+- UTF-8/CRLF semantic break coverage:
+  `crates/scribium-core/src/lib.rs` and
+  `crates/scribium-typst/tests/backend_integration.rs`
 
 The existing `KNOWN_UPSTREAM_SOUNDNESS_RISK_ACCEPTED` decision is unchanged.
 Rushdown remains the Markdown parser substrate; this audit introduces no
@@ -52,10 +55,10 @@ silently flattening the syntax into another Markdown node.
 | Inline code | Yes | Yes | Yes | Yes | Yes | Opaque code-span content is preserved. |
 | Links | Yes | Yes | Yes | Yes | Yes | Label, destination, title metadata, and source span are retained; Typst emits clickable links. |
 | Images | Yes | Yes | Yes* | No | No | Destination, alt content, title, and span are retained in IR; resource resolution is intentionally deferred and emits deterministic E8001. No network or arbitrary filesystem access is added. |
-| Soft line breaks | Yes | Yes | Yes | Yes | Yes | Preserved as an IR break and lowered as a Typst newline. |
-| Hard line breaks | Yes | Yes | Yes | Yes | Yes | Backslash/two-space delimiter and CRLF span remain source-backed; lowered as Typst hard break. |
-| Escaped punctuation | Yes | Yes | Yes | Yes | Yes | Markdown escapes are normalized at the frontend and re-escaped for Typst markup. |
-| Entities | Yes | Yes | Yes | Yes | Yes | HTML and numeric references are resolved as semantic text while retaining original spans. |
+| Soft line breaks | Yes | Yes | Yes | Yes | Yes | Preserved as an IR break and lowered as a Typst newline; UTF-8 + CRLF is covered end-to-end. |
+| Hard line breaks | Yes | Yes | Yes | Yes | Yes | Backslash/two-space delimiter and UTF-8 + CRLF span remain source-backed; lowered as Typst hard break and PDF-tested. |
+| Escaped punctuation | Yes | Yes | Yes | Yes | Yes | Normalized through Rushdown's public `unescape_puncts` utility and re-escaped for Typst markup. |
+| Entities | Yes | Yes | Yes | Yes | Yes | HTML and numeric references are resolved through Rushdown's public utilities while retaining original spans. |
 | Autolinks | Yes | Yes | Yes | Yes | Yes | URI autolinks and GFM linkify are lowered as clickable links. |
 | Inline HTML | Yes | Yes | No | No | No | Preserved as frontend `RawHtml`; current IR/output path reports E8001. HTML normalization remains outside this slice. |
 | Block HTML | Yes | Yes | No | No | No | Preserved as frontend `RawHtml`; current IR/output path reports E8001. |
