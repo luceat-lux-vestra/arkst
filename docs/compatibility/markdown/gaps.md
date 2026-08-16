@@ -208,13 +208,15 @@ copied raw metadata into the frontend AST. The fix adds one narrow
 
 The policy is deliberately metadata-only:
 
-1. Rushdown's public `unescape_puncts(..., false)` removes only escapable
-   punctuation escapes; non-escapable characters, escaped backslashes, and
-   escaped spaces retain their CommonMark behavior.
-2. Named and numeric references are decoded once using Rushdown's public
-   utilities. Invalid entity-like text remains unchanged, and the single-pass
-   token boundary prevents a decoded character from starting a second
-   reference decode.
+1. One lexical/semantic pass scans the original metadata bytes. Backslash
+   escapes use Rushdown's public punctuation classification, while named and
+   numeric references are recognized only at their original source position;
+   an escaped `&` therefore cannot introduce entity syntax. Non-escapable
+   characters, escaped backslashes, and escaped spaces retain their CommonMark
+   behavior.
+2. Valid named and numeric references are decoded once using Rushdown's public
+   utilities. Invalid entity-like text remains unchanged, and a decoded
+   character is never rescanned as a new reference.
 3. Link destination/title normalization applies to ordinary inline and
    reference links. Auto-link destinations remain on their existing parser
    path. Code info is normalized before `split_whitespace().next()` derives
