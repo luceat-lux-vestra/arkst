@@ -62,22 +62,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Block quotes section."
     },
-    "commonmark-0330": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "commonmark-0331": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "commonmark-0334": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "commonmark-0340": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
     "commonmark-0432": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
