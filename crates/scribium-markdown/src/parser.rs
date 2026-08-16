@@ -1005,12 +1005,66 @@ fn convert_inlines(
                 inlines.push(inline);
             }
         }
-        if let Some(line_break) = text_line_break(arena, child, source, base) {
+        let line_break = text_line_break(arena, child, source, base);
+        if matches!(line_break, Some(Inline::HardBreak { .. })) {
+            exclude_hard_break_delimiter_whitespace(&mut inlines, arena, child, source, base);
+        }
+        if let Some(line_break) = line_break {
             inlines.push(line_break);
         }
         previous = Some(child);
     }
     inlines
+}
+
+/// Remove only the source spaces that Rushdown classified as a hard-break
+/// delimiter from semantic text. The text span remains unchanged so the
+/// original delimiter bytes stay represented by the source-backed AST.
+fn exclude_hard_break_delimiter_whitespace(
+    inlines: &mut [Inline],
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    base: usize,
+) {
+    let KindData::Text(text) = arena[node].kind_data() else {
+        return;
+    };
+    if !text.has_qualifiers(TextQualifier::HARD_LINE_BREAK) {
+        return;
+    }
+    let Some(index) = text.index() else {
+        return;
+    };
+    let delimiter_end = index.stop();
+    let Some((content, span)) = inlines.iter_mut().rev().find_map(|inline| match inline {
+        Inline::Text { content, span }
+            if span.start >= base
+                && span.end >= base
+                && span.end > span.start
+                && span.end - base == delimiter_end =>
+        {
+            Some((content, *span))
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    let local_start = span.start - base;
+    let local_end = span.end - base;
+    if source.get(local_start..local_end).is_none() {
+        return;
+    }
+    let mut content_end = local_end;
+    while content_end > local_start && source.as_bytes()[content_end - 1] == b' ' {
+        content_end -= 1;
+    }
+    if content_end == local_end {
+        return;
+    }
+    if let Some(raw_content) = source.get(local_start..content_end) {
+        *content = normalize_text_content(raw_content);
+    }
 }
 
 fn text_line_break(arena: &Arena, node: NodeRef, source: &str, base: usize) -> Option<Inline> {

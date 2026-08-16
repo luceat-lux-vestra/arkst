@@ -49,10 +49,10 @@ case review.
 
 ## Baseline and selected remediation
 
-| Suite | At PR #73 merge | After positioned-empty batch (live base) | After metadata batch | After exact delimiter-run batch | Remaining known mismatches |
-|---|---:|---:|---:|---:|---:|
-| CommonMark | 583 PASS / 69 KNOWN_MISMATCH | 617 PASS / 35 KNOWN_MISMATCH | 626 PASS / 26 KNOWN_MISMATCH | 630 PASS / 22 KNOWN_MISMATCH | 22 |
-| GFM | 601 PASS / 69 KNOWN_MISMATCH | 633 PASS / 37 KNOWN_MISMATCH | 642 PASS / 28 KNOWN_MISMATCH | 646 PASS / 24 KNOWN_MISMATCH | 24 |
+| Suite | At PR #73 merge | After positioned-empty batch (live base) | After metadata batch | After exact delimiter-run batch | After hard-break batch | Remaining known mismatches |
+|---|---:|---:|---:|---:|---:|---:|
+| CommonMark | 583 PASS / 69 KNOWN_MISMATCH | 617 PASS / 35 KNOWN_MISMATCH | 626 PASS / 26 KNOWN_MISMATCH | 630 PASS / 22 KNOWN_MISMATCH | 632 PASS / 20 KNOWN_MISMATCH | 20 |
+| GFM | 601 PASS / 69 KNOWN_MISMATCH | 633 PASS / 37 KNOWN_MISMATCH | 642 PASS / 28 KNOWN_MISMATCH | 646 PASS / 24 KNOWN_MISMATCH | 648 PASS / 22 KNOWN_MISMATCH | 22 |
 
 The selected batch is `code-segment-semantics`. Rushdown's code values are
 `Lines::Segments`; each `Segment` carries source padding and a forced newline.
@@ -69,6 +69,8 @@ reclassified. The metadata batch resolves 9 CommonMark and 9 GFM cases; the
 baseline entries removed for this batch are listed in the fixed group below.
 The exact delimiter-run batch resolves four CommonMark and four GFM cases;
 only those eight code-span entries were removed from the baselines.
+The hard-break trailing-whitespace batch resolves two CommonMark and two GFM
+cases; only those four hard-break entries were removed from the baselines.
 
 ## Root-cause groups
 
@@ -82,7 +84,7 @@ only those eight code-span entries were removed from the baselines.
 | Link/code metadata escape and entity normalization, including inline-link entity cases | 9 / 9 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Normalize destination, title, and info values through one source-backed policy without reparsing; preserve original spans. |
 | Text entity/reference normalization | 3 / 3 | Mixed: `SCRIBIUM_FRONTEND` / `RUSHDOWN_BEHAVIOR` | P1 | Deferred | Separate escaped-reference handling from Rushdown numeric/newline utility behavior. |
 | Code-span delimiter matching | 4 / 4 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Match maximal backtick runs with the opener's exact length while keeping the original span. |
-| Hard-break trailing whitespace | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Deferred | Exclude delimiter spaces from text content; keep them in the enclosing source span. |
+| Hard-break trailing whitespace | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Exclude parser-classified delimiter spaces from semantic text; keep the original text/enclosing source spans. |
 | HTML block canonicalization | 1 / 1 | `CANONICAL_MAPPING` + `INTENTIONAL_POLICY` | P3 | Deferred | Keep source-backed raw HTML; do not normalize blockquote markers into a semantic HTML string. |
 | Inline link destination/title entity sub-group | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed with metadata group | Included because inline destination/title uses the same source-backed adapter policy; no separate parser or span cause was found. |
 | Autolink profile and linkify | 3 / 3 | `CANONICAL_MAPPING` / `RUSHDOWN_BEHAVIOR` | P2 | Deferred | Give CommonMark and GFM explicit harness profiles; track invalid-autolink/linkify behavior as Rushdown debt. |
@@ -288,15 +290,33 @@ GFM: `gfm-0340`, `0341`, `0344`, `0350`.
 All eight cases now pass. Remaining differential gaps are 22 CommonMark cases
 and 24 GFM cases; the other gap groups below are unchanged.
 
-### Hard-break trailing whitespace — deferred frontend fix
+### Hard-break trailing whitespace — fixed frontend adapter
 
-Structural signature: the text child retains delimiter spaces that cmark
-assigns to the hard-break syntax. The enclosing paragraph and hard-break spans
-remain source-backed.
+Root cause: Rushdown marks a hard break with a `HARD_LINE_BREAK` qualifier. For
+some LF inputs with three or more trailing spaces, it leaves a prefix of those
+spaces in the preceding source-backed `Text` index and puts the qualifier on a
+zero-width text node. The Scribium frontend converted that entire index into
+semantic `Inline::Text` content, so delimiter spaces remained visible as text.
+The CRLF and two-space forms confirmed the same boundary through a text node
+whose hard-break span includes the delimiter and newline.
+
+The fix belongs to the Scribium frontend adapter's `convert_inlines` boundary.
+When Rushdown has already classified the node as a hard break, the adapter
+removes only the contiguous ASCII spaces at the end of the affected semantic
+text value and leaves its original `ByteSpan` unchanged. It does not apply a
+blanket trim, rewrite source, or reparse Markdown. The hard break remains an
+`Inline::HardBreak`, and enclosing/container spans retain the original UTF-8
+and CRLF byte provenance.
 
 CommonMark: `commonmark-0226`, `0635`.
 
 GFM: `gfm-0196`, `0655`.
+
+All four cases now pass. The baseline moved from 630 PASS / 22
+`KNOWN_MISMATCH` to 632 PASS / 20 for CommonMark and from 646 PASS / 24 to
+648 PASS / 22 for GFM. Focused regressions cover exact two-space and three-or-
+more-space delimiters, soft breaks, UTF-8, CRLF, nested blockquotes/lists,
+multiple breaks, and sibling inline nodes.
 
 ### HTML block canonicalization — policy/mapping, no production change
 
@@ -344,10 +364,10 @@ parser behavior and has no safe frontend workaround that avoids reparsing.
 
 ## Deferred priority work
 
-The next high-value candidate is hard-break whitespace semantics. It affects
-inline or paragraph semantics in ordinary documents. The leading front-matter
-boundary remains a separate policy decision and is not implied by the resolved
-span, metadata, or code-span batches.
+The remaining P1/P2 gaps are separate frontend, canonical-mapping, policy,
+and Rushdown-boundary questions. The leading front-matter boundary remains a
+separate policy decision and is not implied by the resolved span, metadata,
+code-span, or hard-break batches.
 
 The following remain explicitly outside this remediation batch: Rushdown
 upgrade/fork/patch, parser replacement, source preprocessing or reparsing,
