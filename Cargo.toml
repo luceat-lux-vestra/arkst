@@ -8,6 +8,7 @@ members = [
     "crates/scribium-typst",
     "crates/scribium-cli",
     "crates/scribium-test-support",
+    "tools/markdown-compat",
     "tools/upstream-watch",
 ]
 
@@ -42,6 +43,7 @@ same-file = "1.0.6"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+quick-xml = "0.41"
 insta = "1"
 tempfile = "3"
 rushdown = { git = "https://github.com/yuin/rushdown.git", rev = "e5eb4e4446541ea0ed53111c1b37e779283ff57c", default-features = false, features = ["std", "html-entities"] }

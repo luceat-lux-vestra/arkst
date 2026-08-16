@@ -126,3 +126,129 @@ The target product path demonstrated here is:
 Rushdown -> Scribium Markdown AST -> scribium-core IR/evaluator
          -> scribium-typst -> Typst -> valid PDF
 ```
+
+## Differential compatibility harness
+
+The repository now contains a pinned, end-to-end Markdown compatibility
+harness. It is a measurement and regression layer, not a second production
+parser and not a claim of complete CommonMark or GFM support.
+
+For each corpus example, the harness runs the pinned reference parser in XML
+mode and maps that XML to a small canonical document tree. Scribium parses the
+same source through its normal Markdown frontend and maps the frontend AST to
+the same canonical tree. The comparison is structural: it does not compare
+reference HTML strings with Scribium Typst strings. Source provenance is a
+separate test layer and is not inferred from cmark source positions.
+
+The canonical model covers document structure, headings, paragraphs, inline
+text, emphasis, strong, strikethrough, blockquotes, nested ordered and
+unordered lists, ordered starts, task-list state, fenced and inline code,
+links, images, tables and alignment, thematic breaks, soft and hard breaks,
+and raw HTML structure where the reference exposes it. Reference-private
+structures are intentionally omitted. The harness reports `PASS`,
+`KNOWN_MISMATCH`, `UNSUPPORTED`, and `HARNESS_ERROR`; every harness error
+fails CI.
+
+### Pinned references and provenance
+
+All reference inputs are pinned by version and full commit in
+[`tests/compat/references.toml`](../../../tests/compat/references.toml). The
+preparation script checks out the exact commits and the CI job verifies the
+checked-in corpus byte-for-byte against the pinned sources.
+
+| Role | Version | Revision | Source and license |
+|---|---|---|---|
+| CommonMark specification corpus | `0.31.2` | `9103e341a973013013bb1a80e13567007c5cef6f` | [commonmark/commonmark-spec](https://github.com/commonmark/commonmark-spec), CC-BY-SA-4.0 |
+| CommonMark reference parser | `0.31.2` | `eec0eeba6d31189fd828314576494566d539b1e3` | [commonmark/cmark](https://github.com/commonmark/cmark), BSD-2-Clause and component licenses in `COPYING` |
+| GFM specification/parser corpus | `0.29.0.gfm.13` | `587a12bb54d95ac37241377e6ddc93ea0e45439b` | [github/cmark-gfm](https://github.com/github/cmark-gfm), BSD-2-Clause and component licenses in `COPYING` |
+
+The cmark and cmark-gfm repositories are test-oracle inputs only. They are
+not Scribium production dependencies, and their source and tests are not
+copied into the implementation.
+
+### Current corpus baseline
+
+The checked-in corpus contains all 652 enabled CommonMark 0.31.2 examples and
+670 enabled cmark-gfm examples. The current observed result at the pinned
+revisions is:
+
+| Suite | Total | PASS | KNOWN_MISMATCH | UNSUPPORTED | New mismatch |
+|---|---:|---:|---:|---:|---:|
+| CommonMark | 652 | 539 | 113 | 0 | 0 |
+| GFM | 670 | 557 | 113 | 0 | 0 |
+
+The baseline files
+[`commonmark.json`](../../../tests/compat/baselines/commonmark.json) and
+[`gfm.json`](../../../tests/compat/baselines/gfm.json) store stable case IDs,
+the corpus/reference revisions, and the explicitly accepted current non-PASS
+exception set. They are reviewed data, never automatically updated by CI.
+
+CI fails when a prior pass becomes a mismatch, when a new mismatch appears,
+when a corpus case disappears, or when a pinned revision changes without a
+review-visible baseline/corpus update. Existing known mismatches remain
+visible in the report. A known mismatch that becomes a pass is reported as an
+improvement but also makes the baseline exception stale, so CI requires the
+entry to be explicitly removed. After removal, the pass is accepted without an
+exception and any later mismatch is a new mismatch that fails CI. A change
+between `KNOWN_MISMATCH` and `UNSUPPORTED` also fails until the baseline is
+reviewed. The mismatch count is therefore a snapshot of measured gaps, not a
+completeness score.
+
+The current differences are concentrated in existing parser-boundary gaps
+such as tabs and container/newline handling, thematic breaks and heading
+boundaries, code-block normalization, escapes/entities, links and images, and
+some HTML or extension cases. This PR records those gaps for follow-up; it
+does not mass-fix them or advance #61 evaluator semantics.
+
+### Real document corpus and output smoke
+
+The independently authored mixed-feature corpus is in
+[`fixtures/markdown/real`](../../../fixtures/markdown/real) and is described
+by its [`manifest.json`](../../../fixtures/markdown/real/manifest.json). It
+contains 12 documents covering headings, nested containers, lists, tables,
+task items, strikethrough, code/info strings, links, autolinks, bounded HTML,
+Unicode, LF, and CRLF. The supported ten documents are required to complete
+the normal pipeline and produce a non-empty valid PDF:
+
+```text
+Markdown -> frontend AST -> IR -> evaluator -> Typst -> Typst compiler -> PDF
+```
+
+The current smoke result is 10/10 successful PDFs. Two HTML-policy fixtures
+are expected unsupported and must produce E8001; they are evidence of the
+bounded output policy, not silently accepted documents. PDFs are generated in
+CI artifacts and are not committed. Validation checks the PDF header and
+non-empty output, while generated Typst is checked for the manifest's textual
+markers; no PDF byte-for-byte golden is used.
+
+### Raw HTML and differential observations
+
+Raw HTML is reported separately from general differential equality:
+
+1. frontend representation matches the expected raw-HTML structure;
+2. the exact attribute-free bounded subset is semantically supported;
+3. complete HTML can be preserved with provenance but is output-unsupported;
+4. malformed or incomplete forms are rejected or remain parser recovery, with
+   no HTML semantic claim.
+
+The real corpus explicitly covers `<em>x</em>`, `<strong>x</strong>`,
+`<del>x</del>`, `<s>x</s>`, `<br>`, unsupported `<span>x</span>`, block HTML,
+comments, malformed mismatched tags, and mixed Markdown/HTML. The harness
+records structural differences if the reference observation and the #71
+bounded policy diverge; it does not broaden the whitelist to make a case pass.
+
+### CI reports
+
+The separate `markdown-compat` Ubuntu job prepares the pinned references,
+rebuilds both reference parsers, verifies the checked-in corpora, runs the
+differential and real-document checks, and uploads an artifact containing:
+
+- `compatibility-report.json` and `compatibility-report.md`;
+- per-case failed diffs under `failed-case-diffs/`;
+- generated real-document Typst under `real-typst/`;
+- generated real-document PDFs under `real-pdf/` when available.
+
+The local equivalent writes these files under the selected output directory,
+for example `target/markdown-compat-official/`. A `PASS` means canonical
+parser/document semantic equality for the pinned case only. It does not mean
+Markdown complete, CommonMark fully compliant, or GFM fully compliant.

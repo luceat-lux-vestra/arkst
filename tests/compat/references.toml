@@ -1,0 +1,22 @@
+schema_version = 1
+
+[commonmark]
+repository = "https://github.com/commonmark/commonmark-spec.git"
+version = "0.31.2"
+revision = "9103e341a973013013bb1a80e13567007c5cef6f"
+corpus_path = "spec.txt"
+license = "CC-BY-SA-4.0"
+
+[cmark]
+repository = "https://github.com/commonmark/cmark.git"
+version = "0.31.2"
+revision = "eec0eeba6d31189fd828314576494566d539b1e3"
+corpus_path = "test/spec.txt"
+license = "BSD-2-Clause and component licenses listed by cmark/COPYING"
+
+[cmark_gfm]
+repository = "https://github.com/github/cmark-gfm.git"
+version = "0.29.0.gfm.13"
+revision = "587a12bb54d95ac37241377e6ddc93ea0e45439b"
+corpus_path = "test/spec.txt"
+license = "BSD-2-Clause and component licenses listed by cmark-gfm/COPYING"
