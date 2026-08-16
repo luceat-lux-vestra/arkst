@@ -74,14 +74,16 @@ fn link_metadata_normalizes_values_and_keeps_inline_source_spans() {
 
 #[test]
 fn link_titles_normalize_quoted_and_parenthesized_metadata() {
-    let source = r#"[quoted](url "ti&amp;tle\*") and [paren](url (p&#x61;ren)) and [quotes](/url "title \"&quot;") 한글"#;
+    let source = r#"[quoted](url "ti&amp;tle\*") and [paren](url (p&#x61;ren)) and [quotes](/url "title \"&quot;") and [escaped-named](url "a\&amp;") and [escaped-numeric](url "b\&#38;") 한글"#;
     let document = parse_md(source);
     let actual = links(paragraph_content(&document));
 
-    assert_eq!(actual.len(), 3);
+    assert_eq!(actual.len(), 5);
     assert_eq!(actual[0].1, Some("ti&tle*"));
     assert_eq!(actual[1].1, Some("paren"));
     assert_eq!(actual[2].1, Some("title \"\""));
+    assert_eq!(actual[3].1, Some("a&amp;"));
+    assert_eq!(actual[4].1, Some("b&#38;"));
     assert_eq!(
         &source[actual[0].2.start..actual[0].2.end],
         r#"[quoted](url "ti&amp;tle\*")"#
@@ -94,41 +96,63 @@ fn link_titles_normalize_quoted_and_parenthesized_metadata() {
         &source[actual[2].2.start..actual[2].2.end],
         r#"[quotes](/url "title \"&quot;")"#
     );
+    assert_eq!(
+        &source[actual[3].2.start..actual[3].2.end],
+        r#"[escaped-named](url "a\&amp;")"#
+    );
+    assert_eq!(
+        &source[actual[4].2.start..actual[4].2.end],
+        r#"[escaped-numeric](url "b\&#38;")"#
+    );
 }
 
 #[test]
-fn metadata_escapes_keep_non_escapable_text_and_decode_references_once() {
-    let source =
-        r#"[backslash](a\\*) [nonpunct](a\q) [escaped-amp](a\&amp;) [single-pass](a&#38;amp;)"#;
+fn metadata_escapes_keep_precedence_and_decode_references_once() {
+    let source = r#"[escaped-named](a\&amp;) [escaped-numeric](a\&#38;) [named](a&amp;) [decimal](a&#38;) [hex](a&#x26;) [single-pass](a&#38;amp;) [star](a\*) [plus](a\+) [nonpunct](a\q)"#;
     let document = parse_md(source);
     let actual = links(paragraph_content(&document));
 
-    assert_eq!(actual.len(), 4);
-    assert_eq!(actual[0].0, r"a\*");
-    assert_eq!(actual[1].0, r"a\q");
+    assert_eq!(actual.len(), 9);
+    assert_eq!(actual[0].0, "a&amp;");
+    assert_eq!(actual[1].0, "a&#38;");
     assert_eq!(actual[2].0, "a&");
-    assert_eq!(actual[3].0, "a&amp;");
+    assert_eq!(actual[3].0, "a&");
+    assert_eq!(actual[4].0, "a&");
+    assert_eq!(actual[5].0, "a&amp;");
+    assert_eq!(actual[6].0, "a*");
+    assert_eq!(actual[7].0, "a+");
+    assert_eq!(actual[8].0, r"a\q");
 }
 
 #[test]
 fn reference_metadata_uses_the_same_policy_without_rewriting_source() {
     let source = concat!(
-        "[ref] and [other]\n\n",
+        "[ref] and [other] and [escaped] and [numeric]\n\n",
         "[ref]: /a&amp;b \"ti\\*tle\"\n",
         "[other]: /c&#x26;d (pa&amp;ren)\n",
+        "[escaped]: /e\\&amp;f \"ti\\&amp;tle\"\n",
+        "[numeric]: /n\\&#38;d (pa\\&#x26;ren)\n",
     );
     let document = parse_md(source);
     let actual = links(paragraph_content(&document));
 
-    assert_eq!(actual.len(), 2);
+    assert_eq!(actual.len(), 4);
     assert_eq!(actual[0].0, "/a&b");
     assert_eq!(actual[0].1, Some("ti*tle"));
     assert_eq!(actual[1].0, "/c&d");
     assert_eq!(actual[1].1, Some("pa&ren"));
+    assert_eq!(actual[2].0, "/e&amp;f");
+    assert_eq!(actual[2].1, Some("ti&amp;tle"));
+    assert_eq!(actual[3].0, "/n&#38;d");
+    assert_eq!(actual[3].1, Some("pa&#x26;ren"));
     assert_eq!(&source[actual[0].2.start..actual[0].2.end], "[ref");
     assert_eq!(&source[actual[1].2.start..actual[1].2.end], "[other");
+    assert_eq!(&source[actual[2].2.start..actual[2].2.end], "[escaped");
+    assert_eq!(&source[actual[3].2.start..actual[3].2.end], "[numeric");
     assert!(source.contains("/a&amp;b \"ti\\*tle\""));
     assert!(source.contains("/c&#x26;d (pa&amp;ren)"));
+    assert!(source.contains("/e\\&amp;f \"ti\\&amp;tle\""));
+    assert!(source.contains("/n\\&#38;d (pa\\&#x26;ren)"));
 }
 
 #[test]
@@ -162,4 +186,20 @@ fn fenced_code_info_normalizes_before_language_extraction_and_preserves_crlf() {
     };
     assert_eq!(info.as_deref(), Some("lang extra second"));
     assert_eq!(language.as_deref(), Some("lang"));
+
+    let escaped = "```lang\\&amp; extra second\nbody\n```\n";
+    let document = parse_md(escaped);
+    let Block::CodeBlock { language, info, .. } = &document.nodes[0] else {
+        panic!("expected a fenced code block")
+    };
+    assert_eq!(info.as_deref(), Some("lang&amp; extra second"));
+    assert_eq!(language.as_deref(), Some("lang&amp;"));
+
+    let escaped_numeric = "```lang\\&#38; extra second\nbody\n```\n";
+    let document = parse_md(escaped_numeric);
+    let Block::CodeBlock { language, info, .. } = &document.nodes[0] else {
+        panic!("expected a fenced code block")
+    };
+    assert_eq!(info.as_deref(), Some("lang&#38; extra second"));
+    assert_eq!(language.as_deref(), Some("lang&#38;"));
 }

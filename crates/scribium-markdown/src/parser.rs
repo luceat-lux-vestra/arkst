@@ -1056,34 +1056,55 @@ fn normalize_metadata(raw: &str, kind: MetadataKind) -> String {
     let escaped_space = match kind {
         MetadataKind::LinkDestination | MetadataKind::LinkTitle | MetadataKind::CodeInfo => false,
     };
-    let unescaped = rushdown::util::unescape_puncts(raw.as_bytes(), escaped_space);
-    decode_metadata_references_once(unescaped.as_ref())
-}
-
-/// Decode references in one pass after applying CommonMark punctuation
-/// escapes. Calling Rushdown's numeric and named helpers over the whole value
-/// in sequence can decode a reference introduced by the first pass a second
-/// time (for example, `&#38;amp;`). Scanning only the original reference token
-/// and delegating each token to Rushdown's public utility preserves the
-/// source-backed value and the parser's invalid-reference behavior.
-fn decode_metadata_references_once(value: &[u8]) -> String {
-    let mut decoded = Vec::with_capacity(value.len());
+    let source = raw.as_bytes();
+    let mut normalized = Vec::with_capacity(source.len());
     let mut cursor = 0;
-    while cursor < value.len() {
-        let Some((end, reference_kind)) = metadata_reference_end(value, cursor) else {
-            decoded.push(value[cursor]);
+
+    // Keep this as one pass over the original stream. In particular, an
+    // escaped '&' is emitted as a literal byte and the following `amp;` or
+    // numeric-looking suffix is then copied as ordinary text; it can never
+    // become a reference because it was not reference syntax at its original
+    // source position.
+    while cursor < source.len() {
+        if source[cursor] == b'\\' {
+            if let Some(&next) = source.get(cursor + 1) {
+                if rushdown::util::is_punct(next) {
+                    normalized.push(next);
+                    cursor += 2;
+                    continue;
+                }
+                if escaped_space && next == b' ' {
+                    cursor += 2;
+                    continue;
+                }
+            }
+            normalized.push(source[cursor]);
             cursor += 1;
             continue;
-        };
-        let reference = &value[cursor..end];
-        let replacement = match reference_kind {
-            MetadataReferenceKind::Named => rushdown::util::resolve_entity_references(reference),
-            MetadataReferenceKind::Numeric => rushdown::util::resolve_numeric_references(reference),
-        };
-        decoded.extend_from_slice(replacement.as_ref());
-        cursor = end;
+        }
+
+        if source[cursor] == b'&' {
+            if let Some((end, reference_kind)) = metadata_reference_end(source, cursor) {
+                let reference = &source[cursor..end];
+                let replacement = match reference_kind {
+                    MetadataReferenceKind::Named => {
+                        rushdown::util::resolve_entity_references(reference)
+                    }
+                    MetadataReferenceKind::Numeric => {
+                        rushdown::util::resolve_numeric_references(reference)
+                    }
+                };
+                normalized.extend_from_slice(replacement.as_ref());
+                cursor = end;
+                continue;
+            }
+        }
+
+        normalized.push(source[cursor]);
+        cursor += 1;
     }
-    String::from_utf8_lossy(&decoded).into_owned()
+
+    String::from_utf8_lossy(&normalized).into_owned()
 }
 
 fn metadata_reference_end(value: &[u8], start: usize) -> Option<(usize, MetadataReferenceKind)> {
