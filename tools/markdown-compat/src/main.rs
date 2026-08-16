@@ -669,7 +669,7 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
             Event::Start(event) => {
                 stack.push(XmlNode {
                     name: String::from_utf8(event.local_name().as_ref().to_vec())?,
-                    attrs: read_attrs(&event, &reader)?,
+                    attrs: read_attrs(&event)?,
                     children: Vec::new(),
                     text: String::new(),
                 });
@@ -677,7 +677,7 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
             Event::Empty(event) => {
                 let node = XmlNode {
                     name: String::from_utf8(event.local_name().as_ref().to_vec())?,
-                    attrs: read_attrs(&event, &reader)?,
+                    attrs: read_attrs(&event)?,
                     children: Vec::new(),
                     text: String::new(),
                 };
@@ -685,12 +685,20 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
             }
             Event::Text(event) => {
                 if let Some(node) = stack.last_mut() {
-                    node.text.push_str(&event.unescape()?);
+                    let decoded = event.decode()?;
+                    node.text.push_str(&quick_xml::escape::unescape(&decoded)?);
                 }
             }
             Event::CData(event) => {
                 if let Some(node) = stack.last_mut() {
                     node.text.push_str(&String::from_utf8_lossy(event.as_ref()));
+                }
+            }
+            Event::GeneralRef(event) => {
+                if let Some(node) = stack.last_mut() {
+                    let reference = format!("&{};", event.decode()?);
+                    node.text
+                        .push_str(&quick_xml::escape::unescape(&reference)?);
                 }
             }
             Event::End(_) => {
@@ -707,17 +715,13 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
     root.context("cmark XML did not contain a document")
 }
 
-fn read_attrs(
-    event: &quick_xml::events::BytesStart<'_>,
-    reader: &Reader<&[u8]>,
-) -> Result<BTreeMap<String, String>> {
+fn read_attrs(event: &quick_xml::events::BytesStart<'_>) -> Result<BTreeMap<String, String>> {
     let mut attrs = BTreeMap::new();
     for attr in event.attributes() {
         let attr = attr?;
         let key = String::from_utf8(attr.key.local_name().as_ref().to_vec())?;
-        let value = attr
-            .decode_and_unescape_value(reader.decoder())?
-            .into_owned();
+        let raw_value = String::from_utf8(attr.value.to_vec())?;
+        let value = quick_xml::escape::unescape(&raw_value)?.into_owned();
         attrs.insert(key, value);
     }
     Ok(attrs)
