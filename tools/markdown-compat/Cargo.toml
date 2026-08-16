@@ -1,0 +1,23 @@
+[package]
+name = "scribium-markdown-compat"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Pinned CommonMark/GFM differential and real-document compatibility harness"
+
+[[bin]]
+name = "scribium-markdown-compat"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+quick-xml.workspace = true
+scribium-core.workspace = true
+scribium-markdown.workspace = true
+scribium-typst.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

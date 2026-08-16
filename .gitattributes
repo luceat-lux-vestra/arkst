@@ -6,6 +6,8 @@
 
 # Markdown
 *.md text diff=markdown
+# This fixture intentionally retains CRLF for parser line-ending coverage.
+fixtures/markdown/real/12-line-endings-crlf.md -text whitespace=cr-at-eol
 
 # Typst
 *.typ text

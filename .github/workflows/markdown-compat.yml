@@ -1,0 +1,99 @@
+name: Markdown compatibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/scribium-markdown/**"
+      - "crates/scribium-core/**"
+      - "crates/scribium-typst/**"
+      - "tools/markdown-compat/**"
+      - "tests/compat/**"
+      - "fixtures/markdown/real/**"
+      - "docs/compatibility/markdown/**"
+      - ".github/workflows/markdown-compat.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/scribium-markdown/**"
+      - "crates/scribium-core/**"
+      - "crates/scribium-typst/**"
+      - "tools/markdown-compat/**"
+      - "tests/compat/**"
+      - "fixtures/markdown/real/**"
+      - "docs/compatibility/markdown/**"
+      - ".github/workflows/markdown-compat.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  markdown-compat:
+    name: markdown-compat
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: typst-community/setup-typst@v5
+        with:
+          typst-version: 0.15.1
+
+      - name: Prepare pinned CommonMark and cmark-gfm references
+        id: references
+        run: |
+          python3 tools/markdown-compat/prepare_references.py \
+            --config tests/compat/references.toml \
+            --output-dir "$RUNNER_TEMP/markdown-compat-references" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Build pinned cmark-gfm
+        run: |
+          cmake -S "${{ steps.references.outputs.cmark_gfm_root }}" \
+            -B "${{ steps.references.outputs.cmark_gfm_root }}/build" \
+            -DCMARK_TESTS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build "${{ steps.references.outputs.cmark_gfm_root }}/build" \
+            --target cmark-gfm --parallel
+
+      - name: Build pinned CommonMark cmark
+        run: |
+          cmake -S "${{ steps.references.outputs.cmark_root }}" \
+            -B "${{ steps.references.outputs.cmark_root }}/build" \
+            -DCMARK_TESTS=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build "${{ steps.references.outputs.cmark_root }}/build" \
+            --target cmark_exe --parallel
+
+      - name: Verify checked-in specification corpora
+        run: |
+          python3 tools/markdown-compat/extract_corpus.py \
+            --spec "${{ steps.references.outputs.commonmark_spec }}" \
+            --prefix commonmark \
+            --output "$RUNNER_TEMP/commonmark.json"
+          python3 tools/markdown-compat/extract_corpus.py \
+            --spec "${{ steps.references.outputs.cmark_gfm_spec }}" \
+            --prefix gfm \
+            --output "$RUNNER_TEMP/gfm.json"
+          cmp tests/compat/corpus/commonmark.json "$RUNNER_TEMP/commonmark.json"
+          cmp tests/compat/corpus/gfm.json "$RUNNER_TEMP/gfm.json"
+
+      - name: Run differential corpus and PDF smoke harness
+        run: |
+          cargo run --locked -q -p scribium-markdown-compat -- \
+            --commonmark-cmark "${{ steps.references.outputs.cmark_root }}/build/src/cmark" \
+            --gfm-cmark "${{ steps.references.outputs.cmark_gfm_root }}/build/src/cmark-gfm" \
+            --output-dir "$RUNNER_TEMP/markdown-compat-report" \
+            --typst typst
+
+      - name: Upload Markdown compatibility artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-compat-${{ github.run_id }}
+          path: ${{ runner.temp }}/markdown-compat-report
+          if-no-files-found: error

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "id": "01-readme",
+      "path": "01-readme.md",
+      "expected": "pdf",
+      "markers": ["Project Readme", "scribium-core", "https://github.com/luceat-lux-vestra/scribium"]
+    },
+    {
+      "id": "02-release-notes",
+      "path": "02-release-notes.md",
+      "expected": "pdf",
+      "markers": ["Release notes", "Breaking changes", "release_check"]
+    },
+    {
+      "id": "03-api-guide",
+      "path": "03-api-guide.md",
+      "expected": "pdf",
+      "markers": ["API guide", "Request", "rust", "#table("]
+    },
+    {
+      "id": "04-checklist",
+      "path": "04-checklist.md",
+      "expected": "pdf",
+      "markers": ["Launch checklist", "☐ draft", "☑ merged", "#strike["]
+    },
+    {
+      "id": "05-links",
+      "path": "05-links.md",
+      "expected": "pdf",
+      "markers": ["Link survey", "Nested destination", "https://example.test"]
+    },
+    {
+      "id": "06-html-supported",
+      "path": "06-html-supported.md",
+      "expected": "pdf",
+      "markers": ["Bounded HTML", "italic", "bold", "removed", "old"] ,
+      "html_policy": "supported-bounded"
+    },
+    {
+      "id": "07-html-unsupported",
+      "path": "07-html-unsupported.md",
+      "expected": "unsupported",
+      "diagnostics": ["E8001"],
+      "html_policy": "preserved-but-output-unsupported"
+    },
+    {
+      "id": "08-html-malformed",
+      "path": "08-html-malformed.md",
+      "expected": "unsupported",
+      "diagnostics": ["E8001"],
+      "html_policy": "malformed-or-rejected"
+    },
+    {
+      "id": "09-unicode",
+      "path": "09-unicode.md",
+      "expected": "pdf",
+      "markers": ["한국어", "日本語", "🧪", "é", "非ASCII"]
+    },
+    {
+      "id": "10-containers",
+      "path": "10-containers.md",
+      "expected": "pdf",
+      "markers": ["Container combinations", "deep item", "quoted list"]
+    },
+    {
+      "id": "11-line-endings-lf",
+      "path": "11-line-endings-lf.md",
+      "expected": "pdf",
+      "markers": ["LF document", "hard break"]
+    },
+    {
+      "id": "12-line-endings-crlf",
+      "path": "12-line-endings-crlf.md",
+      "expected": "pdf",
+      "markers": ["CRLF document", "hard break"]
+    }
+  ]
+}
