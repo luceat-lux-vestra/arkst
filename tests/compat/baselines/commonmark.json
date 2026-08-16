@@ -6,85 +6,41 @@
     "parser_revision": "eec0eeba6d31189fd828314576494566d539b1e3"
   },
   "cases": {
-    "commonmark-0014": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
     "commonmark-0026": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned numeric-reference utility preserves &#0; as U+0000; the reference emits U+FFFD and the source-backed value cannot be recovered without reparsing."
     },
     "commonmark-0039": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned text segmentation keeps numeric LF references in one Text segment instead of exposing soft-break qualifiers; the frontend cannot synthesize breaks without reparsing."
     },
     "commonmark-0096": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
+      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
     },
     "commonmark-0098": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
+      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
     },
     "commonmark-0126": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown exposes an empty fenced CodeBlock with no source-backed value segment/end span, so the frontend cannot safely materialize the reference code node."
     },
     "commonmark-0130": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "commonmark-0138": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown exposes an empty fenced CodeBlock with no source-backed value segment/end span, so the frontend cannot safely materialize the reference code node."
     },
     "commonmark-0144": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "commonmark-0145": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown exposes an empty-info fenced CodeBlock with no source-backed value segment/end span, so the frontend cannot safely materialize the reference code node."
     },
     "commonmark-0174": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the HTML blocks section."
-    },
-    "commonmark-0187": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the HTML blocks section."
+      "reason": "CANONICAL_MAPPING: Scribium preserves the original blockquote-marked raw-HTML source span as required by its policy, while cmark canonicalizes the blockquote content to the HTML value without markers."
     },
     "commonmark-0237": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "commonmark-0432": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
-    },
-    "commonmark-0505": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "commonmark-0556": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "commonmark-0587": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Images section."
-    },
-    "commonmark-0608": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks section."
-    },
-    "commonmark-0611": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks section."
-    },
-    "commonmark-0612": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown exposes the blockquote/code-block boundary but no source-backed fenced value segment for the empty code node; synthesizing it would violate provenance."
     }
   }
 }

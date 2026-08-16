@@ -26,6 +26,12 @@ pub enum Mode {
     Quarkdown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownProfile {
+    CommonMark,
+    Gfm,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParserDiagnostic {
     pub code: &'static str,
@@ -343,7 +349,10 @@ impl InlineParser for QuarkdownTightInlineParser {
     }
 }
 
-fn parser(mode: Mode) -> Parser {
+fn parser(mode: Mode, profile: MarkdownProfile) -> Parser {
+    if mode == Mode::Markdown && profile == MarkdownProfile::CommonMark {
+        return Parser::with_options(Options::default());
+    }
     if mode == Mode::Markdown {
         return Parser::with_extensions(Options::default(), gfm(GfmOptions::default()));
     }
@@ -386,9 +395,17 @@ pub fn parse_with_diagnostics(source: &str) -> ParseOutput {
 }
 
 pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
+    parse_source(source, mode, MarkdownProfile::Gfm)
+}
+
+pub fn parse_with_markdown_profile(source: &str, profile: MarkdownProfile) -> ParseOutput {
+    parse_source(source, Mode::Markdown, profile)
+}
+
+fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutput {
     let (front_matter, body_start) = parse_front_matter(source);
     let body = &source[body_start..];
-    let parser = parser(mode);
+    let parser = parser(mode, profile);
     let mut reader = BasicReader::new(body);
     let mut diagnostics = Vec::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| parser.parse(&mut reader)));
@@ -1001,7 +1018,9 @@ fn convert_inlines(
                     && matches!(&inline, Inline::Text { span, .. } if span.start == span.end)
                     && next_is_code_span
             });
-            if !is_zero_width_code_boundary {
+            let is_empty_text =
+                matches!(&inline, Inline::Text { content, .. } if content.is_empty());
+            if !is_zero_width_code_boundary && !is_empty_text {
                 inlines.push(inline);
             }
         }
@@ -1092,15 +1111,11 @@ fn text_line_break(arena: &Arena, node: NodeRef, source: &str, base: usize) -> O
 }
 
 /// Adapt Rushdown's parser-owned text into the semantic text that enters the
-/// Scribium AST. The source span remains the original byte range. These
-/// transformations are Rushdown's public utilities; Scribium does not
-/// tokenize Markdown escapes or entity references itself.
+/// Scribium AST. The source span remains the original byte range. The
+/// source-backed pass preserves escaped references while applying exactly one
+/// reference normalization at the original source position.
 fn normalize_text_content(raw: &str) -> String {
-    let unescaped = rushdown::util::unescape_puncts(raw.as_bytes(), false);
-    let resolved = rushdown::util::resolve_entity_references(
-        rushdown::util::resolve_numeric_references(unescaped),
-    );
-    String::from_utf8_lossy(resolved.as_ref()).into_owned()
+    normalize_source_value(raw, false)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1124,6 +1139,10 @@ fn normalize_metadata(raw: &str, kind: MetadataKind) -> String {
     let escaped_space = match kind {
         MetadataKind::LinkDestination | MetadataKind::LinkTitle | MetadataKind::CodeInfo => false,
     };
+    normalize_source_value(raw, escaped_space)
+}
+
+fn normalize_source_value(raw: &str, escaped_space: bool) -> String {
     let source = raw.as_bytes();
     let mut normalized = Vec::with_capacity(source.len());
     let mut cursor = 0;
@@ -1256,10 +1275,8 @@ fn convert_inline(
             content: convert_inlines(arena, node, source, base, diagnostics),
             span,
         }),
-        KindData::CodeSpan(_code) => Some(Inline::Code {
-            content: code_span_content(
-                source.get(span.start.saturating_sub(base)..span.end.saturating_sub(base))?,
-            ),
+        KindData::CodeSpan(code) => Some(Inline::Code {
+            content: code.str(source).into_owned(),
             span,
         }),
         KindData::Link(link) => Some(Inline::Link {
@@ -2138,30 +2155,6 @@ fn code_source(raw: &str) -> String {
     raw.get(body_start..body_end)
         .unwrap_or_default()
         .to_string()
-}
-
-fn code_span_content(raw: &str) -> String {
-    let delimiter_len = raw.bytes().take_while(|byte| *byte == b'`').count();
-    if delimiter_len == 0 || raw.len() < delimiter_len * 2 {
-        return raw.to_string();
-    }
-    let closing_start = raw.len() - delimiter_len;
-    if raw.as_bytes()[closing_start..]
-        .iter()
-        .any(|byte| *byte != b'`')
-    {
-        return raw.to_string();
-    }
-    let inner = &raw[delimiter_len..closing_start];
-    let normalized = inner.replace("\r\n", " ").replace(['\r', '\n'], " ");
-    if normalized.starts_with(' ')
-        && normalized.ends_with(' ')
-        && normalized.chars().any(|character| character != ' ')
-    {
-        normalized[1..normalized.len() - 1].to_string()
-    } else {
-        normalized
-    }
 }
 
 fn code_span_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
