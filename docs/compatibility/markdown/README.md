@@ -174,8 +174,8 @@ revisions is:
 
 | Suite | Total | PASS | KNOWN_MISMATCH | UNSUPPORTED | New mismatch |
 |---|---:|---:|---:|---:|---:|
-| CommonMark | 652 | 539 | 113 | 0 | 0 |
-| GFM | 670 | 557 | 113 | 0 | 0 |
+| CommonMark | 652 | 583 | 69 | 0 | 0 |
+| GFM | 670 | 601 | 69 | 0 | 0 |
 
 The baseline files
 [`commonmark.json`](../../../tests/compat/baselines/commonmark.json) and
@@ -194,11 +194,18 @@ between `KNOWN_MISMATCH` and `UNSUPPORTED` also fails until the baseline is
 reviewed. The mismatch count is therefore a snapshot of measured gaps, not a
 completeness score.
 
-The current differences are concentrated in existing parser-boundary gaps
-such as tabs and container/newline handling, thematic breaks and heading
-boundaries, code-block normalization, escapes/entities, links and images, and
-some HTML or extension cases. This PR records those gaps for follow-up; it
-does not mass-fix them or advance #61 evaluator semantics.
+The first root-cause remediation batch corrected Rushdown code-segment
+serialization at the Scribium frontend boundary. It preserves segment padding
+and forced newlines instead of joining source slices with synthetic separators;
+the change resolves 44 CommonMark and 44 GFM cases without changing the
+Rushdown pin or the evaluator/IR/backend pipeline.
+
+The complete 113-case root-cause analysis, priority rationale, ownership
+classification, and deferred groups are in
+[`gaps.md`](gaps.md). Remaining differences cover positioned empty-node spans,
+metadata normalization, code-span delimiter boundaries, hard-break whitespace,
+autolink profiles, GFM tables, and pinned Rushdown behavior. `.let` evaluator
+semantics remain deferred.
 
 ### Real document corpus and output smoke
 
