@@ -371,7 +371,7 @@ fn inlines_to_ir(
                         let span =
                             ByteSpan::new(span.start, inline_span_end(&inlines[*close_index]));
                         output.push(match tag {
-                            RawHtmlTag::Emphasis => IrInline::Emphasis {
+                            RawHtmlTag::Em => IrInline::Emphasis {
                                 content,
                                 span: byte_to_source_span(&span, source_id),
                             },
@@ -379,7 +379,7 @@ fn inlines_to_ir(
                                 content,
                                 span: byte_to_source_span(&span, source_id),
                             },
-                            RawHtmlTag::Strikethrough => IrInline::Strikethrough {
+                            RawHtmlTag::Del | RawHtmlTag::S => IrInline::Strikethrough {
                                 content,
                                 span: byte_to_source_span(&span, source_id),
                             },
@@ -402,9 +402,10 @@ fn inlines_to_ir(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RawHtmlTag {
-    Emphasis,
+    Em,
     Strong,
-    Strikethrough,
+    Del,
+    S,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,20 +420,20 @@ enum RawHtmlToken {
 /// opaque Rushdown segments remain unsupported and source-backed.
 fn classify_raw_html(content: &str) -> Option<RawHtmlToken> {
     for (opening, tag) in [
-        ("<em>", RawHtmlTag::Emphasis),
+        ("<em>", RawHtmlTag::Em),
         ("<strong>", RawHtmlTag::Strong),
-        ("<del>", RawHtmlTag::Strikethrough),
-        ("<s>", RawHtmlTag::Strikethrough),
+        ("<del>", RawHtmlTag::Del),
+        ("<s>", RawHtmlTag::S),
     ] {
         if content.eq_ignore_ascii_case(opening) {
             return Some(RawHtmlToken::Open(tag));
         }
     }
     for (closing, tag) in [
-        ("</em>", RawHtmlTag::Emphasis),
+        ("</em>", RawHtmlTag::Em),
         ("</strong>", RawHtmlTag::Strong),
-        ("</del>", RawHtmlTag::Strikethrough),
-        ("</s>", RawHtmlTag::Strikethrough),
+        ("</del>", RawHtmlTag::Del),
+        ("</s>", RawHtmlTag::S),
     ] {
         if content.eq_ignore_ascii_case(closing) {
             return Some(RawHtmlToken::Close(tag));
@@ -1466,6 +1467,87 @@ mod tests {
         assert!(matches!(content[3], IrInline::Strikethrough { .. }));
         assert!(matches!(content[5], IrInline::Strikethrough { .. }));
         assert!(matches!(content[6], IrInline::HardBreak { .. }));
+    }
+
+    #[test]
+    fn strikethrough_html_pairs_preserve_del_and_s_tag_identity() {
+        for source in ["<del>x</del>\n", "<s>x</s>\n"] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+
+            let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+                panic!("expected paragraph, got {:?}", ir.nodes);
+            };
+            assert_eq!(content.len(), 1, "{source:?}: {content:?}");
+            assert!(matches!(content[0], IrInline::Strikethrough { .. }));
+        }
+
+        let nested_source = "<del><s>x</s></del>\n";
+        let nested_document = scribium_markdown::parse_md(nested_source);
+        let (nested_ir, nested_diagnostics) =
+            ast_to_ir_with_diagnostics(&nested_document, source_id(), &empty_project_metadata());
+        assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
+        let IrNode::Paragraph {
+            content: nested_content,
+            ..
+        } = &nested_ir.nodes[0]
+        else {
+            panic!("expected nested paragraph, got {:?}", nested_ir.nodes);
+        };
+        let IrInline::Strikethrough {
+            content: outer_content,
+            ..
+        } = &nested_content[0]
+        else {
+            panic!("expected outer strikethrough, got {nested_content:?}");
+        };
+        assert!(matches!(
+            outer_content.as_slice(),
+            [IrInline::Strikethrough { .. }]
+        ));
+    }
+
+    #[test]
+    fn mismatched_strikethrough_html_tags_remain_unsupported() {
+        for (source, expected_raw) in [
+            ("<del>x</s>\n", vec!["<del>", "</s>"]),
+            ("<s>x</del>\n", vec!["<s>", "</del>"]),
+            (
+                "<del><s>x</del></s>\n",
+                vec!["<del>", "<s>", "</del>", "</s>"],
+            ),
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert_eq!(diagnostics.len(), expected_raw.len(), "{source:?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.code == "E8001"),
+                "{source:?}: {diagnostics:?}"
+            );
+            let diagnostic_raw = diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    let span = diagnostic.primary.expect("HTML diagnostic span");
+                    source[span.start..span.end].to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(diagnostic_raw, expected_raw, "{source:?}");
+
+            let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+                panic!("expected paragraph, got {:?}", ir.nodes);
+            };
+            assert!(
+                content
+                    .iter()
+                    .all(|inline| !matches!(inline, IrInline::Strikethrough { .. })),
+                "mismatched tags must not lower to strikethrough: {source:?}: {content:?}"
+            );
+        }
     }
 
     #[test]
