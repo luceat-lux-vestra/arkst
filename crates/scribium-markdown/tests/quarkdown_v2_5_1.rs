@@ -459,7 +459,7 @@ fn qd251_link_correction_preserves_autolink_backslashes_and_email_semantics() {
 }
 
 #[test]
-fn qd251_link_correction_preserves_reference_and_image_destinations() {
+fn qd251_link_correction_normalizes_reference_and_preserves_image_destinations() {
     let reference_source = "[ref]: https://example.test/a\\+b\n\nbefore [reference][ref] after";
     let reference_document = parse_without_diagnostics(reference_source, Mode::Markdown);
     let reference_content = match reference_document.nodes.last() {
@@ -467,7 +467,7 @@ fn qd251_link_correction_preserves_reference_and_image_destinations() {
         other => panic!("expected reference paragraph, got {other:?}"),
     };
     let (_, destination, _) = first_link(reference_content);
-    assert_eq!(destination, r"https://example.test/a\+b");
+    assert_eq!(destination, "https://example.test/a+b");
 
     let image_source = r"![image](https://example.test/a\+b)";
     let image_document = parse_without_diagnostics(image_source, Mode::Markdown);

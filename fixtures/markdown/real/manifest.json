@@ -81,6 +81,12 @@
       "path": "13-positioned-empty.md",
       "expected": "pdf",
       "markers": ["Positioned nodes", "empty-label", "empty container markers"]
+    },
+    {
+      "id": "14-metadata-normalization",
+      "path": "14-metadata-normalization.md",
+      "expected": "pdf",
+      "markers": ["Metadata normalization", "https://example.test/a&b", "metadata_fixture", "UTF-8"]
     }
   ]
 }
