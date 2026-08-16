@@ -66,9 +66,11 @@ pub enum IrNode {
         rows: Vec<IrTableRow>,
         span: SourceSpan,
     },
-    /// A fenced code block with an optional language tag.
+    /// A fenced code block with its optional full info string and first-token
+    /// language tag.
     CodeBlock {
         language: Option<String>,
+        info: Option<String>,
         source: String,
         span: SourceSpan,
     },
@@ -156,6 +158,15 @@ pub enum IrInline {
     Link {
         content: Vec<IrInline>,
         destination: String,
+        title: Option<String>,
+        span: SourceSpan,
+    },
+    /// A Markdown image. Resource resolution is intentionally outside the
+    /// backend-neutral IR; the source metadata remains structurally present.
+    Image {
+        content: Vec<IrInline>,
+        destination: String,
+        title: Option<String>,
         span: SourceSpan,
     },
     /// An inline code span (`monospace`).
@@ -164,6 +175,10 @@ pub enum IrInline {
     /// into. The span covers the whole construct including the backtick
     /// delimiters.
     Code { content: String, span: SourceSpan },
+    /// A source-backed soft line break.
+    SoftBreak { span: SourceSpan },
+    /// A source-backed hard line break.
+    HardBreak { span: SourceSpan },
 }
 
 /// An evaluated list item in the IR.

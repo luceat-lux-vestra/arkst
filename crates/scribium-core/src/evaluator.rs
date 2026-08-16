@@ -571,10 +571,12 @@ impl Evaluator {
             IrInline::Link {
                 content,
                 destination,
+                title,
                 span,
             } => vec![IrInline::Link {
                 content: self.evaluate_inlines(content, diagnostics, context),
                 destination: destination.clone(),
+                title: title.clone(),
                 span: *span,
             }],
             IrInline::DirectiveCall {
@@ -3058,6 +3060,7 @@ mod tests {
                     text_inline(" after"),
                 ],
                 destination: "https://example.com".to_string(),
+                title: None,
                 span: span(0, 1),
             }],
             span: span(0, 1),
@@ -3070,6 +3073,7 @@ mod tests {
         let IrInline::Link {
             content,
             destination,
+            title: _title,
             span: link_span,
         } = &content[0]
         else {

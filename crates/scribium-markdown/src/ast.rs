@@ -44,6 +44,9 @@ pub enum Block {
     },
     CodeBlock {
         language: Option<String>,
+        /// The complete fenced-code info string, when present. `language` is
+        /// its first whitespace-delimited token for backend compatibility.
+        info: Option<String>,
         source: String,
         span: ByteSpan,
     },
@@ -138,11 +141,13 @@ pub enum Inline {
     Link {
         content: Vec<Inline>,
         destination: String,
+        title: Option<String>,
         span: ByteSpan,
     },
     Image {
         content: Vec<Inline>,
         destination: String,
+        title: Option<String>,
         span: ByteSpan,
     },
     Code {

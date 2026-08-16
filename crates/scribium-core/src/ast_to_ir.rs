@@ -137,10 +137,12 @@ fn block_to_ir(
         }
         Block::CodeBlock {
             language,
+            info,
             source,
             span,
         } => Some(IrNode::CodeBlock {
             language: language.clone(),
+            info: info.clone(),
             source: source.clone(),
             span: byte_to_source_span(span, source_id),
         }),
@@ -429,25 +431,36 @@ fn inline_to_ir(
                 })
             }
         }
-        Inline::HardBreak { span } | Inline::SoftBreak { span } => {
-            // Breaks become whitespace in the text flow for M1
-            Some(IrInline::Text {
-                content: "\n".to_string(),
-                span: byte_to_source_span(span, source_id),
-            })
-        }
+        Inline::HardBreak { span } => Some(IrInline::HardBreak {
+            span: byte_to_source_span(span, source_id),
+        }),
+        Inline::SoftBreak { span } => Some(IrInline::SoftBreak {
+            span: byte_to_source_span(span, source_id),
+        }),
         Inline::Link {
             content,
             destination,
+            title,
             span,
         } => Some(IrInline::Link {
             content: inlines_to_ir(content, source_id, diagnostics),
             destination: destination.clone(),
+            title: title.clone(),
             span: byte_to_source_span(span, source_id),
         }),
-        Inline::Image { span, .. } => {
+        Inline::Image {
+            content,
+            destination,
+            title,
+            span,
+        } => {
             push_unsupported(diagnostics, "image", span, source_id);
-            None
+            Some(IrInline::Image {
+                content: inlines_to_ir(content, source_id, diagnostics),
+                destination: destination.clone(),
+                title: title.clone(),
+                span: byte_to_source_span(span, source_id),
+            })
         }
         Inline::RawHtml { span, .. } => {
             push_unsupported(diagnostics, "raw HTML inline", span, source_id);
@@ -553,7 +566,7 @@ fn push_unsupported(
         code: "E8001".to_string(),
         severity: Severity::Error,
         message: format!(
-            "Markdown syntax `{feature}` was parsed and preserved by the frontend but is not supported by the current IR/Typst lowering"
+            "Markdown syntax `{feature}` was parsed and preserved by the frontend but is not supported by the current document output path"
         ),
         primary: Some(byte_to_source_span(span, source_id)),
         secondary: Vec::new(),
@@ -747,6 +760,7 @@ mod tests {
                         span: bs(1, 4),
                     }],
                     destination: "https://x".into(),
+                    title: None,
                     span: bs(0, 20),
                 }],
                 span: bs(0, 20),
@@ -763,6 +777,7 @@ mod tests {
                     IrInline::Link {
                         content,
                         destination,
+                        title: _title,
                         span,
                     } => {
                         assert_eq!(destination, "https://x");
@@ -838,8 +853,7 @@ mod tests {
             IrNode::Paragraph { content, .. } => {
                 assert_eq!(content.len(), 3);
                 match &content[1] {
-                    IrInline::Text { content, span } => {
-                        assert_eq!(content, "\n");
+                    IrInline::SoftBreak { span } => {
                         assert_eq!(*span, SourceSpan::new(SourceId(42), 5, 6));
                     }
                     other => panic!("expected Text, got {other:?}"),
@@ -874,8 +888,7 @@ mod tests {
             IrNode::Paragraph { content, .. } => {
                 assert_eq!(content.len(), 3);
                 match &content[1] {
-                    IrInline::Text { content, span } => {
-                        assert_eq!(content, "\n");
+                    IrInline::HardBreak { span } => {
                         assert_eq!(*span, SourceSpan::new(SourceId(42), 5, 7));
                     }
                     other => panic!("expected Text, got {other:?}"),
@@ -905,8 +918,7 @@ mod tests {
         match &ir.nodes[0] {
             IrNode::Paragraph { content, .. } => {
                 match &content[1] {
-                    IrInline::Text { content, span } => {
-                        assert_eq!(content, "\n");
+                    IrInline::SoftBreak { span } => {
                         // The break is not at the document start: the span must
                         // point at the real source position, never synthesize 0..0.
                         assert_eq!(*span, SourceSpan::new(SourceId(42), 12, 13));
@@ -1151,6 +1163,7 @@ mod tests {
                                 span: bs(18, 22),
                             }],
                             destination: "page.md".into(),
+                            title: Some("link title".into()),
                             span: bs(17, 32),
                         },
                         Inline::Image {
@@ -1159,6 +1172,7 @@ mod tests {
                                 span: bs(35, 40),
                             }],
                             destination: "image.png".into(),
+                            title: Some("image title".into()),
                             span: bs(34, 51),
                         },
                         Inline::Strikethrough {
@@ -1229,9 +1243,22 @@ mod tests {
                 _ => None,
             })
             .expect("the supported link paragraph remains");
-        assert_eq!(paragraph.len(), 2);
-        assert!(matches!(paragraph[0], IrInline::Link { .. }));
-        assert!(matches!(paragraph[1], IrInline::Strikethrough { .. }));
+        assert_eq!(paragraph.len(), 3);
+        assert!(matches!(
+            &paragraph[0],
+            IrInline::Link {
+                title: Some(title),
+                ..
+            } if title == "link title"
+        ));
+        assert!(matches!(
+            &paragraph[1],
+            IrInline::Image {
+                title: Some(title),
+                ..
+            } if title == "image title"
+        ));
+        assert!(matches!(paragraph[2], IrInline::Strikethrough { .. }));
         assert_eq!(ir.nodes.len(), 3);
         assert!(matches!(ir.nodes[0], IrNode::Blockquote { .. }));
         assert!(matches!(ir.nodes[2], IrNode::Table { .. }));
