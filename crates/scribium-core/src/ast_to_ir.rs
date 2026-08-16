@@ -9,7 +9,7 @@ use crate::ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
     IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
-use crate::source::{SourceId, SourceSpan};
+use crate::source::{ByteSpan, SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
 use scribium_markdown::ast::{
     Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
@@ -345,10 +345,162 @@ fn inlines_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<IrInline> {
-    inlines
+    let mut output = Vec::new();
+    let html_pairs = raw_html_pairs(inlines);
+    let mut index = 0;
+    while index < inlines.len() {
+        if let Inline::RawHtml { content, span } = &inlines[index] {
+            match classify_raw_html(content) {
+                Some(RawHtmlToken::HardBreak) => {
+                    output.push(IrInline::HardBreak {
+                        span: byte_to_source_span(span, source_id),
+                    });
+                    index += 1;
+                    continue;
+                }
+                Some(RawHtmlToken::Open(tag)) => {
+                    if let Some((_, close_index, _)) = html_pairs
+                        .iter()
+                        .find(|(open_index, _, pair_tag)| *open_index == index && *pair_tag == tag)
+                    {
+                        let content = inlines_to_ir(
+                            &inlines[index + 1..*close_index],
+                            source_id,
+                            diagnostics,
+                        );
+                        let span =
+                            ByteSpan::new(span.start, inline_span_end(&inlines[*close_index]));
+                        output.push(match tag {
+                            RawHtmlTag::Em => IrInline::Emphasis {
+                                content,
+                                span: byte_to_source_span(&span, source_id),
+                            },
+                            RawHtmlTag::Strong => IrInline::Strong {
+                                content,
+                                span: byte_to_source_span(&span, source_id),
+                            },
+                            RawHtmlTag::Del | RawHtmlTag::S => IrInline::Strikethrough {
+                                content,
+                                span: byte_to_source_span(&span, source_id),
+                            },
+                        });
+                        index = *close_index + 1;
+                        continue;
+                    }
+                }
+                Some(RawHtmlToken::Close(_)) | None => {}
+            }
+        }
+
+        if let Some(inline) = inline_to_ir(&inlines[index], source_id, diagnostics) {
+            output.push(inline);
+        }
+        index += 1;
+    }
+    output
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawHtmlTag {
+    Em,
+    Strong,
+    Del,
+    S,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawHtmlToken {
+    Open(RawHtmlTag),
+    Close(RawHtmlTag),
+    HardBreak,
+}
+
+/// Classify only exact, attribute-free tags whose existing IR already has the
+/// same document meaning. This is a whitelist, not an HTML parser: all other
+/// opaque Rushdown segments remain unsupported and source-backed.
+fn classify_raw_html(content: &str) -> Option<RawHtmlToken> {
+    for (opening, tag) in [
+        ("<em>", RawHtmlTag::Em),
+        ("<strong>", RawHtmlTag::Strong),
+        ("<del>", RawHtmlTag::Del),
+        ("<s>", RawHtmlTag::S),
+    ] {
+        if content.eq_ignore_ascii_case(opening) {
+            return Some(RawHtmlToken::Open(tag));
+        }
+    }
+    for (closing, tag) in [
+        ("</em>", RawHtmlTag::Em),
+        ("</strong>", RawHtmlTag::Strong),
+        ("</del>", RawHtmlTag::Del),
+        ("</s>", RawHtmlTag::S),
+    ] {
+        if content.eq_ignore_ascii_case(closing) {
+            return Some(RawHtmlToken::Close(tag));
+        }
+    }
+    if ["<br>", "<br/>", "<br />"]
         .iter()
-        .filter_map(|inline| inline_to_ir(inline, source_id, diagnostics))
-        .collect()
+        .any(|break_tag| content.eq_ignore_ascii_case(break_tag))
+    {
+        return Some(RawHtmlToken::HardBreak);
+    }
+    None
+}
+
+type RawHtmlPair = (usize, usize, RawHtmlTag);
+
+struct RawHtmlFrame {
+    index: usize,
+    tag: RawHtmlTag,
+    invalid: bool,
+    pairs: Vec<RawHtmlPair>,
+}
+
+fn raw_html_pairs(inlines: &[Inline]) -> Vec<RawHtmlPair> {
+    let mut stack: Vec<RawHtmlFrame> = Vec::new();
+    let mut pairs = Vec::new();
+    for (index, inline) in inlines.iter().enumerate() {
+        let Inline::RawHtml { content, .. } = inline else {
+            continue;
+        };
+        match classify_raw_html(content) {
+            Some(RawHtmlToken::Open(tag)) => stack.push(RawHtmlFrame {
+                index,
+                tag,
+                invalid: false,
+                pairs: Vec::new(),
+            }),
+            Some(RawHtmlToken::Close(tag)) => {
+                let Some(frame) = stack.pop() else {
+                    continue;
+                };
+                if frame.tag != tag {
+                    for parent in &mut stack {
+                        parent.invalid = true;
+                    }
+                    continue;
+                }
+                if frame.invalid {
+                    continue;
+                }
+                let mut completed = frame.pairs;
+                completed.push((frame.index, index, frame.tag));
+                if let Some(parent) = stack.last_mut() {
+                    parent.pairs.extend(completed);
+                } else {
+                    pairs.extend(completed);
+                }
+            }
+            Some(RawHtmlToken::HardBreak) => {}
+            None => {
+                for frame in &mut stack {
+                    frame.invalid = true;
+                }
+            }
+        }
+    }
+    pairs
 }
 
 fn inline_to_ir(
@@ -1278,5 +1430,171 @@ mod tests {
             .iter()
             .any(|message| message.contains("strikethrough")));
         assert!(!messages.iter().any(|message| message.contains("GFM table")));
+    }
+
+    #[test]
+    fn bounded_attribute_free_inline_html_maps_to_existing_ir_semantics() {
+        let source =
+            "before <em>italic <strong>bold</strong></em> <del>gone</del> <s>old</s><br /> after\n";
+        let document = scribium_markdown::parse_md(source);
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+
+        let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+            panic!("expected paragraph, got {:?}", ir.nodes);
+        };
+        let IrInline::Emphasis {
+            content: emphasis,
+            span: emphasis_span,
+        } = &content[1]
+        else {
+            panic!("expected HTML emphasis, got {content:?}");
+        };
+        assert_eq!(
+            *emphasis_span,
+            SourceSpan::new(
+                source_id(),
+                source.find("<em>").expect("opening emphasis"),
+                source.find("</em>").expect("closing emphasis") + "</em>".len(),
+            )
+        );
+        assert!(matches!(emphasis[0], IrInline::Text { .. }));
+        assert!(matches!(emphasis[1], IrInline::Strong { .. }));
+        assert!(matches!(content[3], IrInline::Strikethrough { .. }));
+        assert!(matches!(content[5], IrInline::Strikethrough { .. }));
+        assert!(matches!(content[6], IrInline::HardBreak { .. }));
+    }
+
+    #[test]
+    fn strikethrough_html_pairs_preserve_del_and_s_tag_identity() {
+        for source in ["<del>x</del>\n", "<s>x</s>\n"] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+
+            let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+                panic!("expected paragraph, got {:?}", ir.nodes);
+            };
+            assert_eq!(content.len(), 1, "{source:?}: {content:?}");
+            assert!(matches!(content[0], IrInline::Strikethrough { .. }));
+        }
+
+        let nested_source = "<del><s>x</s></del>\n";
+        let nested_document = scribium_markdown::parse_md(nested_source);
+        let (nested_ir, nested_diagnostics) =
+            ast_to_ir_with_diagnostics(&nested_document, source_id(), &empty_project_metadata());
+        assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
+        let IrNode::Paragraph {
+            content: nested_content,
+            ..
+        } = &nested_ir.nodes[0]
+        else {
+            panic!("expected nested paragraph, got {:?}", nested_ir.nodes);
+        };
+        let IrInline::Strikethrough {
+            content: outer_content,
+            ..
+        } = &nested_content[0]
+        else {
+            panic!("expected outer strikethrough, got {nested_content:?}");
+        };
+        assert!(matches!(
+            outer_content.as_slice(),
+            [IrInline::Strikethrough { .. }]
+        ));
+    }
+
+    #[test]
+    fn mismatched_strikethrough_html_tags_remain_unsupported() {
+        for (source, expected_raw) in [
+            ("<del>x</s>\n", vec!["<del>", "</s>"]),
+            ("<s>x</del>\n", vec!["<s>", "</del>"]),
+            (
+                "<del><s>x</del></s>\n",
+                vec!["<del>", "<s>", "</del>", "</s>"],
+            ),
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert_eq!(diagnostics.len(), expected_raw.len(), "{source:?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.code == "E8001"),
+                "{source:?}: {diagnostics:?}"
+            );
+            let diagnostic_raw = diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    let span = diagnostic.primary.expect("HTML diagnostic span");
+                    source[span.start..span.end].to_string()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(diagnostic_raw, expected_raw, "{source:?}");
+
+            let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+                panic!("expected paragraph, got {:?}", ir.nodes);
+            };
+            assert!(
+                content
+                    .iter()
+                    .all(|inline| !matches!(inline, IrInline::Strikethrough { .. })),
+                "mismatched tags must not lower to strikethrough: {source:?}: {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_html_keeps_deterministic_diagnostics_and_original_spans() {
+        let inline_source = "before <span class=\"layout\">x</span> after\n";
+        let inline_document = scribium_markdown::parse_md(inline_source);
+        let (inline_ir, inline_diagnostics) =
+            ast_to_ir_with_diagnostics(&inline_document, source_id(), &empty_project_metadata());
+        assert_eq!(inline_diagnostics.len(), 2, "{inline_diagnostics:?}");
+        assert!(inline_diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "E8001"));
+        let inline_spans = inline_diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let span = diagnostic.primary.expect("HTML diagnostic span");
+                inline_source[span.start..span.end].to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(inline_spans, vec!["<span class=\"layout\">", "</span>"]);
+        assert!(matches!(inline_ir.nodes[0], IrNode::Paragraph { .. }));
+
+        let block_source = "<div>\n**not Markdown**\n</div>\n\ntext\n";
+        let block_document = scribium_markdown::parse_md(block_source);
+        let (_, block_diagnostics) =
+            ast_to_ir_with_diagnostics(&block_document, source_id(), &empty_project_metadata());
+        assert_eq!(block_diagnostics.len(), 1, "{block_diagnostics:?}");
+        let block_span = block_diagnostics[0]
+            .primary
+            .expect("block HTML diagnostic span");
+        assert_eq!(
+            block_source.get(block_span.start..block_span.end),
+            Some("<div>\n**not Markdown**\n</div>\n"),
+        );
+        assert_eq!(block_diagnostics[0].code, "E8001");
+
+        let ambiguous_source = "before <em>outer <strong>inner</strong> after\n";
+        let ambiguous_document = scribium_markdown::parse_md(ambiguous_source);
+        let (ambiguous_ir, ambiguous_diagnostics) =
+            ast_to_ir_with_diagnostics(&ambiguous_document, source_id(), &empty_project_metadata());
+        assert_eq!(ambiguous_diagnostics.len(), 3, "{ambiguous_diagnostics:?}");
+        let IrNode::Paragraph { content, .. } = &ambiguous_ir.nodes[0] else {
+            panic!("expected ambiguous HTML paragraph");
+        };
+        assert!(content.iter().all(|inline| matches!(
+            inline,
+            IrInline::Text { .. } | IrInline::SoftBreak { .. } | IrInline::HardBreak { .. }
+        )));
     }
 }

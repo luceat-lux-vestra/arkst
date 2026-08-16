@@ -2257,6 +2257,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn unsupported_raw_html_diagnostic_blocks_pdf_before_backend_execution() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.md");
+        fs::write(&input, "<div>\n**not Markdown**\n</div>\n").unwrap();
+
+        let result = super::build(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            None,
+            Path::new("/nonexistent/typst"),
+        );
+        let error = result.expect_err("unsupported HTML must reject PDF output");
+        assert!(error.to_string().contains("found 1 error(s)"));
+        assert!(
+            !dir.path().join("document.pdf").exists(),
+            "unsupported HTML must not produce a PDF"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn pdf_compilation_failure_leaves_no_output_and_surfaces_diagnostic() {

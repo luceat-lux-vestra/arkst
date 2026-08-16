@@ -237,6 +237,50 @@ fn integration_markdown_structures_compile_to_valid_pdf() {
 }
 
 #[test]
+fn integration_bounded_inline_html_maps_to_ir_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source =
+        "Before <em>italic <strong>bold</strong></em> <del>removed</del> <s>old</s><br/> next.\n";
+    for entry in ["raw-html.md", "raw-html.qd"] {
+        let project = VirtualProjectBuilder::new()
+            .entry(entry)
+            .expect("valid entry path")
+            .add_source(entry, source)
+            .expect("valid source path")
+            .build()
+            .expect("valid project");
+        let result = compile(&project, &CompileOptions::default());
+        assert!(
+            result.diagnostics.is_empty(),
+            "{entry} diagnostics: {:?}",
+            result.diagnostics
+        );
+        let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+        assert!(typst_code.contains("italic"));
+        assert!(typst_code.contains("bold"));
+        assert!(typst_code.contains("#strike[removed]"));
+        assert!(typst_code.contains("#strike[old]"));
+        assert!(typst_code.contains("\\\n next."), "{typst_code:?}");
+        assert!(!typst_code.contains("<em>"));
+        assert!(!typst_code.contains("<strong>"));
+
+        with_typst(entry, |backend| {
+            let output = backend
+                .compile(&TypstInput {
+                    source: typst_code,
+                    entry_path: entry.to_string(),
+                })
+                .expect("bounded HTML Typst must compile");
+            assert!(output
+                .pdf
+                .expect("PDF output must be present")
+                .starts_with(b"%PDF-"));
+        });
+    }
+}
+
+#[test]
 fn integration_commonmark_gfm_baseline_fixture_compiles_to_valid_pdf() {
     use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 

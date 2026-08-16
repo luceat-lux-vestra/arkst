@@ -1442,6 +1442,9 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
             return checked_index(*index, source);
         }
     }
+    if let KindData::HtmlBlock(html) = arena[node].kind_data() {
+        return html_block_span(arena, node, html, source);
+    }
     if let KindData::CodeBlock(code) = arena[node].kind_data() {
         return code_block_span(arena, node, code, source);
     }
@@ -1720,6 +1723,36 @@ fn code_block_span(
         end
     };
     let span = ByteSpan::new(start, end);
+    span.is_valid_for(source).then_some(span)
+}
+
+fn html_block_span(
+    arena: &Arena,
+    node: NodeRef,
+    html: &rushdown::ast::HtmlBlock,
+    source: &str,
+) -> Option<ByteSpan> {
+    let span = match html.value() {
+        Lines::Segments(segments) => {
+            let mut start: Option<usize> = None;
+            let mut end: Option<usize> = None;
+            for segment in segments {
+                let segment = checked_segment(*segment, source)?;
+                start = Some(start.map_or(segment.start, |value| value.min(segment.start)));
+                end = Some(end.map_or(segment.end, |value| value.max(segment.end)));
+            }
+            ByteSpan::new(start?, end?)
+        }
+        Lines::String(raw) => {
+            let start = arena[node].pos()?;
+            let end = start.checked_add(raw.len())?;
+            if source.get(start..end) != Some(raw.as_str()) {
+                return None;
+            }
+            ByteSpan::new(start, end)
+        }
+        _ => return None,
+    };
     span.is_valid_for(source).then_some(span)
 }
 
