@@ -1045,6 +1045,7 @@ fn convert_inline(
         KindData::CodeSpan(_) => code_span_span(arena, node, source),
         KindData::RawHtml(html) => raw_html_span(arena, node, html, source),
         KindData::Link(link) => link_span(arena, node, link, source),
+        KindData::Image(image) => image_span(arena, node, image, source),
         KindData::Strikethrough(_) => strikethrough_span(arena, node, source),
         _ => node_span(arena, node, source),
     }?;
@@ -1473,7 +1474,21 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
             end = Some(end.map_or(child_span.end, |value| value.max(child_span.end)));
         }
     }
+    if end.is_none() {
+        if let (Some(start), TypeData::Block(_)) = (start, arena[node].type_data()) {
+            return positioned_block_span(start, source);
+        }
+    }
     let span = ByteSpan::new(start?, end?);
+    span.is_valid_for(source).then_some(span)
+}
+
+fn positioned_block_span(start: usize, source: &str) -> Option<ByteSpan> {
+    let end = source
+        .get(start..)?
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset + 1);
+    let span = ByteSpan::new(start, end);
     span.is_valid_for(source).then_some(span)
 }
 
@@ -1563,7 +1578,11 @@ fn link_span(
             }
             _ => node_span(arena, node, source),
         },
-        _ => node_span(arena, node, source),
+        _ => node_span(arena, node, source).or_else(|| {
+            (arena[node].children(arena).next().is_none())
+                .then(|| empty_label_base_span(arena[node].pos(), source))
+                .flatten()
+        }),
     }?;
     if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
         let end = if source.as_bytes().get(span.start) == Some(&b'<')
@@ -1628,6 +1647,91 @@ fn link_span(
     }
     let span = ByteSpan::new(span.start, cursor + 1);
     span.is_valid_for(source).then_some(span)
+}
+
+fn empty_label_base_span(start: Option<usize>, source: &str) -> Option<ByteSpan> {
+    let start = start?;
+    let end = start.checked_add(2)?;
+    (source.as_bytes().get(start..end) == Some(b"[]"))
+        .then(|| ByteSpan::new(start, start + 1))
+        .filter(|span| span.is_valid_for(source))
+}
+
+fn empty_label_destination_span(
+    start: usize,
+    prefix_len: usize,
+    destination: &rushdown::text::Value,
+    has_title: bool,
+    source: &str,
+) -> Option<ByteSpan> {
+    let bytes = source.as_bytes();
+    let open_paren = start.checked_add(prefix_len)?.checked_add(2)?;
+    if bytes.get(open_paren) != Some(&b'(') {
+        return None;
+    }
+    let mut cursor = open_paren.checked_add(1)?;
+    cursor = match destination {
+        rushdown::text::Value::Index(destination) => destination.stop(),
+        rushdown::text::Value::String(value) if value.is_empty() => cursor,
+        _ => return None,
+    };
+    if bytes.get(cursor) == Some(&b'>') {
+        cursor += 1;
+    }
+    cursor = skip_link_spaces(bytes, cursor);
+
+    if has_title {
+        let opener = *bytes.get(cursor)?;
+        let closer = if opener == b'(' { b')' } else { opener };
+        cursor += 1;
+        let mut closed = false;
+        while cursor < bytes.len() {
+            if bytes[cursor] == b'\\' {
+                cursor = cursor.saturating_add(2);
+                continue;
+            }
+            if bytes[cursor] == closer {
+                cursor += 1;
+                closed = true;
+                break;
+            }
+            cursor += 1;
+        }
+        if !closed {
+            return None;
+        }
+        cursor = skip_link_spaces(bytes, cursor);
+    }
+
+    (bytes.get(cursor) == Some(&b')'))
+        .then(|| ByteSpan::new(start, cursor + 1))
+        .filter(|span| span.is_valid_for(source))
+}
+
+fn image_span(
+    arena: &Arena,
+    node: NodeRef,
+    image: &rushdown::ast::Image,
+    source: &str,
+) -> Option<ByteSpan> {
+    if let Some(span) = node_span(arena, node, source) {
+        return Some(span);
+    }
+    if arena[node].children(arena).next().is_some() {
+        return None;
+    }
+    let start = arena[node].pos()?;
+    let end = start.checked_add(3)?;
+    if source.as_bytes().get(start..end) != Some(b"![]") {
+        return None;
+    }
+    empty_label_destination_span(
+        start,
+        1,
+        image.destination(),
+        image.title().is_some(),
+        source,
+    )
 }
 
 fn empty_inline_destination_cursor(span: ByteSpan, bytes: &[u8]) -> Option<usize> {

@@ -6,10 +6,6 @@
     "parser_revision": "eec0eeba6d31189fd828314576494566d539b1e3"
   },
   "cases": {
-    "commonmark-0011": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Tabs section."
-    },
     "commonmark-0014": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Backslash escapes section."
@@ -46,74 +42,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
     },
-    "commonmark-0043": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0047": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0050": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0051": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0052": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0053": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0054": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0057": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0058": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0060": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0061": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "commonmark-0077": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the ATX headings section."
-    },
-    "commonmark-0079": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the ATX headings section."
-    },
-    "commonmark-0085": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0088": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0092": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0094": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
     "commonmark-0096": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Setext headings section."
@@ -121,30 +49,6 @@
     "commonmark-0098": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0099": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0100": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0101": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0104": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0105": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "commonmark-0115": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Indented code blocks section."
     },
     "commonmark-0126": {
       "classification": "KNOWN_MISMATCH",
@@ -178,41 +82,13 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Link reference definitions section."
     },
-    "commonmark-0218": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Link reference definitions section."
-    },
     "commonmark-0226": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Paragraphs section."
     },
-    "commonmark-0234": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
     "commonmark-0237": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "commonmark-0239": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "commonmark-0240": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "commonmark-0246": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "commonmark-0280": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the List items section."
-    },
-    "commonmark-0284": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the List items section."
     },
     "commonmark-0330": {
       "classification": "KNOWN_MISMATCH",
@@ -234,14 +110,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
     },
-    "commonmark-0484": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "commonmark-0487": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
     "commonmark-0503": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Links section."
@@ -257,10 +125,6 @@
     "commonmark-0556": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Links section."
-    },
-    "commonmark-0581": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Images section."
     },
     "commonmark-0587": {
       "classification": "KNOWN_MISMATCH",

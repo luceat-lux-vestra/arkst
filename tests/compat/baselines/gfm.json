@@ -6,78 +6,6 @@
     "parser_revision": "587a12bb54d95ac37241377e6ddc93ea0e45439b"
   },
   "cases": {
-    "gfm-0011": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Tabs section."
-    },
-    "gfm-0013": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0017": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0020": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0021": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0022": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0023": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0024": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0027": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0028": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0030": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0031": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Thematic breaks section."
-    },
-    "gfm-0047": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the ATX headings section."
-    },
-    "gfm-0049": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the ATX headings section."
-    },
-    "gfm-0055": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0058": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0062": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0064": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
     "gfm-0066": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Setext headings section."
@@ -85,30 +13,6 @@
     "gfm-0068": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0069": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0070": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0071": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0074": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0075": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0085": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Indented code blocks section."
     },
     "gfm-0096": {
       "classification": "KNOWN_MISMATCH",
@@ -142,10 +46,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Link reference definitions section."
     },
-    "gfm-0187": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Link reference definitions section."
-    },
     "gfm-0196": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Paragraphs section."
@@ -158,33 +58,9 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Tables (extension) section."
     },
-    "gfm-0212": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
     "gfm-0215": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "gfm-0217": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "gfm-0218": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "gfm-0224": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "gfm-0258": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the List items section."
-    },
-    "gfm-0262": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the List items section."
     },
     "gfm-0310": {
       "classification": "KNOWN_MISMATCH",
@@ -257,10 +133,6 @@
     "gfm-0564": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Links section."
-    },
-    "gfm-0589": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Images section."
     },
     "gfm-0595": {
       "classification": "KNOWN_MISMATCH",
