@@ -983,13 +983,27 @@ fn convert_inlines(
 ) -> Vec<Inline> {
     let mut inlines = Vec::new();
     let mut previous = None;
-    for child in arena[node].children(arena) {
+    let mut children = arena[node].children(arena).peekable();
+    while let Some(child) = children.next() {
+        let next_is_code_span = children
+            .peek()
+            .is_some_and(|next| matches!(arena[*next].kind_data(), KindData::CodeSpan(_)));
         if duplicate_autolink_closer(arena, previous, child, source) {
             previous = Some(child);
             continue;
         }
         if let Some(inline) = convert_inline(arena, child, source, base, diagnostics) {
-            inlines.push(inline);
+            // Rushdown represents the line break between adjacent code spans
+            // as a zero-width text node plus a soft-break qualifier. It has no
+            // semantic text and belongs to neither code span.
+            let is_zero_width_code_boundary = inlines.last().is_some_and(|previous| {
+                matches!(previous, Inline::Code { .. })
+                    && matches!(&inline, Inline::Text { span, .. } if span.start == span.end)
+                    && next_is_code_span
+            });
+            if !is_zero_width_code_boundary {
+                inlines.push(inline);
+            }
         }
         if let Some(line_break) = text_line_break(arena, child, source, base) {
             inlines.push(line_break);
@@ -2099,25 +2113,52 @@ fn code_span_content(raw: &str) -> String {
 fn code_span_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     let start = arena[node].pos()?;
     let bytes = source.as_bytes();
-    let delimiter_len = bytes
-        .get(start..)?
-        .iter()
-        .take_while(|byte| **byte == b'`')
-        .count();
+    let delimiter_len = backtick_run_len(bytes, start, bytes.len());
     if delimiter_len == 0 {
         return None;
     }
-    let mut cursor = start + delimiter_len;
-    while cursor + delimiter_len <= bytes.len() {
-        if bytes[cursor..].starts_with(&bytes[start..start + delimiter_len])
-            && !bytes
-                .get(cursor + delimiter_len)
-                .is_some_and(|byte| *byte == b'`')
-        {
-            let span = ByteSpan::new(start, cursor + delimiter_len);
-            return span.is_valid_for(source).then_some(span);
+    let closing_start = find_exact_backtick_run(
+        bytes,
+        start.checked_add(delimiter_len)?,
+        bytes.len(),
+        delimiter_len,
+    )?;
+    let end = closing_start.checked_add(delimiter_len)?;
+    let span = ByteSpan::new(start, end);
+    span.is_valid_for(source).then_some(span)
+}
+
+fn backtick_run_len(source: &[u8], start: usize, limit: usize) -> usize {
+    let Some(run) = source.get(start..limit.min(source.len())) else {
+        return 0;
+    };
+    run.iter().take_while(|byte| **byte == b'`').count()
+}
+
+fn find_exact_backtick_run(
+    source: &[u8],
+    from: usize,
+    to: usize,
+    expected_len: usize,
+) -> Option<usize> {
+    if expected_len == 0 {
+        return None;
+    }
+
+    let limit = to.min(source.len());
+    let mut cursor = from.min(limit);
+    while cursor < limit {
+        if source[cursor] != b'`' {
+            cursor += 1;
+            continue;
         }
-        cursor += 1;
+
+        let run_start = cursor;
+        let run_len = backtick_run_len(source, run_start, limit);
+        if run_len == expected_len {
+            return Some(run_start);
+        }
+        cursor = run_start + run_len;
     }
     None
 }

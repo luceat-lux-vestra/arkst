@@ -70,22 +70,6 @@
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Entity and numeric character references section."
     },
-    "gfm-0340": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "gfm-0341": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "gfm-0344": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
-    "gfm-0350": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Code spans section."
-    },
     "gfm-0441": {
       "classification": "KNOWN_MISMATCH",
       "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
