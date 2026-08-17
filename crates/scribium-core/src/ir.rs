@@ -82,6 +82,11 @@ pub enum IrNode {
         name: String,
         positional_args: Vec<IrValue>,
         named_args: Vec<IrNamedArg>,
+        /// Source-backed explicit lambda parameters for contextual block
+        /// calls such as `.let`. `None` represents a headerless implicit
+        /// lambda when the callee selects that invocation semantics.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lambda_parameters: Option<Vec<IrParameter>>,
         body: Option<Vec<IrNode>>,
         span: SourceSpan,
     },

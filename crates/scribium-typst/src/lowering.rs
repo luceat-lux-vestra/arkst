@@ -227,6 +227,7 @@ impl LoweringContext {
                 named_args,
                 body,
                 span,
+                ..
             } => {
                 let before = self.output.len();
                 self.push_str("#");
@@ -1525,6 +1526,7 @@ mod tests {
                     value: IrValue::String("table".into()),
                     span: empty_span(),
                 }],
+                lambda_parameters: None,
                 body: Some(vec![IrNode::Paragraph {
                     content: vec![text("content")],
                     span: empty_span(),
@@ -1550,6 +1552,7 @@ mod tests {
                         value: IrValue::None,
                         span: empty_span(),
                     }],
+                    lambda_parameters: None,
                     body: None,
                     span: empty_span(),
                 },
@@ -1562,6 +1565,7 @@ mod tests {
                         value: IrValue::String("None".into()),
                         span: empty_span(),
                     }],
+                    lambda_parameters: None,
                     body: None,
                     span: empty_span(),
                 },

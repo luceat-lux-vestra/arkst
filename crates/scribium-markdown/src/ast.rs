@@ -61,8 +61,9 @@ pub enum Block {
         named_args: Vec<NamedArg>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
-        /// Contextual lambda metadata for a `.function` declaration. Other
-        /// call bodies deliberately remain ordinary Markdown structures.
+        /// Contextual lambda metadata for calls with lambda body semantics
+        /// (`.function` and block-form `.let`). Other call bodies deliberately
+        /// remain ordinary Markdown structures.
         lambda_header: Option<LambdaHeader>,
         span: ByteSpan,
     },

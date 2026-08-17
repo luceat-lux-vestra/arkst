@@ -504,8 +504,8 @@ fn normalize_block(
                 }
             }
             *body = kept;
-            if name == "function" {
-                contextualize_function_body(block, accepted_lines, source, diagnostics);
+            if has_lambda_body_semantics(name) {
+                contextualize_lambda_body(block, accepted_lines, source, diagnostics);
             }
             let mut result = vec![block.clone()];
             result.extend(promoted);
@@ -542,7 +542,16 @@ fn normalize_children(
     }
 }
 
-fn contextualize_function_body(
+/// Returns the small set of block calls whose first body line is a
+/// source-backed lambda header rather than ordinary Markdown content.
+///
+/// This must remain contextual. Treating every `name:` body line as a lambda
+/// header would change the meaning of ordinary calls such as `.container`.
+fn has_lambda_body_semantics(name: &str) -> bool {
+    matches!(name, "function" | "let")
+}
+
+fn contextualize_lambda_body(
     block: &mut Block,
     accepted_lines: &[ByteSpan],
     source: &str,
@@ -3125,8 +3134,105 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_call_body_colon_is_not_a_lambda_header() {
-        let output = parse_with_diagnostics(".note\n  Hello:\n  body\n");
+    fn let_explicit_lambda_header_is_source_backed_and_stripped() {
+        let source = ".let {Quarkdown}\n    name:\n    Hello, **.name**!\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            name,
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected explicit let lambda metadata")
+        };
+        assert_eq!(name, "let");
+        assert_eq!(header.parameters.len(), 1);
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(&source[header.span.start..header.span.end], "name:");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected surviving explicit let paragraph")
+        };
+        assert_eq!(&source[span.start..span.end], "Hello, **.name**!");
+    }
+
+    #[test]
+    fn let_implicit_lambda_body_keeps_implicit_reference() {
+        let source = ".let {Quarkdown}\n    .uppercase {.1}\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            lambda_header,
+            body: Some(body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected implicit let body")
+        };
+        assert!(lambda_header.is_none());
+        let Block::DirectiveCall { name, .. } = &body[0] else {
+            panic!("expected implicit let call body")
+        };
+        assert_eq!(name, "uppercase");
+    }
+
+    #[test]
+    fn let_header_utf8_span_is_exact_for_crlf_source() {
+        let source = ".let {값}\r\n\tname:\r\n\t안녕, .name!\r\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected UTF-8 let header")
+        };
+        assert_eq!(
+            &source[header.parameters[0].name_span.start..header.parameters[0].name_span.end],
+            "name"
+        );
+        assert_eq!(&source[header.span.start..header.span.end], "name:");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected surviving let body")
+        };
+        assert_eq!(&source[span.start..span.end], "안녕, .name!");
+        assert!(source.is_char_boundary(header.span.start));
+        assert!(source.is_char_boundary(header.span.end));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+    }
+
+    #[test]
+    fn let_nested_container_span_keeps_original_body_ranges() {
+        let source = "- .let {값}\n    name:\n    안녕, .name!\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::UnorderedList { items, .. } = &output.document.nodes[0] else {
+            panic!("expected list container")
+        };
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            body: Some(body),
+            ..
+        } = &items[0].content[0]
+        else {
+            panic!("expected nested let")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        let body_start = source.find("안녕").expect("nested let body");
+        let Block::Paragraph { span, .. } = &body[0] else {
+            panic!("expected nested let paragraph")
+        };
+        assert_eq!(span.start, body_start);
+        assert_eq!(&source[span.start..span.end], "안녕, .name!");
+    }
+
+    #[test]
+    fn ordinary_non_lambda_body_with_colon_is_not_stripped() {
+        let output = parse_with_diagnostics(".container\n  label:\n  ordinary content\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::DirectiveCall {
             lambda_header,
@@ -3137,7 +3243,10 @@ mod tests {
             panic!("expected ordinary call")
         };
         assert!(lambda_header.is_none());
-        assert_eq!(paragraph_text(&body.as_ref().unwrap()[0]), "Hello:body");
+        assert_eq!(
+            paragraph_text(&body.as_ref().unwrap()[0]),
+            "label:ordinary content"
+        );
     }
 
     #[test]

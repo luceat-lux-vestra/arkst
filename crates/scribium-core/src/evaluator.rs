@@ -1,5 +1,6 @@
-//! M1/M2 evaluator: resolves Quarkdown conditionals, variables, user-defined
-//! functions, and the first value-flow builtins used by `::` call chains.
+//! M1/M2 evaluator: resolves Quarkdown conditionals, variables, scoped `.let`
+//! calls, user-defined functions, and the first value-flow builtins used by
+//! `::` call chains.
 //!
 //! Evaluation runs after parsing and `ast_to_ir` and before Typst lowering.
 //! It operates on the IR: a `FunctionCall` / `DirectiveCall` named `if` or
@@ -347,15 +348,16 @@ impl EvaluationContext {
     }
 
     /// Resolves a numeric implicit parameter only inside the nearest lambda
-    /// invocation. Explicit lambda scopes are a hard boundary and do not
-    /// synthesize `.1` aliases.
+    /// invocation. Explicit lambda scopes are a hard boundary: numeric
+    /// references are diagnosed locally instead of falling through to an
+    /// outer implicit invocation.
     fn get_implicit_parameter(
         &self,
         name: &str,
     ) -> Option<Result<IrValue, ImplicitParameterError>> {
         let index = implicit_parameter_index(name)?;
         match self.lambda_scope.as_ref() {
-            Some(LambdaScope::Explicit) => None,
+            Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
             Some(LambdaScope::Implicit(arguments)) => Some(match index {
                 ImplicitParameterIndex::Valid(index) => arguments
                     .get(index.saturating_sub(1))
@@ -440,12 +442,14 @@ impl Evaluator {
                 name,
                 positional_args,
                 named_args,
+                lambda_parameters,
                 body,
                 span,
             } => self.evaluate_block_call(
                 name,
                 positional_args,
                 named_args,
+                lambda_parameters.as_deref(),
                 body.as_deref(),
                 span,
                 diagnostics,
@@ -619,6 +623,7 @@ impl Evaluator {
         name: &str,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
         body: Option<&[IrNode]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -629,6 +634,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body.map(CallBody::Block),
+            lambda_parameters,
             span,
             diagnostics,
             context,
@@ -641,6 +647,7 @@ impl Evaluator {
                     name,
                     positional_args,
                     named_args,
+                    lambda_parameters,
                     body,
                     span,
                     diagnostics,
@@ -667,6 +674,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body.map(CallBody::Inline),
+            None,
             span,
             diagnostics,
             context,
@@ -746,6 +754,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
@@ -784,6 +793,18 @@ impl Evaluator {
             } else {
                 CallOutcome::Value(IrValue::Content(Vec::new()))
             };
+        }
+
+        if is_let(name) {
+            return self.evaluate_let(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
         }
 
         if is_var_declaration(name) {
@@ -857,6 +878,103 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Evaluates block-form `.let` as a scoped one-argument lambda
+    /// invocation. The value is resolved in the caller context exactly once;
+    /// only then is the invocation-local child scope created and populated.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_let(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if positional_args.len() != 1 {
+            diagnostics.push(let_error(
+                format!(
+                    "`.let` requires exactly one positional value argument (received {})",
+                    positional_args.len()
+                ),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(let_error_at(
+                format!("Unknown named argument `{}` for `.let`", argument.name),
+                argument.name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let body = match body {
+            Some(CallBody::Block(nodes)) => nodes,
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(let_error(
+                    "`.let` supports only the block lambda form".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(let_error(
+                    "`.let` requires a block lambda body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            if parameters.len() != 1 {
+                let parameter_span = parameters
+                    .first()
+                    .map(|parameter| parameter.span)
+                    .unwrap_or(*span);
+                diagnostics.push(let_error_at(
+                    format!(
+                        "`.let` requires exactly one explicit lambda parameter (received {})",
+                        parameters.len()
+                    ),
+                    parameter_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+
+        let value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                }
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(
+                    &positional_args[0],
+                    span,
+                )));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+        };
+
+        let mut child = context.child();
+        match lambda_parameters {
+            Some(parameters) => {
+                child.set_lambda_scope(LambdaScope::Explicit);
+                child.set_value(parameters[0].name.clone(), value);
+            }
+            None => child.set_lambda_scope(LambdaScope::Implicit(vec![value])),
+        }
+
+        self.evaluate_callable_body_value(body, diagnostics, &mut child)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1065,6 +1183,7 @@ impl Evaluator {
                 name,
                 positional_args,
                 named_args,
+                lambda_parameters,
                 body,
                 span,
             } => match self.evaluate_call_value(
@@ -1072,6 +1191,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body.as_deref().map(CallBody::Block),
+                lambda_parameters.as_deref(),
                 span,
                 diagnostics,
                 context,
@@ -1081,6 +1201,7 @@ impl Evaluator {
                         name,
                         positional_args,
                         named_args,
+                        lambda_parameters.as_deref(),
                         body.as_deref(),
                         span,
                         diagnostics,
@@ -1128,6 +1249,7 @@ impl Evaluator {
                 &head.positional_args,
                 &head.named_args,
                 None,
+                None,
                 &head.span,
                 diagnostics,
                 context,
@@ -1155,6 +1277,7 @@ impl Evaluator {
                     &positional_args,
                     &source_segment.named_args,
                     final_body,
+                    None,
                     &source_segment.span,
                     diagnostics,
                     context,
@@ -1355,6 +1478,7 @@ impl Evaluator {
                     name,
                     positional_args,
                     named_args,
+                    lambda_parameters,
                     body,
                     span,
                 }] = nodes.as_slice()
@@ -1364,6 +1488,7 @@ impl Evaluator {
                             name,
                             positional_args,
                             named_args,
+                            lambda_parameters.as_deref(),
                             body.as_deref(),
                             span,
                             diagnostics,
@@ -1389,6 +1514,7 @@ impl Evaluator {
         name: &str,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
         body: Option<&[IrNode]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -1412,6 +1538,7 @@ impl Evaluator {
             name: name.to_string(),
             positional_args,
             named_args,
+            lambda_parameters: lambda_parameters.map(ToOwned::to_owned),
             body,
             span: *span,
         }])
@@ -1529,6 +1656,7 @@ impl Evaluator {
                     name,
                     positional_args,
                     named_args,
+                    lambda_parameters,
                     body,
                     span,
                 }] = nodes.as_slice()
@@ -1538,6 +1666,7 @@ impl Evaluator {
                         positional_args,
                         named_args,
                         body.as_deref().map(CallBody::Block),
+                        lambda_parameters.as_deref(),
                         span,
                         diagnostics,
                         context,
@@ -1654,6 +1783,11 @@ fn is_conditional(name: &str) -> bool {
     name == "if" || name == "ifnot"
 }
 
+/// Returns true for the scoped `.let` semantic form.
+fn is_let(name: &str) -> bool {
+    name == "let"
+}
+
 /// Parses the numeric part of a parser-preserved implicit parameter call.
 ///
 /// The frontend already enforces the token boundary and rejects `.0`/leading
@@ -1731,6 +1865,19 @@ fn function_error_at(message: String, span: SourceSpan) -> Diagnostic {
                 .to_string(),
         ],
     }
+}
+
+fn let_error(message: String, span: SourceSpan) -> Diagnostic {
+    let mut diagnostic = function_error_at(message, span);
+    diagnostic.hints =
+        vec!["`.let` requires one value argument and a block lambda body.".to_string()];
+    diagnostic
+}
+
+fn let_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    let mut diagnostic = let_error(message, span);
+    diagnostic.primary = Some(span);
+    diagnostic
 }
 
 fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
@@ -2155,6 +2302,7 @@ mod tests {
             name: name.to_string(),
             positional_args: vec![condition],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(body),
             span: span(0, 1),
         }
@@ -2235,9 +2383,42 @@ mod tests {
             name: name.to_string(),
             positional_args,
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         }])
+    }
+
+    fn lambda_parameter(name: &str, start: usize) -> IrParameter {
+        IrParameter {
+            name: name.to_string(),
+            name_span: span(start, start + name.len()),
+            span: span(start, start + name.len() + 1),
+            optional: false,
+        }
+    }
+
+    fn let_call(
+        value: Option<IrValue>,
+        lambda_parameters: Option<Vec<IrParameter>>,
+        body: Option<Vec<IrNode>>,
+    ) -> IrNode {
+        IrNode::FunctionCall {
+            name: "let".to_string(),
+            positional_args: value.into_iter().collect(),
+            named_args: Vec::new(),
+            lambda_parameters,
+            body,
+            span: span(0, 10),
+        }
+    }
+
+    fn let_value(
+        value: IrValue,
+        lambda_parameters: Option<Vec<IrParameter>>,
+        body: Vec<IrNode>,
+    ) -> IrValue {
+        IrValue::Content(vec![let_call(Some(value), lambda_parameters, Some(body))])
     }
 
     fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
@@ -2248,6 +2429,249 @@ mod tests {
             panic!("expected one text fragment, got {content:?}");
         };
         assert_eq!(content, expected);
+    }
+
+    #[test]
+    fn let_explicit_parameter_returns_scalar() {
+        let nodes = evaluate(vec![let_call(
+            Some(IrValue::Number(5.0)),
+            Some(vec![lambda_parameter("n", 20)]),
+            Some(vec![var_ref("n")]),
+        )]);
+        assert_paragraph_text(&nodes, "5");
+    }
+
+    #[test]
+    fn let_implicit_parameter_returns_scalar() {
+        let nodes = evaluate(vec![let_call(
+            Some(IrValue::String("Quarkdown".to_string())),
+            None,
+            Some(vec![var_ref("1")]),
+        )]);
+        assert_paragraph_text(&nodes, "Quarkdown");
+    }
+
+    #[test]
+    fn let_preserves_scalar_result_in_nested_value_context() {
+        let outer = IrNode::FunctionCall {
+            name: "multiply".to_string(),
+            positional_args: vec![
+                let_value(
+                    IrValue::Number(5.0),
+                    Some(vec![lambda_parameter("n", 20)]),
+                    vec![var_ref("n")],
+                ),
+                IrValue::Number(2.0),
+            ],
+            named_args: Vec::new(),
+            lambda_parameters: None,
+            body: None,
+            span: span(0, 20),
+        };
+        let nodes = evaluate(vec![outer]);
+        assert_paragraph_text(&nodes, "10");
+    }
+
+    #[test]
+    fn let_returns_structured_content_and_composes_in_source_order() {
+        let nodes = evaluate(vec![let_call(
+            Some(IrValue::String("value".to_string())),
+            Some(vec![lambda_parameter("name", 20)]),
+            Some(vec![text_paragraph("First"), text_paragraph("Second")]),
+        )]);
+        assert_eq!(
+            nodes,
+            vec![text_paragraph("First"), text_paragraph("Second")]
+        );
+    }
+
+    #[test]
+    fn let_reads_parent_variable_and_function() {
+        let declaration = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("decorate".to_string()),
+            parameters: vec![lambda_parameter("value", 5)],
+            body: vec![IrNode::FunctionCall {
+                name: "uppercase".to_string(),
+                positional_args: vec![call_value("value", Vec::new())],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span: span(0, 1),
+            }],
+            span: span(0, 1),
+        };
+        let nodes = evaluate(vec![
+            var_declaration("prefix", IrValue::String("Hello".to_string())),
+            declaration,
+            let_call(
+                Some(IrValue::String("world".to_string())),
+                Some(vec![lambda_parameter("name", 20)]),
+                Some(vec![
+                    var_ref("prefix"),
+                    IrNode::FunctionCall {
+                        name: "decorate".to_string(),
+                        positional_args: vec![call_value("name", Vec::new())],
+                        named_args: Vec::new(),
+                        lambda_parameters: None,
+                        body: None,
+                        span: span(0, 1),
+                    },
+                ]),
+            ),
+        ]);
+        assert_eq!(nodes.len(), 2);
+        assert_paragraph_text(&nodes[..1], "Hello");
+        assert_paragraph_text(&nodes[1..], "WORLD");
+    }
+
+    #[test]
+    fn let_shadows_parent_and_local_variables_do_not_leak() {
+        let nodes = evaluate(vec![
+            var_declaration("name", IrValue::String("outer".to_string())),
+            let_call(
+                Some(IrValue::String("inner".to_string())),
+                Some(vec![lambda_parameter("name", 20)]),
+                Some(vec![var_ref("name")]),
+            ),
+            var_ref("name"),
+        ]);
+        assert_eq!(nodes.len(), 2);
+        assert_paragraph_text(&nodes[..1], "inner");
+        assert_paragraph_text(&nodes[1..], "outer");
+
+        let nodes = evaluate(vec![
+            var_declaration("x", IrValue::String("outer".to_string())),
+            let_call(
+                Some(IrValue::String("inner".to_string())),
+                Some(vec![lambda_parameter("value", 20)]),
+                Some(vec![
+                    var_declaration("x", IrValue::String("local".to_string())),
+                    var_ref("x"),
+                ]),
+            ),
+            var_ref("x"),
+        ]);
+        assert_eq!(nodes.len(), 2);
+        assert_paragraph_text(&nodes[0..1], "local");
+        assert_paragraph_text(&nodes[1..2], "outer");
+    }
+
+    #[test]
+    fn let_local_function_does_not_leak() {
+        let local = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("local".to_string()),
+            parameters: Vec::new(),
+            body: vec![text_paragraph("inside")],
+            span: span(30, 35),
+        };
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![let_call(
+            Some(IrValue::String("hello".to_string())),
+            Some(vec![lambda_parameter("value", 20)]),
+            Some(vec![local]),
+        )]);
+        assert!(nodes.is_empty());
+        assert!(diagnostics.is_empty());
+
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![
+            let_call(
+                Some(IrValue::String("hello".to_string())),
+                Some(vec![lambda_parameter("value", 20)]),
+                Some(vec![IrNode::FunctionDeclaration {
+                    name: IrValue::Identifier("local".to_string()),
+                    parameters: Vec::new(),
+                    body: vec![text_paragraph("inside")],
+                    span: span(30, 35),
+                }]),
+            ),
+            var_ref("local"),
+        ]);
+        assert!(diagnostics.is_empty());
+        let [IrNode::FunctionCall { name, .. }] = nodes.as_slice() else {
+            panic!("expected unresolved local function reference, got {nodes:?}")
+        };
+        assert_eq!(name, "local");
+    }
+
+    #[test]
+    fn nested_let_uses_nearest_implicit_scope() {
+        let nested = let_call(
+            Some(IrValue::Content(vec![var_ref("1")])),
+            None,
+            Some(vec![var_ref("1")]),
+        );
+        let nodes = evaluate(vec![let_call(
+            Some(IrValue::String("outer".to_string())),
+            None,
+            Some(vec![nested]),
+        )]);
+        assert_paragraph_text(&nodes, "outer");
+    }
+
+    #[test]
+    fn explicit_let_masks_outer_implicit_scope() {
+        let nested = let_call(
+            Some(IrValue::String("inner".to_string())),
+            Some(vec![lambda_parameter("value", 40)]),
+            Some(vec![var_ref("1")]),
+        );
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![let_call(
+            Some(IrValue::String("outer".to_string())),
+            None,
+            Some(vec![nested]),
+        )]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3003");
+    }
+
+    #[test]
+    fn let_missing_implicit_parameter_reports_original_span() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![let_call(
+            Some(IrValue::String("value".to_string())),
+            None,
+            Some(vec![var_ref("2")]),
+        )]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3003");
+        assert_eq!(diagnostics[0].primary, Some(span(0, 1)));
+    }
+
+    #[test]
+    fn let_arity_and_value_errors_are_deterministic() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![let_call(
+            None,
+            Some(vec![lambda_parameter("value", 20)]),
+            Some(vec![var_ref("value")]),
+        )]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(span(0, 10)));
+
+        let call = IrNode::FunctionCall {
+            name: "let".to_string(),
+            positional_args: vec![IrValue::Number(1.0), IrValue::Number(2.0)],
+            named_args: Vec::new(),
+            lambda_parameters: Some(vec![lambda_parameter("value", 20)]),
+            body: Some(vec![var_ref("value")]),
+            span: span(0, 10),
+        };
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![call]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+
+        let call = let_call(
+            Some(IrValue::Number(1.0)),
+            Some(vec![
+                lambda_parameter("first", 20),
+                lambda_parameter("second", 30),
+            ]),
+            Some(vec![var_ref("first")]),
+        );
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![call]);
+        assert!(nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(span(20, 26)));
     }
 
     #[test]
@@ -2476,6 +2900,7 @@ mod tests {
             name: "x".to_string(),
             positional_args: vec![IrValue::Number(3.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(7, 12),
         }]);
@@ -2483,6 +2908,7 @@ mod tests {
             name: "multiply".to_string(),
             positional_args: vec![nested_reassignment, IrValue::Number(2.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 20),
         };
@@ -2503,6 +2929,7 @@ mod tests {
             name: "x".to_string(),
             positional_args: vec![IrValue::Number(3.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(9, 14),
         }]);
@@ -2510,6 +2937,7 @@ mod tests {
             name: "multiply".to_string(),
             positional_args: vec![IrValue::Number(2.0)],
             named_args: vec![named_arg("by", nested_reassignment)],
+            lambda_parameters: None,
             body: None,
             span: span(0, 22),
         };
@@ -2537,6 +2965,7 @@ mod tests {
             name: "sum".to_string(),
             positional_args: vec![declaration, IrValue::Number(1.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 30),
         };
@@ -2556,6 +2985,7 @@ mod tests {
             name: "multiply".to_string(),
             positional_args: vec![invalid_sum, IrValue::Number(2.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 20),
         };
@@ -2577,6 +3007,7 @@ mod tests {
                 IrValue::Number(1.0),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(7, 18),
         }]);
@@ -2584,6 +3015,7 @@ mod tests {
             name: "multiply".to_string(),
             positional_args: vec![invalid_var, IrValue::Number(2.0)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 20),
         };
@@ -2603,6 +3035,7 @@ mod tests {
                 IrValue::Number(2.0),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -2637,6 +3070,7 @@ mod tests {
                 vec![IrValue::Identifier("hello".into())],
             )],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -2665,6 +3099,7 @@ mod tests {
                 name: "uppercase".into(),
                 positional_args: vec![call_value("myvar", Vec::new())],
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: None,
                 span: span(0, 1),
             },
@@ -2916,6 +3351,7 @@ mod tests {
             name: "if".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("content")]),
             span: span(3, 6),
         };
@@ -2978,6 +3414,7 @@ mod tests {
                 IrValue::Content(vec![text_paragraph("arg content")]),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -2994,6 +3431,7 @@ mod tests {
                 IrValue::String("inline text".to_string()),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -3019,6 +3457,7 @@ mod tests {
                 IrValue::Content(vec![text_paragraph("from arg")]),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("from body")]),
             span: span(0, 1),
         };
@@ -3244,6 +3683,7 @@ mod tests {
             name: "foo".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(vec![if_call(
                 "if",
                 IrValue::Boolean(false),
@@ -3276,6 +3716,7 @@ mod tests {
             name: "if".to_string(),
             positional_args: Vec::new(),
             named_args: vec![named_arg("condition", IrValue::Boolean(true))],
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("kept")]),
             span: span(0, 1),
         };
@@ -3289,6 +3730,7 @@ mod tests {
             name: "if".to_string(),
             positional_args: Vec::new(),
             named_args: vec![named_arg("condition", IrValue::Boolean(false))],
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("dropped")]),
             span: span(0, 1),
         };
@@ -3302,6 +3744,7 @@ mod tests {
             name: "ifnot".to_string(),
             positional_args: Vec::new(),
             named_args: vec![named_arg("condition", IrValue::Boolean(false))],
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("kept")]),
             span: span(0, 1),
         };
@@ -3319,6 +3762,7 @@ mod tests {
                     "condition",
                     IrValue::Identifier(ident.to_string()),
                 )],
+                lambda_parameters: None,
                 body: Some(vec![text_paragraph("content")]),
                 span: span(0, 1),
             };
@@ -3340,6 +3784,7 @@ mod tests {
                 "body",
                 IrValue::Content(vec![text_paragraph("from named body")]),
             )],
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -3356,6 +3801,7 @@ mod tests {
                 "body",
                 IrValue::String("scalar body".to_string()),
             )],
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         };
@@ -3381,6 +3827,7 @@ mod tests {
                 "body",
                 IrValue::Content(vec![text_paragraph("from named body")]),
             )],
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("from indented body")]),
             span: span(0, 1),
         };
@@ -3456,6 +3903,7 @@ mod tests {
             name: "if".to_string(),
             positional_args: Vec::new(),
             named_args: vec![named_arg("condition", IrValue::Number(3.0))],
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("body")]),
             span: span(3, 6),
         };
@@ -3474,6 +3922,7 @@ mod tests {
             name: "var".to_string(),
             positional_args: vec![IrValue::Identifier(name.to_string()), value],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         }
@@ -3484,6 +3933,7 @@ mod tests {
             name: "var".to_string(),
             positional_args: vec![IrValue::Identifier(name.to_string())],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(body_nodes),
             span: span(0, 1),
         }
@@ -3494,6 +3944,7 @@ mod tests {
             name: name.to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         }
@@ -3504,6 +3955,7 @@ mod tests {
             name: name.to_string(),
             positional_args: vec![value],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 1),
         }
@@ -3548,6 +4000,7 @@ mod tests {
                 name: "if".to_string(),
                 positional_args: vec![IrValue::Identifier("enabled".to_string())],
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: Some(vec![text_paragraph("visible")]),
                 span: span(0, 1),
             },
@@ -3571,6 +4024,7 @@ mod tests {
                 name: "if".to_string(),
                 positional_args: vec![IrValue::Identifier("enabled".to_string())],
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: Some(vec![text_paragraph("hidden")]),
                 span: span(0, 1),
             },
@@ -3586,6 +4040,7 @@ mod tests {
                 name: "ifnot".to_string(),
                 positional_args: vec![IrValue::Identifier("enabled".to_string())],
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: Some(vec![text_paragraph("visible")]),
                 span: span(0, 1),
             },
@@ -3717,6 +4172,7 @@ mod tests {
                 name: "if".to_string(),
                 positional_args: vec![IrValue::Boolean(false)],
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: Some(vec![var_declaration(
                     "x",
                     IrValue::String("hidden".to_string()),
@@ -3750,6 +4206,7 @@ mod tests {
             name: "var".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(3, 6),
         };
@@ -3767,6 +4224,7 @@ mod tests {
             name: "if".to_string(),
             positional_args: vec![IrValue::Boolean(true)],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: Some(vec![text_paragraph("nested visible")]),
             span: span(0, 1),
         }];
@@ -3892,6 +4350,7 @@ mod tests {
                 name: "foo".to_string(),
                 positional_args: Vec::new(),
                 named_args: Vec::new(),
+                lambda_parameters: None,
                 body: Some(body),
                 span: span(0, 1),
             },
@@ -3921,6 +4380,7 @@ mod tests {
                 IrValue::String("hello".to_string()),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 25),
         };
@@ -3942,6 +4402,7 @@ mod tests {
                 IrValue::String("hello".to_string()),
             ],
             named_args: Vec::new(),
+            lambda_parameters: None,
             body: None,
             span: span(0, 17),
         };

@@ -191,18 +191,7 @@ fn block_to_ir(
                 let declaration_name = ir_positional.first().cloned()?;
                 let parameters = lambda_header
                     .as_ref()
-                    .map(|header| {
-                        header
-                            .parameters
-                            .iter()
-                            .map(|parameter| IrParameter {
-                                name: parameter.name.clone(),
-                                name_span: byte_to_source_span(&parameter.name_span, source_id),
-                                span: byte_to_source_span(&parameter.span, source_id),
-                                optional: parameter.optional,
-                            })
-                            .collect()
-                    })
+                    .map(|header| lambda_parameters_to_ir(header, source_id))
                     .unwrap_or_default();
                 return Some(IrNode::FunctionDeclaration {
                     name: declaration_name,
@@ -216,6 +205,9 @@ fn block_to_ir(
                     name: name.clone(),
                     positional_args: ir_positional,
                     named_args: ir_named,
+                    lambda_parameters: lambda_header
+                        .as_ref()
+                        .map(|header| lambda_parameters_to_ir(header, source_id)),
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
                 })
@@ -260,6 +252,22 @@ fn block_to_ir(
             None
         }
     }
+}
+
+fn lambda_parameters_to_ir(
+    header: &scribium_markdown::ast::LambdaHeader,
+    source_id: SourceId,
+) -> Vec<IrParameter> {
+    header
+        .parameters
+        .iter()
+        .map(|parameter| IrParameter {
+            name: parameter.name.clone(),
+            name_span: byte_to_source_span(&parameter.name_span, source_id),
+            span: byte_to_source_span(&parameter.span, source_id),
+            optional: parameter.optional,
+        })
+        .collect()
 }
 
 fn list_item_to_ir(
@@ -675,6 +683,7 @@ fn value_to_ir(
                         name: name.clone(),
                         positional_args: ir_positional,
                         named_args: ir_named,
+                        lambda_parameters: None,
                         body: ir_body,
                         span: byte_to_source_span(span, source_id),
                     }])
@@ -866,6 +875,61 @@ mod tests {
         assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
         assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
         assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
+    }
+
+    #[test]
+    fn let_lambda_metadata_survives_ast_to_ir_with_original_spans() {
+        let source = ".let {값}\r\n\tname:\r\n\t안녕, .name!\r\n";
+        let document = scribium_markdown::parse_qd(source);
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let IrNode::FunctionCall {
+            name,
+            lambda_parameters: Some(parameters),
+            body: Some(body),
+            ..
+        } = &ir.nodes[0]
+        else {
+            panic!("expected let call with explicit lambda metadata")
+        };
+        assert_eq!(name, "let");
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "name");
+        assert_eq!(
+            parameters[0].name_span,
+            SourceSpan::new(source_id(), 13, 17)
+        );
+        assert_eq!(parameters[0].span, SourceSpan::new(source_id(), 13, 17));
+        let IrNode::Paragraph { span, .. } = &body[0] else {
+            panic!("expected stripped let header")
+        };
+        assert_eq!(&source[span.start..span.end], "안녕, .name!");
+        assert!(!source[span.start..span.end].contains("name:"));
+    }
+
+    #[test]
+    fn let_implicit_lambda_metadata_is_absent_in_ir() {
+        let source = ".let {값}\n    .1\n";
+        let document = scribium_markdown::parse_qd(source);
+        let (ir, diagnostics) =
+            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let IrNode::FunctionCall {
+            name,
+            lambda_parameters,
+            body: Some(body),
+            ..
+        } = &ir.nodes[0]
+        else {
+            panic!("expected implicit let call")
+        };
+        assert_eq!(name, "let");
+        assert!(lambda_parameters.is_none());
+        assert!(matches!(
+            body.as_slice(),
+            [IrNode::FunctionCall { name, .. }] if name == "1"
+        ));
     }
 
     #[test]

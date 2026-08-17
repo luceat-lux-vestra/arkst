@@ -337,6 +337,28 @@ slice. A
 rich block result that cannot be represented in an inline context is rejected
 with a source-backed diagnostic rather than flattened or dropped.
 
+### Scoped `.let` (Implemented slice)
+
+Block-form `.let` invokes a one-parameter lambda in a child scope. The value
+argument is evaluated once in the caller scope, then binds either the explicit
+header parameter or the headerless implicit `.1` parameter. Parent variables
+and functions remain visible, while local declarations and shadowing stay
+inside the invocation. The callable body uses the same semantic result
+accumulator as `.function`, preserving a single scalar or structured content
+result and composing multiple outputs in source order.
+
+```text
+.let {Quarkdown}
+    name:
+    .uppercase {.name}
+
+.let {Quarkdown}
+    .uppercase {.1}
+```
+
+Only block-form `.let` is implemented in this slice. Generic inline lambda
+values and other lambda-consuming builtins remain deferred under Issue #61.
+
 ### Evaluation scope (Implemented)
 
 The evaluator now has explicit parent/child scope APIs with deterministic
@@ -347,9 +369,9 @@ scope and are evaluated in source order. The evaluator represents callable
 parameters as either explicit source-backed bindings or an implicit positional
 binding mode. Each invocation installs its own lambda-local argument scope;
 nested invocations therefore shadow only while active and restore the outer
-implicit arguments afterward. Standalone lambda syntax, `.let`, `.foreach`,
-and `.repeat` remain subsequent semantic slices; this slice does not claim
-those user-facing features are implemented.
+implicit arguments afterward. Standalone lambda syntax, `.foreach`, and
+`.repeat` remain subsequent semantic slices; this slice does not claim those
+user-facing features are implemented.
 
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document

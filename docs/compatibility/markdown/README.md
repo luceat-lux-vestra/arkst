@@ -220,7 +220,8 @@ final accepted groups are in
 [`gaps.md`](gaps.md). Remaining differences cover the leading front-matter
 policy boundary, HTML canonicalization, and pinned GFM autolink/linkify
 behavior. The final audit found no actionable Scribium-owned Markdown defect.
-`.let` evaluator semantics remain deferred.
+Quarkdown `.let` evaluator semantics are tracked separately under Issue #61;
+this Markdown audit does not assess programmable-document behavior.
 
 ### Real document corpus and output smoke
 
