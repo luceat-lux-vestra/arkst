@@ -537,6 +537,16 @@ impl LoweringContext {
                 }
                 self.push(']');
             }
+            IrValue::Pair(_) | IrValue::Dictionary(_) => {
+                // Structured values are consumed by the evaluator (iteration,
+                // destructuring, or document-output materialization) before
+                // they reach this backend. This defensive branch keeps the
+                // backend neutral and makes an invalid pre-evaluation IR
+                // explicit instead of inventing Typst data semantics here.
+                self.push_str(
+                    "panic(\"Scribium structured value reached Typst lowering without a semantic consumer\")",
+                );
+            }
             IrValue::Content(nodes) => {
                 self.push('[');
                 let saved_item = std::mem::take(&mut self.list_item_indent);

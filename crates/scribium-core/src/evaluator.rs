@@ -45,7 +45,8 @@
 use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
-    IrCallSegment, IrDocument, IrInline, IrNamedArg, IrNode, IrParameter, IrRange, IrValue,
+    IrCallSegment, IrDictionary, IrDocument, IrInline, IrListItem, IrNamedArg, IrNode, IrPair,
+    IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
 };
 use crate::source::SourceSpan;
 use scribium_quarkdown::is_valid_normal_call_name;
@@ -168,6 +169,12 @@ enum CallBody<'a> {
     Inline(&'a [IrInline]),
 }
 
+#[derive(Clone, Copy)]
+struct IterationOptions {
+    span: SourceSpan,
+    allow_destructuring: bool,
+}
+
 /// Result of invoking a call in value context.
 ///
 /// `Unresolved` is distinct from an empty content value: an ordinary output
@@ -249,6 +256,10 @@ fn value_into_content_nodes(
             }
             Ok(nodes)
         }
+        IrValue::Pair(pair) => pair_into_content_nodes(pair, diagnostics),
+        IrValue::Dictionary(dictionary) => {
+            dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
+        }
         IrValue::Range(range) => {
             diagnostics.push(iteration_error(
                 "Direct Range materialization is deferred; consume the typed Range through iteration first"
@@ -262,6 +273,136 @@ fn value_into_content_nodes(
                 content: vec![IrInline::Text { content, span }],
                 span,
             }]),
+            Err(outcome) => Err(outcome),
+        },
+    }
+}
+
+fn pair_into_content_nodes(
+    pair: IrPair,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<IrNode>, CallOutcome> {
+    let mut items = Vec::new();
+    if let Err(error) = items.try_reserve_exact(2) {
+        diagnostics.push(iteration_error(
+            format!("pair output collection cannot be allocated: {error}"),
+            pair.span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    for value in [*pair.first, *pair.second] {
+        let nodes = value_into_content_nodes(value, pair.span, diagnostics)?;
+        items.push(IrListItem {
+            nodes,
+            task: None,
+            span: pair.span,
+        });
+    }
+    Ok(vec![IrNode::OrderedList {
+        items,
+        start: 1,
+        span: pair.span,
+    }])
+}
+
+fn dictionary_into_table(
+    dictionary: IrDictionary,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<IrNode, CallOutcome> {
+    let span = dictionary.span;
+    let header = IrTableRow {
+        cells: vec![table_text_cell("Key", span), table_text_cell("Value", span)],
+        span,
+    };
+    let mut rows = Vec::new();
+    if let Err(error) = rows.try_reserve_exact(dictionary.entries.len()) {
+        diagnostics.push(iteration_error(
+            format!("dictionary output table cannot be allocated: {error}"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    for pair in dictionary.entries {
+        let IrPair {
+            first,
+            second,
+            span: pair_span,
+        } = pair;
+        let IrValue::String(key) = *first else {
+            diagnostics.push(iteration_error(
+                "Dictionary keys must remain typed strings".to_string(),
+                pair_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let value = value_into_table_cell(*second, pair_span, diagnostics)?;
+        rows.push(IrTableRow {
+            cells: vec![
+                table_text_cell(&key, pair_span),
+                IrTableCell {
+                    content: value,
+                    alignment: IrTableAlignment::None,
+                    span: pair_span,
+                },
+            ],
+            span: pair_span,
+        });
+    }
+    Ok(IrNode::Table { header, rows, span })
+}
+
+fn table_text_cell(content: &str, span: SourceSpan) -> IrTableCell {
+    IrTableCell {
+        content: vec![IrInline::Text {
+            content: content.to_string(),
+            span,
+        }],
+        alignment: IrTableAlignment::None,
+        span,
+    }
+}
+
+fn value_into_table_cell(
+    value: IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<IrInline>, CallOutcome> {
+    match value {
+        IrValue::Content(nodes) => match nodes.as_slice() {
+            [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
+            _ => {
+                diagnostics.push(iteration_error(
+                    "Dictionary values must be scalar or exactly one paragraph when rendered as a table cell"
+                        .to_string(),
+                    span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+        },
+        IrValue::Collection(values) => {
+            let nodes = value_into_content_nodes(IrValue::Collection(values), span, diagnostics)?;
+            match nodes.as_slice() {
+                [IrNode::Paragraph { content, .. }] => Ok(content.clone()),
+                _ => {
+                    diagnostics.push(iteration_error(
+                        "A multi-value Collection cannot be rendered as one Dictionary table cell"
+                            .to_string(),
+                        span,
+                    ));
+                    Err(CallOutcome::Failed)
+                }
+            }
+        }
+        IrValue::Pair(_) | IrValue::Dictionary(_) | IrValue::Range(_) => {
+            diagnostics.push(iteration_error(
+                "Nested Pair, Dictionary, or Range values cannot be rendered as one Dictionary table cell"
+                    .to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        scalar => match scalar_to_text(&scalar, span, diagnostics) {
+            Ok(content) => Ok(vec![IrInline::Text { content, span }]),
             Err(outcome) => Err(outcome),
         },
     }
@@ -932,6 +1073,28 @@ impl Evaluator {
             );
         }
 
+        if is_pair(name) {
+            return self.evaluate_pair(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if is_dictionary(name) {
+            return self.evaluate_dictionary(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if builtins::is_supported(name) {
             let evaluated_positional =
                 match self.evaluate_values(positional_args, span, diagnostics, context) {
@@ -960,6 +1123,228 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Evaluates `.pair` as a typed, recursively valued pair.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_pair(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if positional_args.len() != 2 {
+            diagnostics.push(iteration_error(
+                format!(
+                    "`.pair` requires exactly two positional values (received {})",
+                    positional_args.len()
+                ),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(iteration_error_at(
+                format!("Unknown named argument `{}` for `.pair`", argument.name),
+                argument.name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() {
+            diagnostics.push(iteration_error(
+                "`.pair` does not accept a block body".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let values = match self.evaluate_values(positional_args, span, diagnostics, context) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let mut values = values.into_iter();
+        let Some(first) = values.next() else {
+            return CallOutcome::Failed;
+        };
+        let Some(second) = values.next() else {
+            return CallOutcome::Failed;
+        };
+        CallOutcome::Value(IrValue::Pair(IrPair {
+            first: Box::new(first),
+            second: Box::new(second),
+            span: *span,
+        }))
+    }
+
+    /// Evaluates `.dictionary` from the already parsed Markdown list body.
+    /// Entry evaluation is collected privately and published only after all
+    /// entries succeed, preserving atomic materialization and source order.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_dictionary(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if !positional_args.is_empty() {
+            diagnostics.push(iteration_error(
+                "`.dictionary` accepts its entries as a block body".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(iteration_error_at(
+                format!(
+                    "Unknown named argument `{}` for `.dictionary`",
+                    argument.name
+                ),
+                argument.name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let body = match body {
+            None => &[][..],
+            Some(CallBody::Block(nodes)) => nodes,
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.dictionary` requires a Markdown list block body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let entries = match self.evaluate_dictionary_entries(body, *span, diagnostics, context) {
+            Ok(entries) => entries,
+            Err(outcome) => return outcome,
+        };
+        CallOutcome::Value(IrValue::Dictionary(IrDictionary {
+            entries,
+            span: *span,
+        }))
+    }
+
+    fn evaluate_dictionary_entries(
+        &self,
+        nodes: &[IrNode],
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Result<Vec<IrPair>, CallOutcome> {
+        let list = match nodes {
+            [] => return Ok(Vec::new()),
+            [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => items,
+            _ => {
+                diagnostics.push(iteration_error(
+                    "`.dictionary` requires exactly one Markdown list body".to_string(),
+                    span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+        let mut entries = Vec::new();
+        if let Err(error) = entries.try_reserve_exact(list.len()) {
+            diagnostics.push(iteration_error(
+                format!("dictionary entries cannot be allocated: {error}"),
+                span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for item in list {
+            let (key, value) = self.dictionary_item_parts(item, span, diagnostics, context)?;
+            let pair = IrPair {
+                first: Box::new(IrValue::String(key.clone())),
+                second: Box::new(value),
+                span: item.span,
+            };
+            if let Some(existing) = entries.iter_mut().find(|entry: &&mut IrPair| {
+                matches!(entry.first.as_ref(), IrValue::String(existing_key) if existing_key == &key)
+            }) {
+                // Quarkdown's last-write-wins behavior replaces the value in
+                // the original insertion slot, keeping iteration deterministic.
+                *existing = pair;
+            } else {
+                entries.push(pair);
+            }
+        }
+        Ok(entries)
+    }
+
+    fn dictionary_item_parts(
+        &self,
+        item: &IrListItem,
+        fallback_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Result<(String, IrValue), CallOutcome> {
+        let Some(IrNode::Paragraph { content, span }) = item.nodes.first() else {
+            diagnostics.push(iteration_error(
+                "Dictionary entries must start with a Markdown paragraph".to_string(),
+                item.span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let (key, value_inlines, value_text, value_span) =
+            if let Some(parts) = split_dictionary_paragraph(content, *span) {
+                parts
+            } else if item.nodes.len() > 1 {
+                let Some(key) = plain_dictionary_key(content) else {
+                    diagnostics.push(iteration_error(
+                        "Dictionary entries require a string key".to_string(),
+                        item.span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                };
+                (key, Vec::new(), String::new(), *span)
+            } else {
+                diagnostics.push(iteration_error(
+                    "Dictionary entries require a string key followed by `:`".to_string(),
+                    item.span,
+                ));
+                return Err(CallOutcome::Failed);
+            };
+        if key.is_empty() {
+            diagnostics.push(iteration_error(
+                "Dictionary keys must not be empty".to_string(),
+                item.span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+
+        let value = if value_inlines.is_empty() && value_text.is_empty() {
+            let nested = &item.nodes[1..];
+            if nested.is_empty() {
+                IrValue::String(String::new())
+            } else {
+                let nested =
+                    self.evaluate_dictionary_entries(nested, item.span, diagnostics, context)?;
+                IrValue::Dictionary(IrDictionary {
+                    entries: nested,
+                    span: item.span,
+                })
+            }
+        } else if value_inlines.is_empty() {
+            dictionary_scalar_value(&value_text)
+        } else {
+            let value = dictionary_inline_value(value_inlines, value_span);
+            match self.evaluate_value(&value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    self.preserve_value_expression(&value, diagnostics, context)?
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(&value, &fallback_span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            }
+        };
+        Ok((key, value))
     }
 
     /// Evaluates block-form `.let` as a scoped one-argument lambda
@@ -1047,7 +1432,17 @@ impl Evaluator {
             CallOutcome::Failed => return CallOutcome::Failed,
         };
 
-        self.invoke_scoped_lambda(value, lambda_parameters, body, diagnostics, context)
+        self.invoke_scoped_lambda(
+            value,
+            lambda_parameters,
+            body,
+            IterationOptions {
+                span: *span,
+                allow_destructuring: false,
+            },
+            diagnostics,
+            context,
+        )
     }
 
     /// Evaluates block-form `.foreach` as a typed map over one iterable.
@@ -1098,7 +1493,7 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
         };
-        if !validate_iteration_lambda(lambda_parameters, ".foreach", span, diagnostics) {
+        if !validate_iteration_lambda(lambda_parameters, ".foreach", true, span, diagnostics) {
             return CallOutcome::Failed;
         }
 
@@ -1127,7 +1522,10 @@ impl Evaluator {
             &elements,
             lambda_parameters,
             body,
-            *span,
+            IterationOptions {
+                span: *span,
+                allow_destructuring: true,
+            },
             diagnostics,
             context,
         )
@@ -1180,7 +1578,7 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
         };
-        if !validate_iteration_lambda(lambda_parameters, ".repeat", span, diagnostics) {
+        if !validate_iteration_lambda(lambda_parameters, ".repeat", false, span, diagnostics) {
             return CallOutcome::Failed;
         }
 
@@ -1227,7 +1625,10 @@ impl Evaluator {
             &elements,
             lambda_parameters,
             body,
-            *span,
+            IterationOptions {
+                span: *span,
+                allow_destructuring: false,
+            },
             diagnostics,
             context,
         )
@@ -1238,14 +1639,27 @@ impl Evaluator {
         value: IrValue,
         lambda_parameters: Option<&[IrParameter]>,
         body: &[IrNode],
+        options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
         let mut child = context.child();
         match lambda_parameters {
             Some(parameters) => {
+                let bindings = match scoped_parameter_bindings(
+                    &value,
+                    parameters,
+                    options.allow_destructuring,
+                    options.span,
+                    diagnostics,
+                ) {
+                    Ok(bindings) => bindings,
+                    Err(outcome) => return outcome,
+                };
                 child.set_lambda_scope(LambdaScope::Explicit);
-                child.set_value(parameters[0].name.clone(), value);
+                for (name, value) in bindings {
+                    child.set_value(name, value);
+                }
             }
             None => child.set_lambda_scope(LambdaScope::Implicit(vec![value])),
         }
@@ -1257,7 +1671,7 @@ impl Evaluator {
         elements: &[IrValue],
         lambda_parameters: Option<&[IrParameter]>,
         body: &[IrNode],
-        span: SourceSpan,
+        options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
@@ -1265,7 +1679,7 @@ impl Evaluator {
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
                 format!("iteration result collection cannot be allocated: {error}"),
-                span,
+                options.span,
             ));
             return CallOutcome::Failed;
         }
@@ -1274,12 +1688,13 @@ impl Evaluator {
                 element.clone(),
                 lambda_parameters,
                 body,
+                options,
                 diagnostics,
                 context,
             ) {
                 CallOutcome::Value(value) => results.push(value),
                 CallOutcome::NoValue => {
-                    diagnostics.push(no_value_required(span));
+                    diagnostics.push(no_value_required(options.span));
                     return CallOutcome::Failed;
                 }
                 CallOutcome::Failed => return CallOutcome::Failed,
@@ -1297,6 +1712,10 @@ impl Evaluator {
     ) -> Result<Vec<IrValue>, CallOutcome> {
         match value {
             IrValue::Collection(values) => Ok(values),
+            IrValue::Pair(pair) => Ok(vec![*pair.first, *pair.second]),
+            IrValue::Dictionary(dictionary) => {
+                Ok(dictionary.entries.into_iter().map(IrValue::Pair).collect())
+            }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
             IrValue::Content(nodes) => match nodes.as_slice() {
                 [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
@@ -1958,6 +2377,17 @@ impl Evaluator {
                 }
                 Ok(())
             }
+            IrValue::Pair(pair) => {
+                self.validate_preserved_value(&pair.first, diagnostics)?;
+                self.validate_preserved_value(&pair.second, diagnostics)
+            }
+            IrValue::Dictionary(dictionary) => {
+                for pair in &dictionary.entries {
+                    self.validate_preserved_value(&pair.first, diagnostics)?;
+                    self.validate_preserved_value(&pair.second, diagnostics)?;
+                }
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -2102,6 +2532,10 @@ impl Evaluator {
                     nodes.extend(materialized);
                 }
                 Ok(nodes)
+            }
+            IrValue::Pair(pair) => pair_into_content_nodes(pair, diagnostics),
+            IrValue::Dictionary(dictionary) => {
+                dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
             }
             IrValue::Range(range) => {
                 diagnostics.push(iteration_error(
@@ -2387,6 +2821,149 @@ impl Evaluator {
     }
 }
 
+fn split_dictionary_paragraph(
+    content: &[IrInline],
+    paragraph_span: SourceSpan,
+) -> Option<(String, Vec<IrInline>, String, SourceSpan)> {
+    let IrInline::Text {
+        content: text,
+        span: text_span,
+    } = content.first()?
+    else {
+        return None;
+    };
+    let colon = text.find(':')?;
+    let key = text[..colon].trim().to_string();
+    let after = &text[colon + 1..];
+    let leading = after.len() - after.trim_start().len();
+    let trimmed = after.trim();
+    let value_start = text_span
+        .start
+        .checked_add(colon + 1 + leading)
+        .unwrap_or(text_span.end);
+    let value_end = value_start
+        .checked_add(trimmed.len())
+        .unwrap_or(value_start);
+    let value_span = SourceSpan::new(text_span.source_id, value_start, value_end);
+    if !trimmed.is_empty() {
+        return Some((key, Vec::new(), trimmed.to_string(), value_span));
+    }
+    let mut tail = content.get(1..).unwrap_or_default().to_vec();
+    if let Some(IrInline::Text {
+        content: tail_text,
+        span: tail_span,
+    }) = tail.first_mut()
+    {
+        let leading = tail_text.len() - tail_text.trim_start().len();
+        let trailing = tail_text.trim().len();
+        if leading > 0 || trailing != tail_text.len() {
+            let trimmed = tail_text.trim().to_string();
+            let start = tail_span
+                .start
+                .checked_add(leading)
+                .unwrap_or(tail_span.end);
+            *tail_text = trimmed;
+            *tail_span = SourceSpan::new(
+                tail_span.source_id,
+                start,
+                start.saturating_add(tail_text.len()),
+            );
+        }
+    }
+    let tail_span = tail
+        .first()
+        .map(inline_source_span)
+        .unwrap_or(paragraph_span);
+    Some((key, tail, String::new(), tail_span))
+}
+
+fn plain_dictionary_key(content: &[IrInline]) -> Option<String> {
+    let [IrInline::Text { content, .. }] = content else {
+        return None;
+    };
+    let key = content.trim();
+    (!key.is_empty() && !key.contains(':')).then(|| key.to_string())
+}
+
+fn dictionary_scalar_value(text: &str) -> IrValue {
+    let text = text.trim();
+    if text.len() >= 2 {
+        let bytes = text.as_bytes();
+        if (bytes[0] == b'"' && bytes[text.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[text.len() - 1] == b'\'')
+        {
+            return IrValue::String(text[1..text.len() - 1].to_string());
+        }
+    }
+    match text.to_ascii_lowercase().as_str() {
+        "true" | "yes" => IrValue::Boolean(true),
+        "false" | "no" => IrValue::Boolean(false),
+        _ => text
+            .parse::<f64>()
+            .map_or_else(|_| IrValue::String(text.to_string()), IrValue::Number),
+    }
+}
+
+fn dictionary_inline_value(inlines: Vec<IrInline>, span: SourceSpan) -> IrValue {
+    match inlines.as_slice() {
+        [IrInline::DirectiveCall {
+            name,
+            positional_args,
+            named_args,
+            body,
+            span,
+        }] => IrValue::Content(vec![IrNode::FunctionCall {
+            name: name.clone(),
+            positional_args: positional_args.clone(),
+            named_args: named_args.clone(),
+            lambda_parameters: None,
+            body: body.as_ref().map(|body| {
+                vec![IrNode::Paragraph {
+                    content: body.clone(),
+                    span: *span,
+                }]
+            }),
+            span: *span,
+        }]),
+        [IrInline::ChainedDirectiveCall {
+            head,
+            chain,
+            body,
+            span,
+        }] => IrValue::Content(vec![IrNode::ChainedFunctionCall {
+            head: head.clone(),
+            chain: chain.clone(),
+            body: body.as_ref().map(|body| {
+                vec![IrNode::Paragraph {
+                    content: body.clone(),
+                    span: *span,
+                }]
+            }),
+            span: *span,
+        }]),
+        _ => IrValue::Content(vec![IrNode::Paragraph {
+            content: inlines,
+            span,
+        }]),
+    }
+}
+
+fn inline_source_span(inline: &IrInline) -> SourceSpan {
+    match inline {
+        IrInline::Text { span, .. }
+        | IrInline::Emphasis { span, .. }
+        | IrInline::Strong { span, .. }
+        | IrInline::Strikethrough { span, .. }
+        | IrInline::DirectiveCall { span, .. }
+        | IrInline::ChainedDirectiveCall { span, .. }
+        | IrInline::Link { span, .. }
+        | IrInline::Image { span, .. }
+        | IrInline::Code { span, .. }
+        | IrInline::SoftBreak { span }
+        | IrInline::HardBreak { span } => *span,
+    }
+}
+
 /// Returns true for the conditional constructs this evaluator resolves.
 fn is_conditional(name: &str) -> bool {
     name == "if" || name == "ifnot"
@@ -2405,14 +2982,28 @@ fn is_repeat(name: &str) -> bool {
     name == "repeat"
 }
 
+fn is_pair(name: &str) -> bool {
+    name == "pair"
+}
+
+fn is_dictionary(name: &str) -> bool {
+    name == "dictionary"
+}
+
 fn validate_iteration_lambda(
     parameters: Option<&[IrParameter]>,
     name: &str,
+    allow_destructuring: bool,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     if let Some(parameters) = parameters {
-        if parameters.len() != 1 {
+        let valid = if allow_destructuring {
+            matches!(parameters.len(), 1 | 2)
+        } else {
+            parameters.len() == 1
+        };
+        if !valid {
             let parameter_span = parameters
                 .get(1)
                 .or_else(|| parameters.first())
@@ -2420,7 +3011,12 @@ fn validate_iteration_lambda(
                 .unwrap_or(*span);
             diagnostics.push(iteration_error_at(
                 format!(
-                    "`.{name}` requires exactly one explicit parameter; destructuring is not supported in this slice"
+                    "`.{name}` requires one explicit parameter{}",
+                    if allow_destructuring {
+                        " or exactly two parameters for Pair destructuring"
+                    } else {
+                        ""
+                    }
                 ),
                 parameter_span,
             ));
@@ -2428,6 +3024,41 @@ fn validate_iteration_lambda(
         }
     }
     true
+}
+
+fn scoped_parameter_bindings(
+    value: &IrValue,
+    parameters: &[IrParameter],
+    allow_destructuring: bool,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<(String, IrValue)>, CallOutcome> {
+    match parameters {
+        [parameter] => Ok(vec![(parameter.name.clone(), value.clone())]),
+        [first, second] if allow_destructuring => {
+            let IrValue::Pair(pair) = value else {
+                diagnostics.push(iteration_error(
+                    format!(
+                        "Cannot destructure `.foreach` item as `{}` and `{}`: expected a Pair",
+                        first.name, second.name
+                    ),
+                    value_source_span(value, &span),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            Ok(vec![
+                (first.name.clone(), (*pair.first).clone()),
+                (second.name.clone(), (*pair.second).clone()),
+            ])
+        }
+        _ => {
+            diagnostics.push(iteration_error(
+                "Unsupported scoped lambda parameter pattern".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+    }
 }
 
 fn repeat_count(value: &IrValue) -> Result<u64, String> {
@@ -2546,6 +3177,8 @@ fn let_error_at(message: String, span: SourceSpan) -> Diagnostic {
 
 fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
     match value {
+        IrValue::Pair(pair) => pair.span,
+        IrValue::Dictionary(dictionary) => dictionary.span,
         IrValue::Content(nodes) => match nodes.as_slice() {
             [IrNode::FunctionCall { span, .. }] | [IrNode::ChainedFunctionCall { span, .. }] => {
                 *span
@@ -2616,7 +3249,7 @@ fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option
             }
             None
         }
-        IrValue::None => None,
+        IrValue::None | IrValue::Pair(_) | IrValue::Dictionary(_) => None,
         _ => None,
     }
 }
@@ -2632,7 +3265,7 @@ fn scalar_boolean_value(value: &IrValue) -> Option<bool> {
             "false" | "no" => Some(false),
             _ => None,
         },
-        IrValue::None => None,
+        IrValue::None | IrValue::Pair(_) | IrValue::Dictionary(_) => None,
         _ => None,
     }
 }
@@ -2734,9 +3367,9 @@ fn scalar_to_text(
             ));
             Err(CallOutcome::Failed)
         }
-        IrValue::Collection(_) => {
+        IrValue::Collection(_) | IrValue::Pair(_) | IrValue::Dictionary(_) => {
             diagnostics.push(iteration_error(
-                "Collection cannot be rendered as scalar text".to_string(),
+                "Collection, Pair, or Dictionary cannot be rendered as scalar text".to_string(),
                 span,
             ));
             Err(CallOutcome::Failed)
@@ -2848,7 +3481,15 @@ impl Evaluator {
 
         // Determine the value: body > named "body" > second positional > named "value" > empty
         if let Some(body) = body {
-            match self.evaluate_call_body(body, span, diagnostics, context) {
+            let outcome = match body {
+                CallBody::Block(nodes) => {
+                    self.evaluate_callable_body_value(nodes, diagnostics, context)
+                }
+                CallBody::Inline(inlines) => {
+                    self.evaluate_call_body(CallBody::Inline(inlines), span, diagnostics, context)
+                }
+            };
+            match outcome {
                 CallOutcome::Value(value) => {
                     context.set_value(var_name, value);
                     return CallOutcome::NoValue;
@@ -3382,6 +4023,128 @@ mod tests {
                     IrValue::Number(4.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn pair_evaluation_is_typed_recursive_and_atomic_on_child_failure() {
+        let evaluator = Evaluator::new();
+        let pair_span = span(10, 20);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "pair",
+            &[
+                IrValue::String("key".to_string()),
+                IrValue::Collection(vec![IrValue::Number(1.0), IrValue::Boolean(true)]),
+            ],
+            &[],
+            None,
+            None,
+            &pair_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Pair(IrPair { first, second, span }))
+                if *first == IrValue::String("key".to_string())
+                    && *second == IrValue::Collection(vec![
+                        IrValue::Number(1.0),
+                        IrValue::Boolean(true),
+                    ])
+                    && span == pair_span
+        ));
+
+        let failing = call_value(
+            "multiply",
+            vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+        );
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "pair",
+            &[IrValue::Number(1.0), failing],
+            &[],
+            None,
+            None,
+            &pair_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn dictionary_iteration_reuses_pair_items_and_explicit_destructuring() {
+        let evaluator = Evaluator::new();
+        let dictionary_span = span(0, 30);
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("a".to_string())),
+                    second: Box::new(IrValue::Number(1.0)),
+                    span: span(5, 10),
+                },
+                IrPair {
+                    first: Box::new(IrValue::String("b".to_string())),
+                    second: Box::new(IrValue::Number(2.0)),
+                    span: span(10, 15),
+                },
+            ],
+            span: dictionary_span,
+        });
+        let parameters = vec![lambda_parameter("key", 20), lambda_parameter("value", 24)];
+        let body = vec![var_ref("key"), var_ref("value")];
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "foreach",
+            &[dictionary],
+            &[],
+            Some(CallBody::Block(&body)),
+            Some(&parameters),
+            &dictionary_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let CallOutcome::Value(IrValue::Collection(values)) = outcome else {
+            panic!("expected typed iteration result")
+        };
+        assert_eq!(values.len(), 2);
+        assert!(matches!(
+            &values[0],
+            IrValue::Content(nodes) if nodes.len() == 2
+        ));
+        assert!(matches!(
+            &values[1],
+            IrValue::Content(nodes) if nodes.len() == 2
+        ));
+    }
+
+    #[test]
+    fn pair_destructuring_rejects_non_pair_items_without_coercion() {
+        let evaluator = Evaluator::new();
+        let parameters = vec![lambda_parameter("key", 20), lambda_parameter("value", 24)];
+        let body = vec![var_ref("key")];
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "foreach",
+            &[IrValue::Collection(vec![IrValue::String(
+                "invalid".to_string(),
+            )])],
+            &[],
+            Some(CallBody::Block(&body)),
+            Some(&parameters),
+            &span(0, 20),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("expected a Pair"));
     }
 
     #[test]
