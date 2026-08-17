@@ -600,6 +600,68 @@ mod tests {
     }
 
     #[test]
+    fn compile_direct_range_output_reports_one_source_backed_failure() {
+        let source = ".var {r} {2..4}\n.r\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_range_composition_fails_without_fabricating_empty_content() {
+        let source = ".let {ignored}\n    .var {r} {2..4}\n    .r\n    tail\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_collection_composition_materializes_in_order_without_stringifying() {
+        let source = ".let {ignored}\n    .var {c}\n        .foreach {1..2}\n            .1\n    .c\n    tail\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\ntail");
+    }
+
+    #[test]
+    fn compile_unresolved_range_argument_fails_before_typst_lowering() {
+        let source = ".foo {2..4}\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed() {
         let source = ".var {mapped}\n    .foreach {1..3}\n        n:\n        .multiply {.n} by:{2}\n\n.mapped\n";
         let (result, _) = compile_source(source);

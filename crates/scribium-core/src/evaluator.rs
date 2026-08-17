@@ -190,16 +190,22 @@ enum CallableBodyValueAccumulator {
 }
 
 impl CallableBodyValueAccumulator {
-    fn append_value(&mut self, value: IrValue, span: SourceSpan) {
+    fn append_value(
+        &mut self,
+        value: IrValue,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<(), CallOutcome> {
         if matches!(self, Self::Empty) {
             *self = Self::Semantic { value, span };
-            return;
+            return Ok(());
         }
 
         let current = std::mem::replace(self, Self::Empty);
-        let mut nodes = current.into_content_nodes();
-        nodes.extend(value_into_content_nodes(value, span));
+        let mut nodes = current.into_content_nodes(diagnostics)?;
+        nodes.extend(value_into_content_nodes(value, span, diagnostics)?);
         *self = Self::Content(nodes);
+        Ok(())
     }
 
     fn finish(self) -> CallOutcome {
@@ -210,29 +216,54 @@ impl CallableBodyValueAccumulator {
         }
     }
 
-    fn into_content_nodes(self) -> Vec<IrNode> {
+    fn into_content_nodes(
+        self,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         match self {
-            Self::Empty => Vec::new(),
-            Self::Semantic { value, span } => value_into_content_nodes(value, span),
-            Self::Content(nodes) => nodes,
+            Self::Empty => Ok(Vec::new()),
+            Self::Semantic { value, span } => value_into_content_nodes(value, span, diagnostics),
+            Self::Content(nodes) => Ok(nodes),
         }
     }
 }
 
-fn value_into_content_nodes(value: IrValue, span: SourceSpan) -> Vec<IrNode> {
+fn value_into_content_nodes(
+    value: IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<IrNode>, CallOutcome> {
     match value {
-        IrValue::Content(nodes) => nodes,
-        IrValue::Collection(values) => values
-            .into_iter()
-            .flat_map(|value| value_into_content_nodes(value, span))
-            .collect(),
-        scalar => vec![IrNode::Paragraph {
-            content: vec![IrInline::Text {
-                content: scalar_to_text(&scalar),
+        IrValue::Content(nodes) => Ok(nodes),
+        IrValue::Collection(values) => {
+            let mut nodes = Vec::new();
+            if let Err(error) = nodes.try_reserve(values.len()) {
+                diagnostics.push(iteration_error(
+                    format!("collection content cannot be allocated: {error}"),
+                    span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            for value in values {
+                nodes.extend(value_into_content_nodes(value, span, diagnostics)?);
+            }
+            Ok(nodes)
+        }
+        IrValue::Range(range) => {
+            diagnostics.push(iteration_error(
+                "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                    .to_string(),
+                range.span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        scalar => match scalar_to_text(&scalar, span, diagnostics) {
+            Ok(content) => Ok(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text { content, span }],
                 span,
-            }],
-            span,
-        }],
+            }]),
+            Err(outcome) => Err(outcome),
+        },
     }
 }
 
@@ -1575,7 +1606,11 @@ impl Evaluator {
         for node in nodes {
             let span = ir_node_source_span(node);
             match self.evaluate_callable_statement_value(node, diagnostics, context) {
-                CallOutcome::Value(value) => result.append_value(value, span),
+                CallOutcome::Value(value) => {
+                    if let Err(outcome) = result.append_value(value, span, diagnostics) {
+                        return outcome;
+                    }
+                }
                 CallOutcome::NoValue => {}
                 CallOutcome::Failed => return CallOutcome::Failed,
                 CallOutcome::Unresolved => return CallOutcome::Unresolved,
@@ -1853,7 +1888,10 @@ impl Evaluator {
         context: &mut EvaluationContext,
     ) -> CallOutcome {
         match self.evaluate_value(value, diagnostics, context) {
-            CallOutcome::Value(value) => CallOutcome::Value(self.scalar_or_content(value, span)),
+            CallOutcome::Value(value) => match self.scalar_or_content(value, span, diagnostics) {
+                Ok(value) => CallOutcome::Value(value),
+                Err(outcome) => outcome,
+            },
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(value_source_span(value, span)));
                 CallOutcome::Failed
@@ -1861,23 +1899,49 @@ impl Evaluator {
             CallOutcome::Failed => CallOutcome::Failed,
             CallOutcome::Unresolved => {
                 match self.preserve_value_expression(value, diagnostics, context) {
-                    Ok(value) => CallOutcome::Value(self.scalar_or_content(value, span)),
+                    Ok(value) => match self.scalar_or_content(value, span, diagnostics) {
+                        Ok(value) => CallOutcome::Value(value),
+                        Err(outcome) => outcome,
+                    },
                     Err(outcome) => outcome,
                 }
             }
         }
     }
 
-    fn scalar_or_content(&self, value: IrValue, span: &SourceSpan) -> IrValue {
+    fn scalar_or_content(
+        &self,
+        value: IrValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<IrValue, CallOutcome> {
         match value {
-            IrValue::Content(nodes) => IrValue::Content(nodes),
-            scalar => IrValue::Content(vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(&scalar),
-                    span: *span,
-                }],
-                span: *span,
-            }]),
+            IrValue::Content(nodes) => Ok(IrValue::Content(nodes)),
+            value => value_into_content_nodes(value, *span, diagnostics).map(IrValue::Content),
+        }
+    }
+
+    fn validate_preserved_value(
+        &self,
+        value: &IrValue,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<(), CallOutcome> {
+        match value {
+            IrValue::Range(range) => {
+                diagnostics.push(iteration_error(
+                    "A typed Range cannot be preserved as an unresolved call argument; consume it through iteration first"
+                        .to_string(),
+                    range.span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+            IrValue::Collection(values) => {
+                for value in values {
+                    self.validate_preserved_value(value, diagnostics)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -1922,7 +1986,10 @@ impl Evaluator {
                     Err(CallOutcome::Failed)
                 }
             }
-            scalar => Ok(scalar.clone()),
+            scalar => {
+                self.validate_preserved_value(scalar, diagnostics)?;
+                Ok(scalar.clone())
+            }
         }
     }
 
@@ -2011,21 +2078,24 @@ impl Evaluator {
                 }
                 nodes
             }
-            Some(IrValue::Range(_)) => {
+            Some(IrValue::Range(range)) => {
                 diagnostics.push(iteration_error(
                     "Direct Range materialization is deferred; consume the typed Range through iteration first"
                         .to_string(),
-                    *span,
+                    range.span,
                 ));
                 Vec::new()
             }
-            Some(value) => vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(&value),
+            Some(value) => match scalar_to_text(&value, *span, diagnostics) {
+                Ok(content) => vec![IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content,
+                        span: *span,
+                    }],
                     span: *span,
                 }],
-                span: *span,
-            }],
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -2052,18 +2122,21 @@ impl Evaluator {
                     self.materialize_inline_value(values.into_iter().next(), span, diagnostics)
                 }
             }
-            Some(IrValue::Range(_)) => {
+            Some(IrValue::Range(range)) => {
                 diagnostics.push(iteration_error(
                     "Direct Range materialization is deferred; consume the typed Range through iteration first"
                         .to_string(),
-                    *span,
+                    range.span,
                 ));
                 Vec::new()
             }
-            Some(value) => vec![IrInline::Text {
-                content: scalar_to_text(&value),
-                span: *span,
-            }],
+            Some(value) => match scalar_to_text(&value, *span, diagnostics) {
+                Ok(content) => vec![IrInline::Text {
+                    content,
+                    span: *span,
+                }],
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -2168,7 +2241,28 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Result<Vec<IrValue>, CallOutcome> {
-        self.evaluate_values_for_preservation(values, span, diagnostics, context)
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(values.len()) {
+            diagnostics.push(iteration_error(
+                format!("call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for value in values {
+            match self.evaluate_value(value, diagnostics, context) {
+                CallOutcome::Value(value) => evaluated.push(value),
+                CallOutcome::Unresolved => {
+                    evaluated.push(self.preserve_value_expression(value, diagnostics, context)?)
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            }
+        }
+        Ok(evaluated)
     }
 
     fn evaluate_named(
@@ -2178,7 +2272,34 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Result<Vec<IrNamedArg>, CallOutcome> {
-        self.evaluate_named_for_preservation(named, span, diagnostics, context)
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(named.len()) {
+            diagnostics.push(iteration_error(
+                format!("named call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for arg in named {
+            let value = match self.evaluate_value(&arg.value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    self.preserve_value_expression(&arg.value, diagnostics, context)?
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(&arg.value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            };
+            evaluated.push(IrNamedArg {
+                name: arg.name.clone(),
+                name_span: arg.name_span,
+                value,
+                span: arg.span,
+            });
+        }
+        Ok(evaluated)
     }
 
     fn evaluate_values_for_preservation(
@@ -2191,7 +2312,10 @@ impl Evaluator {
         let mut evaluated = Vec::with_capacity(values.len());
         for value in values {
             match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => evaluated.push(value),
+                CallOutcome::Value(value) => {
+                    self.validate_preserved_value(&value, diagnostics)?;
+                    evaluated.push(value);
+                }
                 CallOutcome::Unresolved => {
                     evaluated.push(self.preserve_value_expression(value, diagnostics, context)?)
                 }
@@ -2215,7 +2339,10 @@ impl Evaluator {
         let mut evaluated = Vec::with_capacity(named.len());
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
-                CallOutcome::Value(value) => value,
+                CallOutcome::Value(value) => {
+                    self.validate_preserved_value(&value, diagnostics)?;
+                    value
+                }
                 CallOutcome::Unresolved => {
                     self.preserve_value_expression(&arg.value, diagnostics, context)?
                 }
@@ -2553,15 +2680,43 @@ fn invalid_var_name(name: &str, span: &SourceSpan) -> Diagnostic {
 }
 
 /// Renders a scalar argument as plain text.
-fn scalar_to_text(value: &IrValue) -> String {
+///
+/// Range and Collection are semantic values, not scalar text. Reaching this
+/// helper with either variant is an explicit materialization failure rather
+/// than an empty-string fallback.
+fn scalar_to_text(
+    value: &IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<String, CallOutcome> {
     match value {
-        IrValue::String(text) => text.clone(),
-        IrValue::Number(number) => number.to_string(),
-        IrValue::Boolean(boolean) => boolean.to_string(),
-        IrValue::Identifier(name) => name.clone(),
-        IrValue::Content(_) => String::new(),
-        IrValue::Range(_) | IrValue::Collection(_) => String::new(),
-        IrValue::None => "None".to_string(),
+        IrValue::String(text) => Ok(text.clone()),
+        IrValue::Number(number) => Ok(number.to_string()),
+        IrValue::Boolean(boolean) => Ok(boolean.to_string()),
+        IrValue::Identifier(name) => Ok(name.clone()),
+        IrValue::None => Ok("None".to_string()),
+        IrValue::Content(_) => {
+            diagnostics.push(iteration_error(
+                "Rich content cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Range(range) => {
+            diagnostics.push(iteration_error(
+                "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                    .to_string(),
+                range.span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Collection(_) => {
+            diagnostics.push(iteration_error(
+                "Collection cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
     }
 }
 
