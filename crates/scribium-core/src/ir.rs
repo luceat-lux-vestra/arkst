@@ -230,6 +230,29 @@ pub struct IrRange {
     pub span: SourceSpan,
 }
 
+/// A source-backed pair of recursive semantic values.
+///
+/// Pairs are first-class evaluator values. The span covers the source
+/// expression that produced the pair; nested values retain their own
+/// provenance wherever their representation carries one.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPair {
+    pub first: Box<IrValue>,
+    pub second: Box<IrValue>,
+    pub span: SourceSpan,
+}
+
+/// A source-backed ordered dictionary.
+///
+/// The evaluator owns duplicate-key handling and preserves the order of the
+/// first insertion of every surviving key. Entries are pairs so dictionary
+/// iteration can reuse the ordinary iterable and scoped-call machinery.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrDictionary {
+    pub entries: Vec<IrPair>,
+    pub span: SourceSpan,
+}
+
 /// Semantic state for a GFM task-list item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrTaskStatus {
@@ -273,6 +296,10 @@ pub enum IrValue {
     Range(IrRange),
     /// An ordered recursive collection of semantic values.
     Collection(Vec<IrValue>),
+    /// A recursive pair value. Pairs are also valid iterable items.
+    Pair(IrPair),
+    /// An ordered recursive dictionary whose entries are key/value pairs.
+    Dictionary(IrDictionary),
     Content(Vec<IrNode>),
     /// The Quarkdown language's explicit absence value.
     ///
@@ -283,7 +310,7 @@ pub enum IrValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{IrRange, IrValue};
+    use super::{IrDictionary, IrPair, IrRange, IrValue};
     use crate::source::{SourceId, SourceSpan};
 
     #[test]
@@ -309,6 +336,28 @@ mod tests {
         let encoded = serde_json::to_value(&value).expect("IrValue serializes");
         assert_eq!(
             serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
+            value
+        );
+    }
+
+    #[test]
+    fn pair_and_dictionary_roundtrip_serde_preserves_recursive_values() {
+        let span = SourceSpan::new(SourceId(1), 3, 8);
+        let value = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("a".to_string())),
+                second: Box::new(IrValue::Pair(IrPair {
+                    first: Box::new(IrValue::Number(1.0)),
+                    second: Box::new(IrValue::Collection(vec![IrValue::Boolean(true)])),
+                    span,
+                })),
+                span,
+            }],
+            span,
+        });
+        let encoded = serde_json::to_value(&value).expect("structured values serialize");
+        assert_eq!(
+            serde_json::from_value::<IrValue>(encoded).expect("structured values deserialize"),
             value
         );
     }

@@ -735,6 +735,144 @@ mod tests {
     }
 
     #[test]
+    fn compile_dictionary_foreach_destructures_ordered_pairs() {
+        let source = ".var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n\n.foreach {.table}\n    key value:\n    .key: .value\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "a: 1\nb: 2");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .all(|node| matches!(node, IrNode::Paragraph { .. })));
+    }
+
+    #[test]
+    fn compile_dictionary_duplicate_keys_are_last_write_wins_in_first_slot() {
+        let source = ".dictionary\n    - a: 1\n    - b: 2\n    - a: 3\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let [IrNode::Table { rows, span, .. }] = result.ir.nodes.as_slice() else {
+            panic!(
+                "expected dictionary table output, got {:?}",
+                result.ir.nodes
+            )
+        };
+        assert_eq!(span.source_id, source_id);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.span.source_id == source_id));
+        assert_eq!(inline_text(&rows[0].cells[0].content), "a");
+        assert_eq!(inline_text(&rows[0].cells[1].content), "3");
+        assert_eq!(inline_text(&rows[1].cells[0].content), "b");
+        assert_eq!(inline_text(&rows[1].cells[1].content), "2");
+    }
+
+    #[test]
+    fn compile_empty_dictionary_is_ordered_and_deterministic() {
+        let source = ".dictionary\n";
+        let (first, source_id) = compile_source(source);
+        let (second, _) = compile_source(source);
+        assert!(first.diagnostics.is_empty(), "{first:?}");
+        assert!(second.diagnostics.is_empty(), "{second:?}");
+        assert_eq!(first.ir, second.ir);
+        let [IrNode::Table { header, rows, span }] = first.ir.nodes.as_slice() else {
+            panic!("expected empty dictionary table, got {:?}", first.ir.nodes)
+        };
+        assert!(rows.is_empty());
+        assert_eq!(span.source_id, source_id);
+        assert_eq!(inline_text(&header.cells[0].content), "Key");
+        assert_eq!(inline_text(&header.cells[1].content), "Value");
+    }
+
+    #[test]
+    fn compile_recursive_dictionary_value_remains_typed_through_foreach() {
+        let source = ".var {table}\n    .dictionary\n        - outer\n            - nested: 1\n\n.foreach {.table}\n    key value:\n    .value\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(matches!(
+            result.ir.nodes.as_slice(),
+            [IrNode::Table { rows, .. }] if rows.len() == 1
+        ));
+    }
+
+    #[test]
+    fn compile_pair_is_a_typed_recursive_value_at_the_output_boundary() {
+        let source = ".pair {left} {.sum {1} {2}}\n";
+        let (result, source_id) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        let [IrNode::OrderedList { items, .. }] = result.ir.nodes.as_slice() else {
+            panic!(
+                "expected Pair output as an ordered list, got {:?}",
+                result.ir.nodes
+            )
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].nodes.as_slice(),
+            [IrNode::Paragraph { .. }]
+        ));
+        assert!(matches!(
+            items[1].nodes.as_slice(),
+            [IrNode::Paragraph { .. }]
+        ));
+        assert!(matches!(
+            items[0].nodes.as_slice(),
+            [IrNode::Paragraph { content, span }]
+                if inline_text(content) == "left" && span.source_id == source_id
+        ));
+        assert!(matches!(
+            items[1].nodes.as_slice(),
+            [IrNode::Paragraph { content, span }]
+                if inline_text(content) == "3" && span.source_id == source_id
+        ));
+    }
+
+    #[test]
+    fn compile_dictionary_entry_failure_is_atomic_and_stops_before_output() {
+        let source = ".dictionary\n    - a: 1\n    - b: .multiply {true} {2}\n    - c: 3\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_dictionary_implicit_scope_keeps_the_pair_typed() {
+        let source = ".var {table}\n    .dictionary\n        - a: 1\n.foreach {.table}\n    .1\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(matches!(
+            result.ir.nodes.as_slice(),
+            [IrNode::OrderedList { items, .. }] if items.len() == 2
+        ));
+    }
+
+    #[test]
+    fn compile_dictionary_explicit_scope_masks_implicit_positional_references() {
+        let source = ".var {table}\n    .dictionary\n        - a: 1\n.foreach {.table}\n    key value:\n    .1\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_dictionary_destructuring_masks_and_restores_parent_bindings() {
+        let source = ".var {key} {outer}\n.var {table}\n    .dictionary\n        - key: inner\n\n.foreach {.table}\n    key value:\n    .key\n\n.key\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "key\nouter");
+    }
+
+    #[test]
+    fn compile_nested_dictionary_destructuring_restores_outer_scope() {
+        let source = ".var {outer_table}\n    .dictionary\n        - outer\n            - nested: 1\n.var {inner_table}\n    .dictionary\n        - inner: 2\n\n.foreach {.outer_table}\n    key value:\n    .foreach {.inner_table}\n        key value:\n        .key\n    .key\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "inner\nouter");
+    }
+
+    #[test]
     fn compile_repeat_is_one_based_and_uses_the_shared_collection_result() {
         for source in [".repeat {3}\n    n:\n    .n\n", ".repeat {3}\n    .1\n"] {
             let (result, _) = compile_source(source);

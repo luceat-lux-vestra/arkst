@@ -145,7 +145,9 @@ fn adapt_scalar_to_text(value: &IrValue) -> Option<String> {
         IrValue::Boolean(value) => Some(value.to_string()),
         IrValue::Number(value) => Some(value.to_string()),
         IrValue::None => None,
-        IrValue::Range(_) | IrValue::Collection(_) => None,
+        IrValue::Range(_) | IrValue::Collection(_) | IrValue::Pair(_) | IrValue::Dictionary(_) => {
+            None
+        }
         IrValue::Content(nodes) => {
             let mut text = String::new();
             for node in nodes {
