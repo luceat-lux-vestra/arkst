@@ -600,6 +600,24 @@ mod tests {
     }
 
     #[test]
+    fn compile_foreach_repeated_range_results_fail_once_at_output_boundary() {
+        let source = ".foreach {1..3}\n    .let {2..4}\n        .1\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_direct_range_output_reports_one_source_backed_failure() {
         let source = ".var {r} {2..4}\n.r\n";
         let (result, source_id) = compile_source(source);

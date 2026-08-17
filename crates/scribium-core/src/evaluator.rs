@@ -482,7 +482,7 @@ impl Evaluator {
                 lambda_parameters,
                 body,
                 span,
-            } => self.evaluate_block_call(
+            } => match self.evaluate_block_call(
                 name,
                 positional_args,
                 named_args,
@@ -491,13 +491,21 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
-            ),
+            ) {
+                CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
+                CallOutcome::Unresolved => Vec::new(),
+            },
             IrNode::ChainedFunctionCall {
                 head,
                 chain,
                 body,
                 span,
-            } => self.evaluate_block_chain(head, chain, body, span, diagnostics, context),
+            } => match self.evaluate_block_chain(head, chain, body, span, diagnostics, context) {
+                CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
+                CallOutcome::Unresolved => Vec::new(),
+            },
             IrNode::Heading {
                 level,
                 content,
@@ -665,7 +673,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
+    ) -> CallOutcome {
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -677,22 +685,26 @@ impl Evaluator {
             context,
         ) {
             CallOutcome::Value(value) => {
-                self.materialize_block_value(Some(value), span, diagnostics)
+                match self.materialize_block_value(value, span, diagnostics) {
+                    Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                    Err(outcome) => outcome,
+                }
             }
-            CallOutcome::NoValue => Vec::new(),
-            CallOutcome::Failed => Vec::new(),
-            CallOutcome::Unresolved => self
-                .preserve_block_call(
-                    name,
-                    positional_args,
-                    named_args,
-                    lambda_parameters,
-                    body,
-                    span,
-                    diagnostics,
-                    context,
-                )
-                .unwrap_or_default(),
+            CallOutcome::NoValue => CallOutcome::NoValue,
+            CallOutcome::Failed => CallOutcome::Failed,
+            CallOutcome::Unresolved => match self.preserve_block_call(
+                name,
+                positional_args,
+                named_args,
+                lambda_parameters,
+                body,
+                span,
+                diagnostics,
+                context,
+            ) {
+                Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                Err(outcome) => outcome,
+            },
         }
     }
 
@@ -746,7 +758,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
+    ) -> CallOutcome {
         match self.evaluate_chain_value(
             head,
             chain,
@@ -755,9 +767,14 @@ impl Evaluator {
             context,
         ) {
             CallOutcome::Value(value) => {
-                self.materialize_block_value(Some(value), span, diagnostics)
+                match self.materialize_block_value(value, span, diagnostics) {
+                    Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                    Err(outcome) => outcome,
+                }
             }
-            CallOutcome::NoValue | CallOutcome::Failed | CallOutcome::Unresolved => Vec::new(),
+            CallOutcome::NoValue => CallOutcome::NoValue,
+            CallOutcome::Failed => CallOutcome::Failed,
+            CallOutcome::Unresolved => CallOutcome::Unresolved,
         }
     }
 
@@ -2065,38 +2082,45 @@ impl Evaluator {
 
     fn materialize_block_value(
         &self,
-        value: Option<IrValue>,
+        value: IrValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Vec<IrNode> {
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         match value {
-            Some(IrValue::Content(nodes)) => nodes,
-            Some(IrValue::Collection(values)) => {
+            IrValue::Content(nodes) => Ok(nodes),
+            IrValue::Collection(values) => {
                 let mut nodes = Vec::new();
                 for value in values {
-                    nodes.extend(self.materialize_block_value(Some(value), span, diagnostics));
+                    let materialized = self.materialize_block_value(value, span, diagnostics)?;
+                    if let Err(error) = nodes.try_reserve(materialized.len()) {
+                        diagnostics.push(iteration_error(
+                            format!("collection output cannot be allocated: {error}"),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                    nodes.extend(materialized);
                 }
-                nodes
+                Ok(nodes)
             }
-            Some(IrValue::Range(range)) => {
+            IrValue::Range(range) => {
                 diagnostics.push(iteration_error(
                     "Direct Range materialization is deferred; consume the typed Range through iteration first"
                         .to_string(),
                     range.span,
                 ));
-                Vec::new()
+                Err(CallOutcome::Failed)
             }
-            Some(value) => match scalar_to_text(&value, *span, diagnostics) {
-                Ok(content) => vec![IrNode::Paragraph {
+            value => match scalar_to_text(&value, *span, diagnostics) {
+                Ok(content) => Ok(vec![IrNode::Paragraph {
                     content: vec![IrInline::Text {
                         content,
                         span: *span,
                     }],
                     span: *span,
-                }],
-                Err(_) => Vec::new(),
+                }]),
+                Err(outcome) => Err(outcome),
             },
-            None => Vec::new(),
         }
     }
 
@@ -3358,6 +3382,68 @@ mod tests {
                     IrValue::Number(4.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn block_materialization_of_mixed_collection_is_fail_fast_and_atomic() {
+        let range_span = span(10, 14);
+        let value = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Range(IrRange {
+                start: Some(2),
+                end: Some(4),
+                span: range_span,
+            }),
+            IrValue::Number(5.0),
+        ]);
+        let mut diagnostics = Vec::new();
+        let result =
+            Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics);
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn block_materialization_of_nested_range_is_fail_fast_and_atomic() {
+        let range_span = span(10, 14);
+        let value = IrValue::Collection(vec![IrValue::Collection(vec![IrValue::Range(IrRange {
+            start: Some(2),
+            end: Some(4),
+            span: range_span,
+        })])]);
+        let mut diagnostics = Vec::new();
+        let result =
+            Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics);
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn block_materialization_of_normal_collection_preserves_order() {
+        let value = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Number(2.0),
+            IrValue::Number(3.0),
+        ]);
+        let mut diagnostics = Vec::new();
+        let nodes =
+            match Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics) {
+                Ok(nodes) => nodes,
+                Err(_) => panic!("normal Collection should materialize"),
+            };
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(nodes.len(), 3);
+        for (node, expected) in nodes.iter().zip(["1", "2", "3"]) {
+            let IrNode::Paragraph { content, .. } = node else {
+                panic!("expected scalar paragraph, got {node:?}")
+            };
+            assert!(matches!(
+                content.as_slice(),
+                [IrInline::Text { content, .. }] if content == expected
+            ));
+        }
     }
 
     #[test]
