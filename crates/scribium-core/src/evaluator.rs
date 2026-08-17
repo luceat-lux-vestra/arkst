@@ -1095,6 +1095,33 @@ impl Evaluator {
             );
         }
 
+        if is_collection_access(name) {
+            if body.is_some() {
+                diagnostics.push(iteration_error(
+                    format!("`.{name}` does not accept a block body"),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            let evaluated_positional =
+                match self.evaluate_values(positional_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+            let evaluated_named = match self.evaluate_named(named_args, span, diagnostics, context)
+            {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+            return self.evaluate_collection_access(
+                name,
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+            );
+        }
+
         if builtins::is_supported(name) {
             let evaluated_positional =
                 match self.evaluate_values(positional_args, span, diagnostics, context) {
@@ -1123,6 +1150,76 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Evaluates the bounded Collection access operations through the same
+    /// ordered semantic element adaptation used by `.foreach`.
+    fn evaluate_collection_access(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> CallOutcome {
+        match name {
+            "size" | "first" | "last" => {
+                let named_parameter = if name == "size" { "of" } else { "from" };
+                let value = match collection_access_operand(
+                    name,
+                    named_parameter,
+                    positional_args,
+                    named_args,
+                    span,
+                    diagnostics,
+                ) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                };
+                let elements = match self.coerce_iterable(value, span, diagnostics) {
+                    Ok(elements) => elements,
+                    Err(outcome) => return outcome,
+                };
+                match name {
+                    "size" => match exact_collection_length(elements.len(), span, diagnostics) {
+                        Ok(length) => CallOutcome::Value(IrValue::Number(length)),
+                        Err(outcome) => outcome,
+                    },
+                    "first" => {
+                        CallOutcome::Value(elements.into_iter().next().unwrap_or(IrValue::None))
+                    }
+                    "last" => {
+                        CallOutcome::Value(elements.into_iter().last().unwrap_or(IrValue::None))
+                    }
+                    _ => unreachable!("collection access operation was prevalidated"),
+                }
+            }
+            "getat" => {
+                let (value, index, fallback) =
+                    match getat_operands(positional_args, named_args, span, diagnostics) {
+                        Ok(operands) => operands,
+                        Err(outcome) => return outcome,
+                    };
+                let elements = match self.coerce_iterable(value, span, diagnostics) {
+                    Ok(elements) => elements,
+                    Err(outcome) => return outcome,
+                };
+                let length = match exact_collection_length(elements.len(), span, diagnostics) {
+                    Ok(length) => length,
+                    Err(outcome) => return outcome,
+                };
+                let index = match collection_index(&index, length, span, diagnostics) {
+                    Ok(index) => index,
+                    Err(outcome) => return outcome,
+                };
+                CallOutcome::Value(
+                    index
+                        .and_then(|index| elements.get(index).cloned())
+                        .unwrap_or(fallback),
+                )
+            }
+            _ => unreachable!("collection access operation was prevalidated"),
+        }
     }
 
     /// Evaluates `.pair` as a typed, recursively valued pair.
@@ -1734,7 +1831,7 @@ impl Evaluator {
                 }
                 _ => {
                     diagnostics.push(iteration_error(
-                        "`.foreach` requires a Range, Collection, or exactly one Markdown list value"
+                        "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
                             .to_string(),
                         *span,
                     ));
@@ -1743,7 +1840,7 @@ impl Evaluator {
             },
             _ => {
                 diagnostics.push(iteration_error(
-                    "`.foreach` requires a Range, Collection, or exactly one Markdown list value"
+                    "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
                         .to_string(),
                     *span,
                 ));
@@ -2990,6 +3087,208 @@ fn is_dictionary(name: &str) -> bool {
     name == "dictionary"
 }
 
+fn is_collection_access(name: &str) -> bool {
+    matches!(name, "size" | "first" | "last" | "getat")
+}
+
+fn collection_access_operand(
+    name: &str,
+    named_parameter: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<IrValue, CallOutcome> {
+    if positional_args.len() > 1 {
+        diagnostics.push(iteration_error(
+            format!(
+                "`.{name}` requires exactly one iterable argument (received {})",
+                positional_args.len()
+            ),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    if let Some(argument) = named_args
+        .iter()
+        .find(|argument| argument.name != named_parameter)
+    {
+        diagnostics.push(iteration_error_at(
+            format!("Unknown named argument `{}` for `.{name}`", argument.name),
+            argument.name_span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    if let Some(argument) = named_args.get(1) {
+        diagnostics.push(iteration_error_at(
+            format!("`.{name}` received iterable argument more than once"),
+            argument.name_span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    match (positional_args.first(), named_args.first()) {
+        (Some(_), Some(argument)) => {
+            diagnostics.push(iteration_error_at(
+                format!("`.{name}` received iterable argument more than once"),
+                argument.name_span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        (Some(value), None) => Ok(value.clone()),
+        (None, Some(argument)) => Ok(argument.value.clone()),
+        (None, None) => {
+            diagnostics.push(iteration_error(
+                format!("`.{name}` requires exactly one iterable argument"),
+                *span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+    }
+}
+
+fn getat_operands(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(IrValue, IrValue, IrValue), CallOutcome> {
+    if positional_args.len() > 2 {
+        diagnostics.push(iteration_error(
+            format!(
+                "`.getat` accepts an iterable and an index (received {} positional arguments)",
+                positional_args.len()
+            ),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    let mut collection = positional_args.first().cloned();
+    let mut index = positional_args.get(1).cloned();
+    let mut fallback = None;
+    for argument in named_args {
+        match argument.name.as_str() {
+            "from" => {
+                if collection.is_some() {
+                    diagnostics.push(iteration_error_at(
+                        "`.getat` received the iterable argument more than once".to_string(),
+                        argument.name_span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                collection = Some(argument.value.clone());
+            }
+            "index" => {
+                if index.is_some() {
+                    diagnostics.push(iteration_error_at(
+                        "`.getat` received the index argument more than once".to_string(),
+                        argument.name_span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                index = Some(argument.value.clone());
+            }
+            "orelse" => {
+                if fallback.is_some() {
+                    diagnostics.push(iteration_error_at(
+                        "`.getat` received the `orelse` argument more than once".to_string(),
+                        argument.name_span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                fallback = Some(argument.value.clone());
+            }
+            _ => {
+                diagnostics.push(iteration_error_at(
+                    format!("Unknown named argument `{}` for `.getat`", argument.name),
+                    argument.name_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        }
+    }
+
+    let Some(collection) = collection else {
+        diagnostics.push(iteration_error(
+            "`.getat` requires an iterable argument".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    let Some(index) = index else {
+        diagnostics.push(iteration_error(
+            "`.getat` requires an integer index".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    Ok((collection, index, fallback.unwrap_or(IrValue::None)))
+}
+
+fn exact_collection_length(
+    length: usize,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<f64, CallOutcome> {
+    const MAX_EXACT_F64_INTEGER: u64 = 1 << 53;
+    let Ok(length) = u64::try_from(length) else {
+        diagnostics.push(iteration_error(
+            "Collection length cannot be represented by the evaluator Number type".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    if length > MAX_EXACT_F64_INTEGER {
+        diagnostics.push(iteration_error(
+            "Collection length cannot be represented exactly by the evaluator Number type"
+                .to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    Ok(length as f64)
+}
+
+fn collection_index(
+    value: &IrValue,
+    length: f64,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Option<usize>, CallOutcome> {
+    let IrValue::Number(index) = value else {
+        diagnostics.push(iteration_error(
+            "`.getat` requires an integer numeric index".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    if !index.is_finite() || index.fract() != 0.0 {
+        diagnostics.push(iteration_error(
+            "`.getat` requires a finite integer numeric index".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    // Quarkdown accepts Int values here, but Kotlin's getOrNull makes zero,
+    // negative, and values beyond the finite collection bounds ordinary
+    // misses. Check the bounds before converting so an f64 cannot truncate or
+    // saturate into a valid Rust index.
+    if *index < 1.0 || *index > length {
+        return Ok(None);
+    }
+    let zero_based = (*index - 1.0) as u64;
+    let Ok(zero_based) = usize::try_from(zero_based) else {
+        diagnostics.push(iteration_error(
+            "`.getat` index cannot be represented by this target".to_string(),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    Ok(Some(zero_based))
+}
+
 fn validate_iteration_lambda(
     parameters: Option<&[IrParameter]>,
     name: &str,
@@ -4023,6 +4322,246 @@ mod tests {
                     IrValue::Number(4.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn collection_access_operations_preserve_recursive_types_and_dictionary_pairs() {
+        let evaluator = Evaluator::new();
+        let pair = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("key".to_string())),
+            second: Box::new(IrValue::Boolean(true)),
+            span: span(10, 20),
+        });
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("first".to_string())),
+                second: Box::new(IrValue::Collection(vec![IrValue::Number(2.0)])),
+                span: span(21, 30),
+            }],
+            span: span(21, 30),
+        });
+        let collection = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Content(vec![text_paragraph("content")]),
+            pair.clone(),
+            dictionary.clone(),
+        ]);
+        let operation_span = span(0, 40);
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "size",
+            &[],
+            &[named_arg("of", collection.clone())],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(outcome, CallOutcome::Value(IrValue::Number(4.0))));
+
+        let outcome = evaluator.evaluate_call_value(
+            "first",
+            std::slice::from_ref(&collection),
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Value(IrValue::Number(1.0))));
+
+        let outcome = evaluator.evaluate_call_value(
+            "getat",
+            &[collection.clone(), IrValue::Number(2.0)],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Content(nodes))
+                if nodes == vec![text_paragraph("content")]
+        ));
+
+        let outcome = evaluator.evaluate_call_value(
+            "last",
+            &[collection],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Value(value) if value == dictionary));
+
+        let outcome = evaluator.evaluate_call_value(
+            "getat",
+            &[
+                IrValue::Dictionary(IrDictionary {
+                    entries: vec![IrPair {
+                        first: Box::new(IrValue::String("a".to_string())),
+                        second: Box::new(IrValue::Number(1.0)),
+                        span: span(41, 45),
+                    }],
+                    span: span(41, 45),
+                }),
+                IrValue::Number(1.0),
+            ],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(entry) = outcome else {
+            panic!("expected a typed dictionary Pair")
+        };
+        assert!(matches!(entry, IrValue::Pair(_)));
+
+        let outcome = evaluator.evaluate_call_value(
+            "first",
+            &[entry],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::String(value)) if value == "a"
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn collection_access_indexing_matches_one_based_empty_and_invalid_boundaries() {
+        let evaluator = Evaluator::new();
+        let values = IrValue::Collection(vec![
+            IrValue::String("first".to_string()),
+            IrValue::String("second".to_string()),
+        ]);
+        let operation_span = span(0, 20);
+
+        for index in [0.0, -1.0, 3.0, 9_007_199_254_740_992.0] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "getat",
+                &[values.clone(), IrValue::Number(index)],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(IrValue::None)));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let empty = IrValue::Range(IrRange {
+            start: Some(4),
+            end: Some(2),
+            span: operation_span,
+        });
+        for name in ["first", "last"] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                name,
+                std::slice::from_ref(&empty),
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(IrValue::None)));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "getat",
+            &[empty, IrValue::Number(1.0)],
+            &[named_arg("orelse", IrValue::Boolean(true))],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Boolean(true))
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        for index in [1.5, f64::NAN, f64::INFINITY] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "getat",
+                &[values.clone(), IrValue::Number(index)],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Failed));
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        }
+    }
+
+    #[test]
+    fn collection_access_reuses_failure_outcomes_and_checks_length_conversion() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 20);
+        let failing = call_value(
+            "multiply",
+            vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+        );
+        let unresolved = call_value("unknown", Vec::new());
+
+        for value in [failing, unresolved, IrValue::Boolean(true)] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "size",
+                &[value],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Failed));
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        assert!(matches!(
+            exact_collection_length(usize::MAX, &operation_span, &mut diagnostics),
+            Err(CallOutcome::Failed)
+        ));
+        assert_eq!(diagnostics.len(), 1);
     }
 
     #[test]

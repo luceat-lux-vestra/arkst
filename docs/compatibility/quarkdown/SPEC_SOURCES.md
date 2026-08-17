@@ -32,6 +32,13 @@ Quarkdown-compatible feature implementation.
 | Quarkdown wiki — "Iterable" (v2.5.1)       | https://quarkdown.com/wiki/iterable/ | Markdown ordered/unordered lists become ordered collections; nested collections; integer Range as iterable | 2026-08-17 |
 | Quarkdown wiki — "Dictionary" (v2.5.1)     | https://quarkdown.com/wiki/dictionary/ | String keys, recursive values, YAML-like Markdown-list syntax, ordered entry iteration, and nested dictionaries | 2026-08-18 |
 | Quarkdown wiki — "Range"                    | https://quarkdown.com/wiki/range/ | Closed/open literal Range syntax and consumer-defined open-range behavior | 2026-08-17 |
+| Quarkdown wiki — "Iterable" (v2.5.1 collection operations review) | https://quarkdown.com/wiki/iterable/ | Collection, Pair, Dictionary, and Range iterable categories; Pair and dictionary-entry behavior; operation chaining | 2026-08-18 |
+| Quarkdown stdlib API — `Collection` package | https://quarkdown.com/docs/quarkdown-stdlib/com.quarkdown.stdlib.module.Collection/ | Public signatures and chaining metadata for `.size`, `.first`, `.last`, and `.getat` | 2026-08-18 |
+| Quarkdown v2.5.1 `Collection.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | Public behavioral evidence for non-negative `.size`, empty `.first`/`.last`, one-based `.getat`, integral index conversion, out-of-bounds fallback, and `orelse` | 2026-08-18 |
+| Quarkdown v2.5.1 `IterableValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/IterableValue.kt | Public behavioral evidence that iterable values expose ordered components and Pair participates in iterable adaptation | 2026-08-18 |
+| Quarkdown v2.5.1 `DictionaryValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/DictionaryValue.kt | Public behavioral evidence that Dictionary adapts to an iterable of key-value Pair entries | 2026-08-18 |
+| Quarkdown v2.5.1 `Range.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public behavioral evidence for inclusive finite Range iteration, left-open default start, and right-open rejection | 2026-08-18 |
+| Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation and non-iterable scalar handling | 2026-08-18 |
 | Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
 | Quarkdown v2.5.1 `Range.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public source evidence for inclusive closed iteration, left-open default start, right-open rejection, and descending bounds | 2026-08-17 |
 | Quarkdown v2.5.1 `FlowTest.kt`              | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Public test evidence for `..4` iteration and `1..` rejection | 2026-08-17 |
@@ -76,6 +83,36 @@ is recorded per source:
 The sources listed above are the sources consulted for this feature set and
 the v2.5.1 impact review.
 
+## Collection access evidence record
+
+The v2.5.1 collection-operation review established the following observable
+contract:
+
+- `.size` accepts one iterable operand (named `of` in ordinary calls) and
+  returns a non-negative numeric value, including `0` for an empty iterable.
+- `.first` and `.last` accept one iterable operand (named `from` in ordinary
+  calls), preserve the selected value's type, and return `None` for an empty
+  iterable.
+- `.getat` accepts an iterable, an integral numeric index, and optional
+  `orelse`. Indexing is one-based. Zero, negative, too-large, and out-of-range
+  indices use the absence/fallback result; fractional, non-finite, and
+  non-numeric indices are invalid for the `Int` parameter.
+- `Pair` is observed as two ordered elements. `Dictionary` is observed as an
+  ordered iterable of `Pair(key, value)` entries. Strings are not iterable
+  operands for these functions. Closed finite Ranges participate through the
+  existing Scribium materialization policy; open-range iteration remains
+  deferred by the current compatibility slice.
+
+Public source was consulted only as permitted behavioral/API evidence. No
+Quarkdown implementation source, test, or fixture was copied or translated.
+The official locally installed release reported `quarkdown version 2.5.1` and
+was probed with independently authored stdin documents for Pair access,
+Dictionary entry access, closed and descending Ranges, empty access, zero and
+negative indices, large indices, fractional indices, `orelse`, and scalar
+operands. The probes confirmed one-based access, `None` for ordinary misses,
+typed fallback values, empty descending Ranges, fractional-index rejection,
+and non-iterable String behavior.
+
 ## Observational Method
 
 - Implemented from public documentation and a permitted black-box probe of the
@@ -96,12 +133,13 @@ the v2.5.1 impact review.
 - Each feature's provenance is recorded in
   `docs/compatibility/quarkdown/README.md`
 
-## Prohibited Sources
+## Clean-room use boundary
 
-The following are explicitly **not** used:
+The public source links above are not implementation authorities to copy or
+translate. The following remain explicitly prohibited as implementation input:
 
-- Quarkdown implementation source code (any language)
-- Quarkdown internal tests or test fixtures
+- copying or translating Quarkdown implementation source code (any language)
+- copying or translating Quarkdown internal tests or test fixtures
 - Quarkdown themes, CSS, HTML templates
 - Quarkdown commit history or internal documentation
 - quarkdown-wasm source code
