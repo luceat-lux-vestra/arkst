@@ -225,8 +225,9 @@ pub struct IrParameter {
 /// A source-backed integer range value.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrRange {
-    pub start: Option<u64>,
-    pub end: Option<u64>,
+    /// Signed Kotlin-`Int`-compatible endpoint. `None` preserves an open end.
+    pub start: Option<i32>,
+    pub end: Option<i32>,
     pub span: SourceSpan,
 }
 

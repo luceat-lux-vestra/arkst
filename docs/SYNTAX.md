@@ -477,17 +477,20 @@ failed iteration stops the mapping without duplicating its diagnostic.
 
 `repeat {0}` returns an empty collection. Fractional, non-finite, negative,
 and unrepresentable counts are rejected. Descending closed ranges follow the
-verified upstream v2.5.1 behavior of an empty iteration. Open ranges remain
-valid `Range` values but are rejected by `.foreach` in this first slice because
-their finite iteration policy is consumer-defined.
+verified upstream v2.5.1 behavior of an empty iteration. Left-open ranges use
+`1` as their default start when consumed as an Iterable; right-open and
+fully-open ranges remain valid typed values but are rejected by the shared
+finite Iterable path as endless.
 
 An exactly-one Markdown ordered or unordered list is adapted to a Collection
 only when a value is required by `.foreach`; ordinary document lists remain
 `UnorderedList` or `OrderedList` IR nodes. Nested list-only items adapt
 recursively to nested Collections, while rich list-item content remains typed
-content. Pair, Dictionary, destructuring, generic inline `@lambda`, dynamic
-`.range`, and collection operators such as `.first` and `.map` remain
-deferred.
+content. Pair, Dictionary, destructuring, generic inline `@lambda`, and
+collection operators such as `.first` and `.map` remain deferred. Dynamic
+`.range` is a typed constructor with optional `from`/`to` bounds; its numeric
+bounds are evaluated normally and truncated to signed integer endpoints using
+the verified upstream Number-to-Int behavior.
 
 ### Include / Read (Planned)
 
