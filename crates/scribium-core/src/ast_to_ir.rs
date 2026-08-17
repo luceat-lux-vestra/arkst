@@ -647,11 +647,18 @@ fn value_to_ir(
         Value::Number(n) => crate::ir::IrValue::Number(*n),
         Value::Boolean(b) => crate::ir::IrValue::Boolean(*b),
         Value::Identifier(id) => crate::ir::IrValue::Identifier(id.clone()),
-        Value::Range(range) => crate::ir::IrValue::Range(IrRange {
-            start: range.start,
-            end: range.end,
-            span: byte_to_source_span(&range.span, source_id),
-        }),
+        Value::Range(range) => {
+            // The literal grammar intentionally accepts only non-negative
+            // decimal endpoints. Quarkdown's v2.5.1 Range factory stores
+            // endpoints through `toIntOrNull`: an out-of-domain literal does
+            // not wrap, but becomes an open endpoint. Preserve that observed
+            // behavior with an explicit checked conversion.
+            crate::ir::IrValue::Range(IrRange {
+                start: range.start.and_then(|value| i32::try_from(value).ok()),
+                end: range.end.and_then(|value| i32::try_from(value).ok()),
+                span: byte_to_source_span(&range.span, source_id),
+            })
+        }
         Value::Content(inlines) => {
             if let [Inline::DirectiveCall {
                 name,
@@ -966,6 +973,35 @@ mod tests {
                 })] if *start == expected_start
                     && *end == expected_end
                     && *span == SourceSpan::new(source_id(), expected_span.0, expected_span.1)
+            ));
+        }
+    }
+
+    #[test]
+    fn literal_range_endpoint_conversion_is_checked_at_the_signed_boundary() {
+        for (source, expected_start, expected_end) in [
+            (
+                ".foreach {2147483647..2147483647}\n    .1\n",
+                Some(i32::MAX),
+                Some(i32::MAX),
+            ),
+            (".foreach {2147483648..2147483648}\n    .1\n", None, None),
+            (".foreach {4294967296..4294967296}\n    .1\n", None, None),
+        ] {
+            let document = scribium_markdown::parse_qd(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let IrNode::FunctionCall {
+                positional_args, ..
+            } = &ir.nodes[0]
+            else {
+                panic!("expected foreach call")
+            };
+            assert!(matches!(
+                positional_args.as_slice(),
+                [crate::ir::IrValue::Range(crate::ir::IrRange { start, end, .. })]
+                    if *start == expected_start && *end == expected_end
             ));
         }
     }

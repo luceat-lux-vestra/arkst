@@ -31,7 +31,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown wiki — "Loops" (v2.5.1)          | https://quarkdown.com/wiki/loops/ | `.foreach` maps an iterable to an ordered collection; `.repeat` is `.foreach {1..times}`; explicit and implicit block forms | 2026-08-17 |
 | Quarkdown wiki — "Iterable" (v2.5.1)       | https://quarkdown.com/wiki/iterable/ | Markdown ordered/unordered lists become ordered collections; nested collections; integer Range as iterable | 2026-08-17 |
 | Quarkdown wiki — "Dictionary" (v2.5.1)     | https://quarkdown.com/wiki/dictionary/ | String keys, recursive values, YAML-like Markdown-list syntax, ordered entry iteration, and nested dictionaries | 2026-08-18 |
-| Quarkdown wiki — "Range"                    | https://quarkdown.com/wiki/range/ | Closed/open literal Range syntax and consumer-defined open-range behavior | 2026-08-17 |
+| Quarkdown wiki — "Range"                    | https://quarkdown.com/wiki/range/ | Non-negative literal Range syntax, four open/closed endpoint shapes, and dynamic `.range` as the evaluated alternative | 2026-08-18 |
 | Quarkdown wiki — "Iterable" (v2.5.1 collection operations review) | https://quarkdown.com/wiki/iterable/ | Collection, Pair, Dictionary, and Range iterable categories; Pair and dictionary-entry behavior; operation chaining | 2026-08-18 |
 | Quarkdown stdlib API — `Collection` package | https://quarkdown.com/docs/quarkdown-stdlib/com.quarkdown.stdlib.module.Collection/ | Public signatures and chaining metadata for `.size`, `.first`, `.last`, and `.getat` | 2026-08-18 |
 | Quarkdown v2.5.1 `Collection.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | Public behavioral evidence for non-negative `.size`, empty `.first`/`.last`, one-based `.getat`, integral index conversion, out-of-bounds fallback, and `orelse` | 2026-08-18 |
@@ -41,6 +41,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation and non-iterable scalar handling | 2026-08-18 |
 | Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
 | Quarkdown v2.5.1 `Range.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public source evidence for inclusive closed iteration, left-open default start, right-open rejection, and descending bounds | 2026-08-17 |
+| Quarkdown v2.5.1 `Math.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public source evidence for `.range` optional `from`/`to` bounds, dynamic evaluation, and Number-to-Int truncation | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`              | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Public test evidence for `..4` iteration and `1..` rejection | 2026-08-17 |
 | GitHub release tag `v2.5.1`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.1 | Release identification and D1-D5 public delta inventory | 2026-08-13 |
 | CommonMark specification, current link rules  | https://spec.commonmark.org/current/#links | D2 balanced/escaped link destinations, literal trailing delimiters, and URI backslash-escape semantics | 2026-08-13 |
@@ -99,19 +100,60 @@ contract:
   non-numeric indices are invalid for the `Int` parameter.
 - `Pair` is observed as two ordered elements. `Dictionary` is observed as an
   ordered iterable of `Pair(key, value)` entries. Strings are not iterable
-  operands for these functions. Closed finite Ranges participate through the
-  existing Scribium materialization policy; open-range iteration remains
-  deferred by the current compatibility slice.
+  operands for these functions. Closed finite and left-open Ranges participate
+  through the shared Scribium materialization policy; right-open and fully-open
+  Range values remain representable but standard Iterable consumption rejects
+  them as endless.
+
+## Range construction and conversion evidence record
+
+The v2.5.1 [Range wiki](https://quarkdown.com/wiki/range/) documents literal
+syntax `A..B`, `..B`, `A..`, and `..`, with non-negative integer literal
+endpoints. It also states that the operator is syntactic sugar for `.range`
+except that literal endpoints are not dynamically evaluated. The v2.5.1
+[`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
+source documents optional `from` and `to` Number parameters and calls
+`Number.toInt()` for both bounds, so ordinary fractions truncate toward zero.
+
+The core [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt)
+source establishes `Int?` endpoints, inclusive `IntRange` iteration, a default
+left-open start of `1`, and rejection of every range whose end is absent as
+endless. Descending finite ranges therefore produce an empty iterator through
+the upstream integer-range behavior. The [`Iterable` wiki](https://quarkdown.com/wiki/iterable/)
+confirms that integer Range is a valid ordered iterable.
+
+The installed official v2.5.1 macOS arm64 release was independently probed
+before implementation. The probes observed `3.9 -> 3`, `-3.9 -> -3`,
+`-0.9 -> 0`, NaN -> `0`, positive infinity and values above `Int.MAX_VALUE`
+-> `Int.MAX_VALUE`, and negative infinity and values below `Int.MIN_VALUE`
+-> `Int.MIN_VALUE`. Literal `2147483647..2147483647` remains finite, while
+`2147483648..2147483648` is observed as an endless/open-bound failure rather
+than a wrapped integer. Scribium reproduces this boundary behavior with
+checked conversion from the frontend's non-negative literal representation to
+the signed core `IrRange` domain.
+
+The implemented semantic policy is therefore:
+
+- literal and dynamic construction converge to one typed `IrRange`;
+- dynamic `.range` accepts optional positional/named `from` and `to` bounds;
+- closed ranges iterate inclusively and descending ranges are empty;
+- left-open iterable ranges default to `1`;
+- right-open and fully-open ranges are valid representations but fail through
+  standard Iterable consumption as endless; and
+- cardinality is checked in a wider intermediate domain before checked target
+  conversion and fallible reservation, with no arbitrary upper bound.
 
 Public source was consulted only as permitted behavioral/API evidence. No
 Quarkdown implementation source, test, or fixture was copied or translated.
 The official locally installed release reported `quarkdown version 2.5.1` and
-was probed with independently authored stdin documents for Pair access,
+was probed with independently authored documents for Pair access,
 Dictionary entry access, closed and descending Ranges, empty access, zero and
 negative indices, large indices, fractional indices, `orelse`, and scalar
-operands. The probes confirmed one-based access, `None` for ordinary misses,
-typed fallback values, empty descending Ranges, fractional-index rejection,
-and non-iterable String behavior.
+operands, plus dynamic Range numeric boundaries and literal endpoint limits.
+The probes confirmed one-based access, `None` for ordinary misses, typed
+fallback values, empty descending Ranges, fractional-index rejection,
+non-iterable String behavior, upstream Number-to-Int conversion, and endless
+open-range rejection.
 
 ## Observational Method
 
@@ -125,9 +167,10 @@ and non-iterable String behavior.
   and failure for two-parameter destructuring of a non-Pair item. Explicit
   lambda scope masks implicit `.1` lookup.
 - No Quarkdown source code or tests are copied or translated. The v2.5.1
-  `Flow.kt`, `Range.kt`, and `FlowTest.kt` links above were consulted only as
-  public behavioral evidence for the iteration policy (including descending
-  bounds and repeat-zero construction).
+  `Math.kt`, `Flow.kt`, `Range.kt`, and `FlowTest.kt` links above were consulted
+  only as public behavioral evidence for dynamic endpoint conversion and the
+  iteration policy (including left-open, endless, descending, and repeat-zero
+  behavior).
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs
 - Each feature's provenance is recorded in

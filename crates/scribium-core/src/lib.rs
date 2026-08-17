@@ -949,6 +949,10 @@ mod tests {
             assert!(result.diagnostics.is_empty(), "{result:?}");
             assert_eq!(output_text(&result), "1\n2\n3");
         }
+
+        let (result, _) = compile_source(".repeat {1}\n    .1\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1");
     }
 
     #[test]
@@ -961,11 +965,16 @@ mod tests {
     }
 
     #[test]
-    fn compile_iteration_rejects_open_ranges_invalid_counts_and_destructuring() {
+    fn compile_iteration_accepts_left_open_and_rejects_endless_ranges() {
+        let (result, _) = compile_source(".foreach {..4}\n    .1\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\n3\n4");
+
         for source in [
             ".foreach {2..}\n    .1\n",
-            ".foreach {..4}\n    .1\n",
             ".foreach {..}\n    .1\n",
+            ".foreach {.range from:{3}}\n    .1\n",
+            ".foreach {.range}\n    .1\n",
             ".repeat {1.5}\n    .1\n",
             ".repeat {-1}\n    .1\n",
             ".foreach {1..2}\n    first second:\n    .first\n",
@@ -974,6 +983,118 @@ mod tests {
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
         }
+    }
+
+    #[test]
+    fn compile_dynamic_range_converges_with_literal_and_supports_signed_bounds() {
+        let source = ".var {literal} {1..3}\n.var {dynamic} {.range {1} {3}}\n.var {left} {.range to:{3}}\n.var {signed} {.range {-3.9} {2.9}}\n\n.literal::size\n.dynamic::size\n.left::size\n.left::first\n.left::last\n.left::getat {2}\n.signed::size\n.signed::first\n.signed::last\n.signed::getat {4}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3\n3\n3\n1\n3\n2\n6\n-3\n2\n0");
+    }
+
+    #[test]
+    fn compile_literal_range_boundary_does_not_wrap() {
+        let (result, _) = compile_source(".foreach {2147483647..2147483647}\n    .1\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2147483647");
+
+        let (result, _) = compile_source(".foreach {2147483648..2147483648}\n    .1\n");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(
+            result.diagnostics[0].message.contains("endless Range"),
+            "{result:?}"
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_dynamic_range_supports_nested_bounds_and_typed_interoperability() {
+        let source = ".var {r} {.range {.sum {1} {1}} {.sum {2} {2}}}\n.function {makerange}\n    .range {2} {4}\n.var {pair}\n    .pair {.range {2} {4}} {value}\n.var {table}\n    .dictionary\n        - key: .range {2} {4}\n.var {scoped}\n    .let {.range {2} {4}}\n        .1\n\n.r::size\n.makerange::first\n.pair::first::size\n.table::getat {1}::last::size\n.scoped::getat {2}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3\n2\n3\n3\n3");
+    }
+
+    #[test]
+    fn compile_dynamic_range_rejects_invalid_shapes_and_preserves_atomic_failures() {
+        for source in [
+            ".range {1} {2} {3}\n",
+            ".range unknown:{1}\n",
+            ".range from:{1} from:{2}\n",
+            ".range {1} from:{2}\n",
+            ".range {true}\n",
+            ".range {text}\n",
+            ".range from:{.multiply {true} {2}} to:{3}\n",
+            ".range from:{.unknown}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+
+        let source = ".foreach {.range from:{3}}\n    .multiply {true} {2}\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(
+            result.diagnostics[0].message.contains("endless Range"),
+            "{result:?}"
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+
+        for source in [
+            ".range from:{3}::size\n",
+            ".range from:{3}::first\n",
+            ".range from:{3}::last\n",
+            ".range from:{3}::getat {1}\n",
+            ".range::size\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert!(
+                result.diagnostics[0].message.contains("endless Range"),
+                "{source:?}: {result:?}"
+            );
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+
+        let source = ".function {makerange}\n    .range from:{.multiply {true} {2}} to:{3}\n.makerange::size\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001", "{result:?}");
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_dynamic_range_diagnostics_keep_utf8_crlf_and_nested_bound_spans() {
+        let source = "앞 문장\r\n.range from:{.multiply {true} {2}} to:{3}\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let nested_start = source.find(".multiply").expect("nested bound");
+        let nested_end = nested_start + ".multiply {true} {2}".len();
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                nested_start,
+                nested_end
+            ))
+        );
+
+        let source = "앞 문장\r\n.range from:{3}::size\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let range_start = source.find(".range").expect("range call");
+        let range_end = range_start + ".range from:{3}".len();
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_end
+            ))
+        );
     }
 
     #[test]

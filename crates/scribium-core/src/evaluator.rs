@@ -1073,6 +1073,17 @@ impl Evaluator {
             );
         }
 
+        if is_range(name) {
+            return self.evaluate_range(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if is_pair(name) {
             return self.evaluate_pair(
                 positional_args,
@@ -1731,6 +1742,75 @@ impl Evaluator {
         )
     }
 
+    /// Evaluates `.range` into the same typed Range representation used by
+    /// literal range values. Bounds are evaluated through the ordinary value
+    /// path before the upstream Number-to-Int-compatible conversion.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_range(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(iteration_error(
+                "`.range` does not accept a block body".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let (start, end) = match range_arguments(positional_args, named_args, span, diagnostics) {
+            Ok(arguments) => arguments,
+            Err(outcome) => return outcome,
+        };
+        let start = match start {
+            Some(value) => match self.evaluate_range_endpoint(&value, span, diagnostics, context) {
+                Ok(value) => Some(value),
+                Err(outcome) => return outcome,
+            },
+            None => None,
+        };
+        let end = match end {
+            Some(value) => match self.evaluate_range_endpoint(&value, span, diagnostics, context) {
+                Ok(value) => Some(value),
+                Err(outcome) => return outcome,
+            },
+            None => None,
+        };
+        CallOutcome::Value(IrValue::Range(IrRange {
+            start,
+            end,
+            span: *span,
+        }))
+    }
+
+    fn evaluate_range_endpoint(
+        &self,
+        value: &IrValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Result<i32, CallOutcome> {
+        let evaluated = match self.evaluate_value(value, diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                self.preserve_value_expression(value, diagnostics, context)?
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(value, span)));
+                return Err(CallOutcome::Failed);
+            }
+            CallOutcome::Failed => return Err(CallOutcome::Failed),
+        };
+        number_to_range_endpoint(&evaluated).map_err(|message| {
+            diagnostics.push(iteration_error(message, value_source_span(value, span)));
+            CallOutcome::Failed
+        })
+    }
+
     fn invoke_scoped_lambda(
         &self,
         value: IrValue,
@@ -1869,13 +1949,14 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
-        let (Some(start), Some(end)) = (range.start, range.end) else {
+        let Some(end) = range.end else {
             diagnostics.push(iteration_error(
-                "Open Range iteration is deferred in this Scribium slice".to_string(),
+                "Cannot iterate through an endless Range".to_string(),
                 range.span,
             ));
             return Err(CallOutcome::Failed);
         };
+        let start = range.start.unwrap_or(1);
         self.materialize_closed_range(
             IrRange {
                 start: Some(start),
@@ -1905,17 +1986,8 @@ impl Evaluator {
             // Kotlin IntRange(4, 2), whose iterator is empty.
             return Ok(Vec::new());
         }
-        const MAX_EXACT_F64_INTEGER: u64 = 1 << 53;
-        if start > MAX_EXACT_F64_INTEGER || end > MAX_EXACT_F64_INTEGER {
-            diagnostics.push(iteration_error(
-                "Closed Range endpoint cannot be represented exactly by the evaluator Number type"
-                    .to_string(),
-                range.span,
-            ));
-            return Err(CallOutcome::Failed);
-        }
-        let Some(count) = end
-            .checked_sub(start)
+        let Some(count) = i64::from(end)
+            .checked_sub(i64::from(start))
             .and_then(|distance| distance.checked_add(1))
         else {
             diagnostics.push(iteration_error(
@@ -3079,6 +3151,10 @@ fn is_repeat(name: &str) -> bool {
     name == "repeat"
 }
 
+fn is_range(name: &str) -> bool {
+    name == "range"
+}
+
 fn is_pair(name: &str) -> bool {
     name == "pair"
 }
@@ -3145,6 +3221,49 @@ fn collection_access_operand(
             Err(CallOutcome::Failed)
         }
     }
+}
+
+fn range_arguments(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(Option<IrValue>, Option<IrValue>), CallOutcome> {
+    if positional_args.len() > 2 {
+        diagnostics.push(iteration_error(
+            format!(
+                "`.range` accepts at most two positional bounds (received {})",
+                positional_args.len()
+            ),
+            *span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    let mut start = positional_args.first().cloned();
+    let mut end = positional_args.get(1).cloned();
+    for argument in named_args {
+        let slot = match argument.name.as_str() {
+            "from" => &mut start,
+            "to" => &mut end,
+            _ => {
+                diagnostics.push(iteration_error_at(
+                    format!("Unknown named argument `{}` for `.range`", argument.name),
+                    argument.name_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+        if slot.is_some() {
+            diagnostics.push(iteration_error_at(
+                format!("`.range` received `{}` more than once", argument.name),
+                argument.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(argument.value.clone());
+    }
+    Ok((start, end))
 }
 
 fn getat_operands(
@@ -3360,7 +3479,7 @@ fn scoped_parameter_bindings(
     }
 }
 
-fn repeat_count(value: &IrValue) -> Result<u64, String> {
+fn repeat_count(value: &IrValue) -> Result<i32, String> {
     let IrValue::Number(number) = value else {
         return Err("`.repeat` requires a semantic Number count".to_string());
     };
@@ -3378,8 +3497,31 @@ fn repeat_count(value: &IrValue) -> Result<u64, String> {
     }
     number
         .to_string()
-        .parse::<u64>()
-        .map_err(|_| "`.repeat` count is outside the supported integer range".to_string())
+        .parse::<i64>()
+        .ok()
+        .and_then(|count| i32::try_from(count).ok())
+        .ok_or_else(|| "`.repeat` count is outside the supported integer range".to_string())
+}
+
+/// Converts an evaluator Number to the endpoint type used by Quarkdown's
+/// `Number.toInt()` call. Kotlin truncates toward zero, maps NaN to zero, and
+/// clamps finite or infinite values outside Int's domain to the nearest Int
+/// boundary. The explicit comparisons avoid relying on Rust's float-to-int
+/// cast behavior as language semantics.
+fn number_to_range_endpoint(value: &IrValue) -> Result<i32, String> {
+    let IrValue::Number(number) = value else {
+        return Err("`.range` bounds must be numeric".to_string());
+    };
+    if number.is_nan() {
+        return Ok(0);
+    }
+    if *number <= f64::from(i32::MIN) {
+        return Ok(i32::MIN);
+    }
+    if *number >= f64::from(i32::MAX) {
+        return Ok(i32::MAX);
+    }
+    Ok(number.trunc() as i32)
 }
 
 /// Parses the numeric part of a parser-preserved implicit parameter call.
@@ -4322,6 +4464,353 @@ mod tests {
                     IrValue::Number(4.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn dynamic_range_returns_typed_signed_truncated_endpoints() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 20);
+        let cases = [
+            (
+                vec![IrValue::Number(1.9), IrValue::Number(3.9)],
+                Some(1),
+                Some(3),
+            ),
+            (
+                vec![IrValue::Number(-3.9), IrValue::Number(-1.1)],
+                Some(-3),
+                Some(-1),
+            ),
+            (
+                vec![IrValue::Number(-0.9), IrValue::Number(0.9)],
+                Some(0),
+                Some(0),
+            ),
+        ];
+        for (positional, start, end) in cases {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "range",
+                &positional,
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            assert!(matches!(
+                outcome,
+                CallOutcome::Value(IrValue::Range(IrRange { start: actual_start, end: actual_end, .. }))
+                    if actual_start == start && actual_end == end
+            ));
+        }
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "range",
+            &[],
+            &[named_arg("to", IrValue::Number(3.0))],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Range(IrRange {
+                start: None,
+                end: Some(3),
+                ..
+            }))
+        ));
+
+        let equivalent_forms = [
+            (vec![IrValue::Number(2.0), IrValue::Number(4.0)], Vec::new()),
+            (
+                vec![IrValue::Number(2.0)],
+                vec![named_arg("to", IrValue::Number(4.0))],
+            ),
+            (
+                Vec::new(),
+                vec![
+                    named_arg("from", IrValue::Number(2.0)),
+                    named_arg("to", IrValue::Number(4.0)),
+                ],
+            ),
+        ];
+        for (positional, named) in equivalent_forms {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "range",
+                &positional,
+                &named,
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            assert!(matches!(
+                outcome,
+                CallOutcome::Value(IrValue::Range(IrRange {
+                    start: Some(2),
+                    end: Some(4),
+                    ..
+                }))
+            ));
+        }
+
+        for (positional, named, expected) in [
+            (
+                Vec::new(),
+                Vec::new(),
+                IrRange {
+                    start: None,
+                    end: None,
+                    span: operation_span,
+                },
+            ),
+            (
+                vec![IrValue::Number(2.0)],
+                Vec::new(),
+                IrRange {
+                    start: Some(2),
+                    end: None,
+                    span: operation_span,
+                },
+            ),
+            (
+                Vec::new(),
+                vec![named_arg("from", IrValue::Number(2.0))],
+                IrRange {
+                    start: Some(2),
+                    end: None,
+                    span: operation_span,
+                },
+            ),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "range",
+                &positional,
+                &named,
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let CallOutcome::Value(IrValue::Range(actual)) = outcome else {
+                panic!("expected typed Range")
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn dynamic_range_number_conversion_matches_upstream_edges() {
+        for (number, expected) in [
+            (f64::NAN, 0),
+            (f64::NEG_INFINITY, i32::MIN),
+            (f64::INFINITY, i32::MAX),
+            ((i32::MIN as f64) - 1.0, i32::MIN),
+            ((i32::MAX as f64) + 1.0, i32::MAX),
+            (f64::from(i32::MIN), i32::MIN),
+            (f64::from(i32::MAX), i32::MAX),
+        ] {
+            assert_eq!(
+                number_to_range_endpoint(&IrValue::Number(number)),
+                Ok(expected)
+            );
+        }
+        assert!(number_to_range_endpoint(&IrValue::Boolean(true)).is_err());
+        assert!(number_to_range_endpoint(&IrValue::String("3".to_string())).is_err());
+    }
+
+    #[test]
+    fn range_materialization_handles_signed_and_left_open_bounds_once() {
+        let evaluator = Evaluator::new();
+        for (range, expected) in [
+            (
+                IrRange {
+                    start: Some(-3),
+                    end: Some(-1),
+                    span: span(0, 5),
+                },
+                vec![-3.0, -2.0, -1.0],
+            ),
+            (
+                IrRange {
+                    start: Some(-3),
+                    end: Some(3),
+                    span: span(0, 5),
+                },
+                (-3..=3).map(f64::from).collect(),
+            ),
+            (
+                IrRange {
+                    start: None,
+                    end: Some(3),
+                    span: span(0, 4),
+                },
+                vec![1.0, 2.0, 3.0],
+            ),
+        ] {
+            let mut diagnostics = Vec::new();
+            let Ok(elements) =
+                evaluator.coerce_iterable(IrValue::Range(range), &span(0, 10), &mut diagnostics)
+            else {
+                panic!("finite ranges materialize");
+            };
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            assert_eq!(
+                elements,
+                expected
+                    .into_iter()
+                    .map(IrValue::Number)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        for range in [
+            IrRange {
+                start: None,
+                end: Some(0),
+                span: span(0, 3),
+            },
+            IrRange {
+                start: None,
+                end: Some(-2),
+                span: span(0, 4),
+            },
+            IrRange {
+                start: Some(4),
+                end: Some(2),
+                span: span(0, 4),
+            },
+        ] {
+            let mut diagnostics = Vec::new();
+            let Ok(elements) =
+                evaluator.coerce_iterable(IrValue::Range(range), &span(0, 10), &mut diagnostics)
+            else {
+                panic!("descending or below-default ranges are empty");
+            };
+            assert!(elements.is_empty());
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        let result = evaluator.coerce_iterable(
+            IrValue::Range(IrRange {
+                start: Some(3),
+                end: None,
+                span: span(10, 13),
+            }),
+            &span(0, 20),
+            &mut diagnostics,
+        );
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(span(10, 13)));
+    }
+
+    #[test]
+    fn dynamic_range_remains_typed_inside_collection_and_pair_values() {
+        let evaluator = Evaluator::new();
+        let range = IrValue::Range(IrRange {
+            start: Some(2),
+            end: Some(4),
+            span: span(0, 5),
+        });
+        let collection = IrValue::Collection(vec![range.clone()]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "getat",
+            &[collection, IrValue::Number(1.0)],
+            &[],
+            None,
+            None,
+            &span(0, 10),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(outcome, CallOutcome::Value(value) if value == range));
+
+        let pair = IrValue::Pair(IrPair {
+            first: Box::new(range),
+            second: Box::new(IrValue::String("value".to_string())),
+            span: span(0, 10),
+        });
+        let outcome = evaluator.evaluate_call_value(
+            "first",
+            &[pair],
+            &[],
+            None,
+            None,
+            &span(0, 10),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Value(IrValue::Range(_))));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn dynamic_range_argument_binding_is_checked_before_evaluation() {
+        let evaluator = Evaluator::new();
+        for named in [
+            vec![named_arg("unknown", IrValue::Number(1.0))],
+            vec![
+                named_arg("from", IrValue::Number(1.0)),
+                named_arg("from", IrValue::Number(2.0)),
+            ],
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "range",
+                &[],
+                &named,
+                None,
+                None,
+                &span(0, 20),
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Failed));
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        }
+
+        let failing = call_value(
+            "multiply",
+            vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "range",
+            &[failing],
+            &[],
+            None,
+            None,
+            &span(0, 20),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     }
 
     #[test]
