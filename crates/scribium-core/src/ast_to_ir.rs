@@ -7,7 +7,7 @@
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
 use crate::source::{ByteSpan, SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
@@ -647,6 +647,11 @@ fn value_to_ir(
         Value::Number(n) => crate::ir::IrValue::Number(*n),
         Value::Boolean(b) => crate::ir::IrValue::Boolean(*b),
         Value::Identifier(id) => crate::ir::IrValue::Identifier(id.clone()),
+        Value::Range(range) => crate::ir::IrValue::Range(IrRange {
+            start: range.start,
+            end: range.end,
+            span: byte_to_source_span(&range.span, source_id),
+        }),
         Value::Content(inlines) => {
             if let [Inline::DirectiveCall {
                 name,
@@ -930,6 +935,120 @@ mod tests {
             body.as_slice(),
             [IrNode::FunctionCall { name, .. }] if name == "1"
         ));
+    }
+
+    #[test]
+    fn range_survives_ast_to_ir_as_a_typed_source_backed_value() {
+        for (source, expected_start, expected_end, expected_span) in [
+            (".foreach {2..4}\n    .1\n", Some(2), Some(4), (10, 14)),
+            (".foreach {2..}\n    .1\n", Some(2), None, (10, 13)),
+            (".foreach {..4}\n    .1\n", None, Some(4), (10, 13)),
+            (".foreach {..}\n    .1\n", None, None, (10, 12)),
+        ] {
+            let document = scribium_markdown::parse_qd(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let IrNode::FunctionCall {
+                positional_args,
+                body: Some(_),
+                ..
+            } = &ir.nodes[0]
+            else {
+                panic!("expected foreach call")
+            };
+            assert!(matches!(
+                positional_args.as_slice(),
+                [crate::ir::IrValue::Range(crate::ir::IrRange {
+                    start,
+                    end,
+                    span,
+                })] if *start == expected_start
+                    && *end == expected_end
+                    && *span == SourceSpan::new(source_id(), expected_span.0, expected_span.1)
+            ));
+        }
+    }
+
+    #[test]
+    fn range_span_rebasing_is_preserved_from_markdown_ast_to_ir() {
+        fn ast_range_span(document: &Document) -> ByteSpan {
+            for block in &document.nodes {
+                match block {
+                    Block::DirectiveCall {
+                        positional_args, ..
+                    } => {
+                        if let Some(Value::Range(range)) = positional_args.first() {
+                            return range.span;
+                        }
+                    }
+                    Block::Paragraph { content, .. } => {
+                        for inline in content {
+                            if let Inline::DirectiveCall {
+                                positional_args, ..
+                            } = inline
+                            {
+                                if let Some(Value::Range(range)) = positional_args.first() {
+                                    return range.span;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            panic!("expected Range in Markdown AST")
+        }
+
+        fn ir_range_span(document: &crate::ir::IrDocument) -> SourceSpan {
+            for node in &document.nodes {
+                match node {
+                    IrNode::FunctionCall {
+                        positional_args, ..
+                    } => {
+                        if let Some(crate::ir::IrValue::Range(range)) = positional_args.first() {
+                            return range.span;
+                        }
+                    }
+                    IrNode::Paragraph { content, .. } => {
+                        for inline in content {
+                            if let IrInline::DirectiveCall {
+                                positional_args, ..
+                            } = inline
+                            {
+                                if let Some(crate::ir::IrValue::Range(range)) =
+                                    positional_args.first()
+                                {
+                                    return range.span;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            panic!("expected Range in IR")
+        }
+
+        for source in [
+            "앞 문장\r\n.foreach {2..4}\r\n    .1\r\n",
+            "---\r\ntitle: 값\r\n---\r\n\r\n앞 문장\r\n.foreach {2..4}\r\n    .1\r\n",
+            "앞 .foo {2..4} 뒤\n",
+            "앞 H{.foo {2..4}}O\n",
+        ] {
+            let document = scribium_markdown::parse_qd(source);
+            let ast_span = ast_range_span(&document);
+            assert_eq!(&source[ast_span.start..ast_span.end], "2..4");
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let ir_span = ir_range_span(&ir);
+            assert_eq!(
+                ir_span,
+                SourceSpan::new(source_id(), ast_span.start, ast_span.end)
+            );
+            assert_eq!(&source[ir_span.start..ir_span.end], "2..4");
+        }
     }
 
     #[test]

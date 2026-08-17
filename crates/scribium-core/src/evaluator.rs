@@ -44,7 +44,9 @@
 
 use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
-use crate::ir::{IrCallSegment, IrDocument, IrInline, IrNamedArg, IrNode, IrParameter, IrValue};
+use crate::ir::{
+    IrCallSegment, IrDocument, IrInline, IrNamedArg, IrNode, IrParameter, IrRange, IrValue,
+};
 use crate::source::SourceSpan;
 use scribium_quarkdown::is_valid_normal_call_name;
 use std::collections::BTreeMap;
@@ -188,16 +190,22 @@ enum CallableBodyValueAccumulator {
 }
 
 impl CallableBodyValueAccumulator {
-    fn append_value(&mut self, value: IrValue, span: SourceSpan) {
+    fn append_value(
+        &mut self,
+        value: IrValue,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<(), CallOutcome> {
         if matches!(self, Self::Empty) {
             *self = Self::Semantic { value, span };
-            return;
+            return Ok(());
         }
 
         let current = std::mem::replace(self, Self::Empty);
-        let mut nodes = current.into_content_nodes();
-        nodes.extend(value_into_content_nodes(value, span));
+        let mut nodes = current.into_content_nodes(diagnostics)?;
+        nodes.extend(value_into_content_nodes(value, span, diagnostics)?);
         *self = Self::Content(nodes);
+        Ok(())
     }
 
     fn finish(self) -> CallOutcome {
@@ -208,25 +216,54 @@ impl CallableBodyValueAccumulator {
         }
     }
 
-    fn into_content_nodes(self) -> Vec<IrNode> {
+    fn into_content_nodes(
+        self,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         match self {
-            Self::Empty => Vec::new(),
-            Self::Semantic { value, span } => value_into_content_nodes(value, span),
-            Self::Content(nodes) => nodes,
+            Self::Empty => Ok(Vec::new()),
+            Self::Semantic { value, span } => value_into_content_nodes(value, span, diagnostics),
+            Self::Content(nodes) => Ok(nodes),
         }
     }
 }
 
-fn value_into_content_nodes(value: IrValue, span: SourceSpan) -> Vec<IrNode> {
+fn value_into_content_nodes(
+    value: IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Vec<IrNode>, CallOutcome> {
     match value {
-        IrValue::Content(nodes) => nodes,
-        scalar => vec![IrNode::Paragraph {
-            content: vec![IrInline::Text {
-                content: scalar_to_text(&scalar),
+        IrValue::Content(nodes) => Ok(nodes),
+        IrValue::Collection(values) => {
+            let mut nodes = Vec::new();
+            if let Err(error) = nodes.try_reserve(values.len()) {
+                diagnostics.push(iteration_error(
+                    format!("collection content cannot be allocated: {error}"),
+                    span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            for value in values {
+                nodes.extend(value_into_content_nodes(value, span, diagnostics)?);
+            }
+            Ok(nodes)
+        }
+        IrValue::Range(range) => {
+            diagnostics.push(iteration_error(
+                "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                    .to_string(),
+                range.span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        scalar => match scalar_to_text(&scalar, span, diagnostics) {
+            Ok(content) => Ok(vec![IrNode::Paragraph {
+                content: vec![IrInline::Text { content, span }],
                 span,
-            }],
-            span,
-        }],
+            }]),
+            Err(outcome) => Err(outcome),
+        },
     }
 }
 
@@ -445,7 +482,7 @@ impl Evaluator {
                 lambda_parameters,
                 body,
                 span,
-            } => self.evaluate_block_call(
+            } => match self.evaluate_block_call(
                 name,
                 positional_args,
                 named_args,
@@ -454,13 +491,21 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
-            ),
+            ) {
+                CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
+                CallOutcome::Unresolved => Vec::new(),
+            },
             IrNode::ChainedFunctionCall {
                 head,
                 chain,
                 body,
                 span,
-            } => self.evaluate_block_chain(head, chain, body, span, diagnostics, context),
+            } => match self.evaluate_block_chain(head, chain, body, span, diagnostics, context) {
+                CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
+                CallOutcome::Unresolved => Vec::new(),
+            },
             IrNode::Heading {
                 level,
                 content,
@@ -628,7 +673,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
+    ) -> CallOutcome {
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -639,21 +684,27 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
-            CallOutcome::Value(value) => self.materialize_block_value(Some(value), span),
-            CallOutcome::NoValue => Vec::new(),
-            CallOutcome::Failed => Vec::new(),
-            CallOutcome::Unresolved => self
-                .preserve_block_call(
-                    name,
-                    positional_args,
-                    named_args,
-                    lambda_parameters,
-                    body,
-                    span,
-                    diagnostics,
-                    context,
-                )
-                .unwrap_or_default(),
+            CallOutcome::Value(value) => {
+                match self.materialize_block_value(value, span, diagnostics) {
+                    Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                    Err(outcome) => outcome,
+                }
+            }
+            CallOutcome::NoValue => CallOutcome::NoValue,
+            CallOutcome::Failed => CallOutcome::Failed,
+            CallOutcome::Unresolved => match self.preserve_block_call(
+                name,
+                positional_args,
+                named_args,
+                lambda_parameters,
+                body,
+                span,
+                diagnostics,
+                context,
+            ) {
+                Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                Err(outcome) => outcome,
+            },
         }
     }
 
@@ -707,7 +758,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
-    ) -> Vec<IrNode> {
+    ) -> CallOutcome {
         match self.evaluate_chain_value(
             head,
             chain,
@@ -715,8 +766,15 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
-            CallOutcome::Value(value) => self.materialize_block_value(Some(value), span),
-            CallOutcome::NoValue | CallOutcome::Failed | CallOutcome::Unresolved => Vec::new(),
+            CallOutcome::Value(value) => {
+                match self.materialize_block_value(value, span, diagnostics) {
+                    Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
+                    Err(outcome) => outcome,
+                }
+            }
+            CallOutcome::NoValue => CallOutcome::NoValue,
+            CallOutcome::Failed => CallOutcome::Failed,
+            CallOutcome::Unresolved => CallOutcome::Unresolved,
         }
     }
 
@@ -797,6 +855,30 @@ impl Evaluator {
 
         if is_let(name) {
             return self.evaluate_let(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if is_foreach(name) {
+            return self.evaluate_foreach(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if is_repeat(name) {
+            return self.evaluate_repeat(
                 positional_args,
                 named_args,
                 body,
@@ -965,6 +1047,200 @@ impl Evaluator {
             CallOutcome::Failed => return CallOutcome::Failed,
         };
 
+        self.invoke_scoped_lambda(value, lambda_parameters, body, diagnostics, context)
+    }
+
+    /// Evaluates block-form `.foreach` as a typed map over one iterable.
+    /// The iterable is resolved before any child scope is created and exactly
+    /// once; every mapped element gets a fresh invocation-local child scope.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_foreach(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if positional_args.len() != 1 {
+            diagnostics.push(iteration_error(
+                format!(
+                    "`.foreach` requires exactly one positional iterable argument (received {})",
+                    positional_args.len()
+                ),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(iteration_error_at(
+                format!("Unknown named argument `{}` for `.foreach`", argument.name),
+                argument.name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let body = match body {
+            Some(CallBody::Block(nodes)) => nodes,
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.foreach` supports only the block lambda form in this slice".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(iteration_error(
+                    "`.foreach` requires a block lambda body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        if !validate_iteration_lambda(lambda_parameters, ".foreach", span, diagnostics) {
+            return CallOutcome::Failed;
+        }
+
+        let value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                }
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(
+                    &positional_args[0],
+                    span,
+                )));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+        };
+        let elements = match self.coerce_iterable(value, span, diagnostics) {
+            Ok(elements) => elements,
+            Err(outcome) => return outcome,
+        };
+        self.map_iteration_values(
+            &elements,
+            lambda_parameters,
+            body,
+            *span,
+            diagnostics,
+            context,
+        )
+    }
+
+    /// Evaluates `.repeat` through the same iteration engine as `.foreach`.
+    /// The count is a checked semantic integer, and indices are one-based.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_repeat(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if positional_args.len() != 1 {
+            diagnostics.push(iteration_error(
+                format!(
+                    "`.repeat` requires exactly one positional count argument (received {})",
+                    positional_args.len()
+                ),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(iteration_error_at(
+                format!("Unknown named argument `{}` for `.repeat`", argument.name),
+                argument.name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let body = match body {
+            Some(CallBody::Block(nodes)) => nodes,
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.repeat` supports only the block lambda form in this slice".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(iteration_error(
+                    "`.repeat` requires a block lambda body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        if !validate_iteration_lambda(lambda_parameters, ".repeat", span, diagnostics) {
+            return CallOutcome::Failed;
+        }
+
+        let count_value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                }
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(
+                    &positional_args[0],
+                    span,
+                )));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+        };
+        let count = match repeat_count(&count_value) {
+            Ok(count) => count,
+            Err(message) => {
+                diagnostics.push(iteration_error(
+                    message,
+                    value_source_span(&count_value, span),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let elements = match self.materialize_closed_range(
+            IrRange {
+                start: Some(1),
+                end: Some(count),
+                span: *span,
+            },
+            span,
+            diagnostics,
+        ) {
+            Ok(elements) => elements,
+            Err(outcome) => return outcome,
+        };
+        self.map_iteration_values(
+            &elements,
+            lambda_parameters,
+            body,
+            *span,
+            diagnostics,
+            context,
+        )
+    }
+
+    fn invoke_scoped_lambda(
+        &self,
+        value: IrValue,
+        lambda_parameters: Option<&[IrParameter]>,
+        body: &[IrNode],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
         let mut child = context.child();
         match lambda_parameters {
             Some(parameters) => {
@@ -973,8 +1249,198 @@ impl Evaluator {
             }
             None => child.set_lambda_scope(LambdaScope::Implicit(vec![value])),
         }
-
         self.evaluate_callable_body_value(body, diagnostics, &mut child)
+    }
+
+    fn map_iteration_values(
+        &self,
+        elements: &[IrValue],
+        lambda_parameters: Option<&[IrParameter]>,
+        body: &[IrNode],
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let mut results = Vec::new();
+        if let Err(error) = results.try_reserve_exact(elements.len()) {
+            diagnostics.push(iteration_error(
+                format!("iteration result collection cannot be allocated: {error}"),
+                span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for element in elements {
+            match self.invoke_scoped_lambda(
+                element.clone(),
+                lambda_parameters,
+                body,
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) => results.push(value),
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(span));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            }
+        }
+        CallOutcome::Value(IrValue::Collection(results))
+    }
+
+    fn coerce_iterable(
+        &self,
+        value: IrValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrValue>, CallOutcome> {
+        match value {
+            IrValue::Collection(values) => Ok(values),
+            IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
+            IrValue::Content(nodes) => match nodes.as_slice() {
+                [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
+                    let mut values = Vec::new();
+                    if let Err(error) = values.try_reserve_exact(items.len()) {
+                        diagnostics.push(iteration_error(
+                            format!("list collection cannot be allocated: {error}"),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                    for item in items {
+                        values.push(self.list_item_value(item, span, diagnostics)?);
+                    }
+                    Ok(values)
+                }
+                _ => {
+                    diagnostics.push(iteration_error(
+                        "`.foreach` requires a Range, Collection, or exactly one Markdown list value"
+                            .to_string(),
+                        *span,
+                    ));
+                    Err(CallOutcome::Failed)
+                }
+            },
+            _ => {
+                diagnostics.push(iteration_error(
+                    "`.foreach` requires a Range, Collection, or exactly one Markdown list value"
+                        .to_string(),
+                    *span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+        }
+    }
+
+    fn list_item_value(
+        &self,
+        item: &crate::ir::IrListItem,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<IrValue, CallOutcome> {
+        match item.nodes.as_slice() {
+            [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
+                .coerce_iterable(IrValue::Content(item.nodes.clone()), span, diagnostics)
+                .map(IrValue::Collection),
+            _ => Ok(IrValue::Content(item.nodes.clone())),
+        }
+    }
+
+    fn materialize_range(
+        &self,
+        range: IrRange,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrValue>, CallOutcome> {
+        let (Some(start), Some(end)) = (range.start, range.end) else {
+            diagnostics.push(iteration_error(
+                "Open Range iteration is deferred in this Scribium slice".to_string(),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        self.materialize_closed_range(
+            IrRange {
+                start: Some(start),
+                end: Some(end),
+                span: range.span,
+            },
+            span,
+            diagnostics,
+        )
+    }
+
+    fn materialize_closed_range(
+        &self,
+        range: IrRange,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrValue>, CallOutcome> {
+        let (Some(start), Some(end)) = (range.start, range.end) else {
+            diagnostics.push(iteration_error(
+                "Internal error: a closed range requires both endpoints".to_string(),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        if start > end {
+            // Verified against Quarkdown v2.5.1: Range(4, 2) delegates to
+            // Kotlin IntRange(4, 2), whose iterator is empty.
+            return Ok(Vec::new());
+        }
+        const MAX_EXACT_F64_INTEGER: u64 = 1 << 53;
+        if start > MAX_EXACT_F64_INTEGER || end > MAX_EXACT_F64_INTEGER {
+            diagnostics.push(iteration_error(
+                "Closed Range endpoint cannot be represented exactly by the evaluator Number type"
+                    .to_string(),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        let Some(count) = end
+            .checked_sub(start)
+            .and_then(|distance| distance.checked_add(1))
+        else {
+            diagnostics.push(iteration_error(
+                "Closed Range cardinality overflowed the supported integer domain".to_string(),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let Ok(capacity) = usize::try_from(count) else {
+            diagnostics.push(iteration_error(
+                "Closed Range is too large to materialize on this target".to_string(),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let mut values = Vec::new();
+        if let Err(error) = values.try_reserve_exact(capacity) {
+            diagnostics.push(iteration_error(
+                format!("Closed Range cannot be materialized: {error}"),
+                range.span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        let mut current = start;
+        loop {
+            values.push(IrValue::Number(current as f64));
+            if current == end {
+                break;
+            }
+            current = match current.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    diagnostics.push(iteration_error(
+                        "Closed Range iteration overflowed its endpoint".to_string(),
+                        range.span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+            };
+        }
+        Ok(values)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1157,7 +1623,11 @@ impl Evaluator {
         for node in nodes {
             let span = ir_node_source_span(node);
             match self.evaluate_callable_statement_value(node, diagnostics, context) {
-                CallOutcome::Value(value) => result.append_value(value, span),
+                CallOutcome::Value(value) => {
+                    if let Err(outcome) = result.append_value(value, span, diagnostics) {
+                        return outcome;
+                    }
+                }
                 CallOutcome::NoValue => {}
                 CallOutcome::Failed => return CallOutcome::Failed,
                 CallOutcome::Unresolved => return CallOutcome::Unresolved,
@@ -1435,7 +1905,10 @@ impl Evaluator {
         context: &mut EvaluationContext,
     ) -> CallOutcome {
         match self.evaluate_value(value, diagnostics, context) {
-            CallOutcome::Value(value) => CallOutcome::Value(self.scalar_or_content(value, span)),
+            CallOutcome::Value(value) => match self.scalar_or_content(value, span, diagnostics) {
+                Ok(value) => CallOutcome::Value(value),
+                Err(outcome) => outcome,
+            },
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(value_source_span(value, span)));
                 CallOutcome::Failed
@@ -1443,23 +1916,49 @@ impl Evaluator {
             CallOutcome::Failed => CallOutcome::Failed,
             CallOutcome::Unresolved => {
                 match self.preserve_value_expression(value, diagnostics, context) {
-                    Ok(value) => CallOutcome::Value(self.scalar_or_content(value, span)),
+                    Ok(value) => match self.scalar_or_content(value, span, diagnostics) {
+                        Ok(value) => CallOutcome::Value(value),
+                        Err(outcome) => outcome,
+                    },
                     Err(outcome) => outcome,
                 }
             }
         }
     }
 
-    fn scalar_or_content(&self, value: IrValue, span: &SourceSpan) -> IrValue {
+    fn scalar_or_content(
+        &self,
+        value: IrValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<IrValue, CallOutcome> {
         match value {
-            IrValue::Content(nodes) => IrValue::Content(nodes),
-            scalar => IrValue::Content(vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(&scalar),
-                    span: *span,
-                }],
-                span: *span,
-            }]),
+            IrValue::Content(nodes) => Ok(IrValue::Content(nodes)),
+            value => value_into_content_nodes(value, *span, diagnostics).map(IrValue::Content),
+        }
+    }
+
+    fn validate_preserved_value(
+        &self,
+        value: &IrValue,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<(), CallOutcome> {
+        match value {
+            IrValue::Range(range) => {
+                diagnostics.push(iteration_error(
+                    "A typed Range cannot be preserved as an unresolved call argument; consume it through iteration first"
+                        .to_string(),
+                    range.span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+            IrValue::Collection(values) => {
+                for value in values {
+                    self.validate_preserved_value(value, diagnostics)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -1504,7 +2003,10 @@ impl Evaluator {
                     Err(CallOutcome::Failed)
                 }
             }
-            scalar => Ok(scalar.clone()),
+            scalar => {
+                self.validate_preserved_value(scalar, diagnostics)?;
+                Ok(scalar.clone())
+            }
         }
     }
 
@@ -1578,17 +2080,47 @@ impl Evaluator {
         }])
     }
 
-    fn materialize_block_value(&self, value: Option<IrValue>, span: &SourceSpan) -> Vec<IrNode> {
+    fn materialize_block_value(
+        &self,
+        value: IrValue,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         match value {
-            Some(IrValue::Content(nodes)) => nodes,
-            Some(value) => vec![IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: scalar_to_text(&value),
+            IrValue::Content(nodes) => Ok(nodes),
+            IrValue::Collection(values) => {
+                let mut nodes = Vec::new();
+                for value in values {
+                    let materialized = self.materialize_block_value(value, span, diagnostics)?;
+                    if let Err(error) = nodes.try_reserve(materialized.len()) {
+                        diagnostics.push(iteration_error(
+                            format!("collection output cannot be allocated: {error}"),
+                            *span,
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                    nodes.extend(materialized);
+                }
+                Ok(nodes)
+            }
+            IrValue::Range(range) => {
+                diagnostics.push(iteration_error(
+                    "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                        .to_string(),
+                    range.span,
+                ));
+                Err(CallOutcome::Failed)
+            }
+            value => match scalar_to_text(&value, *span, diagnostics) {
+                Ok(content) => Ok(vec![IrNode::Paragraph {
+                    content: vec![IrInline::Text {
+                        content,
+                        span: *span,
+                    }],
                     span: *span,
-                }],
-                span: *span,
-            }],
-            None => Vec::new(),
+                }]),
+                Err(outcome) => Err(outcome),
+            },
         }
     }
 
@@ -1602,10 +2134,33 @@ impl Evaluator {
             Some(IrValue::Content(nodes)) => {
                 self.materialize_inline_content(nodes, span, diagnostics)
             }
-            Some(value) => vec![IrInline::Text {
-                content: scalar_to_text(&value),
-                span: *span,
-            }],
+            Some(IrValue::Collection(values)) => {
+                if values.len() != 1 {
+                    diagnostics.push(function_error(
+                        "A Collection cannot be flattened into inline content unless it has exactly one element"
+                            .to_string(),
+                        *span,
+                    ));
+                    Vec::new()
+                } else {
+                    self.materialize_inline_value(values.into_iter().next(), span, diagnostics)
+                }
+            }
+            Some(IrValue::Range(range)) => {
+                diagnostics.push(iteration_error(
+                    "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                        .to_string(),
+                    range.span,
+                ));
+                Vec::new()
+            }
+            Some(value) => match scalar_to_text(&value, *span, diagnostics) {
+                Ok(content) => vec![IrInline::Text {
+                    content,
+                    span: *span,
+                }],
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -1710,7 +2265,28 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Result<Vec<IrValue>, CallOutcome> {
-        self.evaluate_values_for_preservation(values, span, diagnostics, context)
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(values.len()) {
+            diagnostics.push(iteration_error(
+                format!("call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for value in values {
+            match self.evaluate_value(value, diagnostics, context) {
+                CallOutcome::Value(value) => evaluated.push(value),
+                CallOutcome::Unresolved => {
+                    evaluated.push(self.preserve_value_expression(value, diagnostics, context)?)
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            }
+        }
+        Ok(evaluated)
     }
 
     fn evaluate_named(
@@ -1720,7 +2296,34 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Result<Vec<IrNamedArg>, CallOutcome> {
-        self.evaluate_named_for_preservation(named, span, diagnostics, context)
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(named.len()) {
+            diagnostics.push(iteration_error(
+                format!("named call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for arg in named {
+            let value = match self.evaluate_value(&arg.value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    self.preserve_value_expression(&arg.value, diagnostics, context)?
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(&arg.value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            };
+            evaluated.push(IrNamedArg {
+                name: arg.name.clone(),
+                name_span: arg.name_span,
+                value,
+                span: arg.span,
+            });
+        }
+        Ok(evaluated)
     }
 
     fn evaluate_values_for_preservation(
@@ -1733,7 +2336,10 @@ impl Evaluator {
         let mut evaluated = Vec::with_capacity(values.len());
         for value in values {
             match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => evaluated.push(value),
+                CallOutcome::Value(value) => {
+                    self.validate_preserved_value(&value, diagnostics)?;
+                    evaluated.push(value);
+                }
                 CallOutcome::Unresolved => {
                     evaluated.push(self.preserve_value_expression(value, diagnostics, context)?)
                 }
@@ -1757,7 +2363,10 @@ impl Evaluator {
         let mut evaluated = Vec::with_capacity(named.len());
         for arg in named {
             let value = match self.evaluate_value(&arg.value, diagnostics, context) {
-                CallOutcome::Value(value) => value,
+                CallOutcome::Value(value) => {
+                    self.validate_preserved_value(&value, diagnostics)?;
+                    value
+                }
                 CallOutcome::Unresolved => {
                     self.preserve_value_expression(&arg.value, diagnostics, context)?
                 }
@@ -1786,6 +2395,61 @@ fn is_conditional(name: &str) -> bool {
 /// Returns true for the scoped `.let` semantic form.
 fn is_let(name: &str) -> bool {
     name == "let"
+}
+
+fn is_foreach(name: &str) -> bool {
+    name == "foreach"
+}
+
+fn is_repeat(name: &str) -> bool {
+    name == "repeat"
+}
+
+fn validate_iteration_lambda(
+    parameters: Option<&[IrParameter]>,
+    name: &str,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    if let Some(parameters) = parameters {
+        if parameters.len() != 1 {
+            let parameter_span = parameters
+                .get(1)
+                .or_else(|| parameters.first())
+                .map(|parameter| parameter.span)
+                .unwrap_or(*span);
+            diagnostics.push(iteration_error_at(
+                format!(
+                    "`.{name}` requires exactly one explicit parameter; destructuring is not supported in this slice"
+                ),
+                parameter_span,
+            ));
+            return false;
+        }
+    }
+    true
+}
+
+fn repeat_count(value: &IrValue) -> Result<u64, String> {
+    let IrValue::Number(number) = value else {
+        return Err("`.repeat` requires a semantic Number count".to_string());
+    };
+    if !number.is_finite() {
+        return Err("`.repeat` count must be finite".to_string());
+    }
+    if *number < 0.0 {
+        return Err("`.repeat` count must not be negative".to_string());
+    }
+    if number.fract() != 0.0 {
+        return Err("`.repeat` count must be an integer".to_string());
+    }
+    if *number == 0.0 {
+        return Ok(0);
+    }
+    number
+        .to_string()
+        .parse::<u64>()
+        .map_err(|_| "`.repeat` count is outside the supported integer range".to_string())
 }
 
 /// Parses the numeric part of a parser-preserved implicit parameter call.
@@ -1898,6 +2562,24 @@ fn no_value_required(span: SourceSpan) -> Diagnostic {
         "Call produced no value where a value is required for semantic composition".to_string(),
         span,
     )
+}
+
+fn iteration_error(message: String, span: SourceSpan) -> Diagnostic {
+    iteration_error_at(message, span)
+}
+
+fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Iteration values remain typed; unsupported or invalid iteration is not fabricated as text."
+                .to_string(),
+        ],
+    }
 }
 
 /// Resolves a value to a boolean, handling variable references.
@@ -2022,14 +2704,43 @@ fn invalid_var_name(name: &str, span: &SourceSpan) -> Diagnostic {
 }
 
 /// Renders a scalar argument as plain text.
-fn scalar_to_text(value: &IrValue) -> String {
+///
+/// Range and Collection are semantic values, not scalar text. Reaching this
+/// helper with either variant is an explicit materialization failure rather
+/// than an empty-string fallback.
+fn scalar_to_text(
+    value: &IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<String, CallOutcome> {
     match value {
-        IrValue::String(text) => text.clone(),
-        IrValue::Number(number) => number.to_string(),
-        IrValue::Boolean(boolean) => boolean.to_string(),
-        IrValue::Identifier(name) => name.clone(),
-        IrValue::Content(_) => String::new(),
-        IrValue::None => "None".to_string(),
+        IrValue::String(text) => Ok(text.clone()),
+        IrValue::Number(number) => Ok(number.to_string()),
+        IrValue::Boolean(boolean) => Ok(boolean.to_string()),
+        IrValue::Identifier(name) => Ok(name.clone()),
+        IrValue::None => Ok("None".to_string()),
+        IrValue::Content(_) => {
+            diagnostics.push(iteration_error(
+                "Rich content cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Range(range) => {
+            diagnostics.push(iteration_error(
+                "Direct Range materialization is deferred; consume the typed Range through iteration first"
+                    .to_string(),
+                range.span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Collection(_) => {
+            diagnostics.push(iteration_error(
+                "Collection cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
     }
 }
 
@@ -2421,6 +3132,21 @@ mod tests {
         IrValue::Content(vec![let_call(Some(value), lambda_parameters, Some(body))])
     }
 
+    fn foreach_call(
+        value: IrValue,
+        lambda_parameters: Option<Vec<IrParameter>>,
+        body: Vec<IrNode>,
+    ) -> IrNode {
+        IrNode::FunctionCall {
+            name: "foreach".to_string(),
+            positional_args: vec![value],
+            named_args: Vec::new(),
+            lambda_parameters,
+            body: Some(body),
+            span: span(0, 20),
+        }
+    }
+
     fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
         let [IrNode::Paragraph { content, .. }] = nodes else {
             panic!("expected one paragraph, got {nodes:?}");
@@ -2622,6 +3348,159 @@ mod tests {
         assert!(nodes.is_empty());
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E3003");
+    }
+
+    #[test]
+    fn foreach_returns_a_typed_collection_before_output_materialization() {
+        let evaluator = Evaluator::new();
+        let range = IrValue::Range(IrRange {
+            start: Some(2),
+            end: Some(4),
+            span: span(0, 5),
+        });
+        let body = vec![var_ref("n")];
+        let parameters = vec![lambda_parameter("n", 10)];
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "foreach",
+            &[range],
+            &[],
+            Some(CallBody::Block(&body)),
+            Some(&parameters),
+            &span(0, 10),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![
+                    IrValue::Number(2.0),
+                    IrValue::Number(3.0),
+                    IrValue::Number(4.0),
+                ]
+        ));
+    }
+
+    #[test]
+    fn block_materialization_of_mixed_collection_is_fail_fast_and_atomic() {
+        let range_span = span(10, 14);
+        let value = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Range(IrRange {
+                start: Some(2),
+                end: Some(4),
+                span: range_span,
+            }),
+            IrValue::Number(5.0),
+        ]);
+        let mut diagnostics = Vec::new();
+        let result =
+            Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics);
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn block_materialization_of_nested_range_is_fail_fast_and_atomic() {
+        let range_span = span(10, 14);
+        let value = IrValue::Collection(vec![IrValue::Collection(vec![IrValue::Range(IrRange {
+            start: Some(2),
+            end: Some(4),
+            span: range_span,
+        })])]);
+        let mut diagnostics = Vec::new();
+        let result =
+            Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics);
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn block_materialization_of_normal_collection_preserves_order() {
+        let value = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Number(2.0),
+            IrValue::Number(3.0),
+        ]);
+        let mut diagnostics = Vec::new();
+        let nodes =
+            match Evaluator::new().materialize_block_value(value, &span(0, 20), &mut diagnostics) {
+                Ok(nodes) => nodes,
+                Err(_) => panic!("normal Collection should materialize"),
+            };
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(nodes.len(), 3);
+        for (node, expected) in nodes.iter().zip(["1", "2", "3"]) {
+            let IrNode::Paragraph { content, .. } = node else {
+                panic!("expected scalar paragraph, got {node:?}")
+            };
+            assert!(matches!(
+                content.as_slice(),
+                [IrInline::Text { content, .. }] if content == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn foreach_empty_collection_does_not_invoke_the_body() {
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![foreach_call(
+            IrValue::Collection(Vec::new()),
+            None,
+            vec![var_ref("2")],
+        )]);
+        assert!(nodes.is_empty());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn foreach_nested_iterable_expression_flows_through_one_value_context() {
+        let nested = foreach_call(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span: span(0, 4),
+            }),
+            None,
+            vec![var_ref("1")],
+        );
+        let outer = foreach_call(IrValue::Content(vec![nested]), None, vec![var_ref("1")]);
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![outer]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_paragraph_text(&nodes[0..1], "1");
+        assert_paragraph_text(&nodes[1..2], "2");
+    }
+
+    #[test]
+    fn foreach_local_function_does_not_leak_to_parent() {
+        let local = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("local".to_string()),
+            parameters: Vec::new(),
+            body: vec![text_paragraph("inside")],
+            span: span(20, 25),
+        };
+        let foreach = IrNode::FunctionCall {
+            name: "foreach".to_string(),
+            positional_args: vec![IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span: span(0, 4),
+            })],
+            named_args: Vec::new(),
+            lambda_parameters: Some(vec![lambda_parameter("n", 10)]),
+            body: Some(vec![local, var_ref("n")]),
+            span: span(0, 20),
+        };
+        let (nodes, diagnostics) = evaluate_with_diagnostics(vec![foreach, var_ref("local")]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            nodes.last(),
+            Some(IrNode::FunctionCall { name, .. }) if name == "local"
+        ));
     }
 
     #[test]

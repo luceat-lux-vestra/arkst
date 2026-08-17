@@ -588,6 +588,208 @@ mod tests {
     }
 
     #[test]
+    fn compile_foreach_closed_range_is_inclusive_and_preserves_numbers() {
+        for source in [
+            ".foreach {2..4}\n    number:\n    .number\n",
+            ".foreach {2..4}\n    .1\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{result:?}");
+            assert_eq!(output_text(&result), "2\n3\n4");
+        }
+    }
+
+    #[test]
+    fn compile_foreach_repeated_range_results_fail_once_at_output_boundary() {
+        let source = ".foreach {1..3}\n    .let {2..4}\n        .1\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_direct_range_output_reports_one_source_backed_failure() {
+        let source = ".var {r} {2..4}\n.r\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_range_composition_fails_without_fabricating_empty_content() {
+        let source = ".let {ignored}\n    .var {r} {2..4}\n    .r\n    tail\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_collection_composition_materializes_in_order_without_stringifying() {
+        let source = ".let {ignored}\n    .var {c}\n        .foreach {1..2}\n            .1\n    .c\n    tail\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\ntail");
+    }
+
+    #[test]
+    fn compile_unresolved_range_argument_fails_before_typst_lowering() {
+        let source = ".foo {2..4}\n";
+        let (result, source_id) = compile_source(source);
+        let range_start = source.find("2..4").expect("range literal");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                range_start,
+                range_start + "2..4".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed() {
+        let source = ".var {mapped}\n    .foreach {1..3}\n        n:\n        .multiply {.n} by:{2}\n\n.mapped\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n4\n6");
+        assert!(matches!(
+            result.ir.nodes.as_slice(),
+            [
+                IrNode::Paragraph { .. },
+                IrNode::Paragraph { .. },
+                IrNode::Paragraph { .. }
+            ]
+        ));
+    }
+
+    #[test]
+    fn compile_foreach_reads_parent_values_and_functions_with_isolated_children() {
+        let source = ".var {prefix} {item}\n.function {square}\n    n:\n    .multiply {.n} by:{.n}\n\n.foreach {1..3}\n    n:\n    .prefix .square {.n}\n\n.foreach {1..2}\n    n:\n    .var {local} {.n}\n    .local\n\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "item 1\nitem 4\nitem 9\n1\n2");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .any(|node| { matches!(node, IrNode::FunctionCall { name, .. } if name == "local") }));
+    }
+
+    #[test]
+    fn compile_foreach_adapts_only_list_values_and_preserves_nested_collections() {
+        let source = ".var {letters}\n    1. A\n    2. B\n    3. C\n\n.foreach {.letters}\n    .1::lowercase\n\n.var {matrix}\n    - - A\n      - B\n    - - C\n      - D\n\n.foreach {.matrix}\n    .1\n\n- ordinary\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "a\nb\nc\nA\nB\nC\nD");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .any(|node| { matches!(node, IrNode::UnorderedList { .. }) }));
+    }
+
+    #[test]
+    fn compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary() {
+        let implicit = ".let {outer}\n    .foreach {1..2}\n        .1\n";
+        let (result, _) = compile_source(implicit);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2");
+
+        let explicit = ".let {outer}\n    .foreach {1..2}\n        n:\n        .1\n";
+        let (result, _) = compile_source(explicit);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+    }
+
+    #[test]
+    fn compile_repeat_is_one_based_and_uses_the_shared_collection_result() {
+        for source in [".repeat {3}\n    n:\n    .n\n", ".repeat {3}\n    .1\n"] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{result:?}");
+            assert_eq!(output_text(&result), "1\n2\n3");
+        }
+    }
+
+    #[test]
+    fn compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence() {
+        for source in [".repeat {0}\n    .1\n", ".foreach {4..2}\n    .1\n"] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{result:?}");
+            assert!(result.ir.nodes.is_empty());
+        }
+    }
+
+    #[test]
+    fn compile_iteration_rejects_open_ranges_invalid_counts_and_destructuring() {
+        for source in [
+            ".foreach {2..}\n    .1\n",
+            ".foreach {..4}\n    .1\n",
+            ".foreach {..}\n    .1\n",
+            ".repeat {1.5}\n    .1\n",
+            ".repeat {-1}\n    .1\n",
+            ".foreach {1..2}\n    first second:\n    .first\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+        }
+    }
+
+    #[test]
+    fn compile_iteration_body_no_value_and_failure_are_single_diagnostics() {
+        for source in [
+            ".foreach {1..3}\n    n:\n    .var {local} {.n}\n",
+            ".foreach {1..3}\n    n:\n    .multiply {.n} by:{true}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn compile_iteration_fixture_qd_exercises_the_document_boundary() {
+        let source = include_str!("../../../fixtures/markdown/quarkdown_iteration.qd");
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n3\n4\n1\n2\n3\na\nb\nc");
+    }
+
+    #[test]
     fn compile_let_reports_arity_and_implicit_parameter_spans() {
         let missing_value = ".let\n    value:\n    .value\n";
         let (result, source_id) = compile_source(missing_value);

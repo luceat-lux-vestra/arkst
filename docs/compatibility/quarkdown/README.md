@@ -56,7 +56,7 @@ provenance records.
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form; inline lambda values deferred) |
 | Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
-| Iteration                      | —                                | —                        | Planned          |
+| Iteration                      | typed `Range` / `Collection`; block `.foreach` and `.repeat` | Semantically supported for the evidenced first slice | Implemented (evidenced slice; open ranges/destructuring deferred) |
 | Functions/components            | —                                | —                        | Planned          |
 | Include/read                   | —                                | —                        | Planned          |
 | Metadata                       | —                                | —                        | Planned          |
@@ -135,6 +135,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
 | User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_non_lambda_body_with_colon_is_not_stripped`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
 | Scoped `.let`                | `scribium-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `scribium-core/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `scribium-core/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `scribium-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |
+| Iteration                    | `scribium-quarkdown/src/lib.rs::parses_typed_ranges_without_confusing_numbers_or_references`; `scribium-markdown/src/parser.rs::iteration_lambda_headers_are_contextual_and_source_backed`; `scribium-core/src/ast_to_ir.rs::range_survives_ast_to_ir_as_a_typed_source_backed_value`; `scribium-core/src/ir.rs::range_and_nested_collection_roundtrip_serde`; `scribium-core/src/lib.rs::compile_foreach_closed_range_is_inclusive_and_preserves_numbers`, `compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed`, `compile_foreach_reads_parent_values_and_functions_with_isolated_children`, `compile_foreach_adapts_only_list_values_and_preserves_nested_collections`, `compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary`, `compile_repeat_is_one_based_and_uses_the_shared_collection_result`, `compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence`, `compile_iteration_rejects_open_ranges_invalid_counts_and_destructuring`, `compile_iteration_body_no_value_and_failure_are_single_diagnostics` | Semantically supported for typed values, finite closed ascending ranges, descending-empty behavior, ordered list adaptation, block explicit/implicit one-parameter lambdas, typed collection results, parent visibility, and child isolation | Implemented (evidenced first slice) |
 | Optional parameter values      | `scribium-core/src/ir.rs::none_uses_the_stable_externally_tagged_serde_variant`, `scribium-core/src/lib.rs::compile_optional_parameters_support_otherwise_and_preserve_value_types`, `compile_optional_none_is_distinct_from_no_value`, `compile_optional_none_can_be_stored_locally_without_parent_scope_leak`, `compile_optional_none_direct_output_materializes_as_text`, `compile_isnone_returns_a_semantic_boolean_for_optional_values` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 
@@ -201,8 +202,39 @@ and the small `.otherwise`/`.isnone` builtin surface. Scoped `.let` is
 supported for block-form explicit one-parameter and headerless `.1` lambdas,
 including nested lexical scopes, parent lookup, child isolation, and semantic
 result propagation. Generic inline lambda values and other lambda-consuming
-builtins remain deferred under Issue #61; standalone lambda values, iteration,
-components, and complete DynamicValue compatibility remain compatibility debt.
+builtins remain deferred under Issue #61; standalone lambda values, components,
+and complete DynamicValue compatibility remain compatibility debt.
+
+### Typed iteration evidence
+
+This first iteration slice is grounded in the public
+[Loops](https://quarkdown.com/wiki/loops/),
+[Iterable](https://quarkdown.com/wiki/iterable/),
+[Range](https://quarkdown.com/wiki/range/),
+[Lambda](https://quarkdown.com/wiki/lambda/), and
+[foreach API](https://quarkdown.com/docs/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html)
+references. They establish that `.foreach` maps an iterable through a scoped
+lambda and returns an ordered collection, `.repeat` is the one-based
+`.foreach {1..times}` shorthand, Markdown lists are iterable values, and Range
+syntax preserves open endpoints.
+
+The official v2.5.1 implementation was consulted only as public behavioral
+evidence, never copied or translated: [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt)
+delegates `.repeat` to `forEach(Range(1, times), body)`, and [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt)
+iterates closed ranges inclusively, starts a left-open range at `1`, rejects a
+right-open range as endless, and uses the host integer range behavior for
+descending bounds. The public v2.5.1 [`FlowTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt)
+also covers `..4` and rejects `1..`. Scribium deliberately keeps all open
+Range iteration deferred in this slice, while matching the verified descending
+empty result and zero-repeat empty result.
+
+Supported here are typed literal Range values, recursive ordered Collections,
+finite closed ascending Range iteration, descending-empty behavior, Markdown
+ordered/unordered list adaptation at the iterable boundary, block-form
+`.foreach` with one explicit parameter or implicit `.1`, block-form `.repeat`,
+typed mapped results, parent lookup, and fresh per-iteration child scopes.
+Deferred are open-range iteration, destructuring, Pair, Dictionary, generic
+inline `@lambda`, dynamic `.range`, and collection operations.
 
 - **Unsupported:** Syntax may be parsed and preserved, but normal compilation
   produces an explicit `E8xxx` error diagnostic for the unsupported semantics
@@ -234,8 +266,9 @@ conversion in value context. Headerless `.1`/`.2` references are 1-based,
 invocation-local, and preserve typed `IrValue`s; missing indices produce a
 source-backed `E3003` diagnostic. **Conditional evaluation (`.if` / `.ifnot`)
 with boolean literals and variable references (`.if {.name}`) is implemented**.
-Standalone lambda values, iteration, components, and complete
-programmable-document compatibility remain unimplemented. A matrix row can
+Standalone lambda values, components, and complete programmable-document
+compatibility remain unimplemented. Typed block iteration is limited to the
+evidenced first slice above. A matrix row can
 therefore represent only the evidenced
 forms at its stated level; an input form that currently fails to parse (for
 example with an `E2xxx` diagnostic) is a compatibility gap, not evidence of
@@ -264,10 +297,12 @@ recovers as ordinary text.
 Quarkdown has documented features represented in the v2.5.0/v2.5.1 evidence set that
 Scribium has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
-debt against the complete target. Standalone lambda values, iteration, layout
-semantics, resource/data loading, and other v2.5.0 built-ins remain additional
-gaps. The evidenced function row does not promote those later semantic
-surfaces.
+debt against the complete target. Standalone lambda values, layout semantics,
+resource/data loading, and other v2.5.0 built-ins remain additional gaps;
+open-range iteration, destructuring, Pair/Dictionary, generic inline lambdas,
+dynamic `.range`, and collection operations remain deferred within the
+iteration slice. The evidenced function row does not promote those later
+semantic surfaces.
 
 ## Specification Record Format
 

@@ -79,6 +79,19 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Identifier(String),
+    Range(RangeValue),
+}
+
+/// A source-backed integer range literal.
+///
+/// The endpoints are optional because Quarkdown accepts open range syntax.
+/// Range consumption, including whether an open range can be made finite, is
+/// a semantic concern of the evaluator rather than this grammar crate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangeValue {
+    pub start: Option<u64>,
+    pub end: Option<u64>,
+    pub span: ByteSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -631,7 +644,18 @@ fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
 }
 
 fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
-    let raw = source.get(span.start..span.end)?.trim();
+    let raw_source = source.get(span.start..span.end)?;
+    let raw = raw_source.trim();
+    let leading = raw_source
+        .len()
+        .saturating_sub(raw_source.trim_start().len());
+    let trailing = raw_source
+        .len()
+        .saturating_sub(leading.saturating_add(raw.len()));
+    let range_span = ByteSpan::new(
+        span.start.checked_add(leading)?,
+        span.end.checked_sub(trailing)?,
+    );
     if raw.is_empty() {
         return Some(Value::String(String::new()));
     }
@@ -647,6 +671,9 @@ fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
     // preserve the call node and the evaluator can resolve it semantically;
     // do not let the generic floating-point parser classify `.1` as `0.1`.
     if !is_implicit_positional_reference_token(raw) {
+        if let Some(range) = parse_range_literal(raw, range_span) {
+            return Some(Value::Range(range));
+        }
         if let Ok(number) = raw.parse::<f64>() {
             return Some(Value::Number(number));
         }
@@ -667,6 +694,26 @@ fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
         return Some(Value::Identifier(raw.to_string()));
     }
     None
+}
+
+fn parse_range_literal(raw: &str, span: ByteSpan) -> Option<RangeValue> {
+    let mut parts = raw.split("..");
+    let start = parse_range_endpoint(parts.next()?)?;
+    let end = parse_range_endpoint(parts.next()?)?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(RangeValue { start, end, span })
+}
+
+fn parse_range_endpoint(raw: &str) -> Option<Option<u64>> {
+    if raw.is_empty() {
+        return Some(None);
+    }
+    if !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(Some(raw.parse().ok()?))
 }
 
 fn is_implicit_positional_reference_token(raw: &str) -> bool {
@@ -925,6 +972,59 @@ mod tests {
                 "{source:?}"
             );
         }
+    }
+
+    #[test]
+    fn parses_typed_ranges_without_confusing_numbers_or_references() {
+        for (source, start, end) in [
+            (".foo {2..4}", Some(2), Some(4)),
+            (".foo {0..0}", Some(0), Some(0)),
+            (".foo {2..}", Some(2), None),
+            (".foo {..4}", None, Some(4)),
+            (".foo {..}", None, None),
+        ] {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert_eq!(
+                scalar(&call.positional_args[0]),
+                Value::Range(RangeValue {
+                    start,
+                    end,
+                    span: ByteSpan::new(6, source.len() - 1),
+                }),
+                "{source:?}"
+            );
+        }
+
+        for source in [
+            ".foo {1.5}",
+            ".foo {.1}",
+            ".foo {abc}",
+            ".foo {1...2}",
+            ".foo {1..2..3}",
+            ".foo {a..b}",
+            ".foo {-1..3}",
+        ] {
+            let call = parse_call(source).unwrap().unwrap().0;
+            assert!(
+                !matches!(
+                    call.positional_args[0].content,
+                    ArgContent::Scalar(Value::Range(_))
+                ),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn range_span_preserves_utf8_and_crlf_surroundings() {
+        let source = "한글\r\n.foo { 2..4 }\r\n";
+        let start = source.find(".foo").expect("directive start");
+        let (call, _) = parse_inline_call(source, start).unwrap().unwrap();
+        let Value::Range(range) = scalar(&call.positional_args[0]) else {
+            panic!("expected typed range")
+        };
+        assert_eq!(range.span, ByteSpan::new(start + 7, start + 11));
+        assert_eq!(&source[range.span.start..range.span.end], "2..4");
     }
 
     #[test]

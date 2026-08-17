@@ -516,6 +516,27 @@ impl LoweringContext {
                 // materialized by the evaluator at an output boundary.
                 self.push_str("none");
             }
+            IrValue::Range(_) => {
+                // Successful evaluation consumes ranges before lowering. Keep
+                // defensive lowering typed and explicit without inventing a
+                // direct display form for Range values. This branch is only
+                // for manually constructed/pre-evaluation IR; normal user
+                // documents receive an evaluator diagnostic before reaching
+                // the backend.
+                self.push_str(
+                    "panic(\"Scribium typed Range reached Typst lowering without a semantic consumer\")",
+                );
+            }
+            IrValue::Collection(values) => {
+                self.push('[');
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        self.push_str(", ");
+                    }
+                    self.lower_value(value);
+                }
+                self.push(']');
+            }
             IrValue::Content(nodes) => {
                 self.push('[');
                 let saved_item = std::mem::take(&mut self.list_item_indent);
@@ -693,7 +714,7 @@ fn escape_typst_comment(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use scribium_core::ir::{
-        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode,
+        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrRange,
         IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
@@ -1577,6 +1598,44 @@ mod tests {
             code,
             "#show-value(none, value: none)\n\n#show-value(\"None\", value: \"None\")\n\n"
         );
+    }
+
+    #[test]
+    fn lower_pre_evaluation_range_is_explicit_and_never_semantic_none() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "foo".into(),
+                positional_args: vec![IrValue::Range(IrRange {
+                    start: Some(2),
+                    end: Some(4),
+                    span: SourceSpan::new(scribium_core::SourceId(1), 5, 9),
+                })],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert!(code.contains("panic(\"Scribium typed Range reached Typst lowering"));
+        assert!(!code.contains("none"));
+    }
+
+    #[test]
+    fn evaluated_direct_range_failure_leaves_no_typst_none_placeholder() {
+        let project = scribium_core::VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", ".var {r} {2..4}\n.r\n")
+            .expect("valid path")
+            .build()
+            .expect("valid project");
+        let result = scribium_core::compile(&project, &scribium_core::CompileOptions::default());
+        assert_eq!(result.diagnostics.len(), 1);
+        let code = super::lower_to_typst_code(&result.ir);
+        assert!(code.is_empty());
+        assert!(!code.contains("none"));
     }
 
     #[test]

@@ -16,8 +16,8 @@ use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue
 use scribium_source::ByteSpan;
 
 use crate::ast::{
-    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, TableCell, TableRow,
-    TaskStatus, Value,
+    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, RangeValue, TableCell,
+    TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -548,7 +548,7 @@ fn normalize_children(
 /// This must remain contextual. Treating every `name:` body line as a lambda
 /// header would change the meaning of ordinary calls such as `.container`.
 fn has_lambda_body_semantics(name: &str) -> bool {
-    matches!(name, "function" | "let")
+    matches!(name, "function" | "let" | "foreach" | "repeat")
 }
 
 fn contextualize_lambda_body(
@@ -1387,7 +1387,7 @@ fn convert_arg(
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Value {
     match &arg.content {
-        ArgContent::Scalar(value) => convert_value(value),
+        ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
         ArgContent::Content(content) => {
             let span = offset_span(*content, call_base);
             let Some(span) = span.and_then(|value| checked_local_span(value, source)) else {
@@ -1605,12 +1605,48 @@ fn inline_end(inline: &Inline) -> usize {
     }
 }
 
-fn convert_value(value: &QuarkdownValue) -> Value {
+/// Converts a grammar value while applying the parser's existing coordinate
+/// contract. Grammar values from block calls are relative to the reparsed
+/// call substring (`call_base`), while inline/tight calls are already relative
+/// to the body passed to the grammar (`call_base == 0`). The document body
+/// base is applied exactly once in both cases.
+fn convert_value(
+    value: &QuarkdownValue,
+    arg_span: ByteSpan,
+    base: usize,
+    call_base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Value {
     match value {
         QuarkdownValue::String(value) => Value::String(value.clone()),
         QuarkdownValue::Number(value) => Value::Number(*value),
         QuarkdownValue::Boolean(value) => Value::Boolean(*value),
         QuarkdownValue::Identifier(value) => Value::Identifier(value.clone()),
+        QuarkdownValue::Range(value) => {
+            let Some(offset) = base.checked_add(call_base) else {
+                diagnostics.push(ParserDiagnostic {
+                    code: "E9002",
+                    message: "Quarkdown Range span overflowed the document coordinate space"
+                        .to_string(),
+                    span: arg_span,
+                });
+                return Value::String(String::new());
+            };
+            let Some(span) = offset_span(value.span, offset) else {
+                diagnostics.push(ParserDiagnostic {
+                    code: "E9002",
+                    message: "Quarkdown Range span overflowed the document coordinate space"
+                        .to_string(),
+                    span: arg_span,
+                });
+                return Value::String(String::new());
+            };
+            Value::Range(RangeValue {
+                start: value.start,
+                end: value.end,
+                span,
+            })
+        }
     }
 }
 
@@ -2473,6 +2509,58 @@ mod tests {
     }
 
     #[test]
+    fn range_value_spans_are_document_absolute_in_block_inline_and_tight_calls() {
+        fn assert_block_range(source: &str, node: &Block) {
+            let Block::DirectiveCall {
+                positional_args, ..
+            } = node
+            else {
+                panic!("expected block call, got {node:?}")
+            };
+            let Value::Range(range) = &positional_args[0] else {
+                panic!("expected typed Range argument")
+            };
+            assert_eq!(&source[range.span.start..range.span.end], "2..4");
+        }
+
+        for source in [
+            "앞 문장\r\n.foreach {2..4}\r\n    .1\r\n",
+            "---\r\ntitle: 값\r\n---\r\n\r\n앞 문장\r\n.foreach {2..4}\r\n    .1\r\n",
+        ] {
+            let output = parse_with_diagnostics(source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let block = output
+                .document
+                .nodes
+                .iter()
+                .find(|node| matches!(node, Block::DirectiveCall { name, .. } if name == "foreach"))
+                .expect("foreach block");
+            assert_block_range(source, block);
+        }
+
+        for source in ["앞 .foo {2..4} 뒤\n", "앞 H{.foo {2..4}}O\n"] {
+            let output = parse_with_diagnostics(source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+                panic!("expected paragraph")
+            };
+            let call = content
+                .iter()
+                .find_map(|inline| match inline {
+                    Inline::DirectiveCall {
+                        positional_args, ..
+                    } => Some(positional_args),
+                    _ => None,
+                })
+                .expect("inline or tight call");
+            let Value::Range(range) = &call[0] else {
+                panic!("expected typed Range argument")
+            };
+            assert_eq!(&source[range.span.start..range.span.end], "2..4");
+        }
+    }
+
+    #[test]
     fn qd_mode_preserves_nested_body_and_utf8_spans() {
         let source = ".align {center}\n    한글 **본문**\n";
         let output = parse_with_diagnostics(source);
@@ -3175,6 +3263,81 @@ mod tests {
             panic!("expected implicit let call body")
         };
         assert_eq!(name, "uppercase");
+    }
+
+    #[test]
+    fn iteration_lambda_headers_are_contextual_and_source_backed() {
+        for (name, parameter, body_text) in [
+            ("foreach", "number", ".number"),
+            ("repeat", "index", ".index"),
+        ] {
+            let source = format!(".{name} {{3}}\n    {parameter}:\n    {body_text}\n");
+            let output = parse_with_diagnostics(&source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::DirectiveCall {
+                name: actual_name,
+                lambda_header: Some(header),
+                body: Some(body),
+                ..
+            } = &output.document.nodes[0]
+            else {
+                panic!("expected contextual {name} lambda")
+            };
+            assert_eq!(actual_name, name);
+            assert_eq!(header.parameters.len(), 1);
+            assert_eq!(header.parameters[0].name, parameter);
+            assert!(body.iter().all(|block| {
+                !matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::Text { content, .. } if content.contains(":")
+                        ))
+                )
+            }));
+            assert!(body.iter().any(|block| {
+                matches!(
+                    block,
+                    Block::DirectiveCall { name, .. } if name == parameter
+                ) || matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::DirectiveCall { name, .. } if name == parameter
+                        ))
+                )
+            }));
+        }
+
+        for name in ["foreach", "repeat"] {
+            let source = format!(".{name} {{3}}\n    .1\n");
+            let output = parse_with_diagnostics(&source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::DirectiveCall {
+                lambda_header,
+                body: Some(body),
+                ..
+            } = &output.document.nodes[0]
+            else {
+                panic!("expected implicit {name} lambda")
+            };
+            assert!(lambda_header.is_none());
+            assert!(body.iter().any(|block| {
+                matches!(
+                    block,
+                    Block::DirectiveCall { name, .. } if name == "1"
+                ) || matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::DirectiveCall { name, .. } if name == "1"
+                        ))
+                )
+            }));
+        }
     }
 
     #[test]

@@ -62,7 +62,7 @@ pub enum Block {
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
         /// Contextual lambda metadata for calls with lambda body semantics
-        /// (`.function` and block-form `.let`). Other call bodies deliberately
+        /// (`.function`, `.let`, `.foreach`, and `.repeat`). Other call bodies deliberately
         /// remain ordinary Markdown structures.
         lambda_header: Option<LambdaHeader>,
         span: ByteSpan,
@@ -181,7 +181,16 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Identifier(String),
+    Range(RangeValue),
     Content(Vec<Inline>),
+}
+
+/// A source-backed integer range literal from a Quarkdown value argument.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangeValue {
+    pub start: Option<u64>,
+    pub end: Option<u64>,
+    pub span: ByteSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
