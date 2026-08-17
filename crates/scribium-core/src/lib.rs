@@ -547,6 +547,89 @@ mod tests {
     }
 
     #[test]
+    fn compile_let_supports_explicit_and_implicit_block_lambdas() {
+        let source = ".let {Quarkdown}\n    name:\n    .uppercase {.name}\n\n.let {Quarkdown}\n    .uppercase {.1}\n\n.let {true}\n    condition:\n    .if {.condition}\n        yes\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "QUARKDOWN\nQUARKDOWN\nyes");
+    }
+
+    #[test]
+    fn compile_let_preserves_content_results_and_parent_lookup() {
+        let source = ".var {name} {outer}\n.function {decorate}\n    value:\n    .uppercase {.value}\n\n.let {inner}\n    name:\n    .name\n\n.name\n\n.let {hello}\n    value:\n    .decorate {.value}\n\n.let {Quarkdown}\n    name:\n    **Hello .name**\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "inner\nouter\nHELLO\n");
+        let Some(IrNode::Paragraph { content, .. }) = result.ir.nodes.last() else {
+            panic!("expected structured let result")
+        };
+        assert_eq!(inline_text(content), "Hello Quarkdown");
+        assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
+    }
+
+    #[test]
+    fn compile_let_nested_scopes_use_nearest_implicit_argument() {
+        let source = ".let {outer}\n    .let {.1}\n        .1\n\n.let {outer}\n    .let {.1}\n        value:\n        .value\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "outer\nouter");
+    }
+
+    #[test]
+    fn compile_let_isolates_local_variables_and_functions() {
+        let source = ".var {x} {outer}\n.let {inner}\n    value:\n    .var {x} {.value}\n    .x\n\n.x\n\n.let {hello}\n    value:\n    .function {local}\n        body:\n        .body\n\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "inner\nouter");
+        let Some(IrNode::FunctionCall { name, .. }) = result.ir.nodes.last() else {
+            panic!("expected local function reference to remain outside the let scope")
+        };
+        assert_eq!(name, "local");
+    }
+
+    #[test]
+    fn compile_let_reports_arity_and_implicit_parameter_spans() {
+        let missing_value = ".let\n    value:\n    .value\n";
+        let (result, source_id) = compile_source(missing_value);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                0,
+                missing_value.trim_end().len()
+            ))
+        );
+
+        let missing_implicit = ".let {1}\n    .2\n";
+        let (result, source_id) = compile_source(missing_implicit);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let reference_start = missing_implicit.find(".2").expect("implicit reference");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                reference_start,
+                reference_start + 2
+            ))
+        );
+
+        let multiple_parameters = ".let {1}\n    first second:\n    .first\n";
+        let (result, source_id) = compile_source(multiple_parameters);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let first_start = multiple_parameters.find("first").expect("first parameter");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                first_start,
+                first_start + "first".len()
+            ))
+        );
+    }
+
+    #[test]
     fn compile_implicit_lambda_parameters_use_the_shared_callable_path() {
         let source = ".function {identity}\n    .1\n\n.identity {first}\n.identity {second}\n\n.function {pair}\n    .1\n    .2\n\n.pair {one} {two}\n\n.identity {2}::multiply {3}\n";
         let (result, _) = compile_source(source);

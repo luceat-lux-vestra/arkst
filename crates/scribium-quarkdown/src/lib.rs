@@ -258,9 +258,10 @@ pub fn has_trailing_continuation(source: &str) -> bool {
 /// Parse one contextual lambda header from an original source line.
 ///
 /// The function deliberately does not classify arbitrary call bodies. The
-/// caller selects the construct (`.function` for the current slice) and passes
-/// the parser-observed body-line span. Returned spans remain absolute in the
-/// supplied source; no normalized or generated text is involved.
+/// caller selects the construct (`.function` or block-form `.let` in the
+/// current slice) and passes the parser-observed body-line span. Returned
+/// spans remain absolute in the supplied source; no normalized or generated
+/// text is involved.
 pub fn parse_lambda_header(
     source: &str,
     line_span: ByteSpan,
