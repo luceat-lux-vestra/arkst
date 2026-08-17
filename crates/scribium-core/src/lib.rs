@@ -662,6 +662,76 @@ mod tests {
     }
 
     #[test]
+    fn compile_collection_access_operations_cover_basic_recursive_values() {
+        let source = ".var {values}\n    - 1\n    - yes\n    - three\n\n.values::size\n.values::first\n.values::last\n.values::getat {2}\n.size of:{.values}\n.first from:{.values}\n.last from:{.values}\n.values::getat {9} orelse:{fallback}\nInline .values::first .values::last .values::size\n\n.var {matrix}\n    - - A\n      - B\n    - - C\n      - D\n\n.matrix::first::size\n.matrix::last::last\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "3\n1\nthree\nyes\n3\n1\nthree\nfallback\nInline 1 three 3\n2\nD"
+        );
+    }
+
+    #[test]
+    fn compile_collection_access_keeps_pair_dictionary_and_range_values_typed() {
+        let source = ".var {pair}\n    .pair {left} {right}\n.var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n.var {range} {2..4}\n\n.pair::size\n.pair::first\n.pair::last\n.table::size\n.table::getat {1}::first\n.table::getat {2}::last\n.range::size\n.range::first\n.range::last\n.range::getat {2}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\nleft\nright\n2\na\n2\n3\n2\n4\n3");
+    }
+
+    #[test]
+    fn compile_collection_access_results_interoperate_with_foreach_and_functions() {
+        let source = ".var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n.var {mapped}\n    .foreach {1..3}\n        .1\n.var {matrix}\n    - - A\n      - B\n.function {measure}\n    value:\n    .value::size\n\n.mapped::size\n.foreach {.table::getat {1}}\n    .1\n.measure {.table}\n\n.let {.matrix}\n    .var {local} {.1::first::first}\n    .local\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3\na\n1\n2\nA");
+        assert!(result
+            .ir
+            .nodes
+            .iter()
+            .any(|node| matches!(node, IrNode::FunctionCall { name, .. } if name == "local")));
+    }
+
+    #[test]
+    fn compile_collection_access_empty_and_invalid_inputs_are_atomic() {
+        for source in [
+            ".var {empty} {4..2}\n\n.empty::size\n.empty::first\n.empty::last\n.empty::getat {1}\n",
+            ".size of:{true}\n",
+            ".size of:{.unknown}\n",
+            ".size of:{.multiply {true} {2}}\n",
+            ".pair {a} {b}::getat {1.5}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            if source.starts_with(".var {empty}") {
+                assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+                assert_eq!(output_text(&result), "0\nNone\nNone\nNone");
+            } else {
+                assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+                assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+                assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn compile_collection_access_diagnostics_keep_utf8_and_crlf_source_spans() {
+        let source = ".size of:{세계}\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                0,
+                source.find("\r\n").expect("line ending")
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_unresolved_range_argument_fails_before_typst_lowering() {
         let source = ".foo {2..4}\n";
         let (result, source_id) = compile_source(source);
