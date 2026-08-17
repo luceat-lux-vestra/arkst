@@ -174,8 +174,8 @@ revisions is:
 
 | Suite | Total | PASS | KNOWN_MISMATCH | UNSUPPORTED | New mismatch |
 |---|---:|---:|---:|---:|---:|
-| CommonMark | 652 | 626 | 26 | 0 | 0 |
-| GFM | 670 | 642 | 28 | 0 | 0 |
+| CommonMark | 652 | 649 | 3 | 0 | 0 |
+| GFM | 670 | 664 | 6 | 0 | 0 |
 
 The baseline files
 [`commonmark.json`](../../../tests/compat/baselines/commonmark.json) and
@@ -215,12 +215,12 @@ authored metadata regression suite covers escapes, named and numeric entities,
 invalid entity-like text, UTF-8, CRLF, nested title forms, and language
 extraction; real-document smoke now includes `14-metadata-normalization.md`.
 
-The complete 113-case root-cause analysis, priority rationale, ownership
-classification, and deferred groups are in
+The complete root-cause analysis, case-level ownership classification, and
+final accepted groups are in
 [`gaps.md`](gaps.md). Remaining differences cover the leading front-matter
-policy boundary, code-span delimiter boundaries, hard-break whitespace,
-autolink profiles, GFM tables, text/reference normalization, and pinned
-Rushdown behavior. `.let` evaluator semantics remain deferred.
+policy boundary, HTML canonicalization, and pinned GFM autolink/linkify
+behavior. The final audit found no actionable Scribium-owned Markdown defect.
+`.let` evaluator semantics remain deferred.
 
 ### Real document corpus and output smoke
 

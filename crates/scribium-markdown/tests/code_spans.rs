@@ -119,6 +119,21 @@ fn nested_container_code_span_keeps_original_source_offsets() {
 }
 
 #[test]
+fn gfm_table_code_span_uses_rushdown_value_and_original_source_span() {
+    let source = "| value |\n| --- |\n| `\\|` |\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::Table { rows, .. } = &output.document.nodes[0] else {
+        panic!("expected a table")
+    };
+    let Inline::Code { content, span } = &rows[0].cells[0].content[0] else {
+        panic!("expected a code span")
+    };
+    assert_eq!(content, "|");
+    assert_eq!(&source[span.start..span.end], "`\\|`");
+}
+
+#[test]
 fn code_span_boundary_does_not_emit_zero_width_text() {
     let source = "` `\n`  `\n";
     let output = parse_with_diagnostics(source);

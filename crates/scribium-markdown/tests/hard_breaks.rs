@@ -251,9 +251,8 @@ fn sibling_inline_nodes_survive_hard_break_conversion() {
     let document = parse_markdown(source);
     let (content, paragraph_span) = paragraph(&document);
     assert!(matches!(content[0], Inline::Strong { .. }));
-    assert!(matches!(content[1], Inline::Text { ref content, .. } if content.is_empty()));
-    assert!(matches!(content[2], Inline::HardBreak { .. }));
-    assert!(matches!(content[3], Inline::Emphasis { .. }));
+    assert!(matches!(content[1], Inline::HardBreak { .. }));
+    assert!(matches!(content[2], Inline::Emphasis { .. }));
     let Inline::Strong {
         content: strong, ..
     } = &content[0]
@@ -262,7 +261,7 @@ fn sibling_inline_nodes_survive_hard_break_conversion() {
     };
     let Inline::Emphasis {
         content: emphasis, ..
-    } = &content[3]
+    } = &content[2]
     else {
         unreachable!();
     };

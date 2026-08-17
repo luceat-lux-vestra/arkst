@@ -12,6 +12,6 @@ pub use ast::{
     TableRow, TaskStatus, Value,
 };
 pub use parser::{
-    parse, parse_md, parse_qd, parse_with_diagnostics, parse_with_mode, Mode, ParseOutput,
-    ParserDiagnostic,
+    parse, parse_md, parse_qd, parse_with_diagnostics, parse_with_markdown_profile,
+    parse_with_mode, MarkdownProfile, Mode, ParseOutput, ParserDiagnostic,
 };

@@ -10,7 +10,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 use scribium_markdown::ast::{Block, Document, Inline, ListItem, TableAlignment, TableRow};
-use scribium_markdown::{parse_with_mode, Mode};
+use scribium_markdown::{parse_with_markdown_profile, MarkdownProfile};
 use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -716,7 +716,12 @@ type Comparison = (CanonicalNode, CanonicalNode, bool);
 fn compare_case(case: &CorpusCase, cmark: &Path, gfm_extensions: bool) -> Result<Comparison> {
     let xml = run_cmark(cmark, &case.markdown, gfm_extensions)?;
     let reference = canonicalize_xml(&xml)?;
-    let parsed = parse_with_mode(&case.markdown, Mode::Markdown);
+    let profile = if gfm_extensions {
+        MarkdownProfile::Gfm
+    } else {
+        MarkdownProfile::CommonMark
+    };
+    let parsed = parse_with_markdown_profile(&case.markdown, profile);
     let scribium = canonicalize_document(&parsed.document);
     let unsupported = !parsed.diagnostics.is_empty() || contains_unsupported(&scribium);
     Ok((reference, scribium, unsupported))
@@ -973,17 +978,11 @@ fn xml_inline(node: &XmlNode) -> Result<Vec<CanonicalNode>> {
 }
 
 fn xml_text_nodes(value: &str) -> Vec<CanonicalNode> {
-    let parts: Vec<_> = value.split('\n').collect();
-    let mut nodes = Vec::new();
-    for (index, part) in parts.iter().enumerate() {
-        if !part.is_empty() {
-            nodes.push(CanonicalNode::value("text", *part));
-        }
-        if index + 1 < parts.len() {
-            nodes.push(CanonicalNode::new("soft_break"));
-        }
+    if value.is_empty() {
+        Vec::new()
+    } else {
+        vec![CanonicalNode::value("text", value)]
     }
-    nodes
 }
 
 fn link_node(node: &XmlNode, kind: &str) -> Result<CanonicalNode> {
@@ -1061,8 +1060,13 @@ fn canonical_table_row(row: &TableRow, header: bool) -> CanonicalNode {
         row.cells
             .iter()
             .map(|cell| {
+                let alignment = if header {
+                    table_alignment(cell.alignment)
+                } else {
+                    "none".to_string()
+                };
                 CanonicalNode::new("table_cell")
-                    .attr("align", table_alignment(cell.alignment))
+                    .attr("align", alignment)
                     .children(canonical_inlines(&cell.content))
             })
             .collect(),
@@ -1206,6 +1210,42 @@ fn short_json(value: Option<&serde_json::Value>) -> String {
         text.push_str("...");
     }
     text
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    #[test]
+    fn commonmark_profile_does_not_enable_gfm_linkify() {
+        let source = "https://example.com\n";
+        let commonmark = parse_with_markdown_profile(source, MarkdownProfile::CommonMark);
+        let gfm = parse_with_markdown_profile(source, MarkdownProfile::Gfm);
+
+        let commonmark_tree = canonicalize_document(&commonmark.document);
+        let gfm_tree = canonicalize_document(&gfm.document);
+        assert_eq!(commonmark_tree.children[0].children[0].kind, "text");
+        assert_eq!(gfm_tree.children[0].children[0].kind, "link");
+    }
+
+    #[test]
+    fn table_body_alignment_is_a_reference_projection_detail() {
+        let source = "| abc | defghi |\n:-: | -----------:\nbar | baz\n";
+        let parsed = parse_with_markdown_profile(source, MarkdownProfile::Gfm);
+        let tree = canonicalize_document(&parsed.document);
+        let body = &tree.children[0].children[1];
+        assert_eq!(body.children[0].attrs["align"], "none");
+        assert_eq!(body.children[1].attrs["align"], "none");
+    }
+
+    #[test]
+    fn xml_text_node_preserves_entity_newlines_as_text() {
+        assert_eq!(
+            xml_text_nodes("foo\n\nbar"),
+            vec![CanonicalNode::value("text", "foo\n\nbar")]
+        );
+        assert!(xml_text_nodes("").is_empty());
+    }
 }
 
 fn run_real_documents(args: &Args) -> Result<RealReport> {

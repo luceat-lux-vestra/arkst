@@ -8,91 +8,27 @@
   "cases": {
     "gfm-0066": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
+      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the GFM reference treats the source as thematic-break/heading structure."
     },
     "gfm-0068": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Setext headings section."
-    },
-    "gfm-0096": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "gfm-0100": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "gfm-0108": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "gfm-0114": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
-    },
-    "gfm-0115": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Fenced code blocks section."
+      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the GFM reference treats the source as thematic-break/heading structure."
     },
     "gfm-0143": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the HTML blocks section."
-    },
-    "gfm-0156": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the HTML blocks section."
-    },
-    "gfm-0199": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Tables (extension) section."
-    },
-    "gfm-0200": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Tables (extension) section."
-    },
-    "gfm-0215": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Block quotes section."
-    },
-    "gfm-0310": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Backslash escapes section."
-    },
-    "gfm-0322": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "gfm-0335": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Entity and numeric character references section."
-    },
-    "gfm-0441": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Emphasis and strong emphasis section."
-    },
-    "gfm-0513": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "gfm-0564": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Links section."
-    },
-    "gfm-0595": {
-      "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Images section."
+      "reason": "CANONICAL_MAPPING: Scribium preserves the original blockquote-marked raw-HTML source span as required by its policy, while cmark-gfm canonicalizes the blockquote content to the HTML value without markers."
     },
     "gfm-0610": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown rejects the invalid GFM autolink as plain Text; cmark-gfm emits a partial autolink and the frontend has no safe parser-owned link node to adapt."
     },
     "gfm-0614": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown keeps the invalid escaped-plus email autolink as plain Text; cmark-gfm emits an email link and the frontend cannot safely linkify independently."
     },
     "gfm-0623": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "Initial differential baseline for the Autolinks (extension) section."
+      "reason": "RUSHDOWN_BEHAVIOR: pinned Rushdown linkifies www.commonmark.org/a but stops before .b, while cmark-gfm includes the full URL; adding a production linkifier would duplicate parser semantics."
     }
   }
 }

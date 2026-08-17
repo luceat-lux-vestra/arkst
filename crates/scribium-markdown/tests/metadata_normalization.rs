@@ -125,6 +125,51 @@ fn metadata_escapes_keep_precedence_and_decode_references_once() {
 }
 
 #[test]
+fn text_escapes_decode_references_once_and_keep_escaped_references_literal() {
+    let source = "앞 \\&ouml; &ouml; &amp; \\*별표\\* 뒤\r\n";
+    let document = parse_md(source);
+    let Block::Paragraph { content, .. } = &document.nodes[0] else {
+        panic!("expected a paragraph")
+    };
+    let texts: Vec<_> = content
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Text { content, span } => Some((content.as_str(), *span)),
+            _ => None,
+        })
+        .collect();
+
+    let combined = texts
+        .iter()
+        .map(|(content, _)| *content)
+        .collect::<String>();
+    assert_eq!(combined, "앞 &ouml; ö & *별표* 뒤");
+    for (_, span) in texts {
+        assert!(span.start <= span.end);
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+        assert!(!source[span.start..span.end].is_empty());
+    }
+}
+
+#[test]
+fn numeric_zero_references_use_the_replacement_character_once() {
+    let source = "&#0; &#x0; &#x0000;\r\n";
+    let document = parse_md(source);
+    let Block::Paragraph { content, .. } = &document.nodes[0] else {
+        panic!("expected a paragraph")
+    };
+    let text = content
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text, "� � �");
+}
+
+#[test]
 fn reference_metadata_uses_the_same_policy_without_rewriting_source() {
     let source = concat!(
         "[ref] and [other] and [escaped] and [numeric]\n\n",
