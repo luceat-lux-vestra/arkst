@@ -516,6 +516,22 @@ impl LoweringContext {
                 // materialized by the evaluator at an output boundary.
                 self.push_str("none");
             }
+            IrValue::Range(_) => {
+                // Successful evaluation consumes ranges before lowering. Keep
+                // defensive lowering typed and explicit without inventing a
+                // direct display form for Range values.
+                self.push_str("/* Scribium typed Range is evaluator-owned */ none");
+            }
+            IrValue::Collection(values) => {
+                self.push('[');
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        self.push_str(", ");
+                    }
+                    self.lower_value(value);
+                }
+                self.push(']');
+            }
             IrValue::Content(nodes) => {
                 self.push('[');
                 let saved_item = std::mem::take(&mut self.list_item_indent);

@@ -7,7 +7,7 @@
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
 use crate::source::{ByteSpan, SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
@@ -647,6 +647,11 @@ fn value_to_ir(
         Value::Number(n) => crate::ir::IrValue::Number(*n),
         Value::Boolean(b) => crate::ir::IrValue::Boolean(*b),
         Value::Identifier(id) => crate::ir::IrValue::Identifier(id.clone()),
+        Value::Range(range) => crate::ir::IrValue::Range(IrRange {
+            start: range.start,
+            end: range.end,
+            span: byte_to_source_span(&range.span, source_id),
+        }),
         Value::Content(inlines) => {
             if let [Inline::DirectiveCall {
                 name,
@@ -930,6 +935,39 @@ mod tests {
             body.as_slice(),
             [IrNode::FunctionCall { name, .. }] if name == "1"
         ));
+    }
+
+    #[test]
+    fn range_survives_ast_to_ir_as_a_typed_source_backed_value() {
+        for (source, expected_start, expected_end, expected_span) in [
+            (".foreach {2..4}\n    .1\n", Some(2), Some(4), (10, 14)),
+            (".foreach {2..}\n    .1\n", Some(2), None, (10, 13)),
+            (".foreach {..4}\n    .1\n", None, Some(4), (10, 13)),
+            (".foreach {..}\n    .1\n", None, None, (10, 12)),
+        ] {
+            let document = scribium_markdown::parse_qd(source);
+            let (ir, diagnostics) =
+                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let IrNode::FunctionCall {
+                positional_args,
+                body: Some(_),
+                ..
+            } = &ir.nodes[0]
+            else {
+                panic!("expected foreach call")
+            };
+            assert!(matches!(
+                positional_args.as_slice(),
+                [crate::ir::IrValue::Range(crate::ir::IrRange {
+                    start,
+                    end,
+                    span,
+                })] if *start == expected_start
+                    && *end == expected_end
+                    && *span == SourceSpan::new(source_id(), expected_span.0, expected_span.1)
+            ));
+        }
     }
 
     #[test]

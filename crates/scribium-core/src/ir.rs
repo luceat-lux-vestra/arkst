@@ -222,6 +222,14 @@ pub struct IrParameter {
     pub optional: bool,
 }
 
+/// A source-backed integer range value.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrRange {
+    pub start: Option<u64>,
+    pub end: Option<u64>,
+    pub span: SourceSpan,
+}
+
 /// Semantic state for a GFM task-list item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrTaskStatus {
@@ -260,6 +268,11 @@ pub enum IrValue {
     Number(f64),
     Boolean(bool),
     Identifier(String),
+    /// A typed Quarkdown integer range. Open endpoints remain explicit until
+    /// an iterable consumer chooses whether it can handle them.
+    Range(IrRange),
+    /// An ordered recursive collection of semantic values.
+    Collection(Vec<IrValue>),
     Content(Vec<IrNode>),
     /// The Quarkdown language's explicit absence value.
     ///
@@ -270,7 +283,8 @@ pub enum IrValue {
 
 #[cfg(test)]
 mod tests {
-    use super::IrValue;
+    use super::{IrRange, IrValue};
+    use crate::source::{SourceId, SourceSpan};
 
     #[test]
     fn none_uses_the_stable_externally_tagged_serde_variant() {
@@ -279,6 +293,23 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
             IrValue::None
+        );
+    }
+
+    #[test]
+    fn range_and_nested_collection_roundtrip_serde() {
+        let value = IrValue::Collection(vec![
+            IrValue::Range(IrRange {
+                start: Some(2),
+                end: Some(4),
+                span: SourceSpan::new(SourceId(1), 3, 7),
+            }),
+            IrValue::Collection(vec![IrValue::Boolean(true), IrValue::None]),
+        ]);
+        let encoded = serde_json::to_value(&value).expect("IrValue serializes");
+        assert_eq!(
+            serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
+            value
         );
     }
 }

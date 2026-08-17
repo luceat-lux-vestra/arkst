@@ -1,0 +1,15 @@
+.foreach {2..4}
+    number:
+    .number
+
+.repeat {3}
+    n:
+    .n
+
+.var {letters}
+    1. A
+    2. B
+    3. C
+
+.foreach {.letters}
+    .1::lowercase

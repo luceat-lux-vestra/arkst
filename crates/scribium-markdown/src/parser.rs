@@ -16,8 +16,8 @@ use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue
 use scribium_source::ByteSpan;
 
 use crate::ast::{
-    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, TableCell, TableRow,
-    TaskStatus, Value,
+    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, RangeValue, TableCell,
+    TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -548,7 +548,7 @@ fn normalize_children(
 /// This must remain contextual. Treating every `name:` body line as a lambda
 /// header would change the meaning of ordinary calls such as `.container`.
 fn has_lambda_body_semantics(name: &str) -> bool {
-    matches!(name, "function" | "let")
+    matches!(name, "function" | "let" | "foreach" | "repeat")
 }
 
 fn contextualize_lambda_body(
@@ -1611,6 +1611,11 @@ fn convert_value(value: &QuarkdownValue) -> Value {
         QuarkdownValue::Number(value) => Value::Number(*value),
         QuarkdownValue::Boolean(value) => Value::Boolean(*value),
         QuarkdownValue::Identifier(value) => Value::Identifier(value.clone()),
+        QuarkdownValue::Range(value) => Value::Range(RangeValue {
+            start: value.start,
+            end: value.end,
+            span: value.span,
+        }),
     }
 }
 
@@ -3175,6 +3180,81 @@ mod tests {
             panic!("expected implicit let call body")
         };
         assert_eq!(name, "uppercase");
+    }
+
+    #[test]
+    fn iteration_lambda_headers_are_contextual_and_source_backed() {
+        for (name, parameter, body_text) in [
+            ("foreach", "number", ".number"),
+            ("repeat", "index", ".index"),
+        ] {
+            let source = format!(".{name} {{3}}\n    {parameter}:\n    {body_text}\n");
+            let output = parse_with_diagnostics(&source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::DirectiveCall {
+                name: actual_name,
+                lambda_header: Some(header),
+                body: Some(body),
+                ..
+            } = &output.document.nodes[0]
+            else {
+                panic!("expected contextual {name} lambda")
+            };
+            assert_eq!(actual_name, name);
+            assert_eq!(header.parameters.len(), 1);
+            assert_eq!(header.parameters[0].name, parameter);
+            assert!(body.iter().all(|block| {
+                !matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::Text { content, .. } if content.contains(":")
+                        ))
+                )
+            }));
+            assert!(body.iter().any(|block| {
+                matches!(
+                    block,
+                    Block::DirectiveCall { name, .. } if name == parameter
+                ) || matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::DirectiveCall { name, .. } if name == parameter
+                        ))
+                )
+            }));
+        }
+
+        for name in ["foreach", "repeat"] {
+            let source = format!(".{name} {{3}}\n    .1\n");
+            let output = parse_with_diagnostics(&source);
+            assert!(output.diagnostics.is_empty(), "{output:?}");
+            let Block::DirectiveCall {
+                lambda_header,
+                body: Some(body),
+                ..
+            } = &output.document.nodes[0]
+            else {
+                panic!("expected implicit {name} lambda")
+            };
+            assert!(lambda_header.is_none());
+            assert!(body.iter().any(|block| {
+                matches!(
+                    block,
+                    Block::DirectiveCall { name, .. } if name == "1"
+                ) || matches!(
+                    block,
+                    Block::Paragraph { content, .. }
+                        if content.iter().any(|inline| matches!(
+                            inline,
+                            Inline::DirectiveCall { name, .. } if name == "1"
+                        ))
+                )
+            }));
+        }
     }
 
     #[test]

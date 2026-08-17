@@ -332,8 +332,7 @@ diagnostic rather than `None`, `NoValue`, or a panic. The callable body keeps
 the same semantic accumulator as explicit functions, so numbers, booleans,
 strings, `None`, and structured content remain typed until an output boundary.
 
-Generic standalone lambdas, iteration, and components remain outside this
-slice. A
+Generic standalone lambdas and components remain outside this slice. A
 rich block result that cannot be represented in an inline context is rejected
 with a source-backed diagnostic rather than flattened or dropped.
 
@@ -369,9 +368,8 @@ scope and are evaluated in source order. The evaluator represents callable
 parameters as either explicit source-backed bindings or an implicit positional
 binding mode. Each invocation installs its own lambda-local argument scope;
 nested invocations therefore shadow only while active and restore the outer
-implicit arguments afterward. Standalone lambda syntax, `.foreach`, and
-`.repeat` remain subsequent semantic slices; this slice does not claim those
-user-facing features are implemented.
+implicit arguments afterward. Standalone lambda syntax remains deferred; the
+iteration forms below reuse this same invocation machinery.
 
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
@@ -435,9 +433,61 @@ condition is false.
 
 Nested conditionals are supported. Variable references (`.name`) in conditions resolve to the variable's boolean value. Function-call conditions (e.g., `.if {.func {x}}`) are not supported and produce an `E3001` diagnostic.
 
-### Iteration (Planned)
+### Iteration (Implemented first slice)
 
-Planned. Iteration will build on the indented body syntax.
+`Range` is a typed value, not text that the evaluator reparses. Its literal
+syntax accepts non-negative integer endpoints and preserves open endpoints:
+
+```text
+2..4
+2..
+..4
+..
+```
+
+Closed ranges are inclusive. `Collection` is an ordered, recursive typed
+iterable value whose elements retain their semantic kinds (`Number`, `String`,
+`Boolean`, `Content`, `Range`, or another `Collection`).
+
+`.foreach` maps one iterable through a block lambda and returns a
+`Collection` containing one typed result per iteration:
+
+```text
+.foreach {2..4}
+    number:
+    Number .number
+
+.foreach {2..4}
+    .1
+```
+
+The iterable expression is evaluated once. Each element receives a fresh
+child scope with parent visibility; explicit `number:` binds a typed value,
+while a headerless body uses the nearest invocation-local `.1`. A body result
+of `NoValue` is an error, not fabricated `None` or an empty string, and a
+failed iteration stops the mapping without duplicating its diagnostic.
+
+`.repeat {n}` is the shared iteration engine with one-based values `1..n`:
+
+```text
+.repeat {3}
+    n:
+    .n
+```
+
+`repeat {0}` returns an empty collection. Fractional, non-finite, negative,
+and unrepresentable counts are rejected. Descending closed ranges follow the
+verified upstream v2.5.1 behavior of an empty iteration. Open ranges remain
+valid `Range` values but are rejected by `.foreach` in this first slice because
+their finite iteration policy is consumer-defined.
+
+An exactly-one Markdown ordered or unordered list is adapted to a Collection
+only when a value is required by `.foreach`; ordinary document lists remain
+`UnorderedList` or `OrderedList` IR nodes. Nested list-only items adapt
+recursively to nested Collections, while rich list-item content remains typed
+content. Pair, Dictionary, destructuring, generic inline `@lambda`, dynamic
+`.range`, and collection operators such as `.first` and `.map` remain
+deferred.
 
 ### Include / Read (Planned)
 

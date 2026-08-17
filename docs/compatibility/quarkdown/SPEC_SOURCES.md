@@ -27,6 +27,12 @@ Quarkdown-compatible feature implementation.
 | Quarkdown quickstart                          | https://quarkdown.com/                      | Call examples (`.pow {5} to:{2}`, `.align {center}` with an indented body) | 2026-08-08 |
 | Quarkdown Core API — `Lambda` class           | https://quarkdown.com/docs/latest/quarkdown-core/com.quarkdown.core.function.value.data/-Lambda/index.html | Implicit positional references (`.1`, `.2`, ...): "If not present, parameter names are automatically set to `.1`, `.2`" | 2026-08-08 |
 | Quarkdown stdlib API — `foreach` / `Flow`     | https://quarkdown.com/docs/latest/quarkdown-stdlib/com.quarkdown.stdlib.module.Flow/foreach.html | Iterative calls using implicit references (`**.1**`); iteration index starts at 1 | 2026-08-08 |
+| Quarkdown wiki — "Loops" (v2.5.1)          | https://quarkdown.com/wiki/loops/ | `.foreach` maps an iterable to an ordered collection; `.repeat` is `.foreach {1..times}`; explicit and implicit block forms | 2026-08-17 |
+| Quarkdown wiki — "Iterable" (v2.5.1)       | https://quarkdown.com/wiki/iterable/ | Markdown ordered/unordered lists become ordered collections; nested collections; integer Range as iterable | 2026-08-17 |
+| Quarkdown wiki — "Range"                    | https://quarkdown.com/wiki/range/ | Closed/open literal Range syntax and consumer-defined open-range behavior | 2026-08-17 |
+| Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
+| Quarkdown v2.5.1 `Range.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public source evidence for inclusive closed iteration, left-open default start, right-open rejection, and descending bounds | 2026-08-17 |
+| Quarkdown v2.5.1 `FlowTest.kt`              | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Public test evidence for `..4` iteration and `1..` rejection | 2026-08-17 |
 | GitHub release tag `v2.5.1`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.1 | Release identification and D1-D5 public delta inventory | 2026-08-13 |
 | CommonMark specification, current link rules  | https://spec.commonmark.org/current/#links | D2 balanced/escaped link destinations, literal trailing delimiters, and URI backslash-escape semantics | 2026-08-13 |
 | CommonMark specification, current autolink rules | https://spec.commonmark.org/current/#autolinks | D2 autolink URI/email grammar and the rule that backslash escapes do not apply inside autolinks | 2026-08-13 |
@@ -74,7 +80,10 @@ the v2.5.1 impact review.
   official v2.5.1 macOS arm64 release; the probe checked successful `.1`
   binding and observed unresolved-reference failures for missing and
   zero-argument `.N` references
-- No Quarkdown source code is read or copied
+- No Quarkdown source code or tests are copied or translated. The v2.5.1
+  `Flow.kt`, `Range.kt`, and `FlowTest.kt` links above were consulted only as
+  public behavioral evidence for the iteration policy (including descending
+  bounds and repeat-zero construction).
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs
 - Each feature's provenance is recorded in
