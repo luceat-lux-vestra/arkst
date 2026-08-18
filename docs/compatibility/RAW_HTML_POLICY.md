@@ -115,13 +115,20 @@ Block HTML remains outside the supported Typst/PDF semantic path. Rushdown may e
 
 The current fail-closed `E8001` behavior is the correct boundary until a separately justified portable semantic mapping exists.
 
-## Known implementation divergence to correct
+## Resolved implementation divergence
 
-The current parser substrate is shared by Markdown and Quarkdown modes, and the current AST-to-IR bounded raw-HTML adapter is not mode-specific. As a result, exact whitelist forms that are intentionally supported for Markdown can currently flow through the same semantic adapter in Quarkdown-mode documents.
+The former implementation used the shared parser substrate's AST-to-IR
+bounded raw-HTML adapter without an input-mode guard. Exact whitelist forms
+could therefore flow through as successful semantics in Quarkdown-mode
+documents, even though that is not a Quarkdown v2.5.1 feature.
 
-That behavior must **not** be treated as Quarkdown v2.5.1 compatibility. It conflicts with the upstream mixed-content policy and should be corrected in a focused implementation change.
+This divergence is resolved. The compile entry boundary now determines one
+internal source mode and passes it to both frontend parsing and AST-to-IR
+conversion. The whitelist adapter is enabled only for Markdown; `.qd` and
+`.scrib` preserve parser-exposed raw HTML as source-backed nodes and emit
+`E8001`. Block raw HTML remains unsupported in every mode.
 
-The correction must preserve these invariants:
+The implementation preserves these invariants:
 
 - no Rushdown fork, patch, or upgrade;
 - no second Markdown parser;
@@ -133,8 +140,8 @@ The correction must preserve these invariants:
 
 ## Implementation order
 
-1. **Mode separation:** prevent the Markdown bounded raw-HTML semantic adapter from becoming Quarkdown mixed-HTML support.
-2. **Regression evidence:** add `.md` success cases and `.qd` / `.scrib` fail-closed cases for the same exact raw tags.
+1. **Mode separation:** **Completed.** The Markdown bounded raw-HTML semantic adapter cannot become Quarkdown mixed-HTML support.
+2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.scrib` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
 3. **Comment decision:** independently oracle/test complete Markdown HTML comments and, if justified, promote them to semantic no-op.
 4. **`.html` function:** implement only when its target-specific behavior and backend contract are explicitly defined.
 5. **Do not expand arbitrary HTML semantics** unless a concrete source-language compatibility requirement cannot be represented with existing portable IR/functions.
