@@ -548,7 +548,10 @@ fn normalize_children(
 /// This must remain contextual. Treating every `name:` body line as a lambda
 /// header would change the meaning of ordinary calls such as `.container`.
 fn has_lambda_body_semantics(name: &str) -> bool {
-    matches!(name, "function" | "let" | "foreach" | "repeat")
+    matches!(
+        name,
+        "function" | "let" | "foreach" | "repeat" | "map" | "filter" | "sorted"
+    )
 }
 
 fn contextualize_lambda_body(
@@ -957,6 +960,7 @@ fn directive_block(
         .or_else(|| offset_span(call.span, base.checked_add(call_base)?))
         .unwrap_or(ByteSpan::new(0, 0));
     let span_base = base.checked_add(call_base).unwrap_or(base);
+    let call_name = call.name.clone();
     let body_nodes =
         convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
     Block::DirectiveCall {
@@ -971,7 +975,16 @@ fn directive_block(
         named_args: call
             .named_args
             .iter()
-            .map(|arg| convert_named_arg(arg, source, base, call_base, diagnostics))
+            .map(|arg| {
+                convert_named_arg(
+                    arg,
+                    source,
+                    base,
+                    call_base,
+                    diagnostics,
+                    Some(call_name.as_str()),
+                )
+            })
             .collect(),
         chain: call
             .chain
@@ -1349,6 +1362,7 @@ fn convert_inline(
                     return None;
                 }
             };
+            let call_name = call.name.clone();
             Some(Inline::DirectiveCall {
                 name: call.name,
                 name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
@@ -1361,7 +1375,16 @@ fn convert_inline(
                 named_args: call
                     .named_args
                     .iter()
-                    .map(|arg| convert_named_arg(arg, source, base, 0, diagnostics))
+                    .map(|arg| {
+                        convert_named_arg(
+                            arg,
+                            source,
+                            base,
+                            0,
+                            diagnostics,
+                            Some(call_name.as_str()),
+                        )
+                    })
                     .collect(),
                 chain: call
                     .chain
@@ -1386,6 +1409,17 @@ fn convert_arg(
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Value {
+    convert_arg_with_mode(arg, source, base, call_base, diagnostics, false)
+}
+
+fn convert_arg_with_mode(
+    arg: &Arg,
+    source: &str,
+    base: usize,
+    call_base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+    allow_unmarked_lambda: bool,
+) -> Value {
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
         ArgContent::Content(content) => {
@@ -1400,7 +1434,47 @@ fn convert_arg(
                 });
                 return Value::String(String::new());
             };
-            Value::Content(parse_original_content(source, span, base, diagnostics))
+            let parsed_lambda = if allow_unmarked_lambda {
+                scribium_quarkdown::parse_callback_lambda(source, span)
+            } else {
+                scribium_quarkdown::parse_inline_lambda(source, span)
+            };
+            match parsed_lambda {
+                Ok(Some(lambda)) => {
+                    let parameters = (!lambda.implicit).then(|| crate::ast::LambdaHeader {
+                        parameters: lambda
+                            .parameters
+                            .into_iter()
+                            .map(|parameter| crate::ast::LambdaParameter {
+                                name: parameter.name,
+                                name_span: offset_span(parameter.name_span, base)
+                                    .unwrap_or(parameter.name_span),
+                                span: offset_span(parameter.span, base).unwrap_or(parameter.span),
+                                optional: parameter.optional,
+                            })
+                            .collect(),
+                        span: offset_span(
+                            ByteSpan::new(lambda.span.start, lambda.body.start),
+                            base,
+                        )
+                        .unwrap_or(ByteSpan::new(lambda.span.start, lambda.body.start)),
+                    });
+                    Value::Lambda {
+                        parameters,
+                        body: parse_original_content(source, lambda.body, base, diagnostics),
+                        span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                    }
+                }
+                Ok(None) => Value::Content(parse_original_content(source, span, base, diagnostics)),
+                Err(error) => {
+                    diagnostics.push(ParserDiagnostic {
+                        code: error.code,
+                        message: error.message,
+                        span: offset_span(error.span, base).unwrap_or(error.span),
+                    });
+                    Value::Content(parse_original_content(source, span, base, diagnostics))
+                }
+            }
         }
     }
 }
@@ -1502,6 +1576,7 @@ fn convert_content_call(
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Inline {
     let span = offset_span(call.span, base).unwrap_or(ByteSpan::new(0, 0));
+    let call_name = call.name.clone();
     Inline::DirectiveCall {
         name: call.name,
         name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
@@ -1514,7 +1589,9 @@ fn convert_content_call(
         named_args: call
             .named_args
             .iter()
-            .map(|arg| convert_named_arg(arg, source, base, 0, diagnostics))
+            .map(|arg| {
+                convert_named_arg(arg, source, base, 0, diagnostics, Some(call_name.as_str()))
+            })
             .collect(),
         chain: call
             .chain
@@ -1533,6 +1610,7 @@ fn convert_call_segment(
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> CallSegment {
+    let call_name = segment.name.clone();
     CallSegment {
         name: segment.name.clone(),
         name_span: offset_span(
@@ -1548,7 +1626,16 @@ fn convert_call_segment(
         named_args: segment
             .named_args
             .iter()
-            .map(|arg| convert_named_arg(arg, source, base, call_base, diagnostics))
+            .map(|arg| {
+                convert_named_arg(
+                    arg,
+                    source,
+                    base,
+                    call_base,
+                    diagnostics,
+                    Some(call_name.as_str()),
+                )
+            })
             .collect(),
         span: offset_span(segment.span, base.checked_add(call_base).unwrap_or(base))
             .unwrap_or(ByteSpan::new(0, 0)),
@@ -1561,12 +1648,22 @@ fn convert_named_arg(
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    call_name: Option<&str>,
 ) -> NamedArg {
     let offset = base.checked_add(call_base).unwrap_or(base);
+    let callback_lambda = arg.name == "by"
+        && call_name.is_some_and(|name| matches!(name, "map" | "filter" | "sorted"));
     NamedArg {
         name: arg.name.clone(),
         name_span: offset_span(arg.name_span, offset).unwrap_or(ByteSpan::new(0, 0)),
-        value: convert_arg(&arg.value, source, base, call_base, diagnostics),
+        value: convert_arg_with_mode(
+            &arg.value,
+            source,
+            base,
+            call_base,
+            diagnostics,
+            callback_lambda,
+        ),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
     }
 }
@@ -3338,6 +3435,40 @@ mod tests {
                 )
             }));
         }
+    }
+
+    #[test]
+    fn marked_inline_lambda_is_structural_and_source_backed() {
+        let output = parse_with_diagnostics(".sorted {1..3} by:{@lambda .1}\n");
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall { named_args, .. } = &output.document.nodes[0] else {
+            panic!("expected sorted directive")
+        };
+        assert!(matches!(
+            named_args.first().map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: None,
+                body,
+                span,
+            }) if !body.is_empty() && span.start < span.end
+        ));
+    }
+
+    #[test]
+    fn transform_callback_lambda_uses_contextual_unmarked_form() {
+        let output = parse_with_diagnostics(".map {1..3} by:{value: .value}\n");
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall { named_args, .. } = &output.document.nodes[0] else {
+            panic!("expected map directive")
+        };
+        assert!(matches!(
+            named_args.first().map(|argument| &argument.value),
+            Some(Value::Lambda {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
     }
 
     #[test]

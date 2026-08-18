@@ -965,6 +965,14 @@ mod tests {
     }
 
     #[test]
+    fn compile_collection_transforms_through_frontend_and_first_class_lambda_values() {
+        let source = ".map {1..3} by:{value: .value}\n\n.sorted {.map {1..3} by:{@lambda .1}}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\n3\n1\n2\n3");
+    }
+
+    #[test]
     fn compile_iteration_accepts_left_open_and_rejects_endless_ranges() {
         let (result, _) = compile_source(".foreach {..4}\n    .1\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");

@@ -183,6 +183,13 @@ pub enum Value {
     Identifier(String),
     Range(RangeValue),
     Content(Vec<Inline>),
+    /// A source-backed first-class inline lambda. Its body has already passed
+    /// through the Rushdown-backed inline frontend.
+    Lambda {
+        parameters: Option<LambdaHeader>,
+        body: Vec<Inline>,
+        span: ByteSpan,
+    },
 }
 
 /// A source-backed integer range literal from a Quarkdown value argument.

@@ -659,6 +659,18 @@ fn value_to_ir(
                 span: byte_to_source_span(&range.span, source_id),
             })
         }
+        Value::Lambda {
+            parameters,
+            body,
+            span,
+        } => crate::ir::IrValue::Callable(crate::ir::IrCallable {
+            parameters: parameters
+                .as_ref()
+                .map(|header| lambda_parameters_to_ir(header, source_id)),
+            body: inline_lambda_body_to_ir(body, source_id, diagnostics, *span),
+            span: byte_to_source_span(span, source_id),
+            capture: None,
+        }),
         Value::Content(inlines) => {
             if let [Inline::DirectiveCall {
                 name,
@@ -726,6 +738,77 @@ fn value_to_ir(
                 }])
             }
         }
+    }
+}
+
+fn inline_lambda_body_to_ir(
+    body: &[Inline],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    fallback_span: ByteSpan,
+) -> Vec<IrNode> {
+    match body {
+        [] => Vec::new(),
+        [Inline::DirectiveCall {
+            name,
+            name_span,
+            head_span,
+            positional_args,
+            named_args,
+            chain,
+            body,
+            span,
+        }] => {
+            let positional_args = positional_args
+                .iter()
+                .map(|value| value_to_ir(value, source_id, diagnostics))
+                .collect();
+            let named_args = named_args
+                .iter()
+                .map(|argument| IrNamedArg {
+                    name: argument.name.clone(),
+                    name_span: byte_to_source_span(&argument.name_span, source_id),
+                    value: value_to_ir(&argument.value, source_id, diagnostics),
+                    span: byte_to_source_span(&argument.span, source_id),
+                })
+                .collect();
+            let body = body.as_ref().map(|inlines| {
+                vec![IrNode::Paragraph {
+                    content: inlines_to_ir(inlines, source_id, diagnostics),
+                    span: byte_to_source_span(span, source_id),
+                }]
+            });
+            if chain.is_empty() {
+                vec![IrNode::FunctionCall {
+                    name: name.clone(),
+                    positional_args,
+                    named_args,
+                    lambda_parameters: None,
+                    body,
+                    span: byte_to_source_span(span, source_id),
+                }]
+            } else {
+                vec![IrNode::ChainedFunctionCall {
+                    head: IrCallSegment {
+                        name: name.clone(),
+                        name_span: byte_to_source_span(name_span, source_id),
+                        positional_args,
+                        named_args,
+                        span: byte_to_source_span(head_span, source_id),
+                    },
+                    chain: chain
+                        .iter()
+                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .collect(),
+                    body,
+                    span: byte_to_source_span(span, source_id),
+                }]
+            }
+        }
+        _ => vec![IrNode::Paragraph {
+            content: inlines_to_ir(body, source_id, diagnostics),
+            span: byte_to_source_span(&fallback_span, source_id),
+        }],
     }
 }
 

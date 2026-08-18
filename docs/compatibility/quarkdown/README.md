@@ -54,10 +54,11 @@ provenance records.
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
-| Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form; inline lambda values deferred) |
+| Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
 | Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Iteration                      | typed `Range` / `Collection` / `Pair` / ordered `Dictionary`; block `.foreach` and `.repeat` | Semantically supported for typed values, closed inclusive ranges, left-open ranges starting at 1, descending-empty behavior, ordered list adaptation, ordered dictionary entries, block explicit/implicit lambdas, Pair destructuring, typed collection results, parent visibility, and child isolation | Implemented (evidenced slice; right-open/fully-open iterable rejection and generalized patterns deferred) |
 | Collection access              | `.size`, `.first`, `.last`, `.getat` | Typed access over `Collection`, `Pair`, ordered `Dictionary` entries, finite closed or left-open `Range`, and Markdown list values; one-based integral indexing with upstream absence/fallback behavior | Implemented (evidenced slice; endless ranges and other collection operations deferred) |
+| Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.sorted` follows the evidenced `from`/`by?` ascending natural/selector slice; `.map`/`.filter` are the requested Scribium slice because no public v2.5.1 definitions were found | Implemented (evidenced callable/sorted slice; Boolean-only filter and transform details are explicitly bounded) |
 | Functions/components            | —                                | —                        | Planned          |
 | Include/read                   | —                                | —                        | Planned          |
 | Metadata                       | —                                | —                        | Planned          |
@@ -123,11 +124,13 @@ document output is materialized by the evaluator as an ordered list for Pair
 and a two-column table for Dictionary; Typst lowering does not implement these
 language semantics.
 
-This slice intentionally does not add generic inline or first-class lambdas,
-nested or generalized destructuring, rest/spread patterns, or collection
-transforms and queries outside the four access operations recorded in the
-matrix. `.map`, `.filter`, `.sorted`, mutation, spread/rest, and generalized
-destructuring remain deferred.
+This slice intentionally does not add nested or generalized destructuring,
+rest/spread patterns, mutation, comparator-language syntax, descending sorting,
+or transform forms beyond the shared first-class `by` callback. `.map`,
+`.filter`, and `.sorted` now use the generic callable and iterable machinery
+described below; `.filter` is Boolean-only and the requested `.map`/`.filter`
+surface is not asserted as an upstream v2.5.1 compatibility claim because the
+tracked public `Collection.kt` source does not define those functions.
 
 ## Collection access evidence
 
@@ -175,6 +178,49 @@ feed the existing `.foreach` destructuring path. Nested operand failures remain
 atomic and propagate their original diagnostic without a duplicate. The
 compile/evaluator evidence is listed in the conformance table below, including
 UTF-8 and CRLF source-span coverage.
+
+## Generic callable and collection transforms
+
+The v2.5.1 lambda evidence identifies a lambda as a first-class typed value
+with explicit named parameters or implicit `.1`, `.2`, and later positional
+references. Invocation forks a child scope, preserves lexical parent bindings,
+fills omitted optional parameters with `None`, and validates explicit arity.
+Scribium stores the body and source spans in `IrValue::Callable`, snapshots
+captured bindings deterministically, and routes `.foreach`, `.map`, `.filter`,
+`.sorted` selectors, and first-class callback values through one invocation
+path. The same path preserves nearest-scope implicit masking and child-scope
+isolation.
+
+The explicit first-class form is source-backed `@lambda`, for example:
+
+```text
+.var {identity} {@lambda .1}
+.map {1..3} by:{.identity}
+.map {1..3} by:{value: .value}
+```
+
+Transform callback arguments also accept the contextual upstream form without
+the legacy marker when they occur as the `by` argument of `.map`, `.filter`, or
+`.sorted`. Other content arguments remain ordinary content and are not
+reclassified as lambdas.
+
+All transforms first evaluate one value through `coerce_iterable`, then invoke
+the callback against each typed element. `.map` returns a typed `Collection` in
+source order. `.filter` requires a semantic Boolean predicate result and
+returns the original typed elements in source order. `.sorted` accepts natural
+keys or a `by` selector and returns a stable ascending typed `Collection`;
+Scribium rejects heterogeneous, `None`, and unsupported keys with diagnostics.
+There is no descending option or arbitrary comparator language.
+
+The v2.5.1 `Collection.kt` source documents `.sorted(from, by?)` but does not
+define public `.map` or `.filter` functions in the tracked tag. Consequently
+`.sorted` is an evidenced narrow compatibility slice, while `.map` and
+`.filter` are this task's bounded Scribium transform slice rather than an
+upstream compatibility claim. Unknown upstream details remain deferred.
+Pair, Dictionary, Range, and supported Markdown-list transforms reuse the exact
+`.foreach` element sequence and Range policy. Callback failures, invalid
+predicates, unsupported sort keys, and endless ranges publish no partial
+result; no value is serialized or reparsed.
 
 ## Range construction and iterable semantics
 
@@ -267,6 +313,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Scoped `.let`                | `scribium-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `scribium-core/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `scribium-core/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `scribium-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |
 | Iteration                    | `scribium-quarkdown/src/lib.rs::parses_typed_ranges_without_confusing_numbers_or_references`; `scribium-markdown/src/parser.rs::iteration_lambda_headers_are_contextual_and_source_backed`; `scribium-core/src/ast_to_ir.rs::range_survives_ast_to_ir_as_a_typed_source_backed_value`, `literal_range_endpoint_conversion_is_checked_at_the_signed_boundary`; `scribium-core/src/ir.rs::range_and_nested_collection_roundtrip_serde`, `pair_and_dictionary_roundtrip_serde_preserves_recursive_values`; `scribium-core/src/evaluator.rs::dynamic_range_returns_typed_signed_truncated_endpoints`, `dynamic_range_number_conversion_matches_upstream_edges`, `range_materialization_handles_signed_and_left_open_bounds_once`, `pair_evaluation_is_typed_recursive_and_atomic_on_child_failure`, `dictionary_iteration_reuses_pair_items_and_explicit_destructuring`, `pair_destructuring_rejects_non_pair_items_without_coercion`; `scribium-core/src/lib.rs::compile_foreach_closed_range_is_inclusive_and_preserves_numbers`, `compile_dynamic_range_converges_with_literal_and_supports_signed_bounds`, `compile_dynamic_range_supports_nested_bounds_and_typed_interoperability`, `compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed`, `compile_foreach_reads_parent_values_and_functions_with_isolated_children`, `compile_foreach_adapts_only_list_values_and_preserves_nested_collections`, `compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary`, `compile_dictionary_foreach_destructures_ordered_pairs`, `compile_dictionary_duplicate_keys_are_last_write_wins_in_first_slot`, `compile_dictionary_entry_failure_is_atomic_and_stops_before_output`, `compile_dictionary_implicit_scope_keeps_the_pair_typed`, `compile_dictionary_explicit_scope_masks_implicit_positional_references`, `compile_dictionary_destructuring_masks_and_restores_parent_bindings`, `compile_nested_dictionary_destructuring_restores_outer_scope`, `compile_pair_is_a_typed_recursive_value_at_the_output_boundary`, `compile_repeat_is_one_based_and_uses_the_shared_collection_result`, `compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence`, `compile_iteration_accepts_left_open_and_rejects_endless_ranges`, `compile_dynamic_range_rejects_invalid_shapes_and_preserves_atomic_failures`, `compile_dynamic_range_diagnostics_keep_utf8_crlf_and_nested_bound_spans`, `compile_iteration_body_no_value_and_failure_are_single_diagnostics` | Semantically supported for typed literal/dynamic values, signed endpoint conversion, closed and left-open iterable ranges, descending-empty behavior, ordered list adaptation, ordered dictionary entries, Pair destructuring, block explicit/implicit lambdas, typed collection results, parent visibility, and child isolation | Implemented (evidenced slice; endless right-open/fully-open consumption and generalized patterns deferred) |
 | Collection access              | `scribium-core/src/evaluator.rs::collection_access_operations_preserve_recursive_types_and_dictionary_pairs`, `collection_access_indexing_matches_one_based_empty_and_invalid_boundaries`, `collection_access_reuses_failure_outcomes_and_checks_length_conversion`; `scribium-core/src/lib.rs::compile_collection_access_operations_cover_basic_recursive_values`, `compile_collection_access_keeps_pair_dictionary_and_range_values_typed`, `compile_collection_access_results_interoperate_with_foreach_and_functions`, `compile_dynamic_range_converges_with_literal_and_supports_signed_bounds`, `compile_dynamic_range_supports_nested_bounds_and_typed_interoperability`, `compile_collection_access_empty_and_invalid_inputs_are_atomic`, `compile_collection_access_diagnostics_keep_utf8_and_crlf_source_spans` | `.size`, `.first`, `.last`, and `.getat` over typed Collection, Pair, ordered Dictionary entries, closed/left-open Range, and Markdown list values, with the shared `coerce_iterable` path | Implemented (evidenced slice) |
+| Generic callable and transforms | `scribium-quarkdown/src/lib.rs::parses_marked_inline_lambdas_without_rewriting_source`, `parses_marked_inline_implicit_lambdas`; `scribium-markdown/src/parser.rs::marked_inline_lambda_is_structural_and_source_backed`, `transform_callback_lambda_uses_contextual_unmarked_form`; `scribium-core/src/evaluator.rs::collection_transforms_share_typed_iterable_and_callable_paths`, `transforms_support_pair_dictionary_and_nested_typed_values`, `sorted_supports_typed_keys_and_fails_closed_for_unsupported_keys`, `transform_failures_are_atomic_and_predicates_are_boolean_only`, `first_class_callable_captures_definition_values_and_checks_arity`; `scribium-core/src/lib.rs::compile_collection_transforms_through_frontend_and_first_class_lambda_values` | First-class typed callable values, explicit/implicit callback binding, lexical capture, shared invocation and iterable adaptation, typed map/filter/sorted results, Pair/Dictionary/Range interoperability, stable natural/selector sorting, Boolean-only predicates, failure atomicity, and source-backed callback errors | Implemented (bounded callable/sorted evidence; `.map`/`.filter` are the requested Scribium slice, not an upstream v2.5.1 claim) |
 | Optional parameter values      | `scribium-core/src/ir.rs::none_uses_the_stable_externally_tagged_serde_variant`, `scribium-core/src/lib.rs::compile_optional_parameters_support_otherwise_and_preserve_value_types`, `compile_optional_none_is_distinct_from_no_value`, `compile_optional_none_can_be_stored_locally_without_parent_scope_leak`, `compile_optional_none_direct_output_materializes_as_text`, `compile_isnone_returns_a_semantic_boolean_for_optional_values` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 
@@ -332,9 +379,9 @@ headerless implicit positional references, the tested scalar/content shapes,
 and the small `.otherwise`/`.isnone` builtin surface. Scoped `.let` is
 supported for block-form explicit one-parameter and headerless `.1` lambdas,
 including nested lexical scopes, parent lookup, child isolation, and semantic
-result propagation. Generic inline lambda values and other lambda-consuming
-builtins remain deferred under Issue #61; standalone lambda values, components,
-and complete DynamicValue compatibility remain compatibility debt.
+result propagation. First-class `@lambda` values and contextual transform
+callbacks now use the same invocation machinery. Components and complete
+DynamicValue compatibility remain compatibility debt.
 
 ### Typed iteration evidence
 
@@ -365,10 +412,13 @@ descending-empty behavior, Markdown ordered/unordered list adaptation at the
 iterable boundary, block-form `.foreach` with one explicit parameter or
 implicit `.1`, block-form `.repeat`, typed mapped results, parent lookup, fresh
 per-iteration child scopes, and the four evidenced Collection access
-operations. Deferred are generalized or nested destructuring, generic inline
-`@lambda`, and collection transforms/queries such as `.map`, `.filter`, and
-`.sorted`. Right-open and fully-open Range values are represented but are
-rejected by the standard finite Iterable path as endless.
+operations. The transform slice is implemented through the same callable and
+iterable path; its Boolean-only `.filter` policy and requested `.map`/`.filter`
+surface are explicitly bounded rather than upstream v2.5.1 compatibility
+claims. Deferred are generalized or nested destructuring, comparator-language
+syntax, descending sorting, and other collection operations. Right-open and
+fully-open Range values are represented but are rejected by the standard finite
+Iterable path as endless.
 
 - **Unsupported:** Syntax may be parsed and preserved, but normal compilation
   produces an explicit `E8xxx` error diagnostic for the unsupported semantics
@@ -431,10 +481,11 @@ recovers as ordinary text.
 Quarkdown has documented features represented in the v2.5.0/v2.5.1 evidence set that
 Scribium has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
-debt against the complete target. Standalone lambda values, layout semantics,
-resource/data loading, and other v2.5.0 built-ins remain additional gaps;
-generalized or nested destructuring, generic inline lambdas, and collection
-transforms/queries remain deferred within the iteration slice. Right-open and
+debt against the complete target. Standalone lambda values outside the
+supported first-class/callback forms, layout semantics, resource/data loading,
+and other v2.5.0 built-ins remain additional gaps; generalized or nested
+destructuring, comparator-language syntax, descending sorting, and unrelated
+collection operations remain deferred within the iteration slice. Right-open and
 fully-open Range values are not globally unsupported: their representation is
 supported, while standard Iterable consumption rejects them as endless. The
 evidenced function row does not promote later consumer-specific Range surfaces.

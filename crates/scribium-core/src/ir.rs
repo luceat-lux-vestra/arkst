@@ -254,6 +254,40 @@ pub struct IrDictionary {
     pub span: SourceSpan,
 }
 
+/// A typed first-class callable value.
+///
+/// The frontend stores the callable body structurally. The evaluator fills
+/// `capture` when the value is materialized, keeping lexical capture as an
+/// immutable semantic snapshot rather than a pointer into mutable evaluator
+/// state.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCallable {
+    pub parameters: Option<Vec<IrParameter>>,
+    pub body: Vec<IrNode>,
+    pub span: SourceSpan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<Box<IrCallableCapture>>,
+}
+
+/// Immutable lexical bindings captured by a first-class callable.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCallableCapture {
+    pub variables: Vec<IrCapturedVariable>,
+    pub functions: Vec<IrCapturedFunction>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCapturedVariable {
+    pub name: String,
+    pub value: IrValue,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrCapturedFunction {
+    pub name: String,
+    pub callable: IrCallable,
+}
+
 /// Semantic state for a GFM task-list item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrTaskStatus {
@@ -307,6 +341,9 @@ pub enum IrValue {
     /// This is a semantic value, distinct from an evaluator `NoValue`
     /// outcome. It remains typed until an output boundary materializes it.
     None,
+    /// A first-class typed callable. It is consumed by the evaluator and must
+    /// never be lowered as a backend expression.
+    Callable(IrCallable),
 }
 
 #[cfg(test)]
