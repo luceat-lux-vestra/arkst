@@ -37,6 +37,12 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `Collection.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | Public behavioral evidence for non-negative `.size`, empty `.first`/`.last`, one-based `.getat`, integral index conversion, out-of-bounds fallback, and `orelse` | 2026-08-18 |
 | Quarkdown v2.5.1 `IterableValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/IterableValue.kt | Public behavioral evidence that iterable values expose ordered components and Pair participates in iterable adaptation | 2026-08-18 |
 | Quarkdown v2.5.1 `DictionaryValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/DictionaryValue.kt | Public behavioral evidence that Dictionary adapts to an iterable of key-value Pair entries | 2026-08-18 |
+| Quarkdown v2.5.1 `Lambda.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt | First-class lambda value, explicit/implicit parameters, optional arguments, forked invocation scope, and lexical parent context | 2026-08-18 |
+| Quarkdown v2.5.1 `LambdaValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/LambdaValue.kt | Lambda as a typed Value wrapper rather than a backend expression | 2026-08-18 |
+| Quarkdown v2.5.1 `LambdaTest.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/LambdaTest.kt | Public examples for nested implicit scope, explicit inline parameters, callback passing, and legacy `@lambda` syntax | 2026-08-18 |
+| Quarkdown v2.5.1 `Collection.kt` transform section | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | `.sorted(from, by?)` signature, natural-order vs selector behavior, and no public `.map`/`.filter` declarations in the tracked tag | 2026-08-18 |
+| Quarkdown v2.5.1 `Sorting.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Sorting.kt | Stable selector-based sorting machinery and null-safe comparator helper used by stdlib sorting | 2026-08-18 |
+| Kotlin stdlib `sortedWith` API | https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/sorted-with.html | Public contract that the comparator sort is stable and equal elements preserve relative order | 2026-08-18 |
 | Quarkdown v2.5.1 `Range.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public behavioral evidence for inclusive finite Range iteration, left-open default start, and right-open rejection | 2026-08-18 |
 | Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation and non-iterable scalar handling | 2026-08-18 |
 | Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
@@ -154,6 +160,58 @@ The probes confirmed one-based access, `None` for ordinary misses, typed
 fallback values, empty descending Ranges, fractional-index rejection,
 non-iterable String behavior, upstream Number-to-Int conversion, and endless
 open-range rejection.
+
+## Generic callable and collection-transform evidence record
+
+The v2.5.1 [`Lambda.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt)
+and [`LambdaValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/LambdaValue.kt)
+sources establish that a lambda is a typed first-class value. It retains a
+parent lexical context, accepts either explicit named parameters or implicit
+`.1`, `.2`, and later positional names, forks a child context for each
+invocation, fills omitted optional parameters with `None`, and rejects an
+invalid explicit argument count. Invocation also propagates the calling scope
+needed by dynamic body arguments. The public v2.5.1 lambda tests provide
+examples for nested implicit masking, explicit callback parameters, callback
+passing, and the legacy `@lambda` marker.
+
+Scribium represents that semantic value as `IrValue::Callable`. Its body,
+parameter spans, definition span, and immutable lexical snapshot stay in the
+backend-neutral IR. `.foreach`, `.map`, `.filter`, `.sorted` selector calls,
+and first-class callback values all use one evaluator invocation path and one
+`coerce_iterable` adaptation path. A callback is evaluated in a fresh child
+scope, explicit parameters shadow visible names, and the nearest implicit
+lambda scope masks outer `.1`/`.2` references. Transform results are recursive
+typed `IrValue`s and are published only after the complete operation succeeds.
+
+The v2.5.1 [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt)
+source exposes `.sorted(from, by?)`. Without `by`, it requires naturally
+comparable elements; with `by`, it compares the selector result. It exposes no
+descending argument, and no public `.map` or `.filter` declaration is present
+in this tracked `v2.5.1` file. The implementation rejects unsortable values
+rather than defining an arbitrary order. Its `sortedWith` path uses the Kotlin
+stdlib stable-sort contract, where equal elements preserve relative order.
+Scribium therefore implements `.sorted` only for homogeneous Number, String,
+or Boolean keys, uses a deterministic stable ascending sort, rejects `None`,
+and reports heterogeneous or unsupported keys as source-backed diagnostics.
+NaN ordering is explicit and deterministic in Scribium; the reviewed Quarkdown
+source does not specify a separate NaN rule, so this is not promoted as an
+upstream compatibility claim.
+
+`.map` and `.filter` are included because this task explicitly defines them as
+the Scribium collection-transform slice, not because public `.map`/`.filter`
+definitions were found in the v2.5.1 `Collection.kt` source. Their callback
+shape is the shared `by` first-class callable form. `.filter` is deliberately
+Boolean-only and rejects `None`, Number, String, Collection, and other
+non-Boolean results; this fail-closed policy is an implementation boundary,
+not an upstream v2.5.1 compatibility claim. Upstream behavior not evidenced by
+the reviewed v2.5.1 sources remains deferred rather than generalized.
+
+Pair and Dictionary callbacks receive the same ordered Pair sequence already
+used by `.foreach`; two explicit callback parameters use the existing Pair
+destructuring rule. Range callbacks consume the existing finite inclusive or
+left-open materialization and reject right-open/fully-open endless ranges.
+Markdown lists use the same supported list adaptation. No transform materializes
+through text serialization, generated Markdown, or a second parser.
 
 ## Observational Method
 

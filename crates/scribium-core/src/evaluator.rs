@@ -45,11 +45,13 @@
 use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
-    IrCallSegment, IrDictionary, IrDocument, IrInline, IrListItem, IrNamedArg, IrNode, IrPair,
-    IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
+    IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
+    IrDictionary, IrDocument, IrInline, IrListItem, IrNamedArg, IrNode, IrPair, IrParameter,
+    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
 };
 use crate::source::SourceSpan;
 use scribium_quarkdown::is_valid_normal_call_name;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// A resolved variable value stored in the evaluation environment.
@@ -98,6 +100,18 @@ struct FunctionBinding {
     parameters: LambdaParameters,
     body: Vec<IrNode>,
     declaration_span: SourceSpan,
+    capture: Option<Box<IrCallableCapture>>,
+}
+
+impl FunctionBinding {
+    fn as_callable(&self) -> IrCallable {
+        IrCallable {
+            parameters: self.parameters.to_ir(),
+            body: self.body.clone(),
+            span: self.declaration_span,
+            capture: self.capture.clone(),
+        }
+    }
 }
 
 /// The parameter mode of a callable body.
@@ -127,6 +141,17 @@ impl LambdaParameters {
             Self::Explicit(parameters) => format!("{} explicit parameter(s)", parameters.len()),
             Self::Implicit => "implicit positional parameters".to_string(),
         }
+    }
+
+    fn to_ir(&self) -> Option<Vec<IrParameter>> {
+        match self {
+            Self::Explicit(parameters) => Some(parameters.clone()),
+            Self::Implicit => None,
+        }
+    }
+
+    fn from_ir(parameters: Option<Vec<IrParameter>>) -> Self {
+        parameters.map_or(Self::Implicit, Self::Explicit)
     }
 }
 
@@ -173,6 +198,58 @@ enum CallBody<'a> {
 struct IterationOptions {
     span: SourceSpan,
     allow_destructuring: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SortKey {
+    Number(f64),
+    String(String),
+    Boolean(bool),
+}
+
+impl SortKey {
+    fn try_from_value(value: &IrValue) -> Result<Self, String> {
+        match value {
+            IrValue::Number(value) => Ok(Self::Number(*value)),
+            IrValue::String(value) => Ok(Self::String(value.clone())),
+            IrValue::Boolean(value) => Ok(Self::Boolean(*value)),
+            IrValue::None => Err("`.sorted` cannot compare a None value".to_string()),
+            _ => Err("`.sorted` key has no supported natural ordering".to_string()),
+        }
+    }
+
+    fn same_kind(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Number(_), Self::Number(_))
+                | (Self::String(_), Self::String(_))
+                | (Self::Boolean(_), Self::Boolean(_))
+        )
+    }
+}
+
+impl Eq for SortKey {}
+
+impl Ord for SortKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Number(left), Self::Number(right)) => match (left.is_nan(), right.is_nan()) {
+                (true, true) => Ordering::Equal,
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => left.total_cmp(right),
+            },
+            (Self::String(left), Self::String(right)) => left.cmp(right),
+            (Self::Boolean(left), Self::Boolean(right)) => left.cmp(right),
+            _ => Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for SortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Result of invoking a call in value context.
@@ -470,6 +547,7 @@ impl EvaluationContext {
         parameters: LambdaParameters,
         body: Vec<IrNode>,
         declaration_span: SourceSpan,
+        capture: Option<Box<IrCallableCapture>>,
     ) {
         self.functions.insert(
             name,
@@ -477,8 +555,63 @@ impl EvaluationContext {
                 parameters,
                 body,
                 declaration_span,
+                capture,
             },
         );
+    }
+
+    fn capture_snapshot(&self) -> IrCallableCapture {
+        let mut variables = BTreeMap::new();
+        let mut functions = BTreeMap::new();
+        self.collect_bindings(&mut variables, &mut functions);
+        IrCallableCapture {
+            variables: variables
+                .into_iter()
+                .map(|(name, value)| IrCapturedVariable { name, value })
+                .collect(),
+            functions: functions
+                .into_iter()
+                .map(|(name, binding)| IrCapturedFunction {
+                    name,
+                    callable: binding.as_callable(),
+                })
+                .collect(),
+        }
+    }
+
+    fn collect_bindings(
+        &self,
+        variables: &mut BTreeMap<String, IrValue>,
+        functions: &mut BTreeMap<String, FunctionBinding>,
+    ) {
+        if let Some(parent) = self.parent.as_deref() {
+            parent.collect_bindings(variables, functions);
+        }
+        variables.extend(
+            self.variables
+                .iter()
+                .map(|(name, value)| (name.clone(), value.to_value())),
+        );
+        functions.extend(self.functions.clone());
+    }
+
+    fn from_capture(capture: &IrCallableCapture) -> Self {
+        let mut context = Self::new();
+        for variable in &capture.variables {
+            context.set_value(variable.name.clone(), variable.value.clone());
+        }
+        for function in &capture.functions {
+            context.functions.insert(
+                function.name.clone(),
+                FunctionBinding {
+                    parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
+                    body: function.callable.body.clone(),
+                    declaration_span: function.callable.span,
+                    capture: function.callable.capture.clone(),
+                },
+            );
+        }
+        context
     }
 
     #[cfg(test)]
@@ -497,6 +630,7 @@ impl EvaluationContext {
             LambdaParameters::Explicit(parameters),
             Vec::new(),
             SourceSpan::new(crate::source::SourceId(0), 0, 0),
+            None,
         );
     }
 
@@ -1020,6 +1154,19 @@ impl Evaluator {
 
         if is_repeat(name) {
             return self.evaluate_repeat(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if is_collection_transform(name) {
+            return self.evaluate_collection_transform(
+                name,
                 positional_args,
                 named_args,
                 body,
@@ -1742,6 +1889,142 @@ impl Evaluator {
         )
     }
 
+    /// Evaluates `.map`, `.filter`, and `.sorted` through the same typed
+    /// iterable and callable machinery used by `.foreach`.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_collection_transform(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let (raw_collection, raw_callback) = match transform_operands(
+            name,
+            positional_args,
+            named_args,
+            body.is_some(),
+            *span,
+            diagnostics,
+        ) {
+            Ok(operands) => operands,
+            Err(outcome) => return outcome,
+        };
+        let collection = match self.evaluate_value(&raw_collection, diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                match self.preserve_value_expression(&raw_collection, diagnostics, context) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                }
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(&raw_collection, span)));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+        };
+        let elements = match self.coerce_iterable(collection, span, diagnostics) {
+            Ok(elements) => elements,
+            Err(outcome) => return outcome,
+        };
+
+        let callable = match body {
+            Some(CallBody::Block(nodes)) => {
+                Some(self.make_callable(lambda_parameters, nodes, *span, context))
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    format!("`.{name}` requires a block or first-class lambda callback"),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => match raw_callback {
+                Some(value) => {
+                    let value = match self.evaluate_value(&value, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        CallOutcome::Unresolved => {
+                            match self.preserve_value_expression(&value, diagnostics, context) {
+                                Ok(value) => value,
+                                Err(outcome) => return outcome,
+                            }
+                        }
+                        CallOutcome::NoValue => {
+                            diagnostics.push(no_value_required(value_source_span(&value, span)));
+                            return CallOutcome::Failed;
+                        }
+                        CallOutcome::Failed => return CallOutcome::Failed,
+                    };
+                    match value {
+                        IrValue::Callable(callable) => Some(callable),
+                        _ => {
+                            diagnostics.push(iteration_error(
+                                format!("`.{name}` callback must be a first-class callable"),
+                                value_source_span(&value, span),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    }
+                }
+                None if name == "sorted" => None,
+                None => {
+                    diagnostics.push(iteration_error(
+                        format!("`.{name}` requires a callback lambda"),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+        };
+
+        match name {
+            "map" => {
+                let Some(callable) = callable.as_ref() else {
+                    diagnostics.push(iteration_error(
+                        "`.map` requires a callback lambda".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                self.map_callable_values(
+                    &elements,
+                    callable,
+                    IterationOptions {
+                        span: *span,
+                        allow_destructuring: true,
+                    },
+                    diagnostics,
+                    context,
+                )
+            }
+            "filter" => {
+                let Some(callable) = callable.as_ref() else {
+                    diagnostics.push(iteration_error(
+                        "`.filter` requires a predicate lambda".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                self.filter_callable_values(&elements, callable, *span, diagnostics, context)
+            }
+            "sorted" => {
+                self.sort_iterable_values(elements, callable.as_ref(), *span, diagnostics, context)
+            }
+            _ => {
+                diagnostics.push(iteration_error(
+                    format!("Unsupported collection transform `.{name}`"),
+                    *span,
+                ));
+                CallOutcome::Failed
+            }
+        }
+    }
+
     /// Evaluates `.range` into the same typed Range representation used by
     /// literal range values. Bounds are evaluated through the ordinary value
     /// path before the upstream Number-to-Int-compatible conversion.
@@ -1820,27 +2103,76 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
-        let mut child = context.child();
-        match lambda_parameters {
-            Some(parameters) => {
-                let bindings = match scoped_parameter_bindings(
-                    &value,
-                    parameters,
-                    options.allow_destructuring,
-                    options.span,
-                    diagnostics,
-                ) {
-                    Ok(bindings) => bindings,
-                    Err(outcome) => return outcome,
-                };
+        let callable = self.make_callable(lambda_parameters, body, options.span, context);
+        self.invoke_callable(&callable, vec![value], options, diagnostics, context)
+    }
+
+    fn make_callable(
+        &self,
+        parameters: Option<&[IrParameter]>,
+        body: &[IrNode],
+        span: SourceSpan,
+        context: &EvaluationContext,
+    ) -> IrCallable {
+        IrCallable {
+            parameters: parameters.map(ToOwned::to_owned),
+            body: body.to_vec(),
+            span,
+            capture: Some(Box::new(context.capture_snapshot())),
+        }
+    }
+
+    /// Shared first-class callable invocation path for loops, transforms, and
+    /// user-defined callables. Invocation never mutates the caller context.
+    fn invoke_callable(
+        &self,
+        callable: &IrCallable,
+        arguments: Vec<IrValue>,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &EvaluationContext,
+    ) -> CallOutcome {
+        let bound = match bind_invocation_arguments(
+            callable.parameters.as_deref(),
+            arguments,
+            options.allow_destructuring,
+            options.span,
+            diagnostics,
+        ) {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
+        };
+        self.invoke_bound_callable(callable, bound, options, diagnostics, caller_context)
+    }
+
+    fn invoke_bound_callable(
+        &self,
+        callable: &IrCallable,
+        bound: BoundLambdaArguments,
+        _options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &EvaluationContext,
+    ) -> CallOutcome {
+        let base = callable
+            .capture
+            .as_deref()
+            .map(EvaluationContext::from_capture)
+            .unwrap_or_else(|| caller_context.clone());
+        let mut child = base.child();
+        match bound {
+            BoundLambdaArguments::Explicit(values) => {
                 child.set_lambda_scope(LambdaScope::Explicit);
-                for (name, value) in bindings {
-                    child.set_value(name, value);
+                if let Some(parameters) = callable.parameters.as_deref() {
+                    for (parameter, value) in parameters.iter().zip(values) {
+                        child.set_value(parameter.name.clone(), value);
+                    }
                 }
             }
-            None => child.set_lambda_scope(LambdaScope::Implicit(vec![value])),
+            BoundLambdaArguments::Implicit(values) => {
+                child.set_lambda_scope(LambdaScope::Implicit(values));
+            }
         }
-        self.evaluate_callable_body_value(body, diagnostics, &mut child)
+        self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child)
     }
 
     fn map_iteration_values(
@@ -1848,6 +2180,18 @@ impl Evaluator {
         elements: &[IrValue],
         lambda_parameters: Option<&[IrParameter]>,
         body: &[IrNode],
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let callable = self.make_callable(lambda_parameters, body, options.span, context);
+        self.map_callable_values(elements, &callable, options, diagnostics, context)
+    }
+
+    fn map_callable_values(
+        &self,
+        elements: &[IrValue],
+        callable: &IrCallable,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
@@ -1861,10 +2205,9 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
         for element in elements {
-            match self.invoke_scoped_lambda(
-                element.clone(),
-                lambda_parameters,
-                body,
+            match self.invoke_callable(
+                callable,
+                vec![element.clone()],
                 options,
                 diagnostics,
                 context,
@@ -1881,6 +2224,128 @@ impl Evaluator {
         CallOutcome::Value(IrValue::Collection(results))
     }
 
+    fn filter_callable_values(
+        &self,
+        elements: &[IrValue],
+        callable: &IrCallable,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let mut results = Vec::new();
+        if let Err(error) = results.try_reserve_exact(elements.len()) {
+            diagnostics.push(iteration_error(
+                format!("filter result collection cannot be allocated: {error}"),
+                span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for element in elements {
+            let predicate = match self.invoke_callable(
+                callable,
+                vec![element.clone()],
+                IterationOptions {
+                    span,
+                    allow_destructuring: true,
+                },
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(callable.span));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            };
+            let Some(keep) = scalar_boolean_value(&predicate) else {
+                diagnostics.push(iteration_error(
+                    "`.filter` predicate must return Boolean".to_string(),
+                    value_source_span(&predicate, &callable.span),
+                ));
+                return CallOutcome::Failed;
+            };
+            if keep {
+                results.push(element.clone());
+            }
+        }
+        CallOutcome::Value(IrValue::Collection(results))
+    }
+
+    fn sort_iterable_values(
+        &self,
+        elements: Vec<IrValue>,
+        callable: Option<&IrCallable>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let mut keyed = Vec::new();
+        if let Err(error) = keyed.try_reserve_exact(elements.len()) {
+            diagnostics.push(iteration_error(
+                format!("sorted collection cannot be allocated: {error}"),
+                span,
+            ));
+            return CallOutcome::Failed;
+        }
+        for element in elements {
+            let key = match callable {
+                Some(callable) => match self.invoke_callable(
+                    callable,
+                    vec![element.clone()],
+                    IterationOptions {
+                        span,
+                        allow_destructuring: true,
+                    },
+                    diagnostics,
+                    context,
+                ) {
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(callable.span));
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                },
+                None => element.clone(),
+            };
+            let key = match SortKey::try_from_value(&key) {
+                Ok(key) => key,
+                Err(message) => {
+                    diagnostics.push(iteration_error(message, value_source_span(&key, &span)));
+                    return CallOutcome::Failed;
+                }
+            };
+            keyed.push((element, key));
+        }
+        if let Some((_, first_key)) = keyed.first() {
+            if keyed
+                .iter()
+                .skip(1)
+                .any(|(_, key)| !first_key.same_kind(key))
+            {
+                diagnostics.push(iteration_error(
+                    "`.sorted` does not compare heterogeneous key types".to_string(),
+                    span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+        keyed.sort_by(|(_, left), (_, right)| left.cmp(right));
+        let mut sorted = Vec::new();
+        if let Err(error) = sorted.try_reserve_exact(keyed.len()) {
+            diagnostics.push(iteration_error(
+                format!("sorted result collection cannot be allocated: {error}"),
+                span,
+            ));
+            return CallOutcome::Failed;
+        }
+        sorted.extend(keyed.into_iter().map(|(value, _)| value));
+        CallOutcome::Value(IrValue::Collection(sorted))
+    }
+
     fn coerce_iterable(
         &self,
         value: IrValue,
@@ -1889,9 +2354,30 @@ impl Evaluator {
     ) -> Result<Vec<IrValue>, CallOutcome> {
         match value {
             IrValue::Collection(values) => Ok(values),
-            IrValue::Pair(pair) => Ok(vec![*pair.first, *pair.second]),
+            IrValue::Pair(pair) => {
+                let mut values = Vec::new();
+                if let Err(error) = values.try_reserve_exact(2) {
+                    diagnostics.push(iteration_error(
+                        format!("Pair iterable cannot be allocated: {error}"),
+                        pair.span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                values.push(*pair.first);
+                values.push(*pair.second);
+                Ok(values)
+            }
             IrValue::Dictionary(dictionary) => {
-                Ok(dictionary.entries.into_iter().map(IrValue::Pair).collect())
+                let mut values = Vec::new();
+                if let Err(error) = values.try_reserve_exact(dictionary.entries.len()) {
+                    diagnostics.push(iteration_error(
+                        format!("Dictionary iterable cannot be allocated: {error}"),
+                        dictionary.span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                values.extend(dictionary.entries.into_iter().map(IrValue::Pair));
+                Ok(values)
             }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
             IrValue::Content(nodes) => match nodes.as_slice() {
@@ -2065,21 +2551,17 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
-        let mut child = context.child();
-        match bound {
-            BoundLambdaArguments::Explicit(values) => {
-                child.set_lambda_scope(LambdaScope::Explicit);
-                if let LambdaParameters::Explicit(parameters) = &binding.parameters {
-                    for (parameter, value) in parameters.iter().zip(values) {
-                        child.set_value(parameter.name.clone(), value);
-                    }
-                }
-            }
-            BoundLambdaArguments::Implicit(values) => {
-                child.set_lambda_scope(LambdaScope::Implicit(values));
-            }
-        }
-        self.evaluate_callable_body_value(&binding.body, diagnostics, &mut child)
+        let callable = binding.as_callable();
+        self.invoke_bound_callable(
+            &callable,
+            bound,
+            IterationOptions {
+                span: *span,
+                allow_destructuring: false,
+            },
+            diagnostics,
+            context,
+        )
     }
 
     /// Evaluates and binds one callable's arguments for either parameter mode.
@@ -2557,6 +3039,13 @@ impl Evaluator {
                 }
                 Ok(())
             }
+            IrValue::Callable(callable) => {
+                diagnostics.push(iteration_error(
+                    "A callable cannot be preserved as an unresolved call argument".to_string(),
+                    callable.span,
+                ));
+                Err(CallOutcome::Failed)
+            }
             _ => Ok(()),
         }
     }
@@ -2855,6 +3344,15 @@ impl Evaluator {
                     }
                 } else {
                     CallOutcome::Failed
+                }
+            }
+            IrValue::Callable(callable) => {
+                if callable.capture.is_some() {
+                    CallOutcome::Value(value.clone())
+                } else {
+                    let mut callable = callable.clone();
+                    callable.capture = Some(Box::new(context.capture_snapshot()));
+                    CallOutcome::Value(IrValue::Callable(callable))
                 }
             }
             scalar => CallOutcome::Value(scalar.clone()),
@@ -3167,6 +3665,76 @@ fn is_collection_access(name: &str) -> bool {
     matches!(name, "size" | "first" | "last" | "getat")
 }
 
+fn is_collection_transform(name: &str) -> bool {
+    matches!(name, "map" | "filter" | "sorted")
+}
+
+fn transform_operands(
+    name: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(IrValue, Option<IrValue>), CallOutcome> {
+    if positional_args.len() > 2 {
+        diagnostics.push(iteration_error(
+            format!("`.{name}` accepts an iterable and at most one callback"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    let callback_names: &[&str] = match name {
+        "filter" | "map" | "sorted" => &["by"],
+        _ => &[],
+    };
+    let collection_names = ["from"];
+    let mut collection = positional_args.first().cloned();
+    let mut callback = positional_args.get(1).cloned();
+    for argument in named_args {
+        if collection_names.contains(&argument.name.as_str()) {
+            if collection.is_some() {
+                diagnostics.push(iteration_error_at(
+                    format!("`.{name}` received the iterable argument more than once"),
+                    argument.name_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            collection = Some(argument.value.clone());
+        } else if callback_names.contains(&argument.name.as_str()) {
+            if callback.is_some() {
+                diagnostics.push(iteration_error_at(
+                    format!("`.{name}` received the callback argument more than once"),
+                    argument.name_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            callback = Some(argument.value.clone());
+        } else {
+            diagnostics.push(iteration_error_at(
+                format!("Unknown named argument `{}` for `.{name}`", argument.name),
+                argument.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+    }
+    let Some(collection) = collection else {
+        diagnostics.push(iteration_error(
+            format!("`.{name}` requires an iterable argument"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    if has_body && callback.is_some() {
+        diagnostics.push(iteration_error(
+            format!("`.{name}` received both a callback argument and a block body"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    Ok((collection, callback))
+}
+
 fn collection_access_operand(
     name: &str,
     named_parameter: &str,
@@ -3442,6 +4010,51 @@ fn validate_iteration_lambda(
         }
     }
     true
+}
+
+fn bind_invocation_arguments(
+    parameters: Option<&[IrParameter]>,
+    arguments: Vec<IrValue>,
+    allow_destructuring: bool,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<BoundLambdaArguments, CallOutcome> {
+    let Some(parameters) = parameters else {
+        return Ok(BoundLambdaArguments::Implicit(arguments));
+    };
+
+    if allow_destructuring && parameters.len() > 1 && arguments.len() == 1 {
+        let bindings =
+            scoped_parameter_bindings(&arguments[0], parameters, true, span, diagnostics)?;
+        return Ok(BoundLambdaArguments::Explicit(
+            bindings.into_iter().map(|(_, value)| value).collect(),
+        ));
+    }
+
+    if arguments.len() > parameters.len() {
+        diagnostics.push(function_error(
+            format!(
+                "Callable received too many arguments (expected at most {}, received {})",
+                parameters.len(),
+                arguments.len()
+            ),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    let mut bound = arguments;
+    for parameter in parameters.iter().skip(bound.len()) {
+        if parameter.optional {
+            bound.push(IrValue::None);
+        } else {
+            diagnostics.push(function_error_at(
+                format!("Missing required callable argument `{}`", parameter.name),
+                parameter.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+    }
+    Ok(BoundLambdaArguments::Explicit(bound))
 }
 
 fn scoped_parameter_bindings(
@@ -3815,6 +4428,13 @@ fn scalar_to_text(
             ));
             Err(CallOutcome::Failed)
         }
+        IrValue::Callable(_) => {
+            diagnostics.push(iteration_error(
+                "A callable cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
     }
 }
 
@@ -3884,11 +4504,13 @@ impl Evaluator {
         } else {
             LambdaParameters::Explicit(parameters.to_vec())
         };
+        let capture = Some(Box::new(context.capture_snapshot()));
         context.set_function_binding(
             function_name.clone(),
             lambda_parameters,
             body.to_vec(),
             *span,
+            capture,
         );
     }
 
@@ -4229,6 +4851,15 @@ mod tests {
         }
     }
 
+    fn transform_callable(parameters: Option<Vec<IrParameter>>, body: Vec<IrNode>) -> IrValue {
+        IrValue::Callable(IrCallable {
+            parameters,
+            body,
+            span: span(50, 60),
+            capture: None,
+        })
+    }
+
     fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
         let [IrNode::Paragraph { content, .. }] = nodes else {
             panic!("expected one paragraph, got {nodes:?}");
@@ -4464,6 +5095,417 @@ mod tests {
                     IrValue::Number(4.0),
                 ]
         ));
+    }
+
+    #[test]
+    fn collection_transforms_share_typed_iterable_and_callable_paths() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let range = IrValue::Range(IrRange {
+            start: Some(-2),
+            end: Some(2),
+            span: span(1, 6),
+        });
+        let identity = transform_callable(None, vec![var_ref("1")]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let mapped = evaluator.evaluate_call_value(
+            "map",
+            std::slice::from_ref(&range),
+            &[named_arg("by", identity.clone())],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            mapped,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == (-2..=2).map(|value| IrValue::Number(f64::from(value))).collect::<Vec<_>>()
+        ));
+
+        let predicate = transform_callable(
+            None,
+            vec![IrNode::FunctionCall {
+                name: "isnone".to_string(),
+                positional_args: vec![call_value("1", Vec::new())],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span: span(10, 20),
+            }],
+        );
+        let filter_input =
+            IrValue::Collection(vec![IrValue::None, IrValue::Number(-1.0), IrValue::None]);
+        let filtered = evaluator.evaluate_call_value(
+            "filter",
+            std::slice::from_ref(&filter_input),
+            &[named_arg("by", predicate)],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            filtered,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![IrValue::None, IrValue::None]
+        ));
+
+        let sorted = evaluator.evaluate_call_value(
+            "sorted",
+            &[IrValue::Collection(vec![
+                IrValue::Number(3.0),
+                IrValue::Number(1.0),
+                IrValue::Number(2.0),
+                IrValue::Number(1.0),
+            ])],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            sorted,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![
+                    IrValue::Number(1.0),
+                    IrValue::Number(1.0),
+                    IrValue::Number(2.0),
+                    IrValue::Number(3.0),
+                ]
+        ));
+    }
+
+    #[test]
+    fn transforms_support_pair_dictionary_and_nested_typed_values() {
+        let evaluator = Evaluator::new();
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("a".to_string())),
+                    second: Box::new(IrValue::Number(3.0)),
+                    span: span(1, 5),
+                },
+                IrPair {
+                    first: Box::new(IrValue::String("b".to_string())),
+                    second: Box::new(IrValue::Number(1.0)),
+                    span: span(6, 10),
+                },
+            ],
+            span: span(0, 10),
+        });
+        let parameters = vec![lambda_parameter("key", 20), lambda_parameter("value", 24)];
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let mapped = evaluator.evaluate_call_value(
+            "map",
+            std::slice::from_ref(&dictionary),
+            &[],
+            Some(CallBody::Block(&[var_ref("value")])),
+            Some(&parameters),
+            &span(0, 30),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            mapped,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![IrValue::Number(3.0), IrValue::Number(1.0)]
+        ));
+
+        let sorted = evaluator.evaluate_call_value(
+            "sorted",
+            &[dictionary],
+            &[named_arg(
+                "by",
+                transform_callable(Some(parameters), vec![var_ref("value")]),
+            )],
+            None,
+            None,
+            &span(0, 30),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let CallOutcome::Value(IrValue::Collection(values)) = sorted else {
+            panic!("expected sorted collection")
+        };
+        assert!(matches!(values[0], IrValue::Pair(_)));
+        assert!(matches!(values[1], IrValue::Pair(_)));
+        let IrValue::Pair(first) = &values[0] else {
+            unreachable!()
+        };
+        assert_eq!(*first.second, IrValue::Number(1.0));
+    }
+
+    #[test]
+    fn sorted_supports_typed_keys_and_fails_closed_for_unsupported_keys() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let strings = evaluator.evaluate_call_value(
+            "sorted",
+            &[IrValue::Collection(vec![
+                IrValue::String("b".to_string()),
+                IrValue::String("a".to_string()),
+            ])],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            strings,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![
+                    IrValue::String("a".to_string()),
+                    IrValue::String("b".to_string()),
+                ]
+        ));
+
+        let nan_sorted = evaluator.evaluate_call_value(
+            "sorted",
+            &[IrValue::Collection(vec![
+                IrValue::Number(1.0),
+                IrValue::Number(f64::NAN),
+                IrValue::Number(0.0),
+            ])],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(IrValue::Collection(values)) = nan_sorted else {
+            panic!("expected NaN sort result")
+        };
+        assert_eq!(values[0], IrValue::Number(0.0));
+        assert_eq!(values[1], IrValue::Number(1.0));
+        assert!(matches!(values[2], IrValue::Number(value) if value.is_nan()));
+
+        diagnostics.clear();
+        let mixed = evaluator.evaluate_call_value(
+            "sorted",
+            &[IrValue::Collection(vec![
+                IrValue::Number(1.0),
+                IrValue::String("1".to_string()),
+            ])],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(mixed, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("heterogeneous"));
+
+        diagnostics.clear();
+        let none = evaluator.evaluate_call_value(
+            "sorted",
+            &[IrValue::Collection(vec![IrValue::None])],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(none, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn transform_failures_are_atomic_and_predicates_are_boolean_only() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let failing = transform_callable(
+            None,
+            vec![IrNode::FunctionCall {
+                name: "multiply".to_string(),
+                positional_args: vec![IrValue::Boolean(true), call_value("1", Vec::new())],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span: span(12, 20),
+            }],
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let mapped = evaluator.evaluate_call_value(
+            "map",
+            &[IrValue::Collection(vec![
+                IrValue::Number(1.0),
+                IrValue::Number(2.0),
+            ])],
+            &[named_arg("by", failing)],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(mapped, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+
+        diagnostics.clear();
+        let invalid_predicate = transform_callable(
+            None,
+            vec![IrNode::Paragraph {
+                content: vec![text_inline("not boolean")],
+                span: span(20, 31),
+            }],
+        );
+        let filtered = evaluator.evaluate_call_value(
+            "filter",
+            &[IrValue::Collection(vec![IrValue::Number(1.0)])],
+            &[named_arg("by", invalid_predicate)],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(filtered, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("Boolean"));
+
+        diagnostics.clear();
+        let endless = evaluator.evaluate_call_value(
+            "map",
+            &[IrValue::Range(IrRange {
+                start: Some(1),
+                end: None,
+                span: span(5, 8),
+            })],
+            &[named_arg(
+                "by",
+                transform_callable(None, vec![var_ref("1")]),
+            )],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(endless, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(span(5, 8)));
+    }
+
+    #[test]
+    fn first_class_callable_captures_definition_values_and_checks_arity() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let span = span(0, 50);
+        assert!(matches!(
+            evaluator.evaluate_call_value(
+                "var",
+                &[
+                    IrValue::Identifier("offset".to_string()),
+                    IrValue::Number(10.0)
+                ],
+                &[],
+                None,
+                None,
+                &span,
+                &mut diagnostics,
+                &mut context,
+            ),
+            CallOutcome::NoValue
+        ));
+        let callable = transform_callable(
+            None,
+            vec![IrNode::FunctionCall {
+                name: "sum".to_string(),
+                positional_args: vec![
+                    call_value("1", Vec::new()),
+                    call_value("offset", Vec::new()),
+                ],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span,
+            }],
+        );
+        assert!(matches!(
+            evaluator.evaluate_call_value(
+                "var",
+                &[IrValue::Identifier("add_offset".to_string()), callable],
+                &[],
+                None,
+                None,
+                &span,
+                &mut diagnostics,
+                &mut context,
+            ),
+            CallOutcome::NoValue
+        ));
+        assert!(matches!(
+            evaluator.evaluate_call_value(
+                "offset",
+                &[IrValue::Number(20.0)],
+                &[],
+                None,
+                None,
+                &span,
+                &mut diagnostics,
+                &mut context,
+            ),
+            CallOutcome::NoValue
+        ));
+        let result = evaluator.evaluate_call_value(
+            "map",
+            &[IrValue::Collection(vec![IrValue::Number(1.0)])],
+            &[named_arg("by", call_value("add_offset", Vec::new()))],
+            None,
+            None,
+            &span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            result,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![IrValue::Number(11.0)]
+        ));
+
+        let wrong_arity = evaluator.evaluate_call_value(
+            "map",
+            &[IrValue::Collection(vec![IrValue::Number(1.0)])],
+            &[named_arg(
+                "by",
+                transform_callable(
+                    Some(vec![lambda_parameter("a", 1), lambda_parameter("b", 2)]),
+                    vec![var_ref("a")],
+                ),
+            )],
+            None,
+            None,
+            &span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(wrong_arity, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     }
 
     #[test]

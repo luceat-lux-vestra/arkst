@@ -64,6 +64,15 @@ pub struct LambdaHeader {
     pub span: ByteSpan,
 }
 
+/// A source-backed inline lambda expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineLambda {
+    pub parameters: Vec<LambdaParameter>,
+    pub implicit: bool,
+    pub body: ByteSpan,
+    pub span: ByteSpan,
+}
+
 /// One parameter in a [`LambdaHeader`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaParameter {
@@ -375,6 +384,146 @@ pub fn parse_lambda_header(
     Ok(Some(LambdaHeader {
         parameters,
         span: ByteSpan::new(header_start, header_end),
+    }))
+}
+
+/// Parses the explicitly marked inline lambda form used as a first-class
+/// value, for example `@lambda item: .item` or `@lambda .1`.
+///
+/// Unmarked content is intentionally not classified here. Ordinary content
+/// arguments such as `key: value` must remain content unless a surrounding
+/// callable construct has selected block-lambda semantics.
+pub fn parse_inline_lambda(
+    source: &str,
+    span: ByteSpan,
+) -> Result<Option<InlineLambda>, ParseError> {
+    parse_inline_lambda_inner(source, span, true)
+}
+
+/// Parses a lambda in a callback argument selected by a transform builtin.
+///
+/// Quarkdown's documented inline callback form does not require the legacy
+/// `@lambda` marker. The caller must provide the surrounding semantic context;
+/// ordinary content arguments are never sent through this entry point.
+pub fn parse_callback_lambda(
+    source: &str,
+    span: ByteSpan,
+) -> Result<Option<InlineLambda>, ParseError> {
+    parse_inline_lambda_inner(source, span, false)
+}
+
+fn parse_inline_lambda_inner(
+    source: &str,
+    span: ByteSpan,
+    marker_required: bool,
+) -> Result<Option<InlineLambda>, ParseError> {
+    let Some(raw) = span.checked_str(source) else {
+        return Err(ParseError::new(
+            "E9002",
+            "inline lambda is outside the source",
+            span,
+        ));
+    };
+    let leading = raw.len() - raw.trim_start_matches([' ', '\t', '\r', '\n']).len();
+    let marker_start = span
+        .start
+        .checked_add(leading)
+        .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+    let (expression, expression_start) =
+        if let Some(marked) = raw[leading..].strip_prefix("@lambda") {
+            if marked.as_bytes().first().is_some_and(|byte| is_word(*byte)) {
+                return Ok(None);
+            }
+            let marker_end = marker_start
+                .checked_add("@lambda".len())
+                .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+            let expression_leading = marked.len() - marked.trim_start_matches([' ', '\t']).len();
+            let expression_start = marker_end
+                .checked_add(expression_leading)
+                .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+            (&marked[expression_leading..], expression_start)
+        } else if marker_required {
+            return Ok(None);
+        } else {
+            let expression = raw[leading..].trim_start_matches([' ', '\t']);
+            let expression_start = marker_start
+                .checked_add(raw[leading..].len() - expression.len())
+                .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+            (expression, expression_start)
+        };
+
+    let Some(colon) = expression.find(':') else {
+        return Ok(Some(InlineLambda {
+            parameters: Vec::new(),
+            implicit: true,
+            body: ByteSpan::new(expression_start, span.end),
+            span,
+        }));
+    };
+    let header = expression[..colon].trim();
+    let body_text = &expression[colon + 1..];
+    let body_leading =
+        body_text.len() - body_text.trim_start_matches([' ', '\t', '\r', '\n']).len();
+    let body_start = expression_start
+        .checked_add(colon + 1)
+        .and_then(|value| value.checked_add(body_leading))
+        .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+    if header.is_empty() {
+        return Err(ParseError::new(
+            "E2005",
+            "inline lambda header must contain at least one parameter",
+            ByteSpan::new(expression_start, body_start),
+        ));
+    }
+    let header_leading = expression[..colon].len() - expression[..colon].trim_start().len();
+    let header_start = expression_start
+        .checked_add(header_leading)
+        .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+    let mut parameters = Vec::new();
+    let mut cursor = 0usize;
+    for token in header.split_whitespace() {
+        let token_start = header[cursor..]
+            .find(token)
+            .and_then(|offset| cursor.checked_add(offset))
+            .ok_or_else(|| {
+                ParseError::new(
+                    "E9002",
+                    "inline lambda parameter span could not be mapped",
+                    span,
+                )
+            })?;
+        let token_end = token_start
+            .checked_add(token.len())
+            .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+        cursor = token_end;
+        let optional = token.ends_with('?');
+        let name = token.strip_suffix('?').unwrap_or(token);
+        let absolute_start = header_start
+            .checked_add(token_start)
+            .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+        let absolute_end = header_start
+            .checked_add(token_end)
+            .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
+        if !is_valid_normal_call_name(name) {
+            return Err(ParseError::new(
+                "E2005",
+                format!("invalid inline lambda parameter name `{token}`"),
+                ByteSpan::new(absolute_start, absolute_end),
+            ));
+        }
+        let token_span = ByteSpan::new(absolute_start, absolute_end);
+        parameters.push(LambdaParameter {
+            name: name.to_string(),
+            name_span: ByteSpan::new(absolute_start, absolute_end - usize::from(optional)),
+            span: token_span,
+            optional,
+        });
+    }
+    Ok(Some(InlineLambda {
+        parameters,
+        implicit: false,
+        body: ByteSpan::new(body_start, span.end),
+        span,
     }))
 }
 
@@ -1272,6 +1421,35 @@ mod tests {
         let error =
             parse_lambda_header(source, ByteSpan::new(empty_start, source.len())).unwrap_err();
         assert_eq!(error.code, "E2005");
+    }
+
+    #[test]
+    fn parses_marked_inline_lambdas_without_rewriting_source() {
+        let source = "prefix @lambda key value?: .value suffix";
+        let start = source.find("@lambda").unwrap();
+        let lambda = parse_inline_lambda(source, ByteSpan::new(start, source.len()))
+            .unwrap()
+            .unwrap();
+        assert!(!lambda.implicit);
+        assert_eq!(lambda.parameters.len(), 2);
+        assert_eq!(lambda.parameters[0].name, "key");
+        assert!(lambda.parameters[1].optional);
+        assert_eq!(&source[lambda.body.start..lambda.body.end], ".value suffix");
+        assert_eq!(
+            &source[lambda.span.start..lambda.span.end],
+            "@lambda key value?: .value suffix"
+        );
+    }
+
+    #[test]
+    fn parses_marked_inline_implicit_lambdas() {
+        let source = "@lambda .1";
+        let lambda = parse_inline_lambda(source, ByteSpan::new(0, source.len()))
+            .unwrap()
+            .unwrap();
+        assert!(lambda.implicit);
+        assert!(lambda.parameters.is_empty());
+        assert_eq!(&source[lambda.body.start..lambda.body.end], ".1");
     }
 
     fn scalar(arg: &Arg) -> Value {

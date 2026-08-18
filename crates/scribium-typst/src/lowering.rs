@@ -556,6 +556,19 @@ impl LoweringContext {
                 self.list_item_indent = saved_item;
                 self.push(']');
             }
+            IrValue::Callable(callable) => {
+                // A callable is evaluator-owned semantic state. Successful
+                // documents consume it before lowering; this comment keeps
+                // manually constructed invalid IR non-executable and avoids
+                // inventing a Typst callable representation.
+                let before = self.output.len();
+                self.push_str(
+                    "/* Scribium callable reached Typst lowering without evaluator consumption */",
+                );
+                if callable.span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(callable.span, self.output.len() - before);
+                }
+            }
         }
     }
 

@@ -332,9 +332,35 @@ diagnostic rather than `None`, `NoValue`, or a panic. The callable body keeps
 the same semantic accumulator as explicit functions, so numbers, booleans,
 strings, `None`, and structured content remain typed until an output boundary.
 
-Generic standalone lambdas and components remain outside this slice. A
-rich block result that cannot be represented in an inline context is rejected
-with a source-backed diagnostic rather than flattened or dropped.
+Generic standalone lambdas outside the supported first-class forms and
+components remain outside this slice. A rich block result that cannot be
+represented in an inline context is rejected with a source-backed diagnostic
+rather than flattened or dropped.
+
+### First-class callable values and collection transforms
+
+The evaluator supports a typed first-class callable value. The explicit
+source-backed form is `@lambda`, while transform callbacks also accept the
+contextual unmarked form in a `by` argument:
+
+```text
+.var {identity} {@lambda .1}
+.map {1..3} by:{.identity}
+.map {1..3} by:{value: .value}
+.filter {1..3} by:{@lambda .1::isnone}
+.sorted {.map {1..3} by:{@lambda .1}}
+.sorted {3..1} by:{@lambda .1}
+```
+
+Explicit parameters bind in a fresh child scope; headerless lambdas bind
+`.1`, `.2`, and later arguments in the nearest invocation scope. Captured
+values are immutable snapshots of the definition context. `.map`, `.filter`,
+and `.sorted` all consume the shared typed iterable path and return recursive
+typed `Collection` values. `.filter` requires a Boolean predicate. `.sorted`
+is stable ascending natural/selector ordering for homogeneous Number, String,
+or Boolean keys; unsupported, heterogeneous, `None`, and invalid key values
+produce diagnostics. Descending options and arbitrary comparator syntax are
+not part of this slice.
 
 ### Scoped `.let` (Implemented slice)
 
@@ -355,8 +381,8 @@ result and composing multiple outputs in source order.
     .uppercase {.1}
 ```
 
-Only block-form `.let` is implemented in this slice. Generic inline lambda
-values and other lambda-consuming builtins remain deferred under Issue #61.
+Only block-form `.let` is implemented in this slice; first-class callable
+values are available to the collection-transform callback path described above.
 
 ### Evaluation scope (Implemented)
 
@@ -368,8 +394,9 @@ scope and are evaluated in source order. The evaluator represents callable
 parameters as either explicit source-backed bindings or an implicit positional
 binding mode. Each invocation installs its own lambda-local argument scope;
 nested invocations therefore shadow only while active and restore the outer
-implicit arguments afterward. Standalone lambda syntax remains deferred; the
-iteration forms below reuse this same invocation machinery.
+implicit arguments afterward. Standalone lambda syntax outside the supported
+`@lambda`/transform forms remains deferred; the iteration forms below reuse
+this same invocation machinery.
 
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
@@ -486,8 +513,9 @@ An exactly-one Markdown ordered or unordered list is adapted to a Collection
 only when a value is required by `.foreach`; ordinary document lists remain
 `UnorderedList` or `OrderedList` IR nodes. Nested list-only items adapt
 recursively to nested Collections, while rich list-item content remains typed
-content. Pair, Dictionary, destructuring, generic inline `@lambda`, and
-collection operators such as `.first` and `.map` remain deferred. Dynamic
+content. Pair, Dictionary, and generalized destructuring remain bounded to the
+evidenced forms. Collection transforms such as `.map`, `.filter`, and `.sorted`
+use the typed callable path described above. Dynamic
 `.range` is a typed constructor with optional `from`/`to` bounds; its numeric
 bounds are evaluated normally and truncated to signed integer endpoints using
 the verified upstream Number-to-Int behavior.
