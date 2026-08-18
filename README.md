@@ -8,7 +8,7 @@
 
 Scribium accepts Markdown and Quarkdown-compatible documents, evaluates supported programmable-document semantics into a backend-neutral IR, lowers that IR to Typst, and can invoke the official Typst compiler to produce PDF.
 
-> Quarkdown compatibility is currently partial and evidence-based. The verified compatibility target is Quarkdown v2.5.1. See [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/) for the detailed inventory and evidence.
+> Quarkdown compatibility is currently partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.1. See [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/) for the detailed inventory and evidence.
 
 > Scribium is an independent project. It is not affiliated with, endorsed by, or sponsored by Typst GmbH or the Quarkdown project.
 
