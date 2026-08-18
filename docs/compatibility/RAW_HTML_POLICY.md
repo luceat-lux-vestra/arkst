@@ -1,7 +1,7 @@
 # Raw HTML Compatibility Policy
 
 Status: **Accepted compatibility policy**  
-Review date: **2026-08-18**  
+Review date: **2026-08-19**
 Applies to: Markdown (`.md`), Quarkdown-compatible (`.qd`, `.scrib`), and the Typst backend boundary.
 
 This document separates four concepts that must not be conflated:
@@ -65,7 +65,7 @@ The Typst boundary must therefore remain downstream of Scribium's semantic decis
 
 | Input mode | Raw HTML recognition | Successful semantic support | Unsupported raw HTML | Explicit HTML escape hatch |
 |---|---|---|---|---|
-| Markdown (`.md`) | Rushdown/CommonMark+GFM | Bounded exact subset only | Preserve provenance and fail closed with `E8001` at the document-output boundary | Not a Markdown language feature |
+| Markdown (`.md`) | Rushdown/CommonMark+GFM | Bounded exact subset, including complete parser-owned HTML comments as semantic no-ops | Preserve provenance and fail closed with `E8001` at the document-output boundary | Not a Markdown language feature |
 | Quarkdown (`.qd`, `.scrib`) | Rushdown may still expose parser nodes because it is the shared substrate | Ordinary mixed raw HTML is **not** Quarkdown-compatible and must not be promoted to document semantics | Must fail closed rather than inherit the Markdown semantic whitelist | Quarkdown `.html`, separately tracked and target-specific |
 | Typst backend | Not a source-language parser responsibility | Receives only already accepted backend-neutral IR | Must not recover/reparse rejected source HTML | Typst HTML facilities are backend/output concerns |
 
@@ -80,6 +80,7 @@ The current evidence-backed Markdown-to-Typst/PDF subset is intentionally small:
 | `<del>...</del>` | `Strikethrough` |
 | `<s>...</s>` | `Strikethrough` |
 | `<br>`, `<br/>`, `<br />` | `HardBreak` |
+| Complete parser-owned HTML comment | No-op: no IR node and no rendered output |
 
 Matching is case-insensitive but otherwise deliberately strict and attribute-free. Nested combinations are valid only when the entire matched structure remains inside this exact whitelist.
 
@@ -93,15 +94,41 @@ Examples intentionally outside this semantic subset include:
 - `<u>`, `<mark>`, `<sub>`, `<sup>`, `<kbd>`, and arbitrary custom elements;
 - scripts, style, event handlers, CSS, and JavaScript;
 - arbitrary block HTML such as `<div>...</div>`;
-- comments, declarations, processing instructions, and CDATA as rendered content.
+- declarations, processing instructions, and CDATA as rendered content.
 
 Being outside the subset does not mean Rushdown failed to parse the source. It means Scribium has no justified backend-neutral semantic projection for the current product path.
 
 ## HTML comments
 
-HTML comments are common in Markdown documents and do not require visible rendering semantics. Treating a complete parser-recognized Markdown comment as a semantic no-op is a reasonable future bounded extension, but it is **not yet part of the supported contract**. It requires its own evidence and regression tests before promotion.
+Complete parser-recognized HTML comments are part of the bounded Markdown
+semantic subset as a semantic no-op. This support is deliberately narrow:
 
-Do not generalize a future comment no-op into declaration/processing-instruction/CDATA handling.
+- it applies only in Markdown mode (`.md`, case-insensitively), never in
+  `.qd` or `.scrib` mode;
+- it applies only to parser-owned `Inline::RawHtml` and `Block::RawHtml`
+  nodes;
+- the accepted token forms are the CommonMark 0.31.2 short forms `<!-->` and
+  `<!--->`, or the ordinary `<!--` ... `-->` form ending at its first `-->`;
+- inline comments produce no `IrInline` and no rendered output; and
+- a block comment is accepted only when the entire parser-owned raw block is
+  one complete comment, with at most the parser-supported leading indentation
+  and the terminating line's insignificant ASCII boundary whitespace/line
+  ending.
+
+The block boundary is fail-closed. A raw block that starts with a comment but
+has visible or additional raw content after the first comment token is not a
+comment-only block and emits source-backed `E8001`. For example,
+`<!-- note -->VISIBLE`, `<!--> VISIBLE -->`, and
+`<!-- one --><!-- two -->` remain unsupported when Rushdown exposes each as
+one raw block. An unterminated raw block also remains unsupported.
+
+The comment is discarded only during Markdown AST-to-IR lowering. The
+parser-created block structure is retained, so a comment can separate two
+lists or a list and an indented code block without causing a reparse or
+post-hoc structural reconstruction.
+
+Do not generalize this comment no-op into declaration, processing-instruction,
+CDATA, arbitrary HTML, or generic invisible-HTML handling.
 
 ## Block HTML
 
@@ -111,7 +138,8 @@ Block HTML remains outside the supported Typst/PDF semantic path. Rushdown may e
 - reparse its contents as Markdown;
 - strip tags with regular expressions;
 - extract text heuristically; or
-- silently drop unsupported visible content.
+- silently drop unsupported visible content. A comment-only block is the
+  explicit bounded exception documented above; trailing raw content is not.
 
 The current fail-closed `E8001` behavior is the correct boundary until a separately justified portable semantic mapping exists.
 
@@ -135,6 +163,8 @@ The implementation preserves these invariants:
 - no HTML DOM/parser introduced merely for this correction;
 - no preprocess/source rewrite/reparse path;
 - Markdown's existing bounded subset remains supported and covered;
+- complete Markdown comments are discarded only as a parser-owned semantic
+  no-op;
 - `.qd` / `.scrib` ordinary mixed raw HTML fails closed;
 - `.html` remains a separate language-feature decision.
 
@@ -142,7 +172,7 @@ The implementation preserves these invariants:
 
 1. **Mode separation:** **Completed.** The Markdown bounded raw-HTML semantic adapter cannot become Quarkdown mixed-HTML support.
 2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.scrib` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
-3. **Comment decision:** independently oracle/test complete Markdown HTML comments and, if justified, promote them to semantic no-op.
+3. **Comment decision:** **Completed.** Complete parser-owned Markdown HTML comments are a bounded semantic no-op; trailing, malformed, and non-comment raw HTML remains fail-closed.
 4. **`.html` function:** implement only when its target-specific behavior and backend contract are explicitly defined.
 5. **Do not expand arbitrary HTML semantics** unless a concrete source-language compatibility requirement cannot be represented with existing portable IR/functions.
 

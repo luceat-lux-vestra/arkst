@@ -280,6 +280,48 @@ fn integration_bounded_inline_markdown_html_maps_to_ir_typst_and_pdf() {
 }
 
 #[test]
+fn integration_markdown_html_comments_are_semantic_noops_in_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = "Before <!-- hidden inline --> visible.\n\n<!-- hidden block -->\n\nAfter.\n";
+    let entry = "comments.md";
+    let project = VirtualProjectBuilder::new()
+        .entry(entry)
+        .expect("valid entry path")
+        .add_source(entry, source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "{entry} diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("Before"));
+    assert!(typst_code.contains("visible."));
+    assert!(typst_code.contains("After."));
+    assert!(!typst_code.contains("<!--"));
+    assert!(!typst_code.contains("hidden inline"));
+    assert!(!typst_code.contains("hidden block"));
+
+    with_typst(entry, |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: entry.to_string(),
+            })
+            .expect("comment-free Markdown Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_commonmark_gfm_baseline_fixture_compiles_to_valid_pdf() {
     use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 

@@ -193,3 +193,98 @@ fn quarkdown_mode_keeps_raw_html_at_the_markdown_frontend_boundary() {
     );
     assert_inline_raw_spans(source, content);
 }
+
+#[test]
+fn pinned_rushdown_html_comment_shapes_and_spans_are_recorded() {
+    for (source, expected) in [
+        ("before <!-- note --> after\n", ("<!-- note -->", 7, 20)),
+        (
+            "before <!-- this is a --\ncomment - with hyphens --> after\n",
+            ("<!-- this is a --\ncomment - with hyphens -->", 7, 51),
+        ),
+        ("before <!--> after\n", ("<!-->", 7, 12)),
+        ("before <!---> after\n", ("<!--->", 7, 13)),
+        ("한글 <!-- note --> 뒤\r\n", ("<!-- note -->", 7, 20)),
+    ] {
+        let document = parse_md(source);
+        let Block::Paragraph { content, .. } = &document.nodes[0] else {
+            panic!("expected paragraph, got {:?}", document.nodes);
+        };
+        assert_eq!(
+            inline_raw_html(content),
+            vec![(
+                expected.0,
+                scribium_source::ByteSpan::new(expected.1, expected.2)
+            )]
+        );
+        assert_inline_raw_spans(source, content);
+    }
+
+    for (source, expected) in [
+        ("<!-- -->\n", "<!-- -->\n"),
+        (
+            "<!-- Foo\nbar\n   baz -->\nafter\n",
+            "<!-- Foo\nbar\n   baz -->\n",
+        ),
+        ("  <!-- indented -->\nafter\n", "  <!-- indented -->\n"),
+        ("<!-- -->\r\n", "<!-- -->\r\n"),
+        (
+            "  <!-- Foo\r\nbar\r\n   baz -->\r\n",
+            "  <!-- Foo\r\nbar\r\n   baz -->\r\n",
+        ),
+    ] {
+        let document = parse_md(source);
+        let (raw, span) = document
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                Block::RawHtml { source, span } => Some((source.as_str(), *span)),
+                _ => None,
+            })
+            .expect("expected parser-owned raw HTML block");
+        assert_eq!(raw, expected);
+        assert_eq!(source.get(span.start..span.end), Some(expected));
+        assert_eq!(span, scribium_source::ByteSpan::new(0, expected.len()));
+    }
+}
+
+#[test]
+fn pinned_rushdown_comments_preserve_list_and_code_block_separators() {
+    let lists = parse_md("- foo\n- bar\n\n<!-- -->\n\n- baz\n- bim\n");
+    assert!(matches!(
+        lists.nodes.as_slice(),
+        [
+            Block::UnorderedList { .. },
+            Block::RawHtml { .. },
+            Block::UnorderedList { .. }
+        ]
+    ));
+
+    let list_and_code = parse_md("- foo\n- bar\n\n<!-- -->\n\n    code\n");
+    assert!(matches!(
+        list_and_code.nodes.as_slice(),
+        [
+            Block::UnorderedList { .. },
+            Block::RawHtml { .. },
+            Block::CodeBlock { .. }
+        ]
+    ));
+}
+
+#[test]
+fn pinned_rushdown_comment_like_blocks_remain_one_source_backed_span() {
+    for source in [
+        "<!-- foo -->*bar*\n",
+        "<!--> foo -->\n",
+        "<!---> VISIBLE -->\n",
+        "<!-- a --><!-- b -->\n",
+        "<!-- unterminated\nvisible\n",
+    ] {
+        let document = parse_md(source);
+        assert!(matches!(
+            document.nodes.as_slice(),
+            [Block::RawHtml { source: raw, span }] if raw == source
+                && *span == scribium_source::ByteSpan::new(0, source.len())
+        ));
+    }
+}
