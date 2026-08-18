@@ -20,6 +20,11 @@ pub(crate) fn is_supported(name: &str) -> bool {
             | "abs"
             | "negate"
             | "sqrt"
+            | "logn"
+            | "pi"
+            | "sin"
+            | "cos"
+            | "tan"
             | "truncate"
             | "round"
             | "iseven"
@@ -54,6 +59,10 @@ pub(crate) fn evaluate(
         "abs" | "negate" | "sqrt" | "iseven" => {
             evaluate_unary_numeric(name, positional_args, named_args, has_body)
         }
+        "logn" | "sin" | "cos" | "tan" => {
+            evaluate_transcendental(name, positional_args, named_args, has_body)
+        }
+        "pi" => evaluate_pi(positional_args, named_args, has_body),
         "truncate" => evaluate_truncate(positional_args, named_args, has_body),
         "round" => evaluate_round(positional_args, named_args, has_body),
         "string" => evaluate_string(positional_args, named_args, has_body),
@@ -536,6 +545,58 @@ fn evaluate_unary_numeric(
     }
 }
 
+fn evaluate_transcendental(
+    name: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(format!("`.{name}` does not accept a block body")));
+    }
+    let mut arguments = bind_arguments(name, positional_args, named_args, &["x"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
+    let value = numeric_argument(&value, "x")
+        .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
+    Ok(numeric_result(deterministic_transcendental(name, value)))
+}
+
+fn evaluate_pi(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error("`.pi` does not accept a block body".to_string()));
+    }
+    bind_arguments("pi", positional_args, named_args, &[], 0)?;
+
+    // Quarkdown passes kotlin.math.PI as a Double to NumberValue. Keep this
+    // binary64 constant separate from the Float result normalization used by
+    // arithmetic and transcendental builtins.
+    Ok(IrValue::Number(std::f64::consts::PI))
+}
+
+/// Reproduces the JVM observable boundary of Kotlin's Float overloads without
+/// calling platform `std` math. Kotlin/JVM first adapts the argument to Float,
+/// calls `java.lang.Math` on the widened binary64 value, and narrows the result
+/// back to Float. `libm` is pinned and built with no default features so these
+/// operations use its pure-Rust software implementations on native and WASM
+/// targets rather than an OS libc/libm or a target-specific math intrinsic.
+fn deterministic_transcendental(name: &str, value: f32) -> f32 {
+    let value = f64::from(value);
+    let result = match name {
+        "logn" => libm::log(value),
+        "sin" => libm::sin(value),
+        "cos" => libm::cos(value),
+        "tan" => libm::tan(value),
+        _ => unreachable!("unrecognized transcendental builtin: {name}"),
+    };
+    result as f32
+}
+
 fn evaluate_truncate(
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
@@ -762,7 +823,7 @@ fn adapt_string_argument(value: &IrValue) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate, is_supported};
+    use super::{deterministic_transcendental, evaluate, is_supported};
     use crate::ir::{IrInline, IrNode, IrValue};
 
     fn number(value: f64) -> IrValue {
@@ -781,8 +842,8 @@ mod tests {
     #[test]
     fn numeric_surface_is_registered_and_preserves_typed_results() {
         for name in [
-            "sum", "subtract", "multiply", "divide", "rem", "pow", "abs", "negate", "sqrt",
-            "truncate", "round", "iseven",
+            "sum", "subtract", "multiply", "divide", "rem", "pow", "abs", "negate", "sqrt", "logn",
+            "pi", "sin", "cos", "tan", "truncate", "round", "iseven",
         ] {
             assert!(is_supported(name), "{name} should be supported");
         }
@@ -1046,6 +1107,128 @@ mod tests {
     }
 
     #[test]
+    fn transcendental_numeric_surface_matches_upstream_boundaries() {
+        assert_eq!(
+            evaluate("pi", &[], &[], false).expect("pi has zero arguments"),
+            number(std::f64::consts::PI)
+        );
+        assert_eq!(
+            evaluate("logn", &[number(1.0)], &[], false).expect("ln(1) should normalize to zero"),
+            number(0.0)
+        );
+        assert_eq!(
+            evaluate("sin", &[number(0.0)], &[], false).expect("sin(0) should normalize to zero"),
+            number(0.0)
+        );
+        assert_eq!(
+            evaluate("cos", &[number(0.0)], &[], false).expect("cos(0) should normalize to one"),
+            number(1.0)
+        );
+        assert_eq!(
+            evaluate("tan", &[number(0.0)], &[], false).expect("tan(0) should normalize to zero"),
+            number(0.0)
+        );
+        assert_eq!(
+            evaluate("cos", &[number(std::f64::consts::PI)], &[], false)
+                .expect("cos(pi) should use the Float-adapted pi"),
+            number(-1.0)
+        );
+        assert_eq!(
+            evaluate(
+                "cos",
+                &[],
+                &[named_arg("x", number(std::f64::consts::PI))],
+                false,
+            )
+            .expect("named x should bind for cosine"),
+            number(-1.0)
+        );
+        assert_eq!(
+            evaluate(
+                "logn",
+                &[evaluate("sum", &[number(1.0), number(1.0)], &[], false)
+                    .expect("nested arithmetic should produce a number")],
+                &[],
+                false,
+            )
+            .expect("nested numeric results should remain typed"),
+            number(f64::from(libm::log(2.0_f64) as f32))
+        );
+        assert_eq!(
+            evaluate("pi", &[], &[], false)
+                .and_then(|value| evaluate("multiply", &[value, number(2.0)], &[], false))
+                .and_then(|value| evaluate("cos", &[value], &[], false))
+                .expect("pi::multiply {2}::cos should chain as typed values"),
+            number(1.0)
+        );
+        assert_eq!(
+            evaluate("sin", &[IrValue::String("1".into())], &[], false)
+                .expect("numeric text should use numeric_argument"),
+            number(f64::from(libm::sin(1.0_f64) as f32))
+        );
+
+        assert!(matches!(
+            evaluate("logn", &[number(0.0)], &[], false),
+            Ok(IrValue::Number(value)) if value == f64::from(i32::MIN)
+        ));
+        assert!(matches!(
+            evaluate("logn", &[number(-1.0)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert!(matches!(
+            evaluate("sin", &[number(f64::INFINITY)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert!(matches!(
+            evaluate("cos", &[number(f64::NEG_INFINITY)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert!(matches!(
+            evaluate("tan", &[number(f64::NAN)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn deterministic_transcendental_math_has_stable_representative_bits() {
+        for (name, input, expected_bits) in [
+            ("logn", 2.0_f32, 0x3f31_7218),
+            ("logn", f32::from_bits(0x402d_f854), 0x3f7f_ffff),
+            ("sin", 1.0_f32, 0x3f57_6aa4),
+            ("sin", f32::from_bits(0x4049_0fdb), 0xb3bb_bd2e),
+            ("cos", 1.0_f32, 0x3f0a_5140),
+            ("cos", f32::from_bits(0x4049_0fdb), 0xbf80_0000),
+            ("tan", 1.0_f32, 0x3fc7_5923),
+            ("tan", f32::from_bits(0x4049_0fdb), 0x33bb_bd2e),
+        ] {
+            assert_eq!(
+                deterministic_transcendental(name, input).to_bits(),
+                expected_bits,
+                "{name}({input:?}) changed"
+            );
+        }
+
+        assert_eq!(
+            deterministic_transcendental("sin", -0.0).to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert_eq!(
+            deterministic_transcendental("tan", -0.0).to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert_eq!(
+            deterministic_transcendental("cos", -0.0).to_bits(),
+            1.0_f32.to_bits()
+        );
+        assert_eq!(
+            deterministic_transcendental("logn", 0.0).to_bits(),
+            f32::NEG_INFINITY.to_bits()
+        );
+        assert!(deterministic_transcendental("logn", -1.0).is_nan());
+        assert!(deterministic_transcendental("sin", f32::INFINITY).is_nan());
+    }
+
+    #[test]
     fn numeric_arithmetic_matches_upstream_float_and_integer_boundaries() {
         assert_eq!(
             evaluate("subtract", &[number(-2.0), number(5.0)], &[], false)
@@ -1141,7 +1324,9 @@ mod tests {
     #[test]
     fn numeric_builtins_share_argument_binding_and_fail_closed() {
         let binary = ["sum", "subtract", "multiply", "divide", "rem", "pow"];
-        let unary = ["abs", "negate", "sqrt", "iseven"];
+        let unary = [
+            "abs", "negate", "sqrt", "iseven", "logn", "sin", "cos", "tan",
+        ];
 
         for name in binary {
             assert!(
@@ -1211,6 +1396,10 @@ mod tests {
                 "{name} block body"
             );
         }
+
+        assert!(evaluate("pi", &[number(1.0)], &[], false).is_err());
+        assert!(evaluate("pi", &[], &[named_arg("x", number(1.0))], false).is_err());
+        assert!(evaluate("pi", &[], &[], true).is_err());
     }
 
     #[test]

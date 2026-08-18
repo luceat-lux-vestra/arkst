@@ -59,7 +59,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
-| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, strict `decimals: Int` adaptation, upstream Float/Double/Float truncation, Kotlin ties-to-even rounding, and the evidenced scalar numeric boundary; `.logn`, `.pi`, `.sin`, `.cos`, and `.tan` remain deferred | Implemented (bounded v2.5.1 decimal post-processing slice) |
+| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, strict `decimals: Int` adaptation, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
 | String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates for the evidenced scalar/plain-text adaptation boundary; rich Markdown plain-text projection remains deferred | Implemented (bounded v2.5.1 slice) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
@@ -523,8 +523,15 @@ DynamicValue conversions or other logical helpers are complete.
 ### Mathematical and numeric evidence
 
 The v2.5.1 [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
-source defines the arithmetic/unary functions plus `.truncate(x,
-decimals: Int)` and `.round(x)` over `Number` values. The decimal slice has
+source defines the arithmetic/unary functions, `.logn`, `.pi`, `.sin`, `.cos`,
+and `.tan`, plus `.truncate(x, decimals: Int)` and `.round(x)` over `Number`
+values. The transcendental boundaries are explicit: `.logn`, `.sin`, `.cos`,
+and `.tan` call `x.toFloat()` before Kotlin's Float overload, while `.pi`
+passes the binary64 `kotlin.math.PI` constant to `NumberValue`. The public
+[`MathFunctionsTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt)
+covers `.pi::truncate {2}`, zero trigonometry, `.cos {.pi}`, and
+`.pi::multiply {2}::cos` with rendered results `3.14`, `1`, `0`, `0`, `-1`,
+and `1`. The decimal slice has
 the following observable boundaries:
 
 - `.truncate` rejects negative `decimals` at runtime; fractional `decimals`
@@ -554,6 +561,20 @@ argument binder, preserve `IrValue::Number` or `IrValue::Boolean`, and reject
 unsupported values, unknown/duplicate bindings, arity errors, and block bodies
 without publishing partial nested output.
 
+The transcendental implementation uses `libm` `0.2.16` with
+`default-features = false`. Its pure-Rust binary64 software functions receive
+the already-adapted Float value and are narrowed to Float afterward, matching
+the Kotlin/JVM Float overload's `float -> double Math.* -> float` boundary
+without depending on Rust `std` math, an OS libc/libm, or target-specific
+intrinsics. The pinned version was compared with `0.2.14` and `0.2.15` on the
+representative corpus; all three produced the same selected bits, and
+`0.2.16` is retained for its current reviewed release and fixes. The helper
+tests fix representative `to_bits()` values and separately cover `ln(0)`,
+negative-domain NaN, infinities, and signed zero. At the evaluator boundary,
+the existing `NumberValue(Float)` normalization remains authoritative: an
+integral result becomes an Int, so signed zero becomes `0` and infinities
+clamp to the Kotlin Int range; `.pi` does not pass through that Float helper.
+
 The independent unit and integration evidence is:
 `scribium-core/src/builtins.rs::tests::decimal_numeric_surface_matches_upstream_boundaries`,
 `scribium-core/src/lib.rs::tests::compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`,
@@ -561,9 +582,16 @@ The independent unit and integration evidence is:
 `compile_numeric_decimal_failure_is_atomic_and_source_backed`,
 `scribium-test-support/src/lib.rs::tests::test_verify_numeric_decimal_family_is_semantically_supported`,
 and `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`.
+Transcendental evaluation is covered by
+`scribium-core/src/builtins.rs::tests::transcendental_numeric_surface_matches_upstream_boundaries`,
+`deterministic_transcendental_math_has_stable_representative_bits`,
+`scribium-core/src/lib.rs::tests::compile_v251_numeric_transcendental_fixture_preserves_typed_value_flow`,
+`compile_numeric_transcendental_failure_is_atomic_and_source_backed`,
+`scribium-test-support/src/lib.rs::tests::test_verify_numeric_transcendental_family_is_semantically_supported`,
+and `fixtures/quarkdown-conformance/cases/numeric-transcendental-family/input.qd`.
 The arithmetic/unary regression remains covered by the existing numeric tests
-and `numeric-arithmetic-family` fixture. The remaining `.logn`, `.pi`, `.sin`,
-`.cos`, and `.tan` functions are deliberately outside this slice.
+and `numeric-arithmetic-family` fixture. `.map` and `.filter` remain Scribium
+extensions and are not included in the upstream numeric family.
 
 ### String and text evidence
 

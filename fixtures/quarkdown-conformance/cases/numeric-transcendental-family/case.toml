@@ -1,0 +1,5 @@
+id = "numeric-transcendental-family"
+feature = "numeric-transcendental"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-math"
+description = "Typed deterministic logarithm, pi, sine, cosine, and tangent operations with nested and chained composition"

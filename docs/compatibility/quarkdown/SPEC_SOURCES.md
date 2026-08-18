@@ -28,12 +28,13 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `ConditionalTest.kt`         | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/ConditionalTest.kt | Public integration examples for `.islower` in `.if`, false branches, and `.ifnot` | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`                | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Direct logical helper behavior and conditional control-flow results | 2026-08-18 |
 | Quarkdown v2.5.1 `Strings.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt | Public scalar string signatures, quote-delimited `.string` behavior, case transforms, emptiness predicates, and `.startswith` | 2026-08-18 |
-| Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, and `.range` signatures plus Float/Double/Int operation boundaries | 2026-08-18 |
-| Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, `.truncate` positional/named forms, `.round`, negative-decimal runtime failure, and fractional-decimal type failure | 2026-08-18 |
+| Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, and `.range` signatures plus Float/Double/Int operation boundaries | 2026-08-18 |
+| Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, `.pi::truncate {2}`, zero trigonometry, `.cos {.pi}`, `.pi::multiply {2}::cos`, negative-decimal runtime failure, and fractional-decimal type failure | 2026-08-18 |
 | Quarkdown wiki — "Math"                       | https://quarkdown.com/wiki/math/ | Public math-family scope and nested/chained arithmetic examples | 2026-08-18 |
 | Quarkdown v2.5.1 `NumberValue.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt | Integral Float normalization to Int, including the observable finite/non-finite conversion boundary | 2026-08-18 |
 | Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory | 2026-08-18 |
 | Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior used to classify conversion gaps | 2026-08-18 |
+| Rust `libm` 0.2.16                         | https://docs.rs/libm/0.2.16/ | Pure-Rust `log`, `sin`, `cos`, and `tan` software implementation selected with default features disabled for native/WASM reproducibility; compared against 0.2.14 and 0.2.15 on the representative corpus | 2026-08-18 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call" (v2.5.1 syntax review) | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Behavior specification for the #60 multiline-argument, continuation, chaining, tight-call, and block/inline boundary fixtures | 2026-08-14 |
 | Quarkdown wiki — "Lambda" (v2.5.1)              | https://quarkdown.com/wiki/lambda/ | Headerless lambda implicit positional references (`.1`, `.2`, ...), nested scope behavior | 2026-08-16 |
@@ -198,6 +199,51 @@ Scribium covers this evidence through the shared `bind_arguments` path,
 ordinary/named/mixed/chain calls, nested composition, source-backed atomic
 failure, and the independently authored
 `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`.
+
+## Transcendental numeric evidence record
+
+The v2.5.1 [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
+definitions are `logn(x: Number)`, `pi()`, `sin(x: Number)`,
+`cos(x: Number)`, and `tan(x: Number)`. The four unary functions explicitly
+call `x.toFloat()` before Kotlin's Float overload; `.pi` passes
+`kotlin.math.PI`, a binary64 `Double`, directly to `NumberValue`. The public
+[`MathFunctionsTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt)
+observes `.pi::truncate {2}` as `3.14`, `.cos {0}` as `1`, `.sin {0}` as
+`0`, `.tan {0}` as `0`, `.cos {.pi}` as `-1`, and
+`.pi::multiply {2}::cos` as `1`.
+
+The installed official v2.5.1 macOS arm64 release was used as a black-box
+oracle for an independently authored edge corpus. Before `NumberValue`
+normalization, the direct Float math classes are `ln(1) = +0`, `ln(0) =
+-Infinity`, `ln(negative finite) = NaN`, `ln(+Infinity) = +Infinity`, and
+`ln(NaN) = NaN`; sine and tangent preserve the sign of `-0`, while cosine
+returns `+1`. At the rendered value boundary, `NumberValue` converts integral
+Float results to Int: the runtime therefore renders `.logn {0}` as
+`-2147483648`, `.logn {-1}` as `NaN`, `.logn {1.40129846e-45}` as
+`-103.27893`, `.logn {3.4028235e38}` as `21.487562` after the upstream
+integral-Number normalization, and zero trigonometric results as `0`/`1`.
+The standard representative outputs `.logn {2}` → `0.6931472`,
+`.sin {1}` → `0.84147096`, `.cos {1}` → `0.5403023`, and `.tan {1}` →
+`1.5574077` are also retained in the conformance/unit corpus. Quoted
+`"2"` is rejected by the upstream Number conversion; Scribium's existing
+numeric scalar adaptation remains the explicitly bounded compatibility path
+for accepted textual/adapted values.
+
+Kotlin/JVM bytecode for the Float overload expands to `f2d`,
+`java.lang.Math.*(double)`, then `d2f`. Scribium reproduces that observable
+operation order with `libm` `0.2.16` built as
+`default-features = false`: the already-adapted Float is widened to binary64,
+the pure-Rust software operation runs, and the result is narrowed to Float.
+This avoids Rust `std` transcendental calls, OS libc/libm FFI, and
+target-specific intrinsics. Versions `0.2.14`, `0.2.15`, and `0.2.16` were
+compared on the representative input corpus and produced identical selected
+bits; `0.2.16` is pinned for the reviewed current release. Exact layer tests
+use `to_bits()` for finite values and signed zero, while evaluator tests cover
+the existing `NumberValue(Float)` integral normalization for NaN and
+infinities. The dependency's no-default-feature build is the source/dependency
+evidence used for Linux x86_64, macOS arm64, Windows x86_64, and wasm32
+portability; repository CI runs the first three natively and checks wasm32
+compilation only, with no wasm execution claim.
 
 ## Range construction and conversion evidence record
 
