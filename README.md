@@ -6,135 +6,124 @@
 
 **Scribium is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 
-> Scribium targets complete compatibility with the publicly documented Quarkdown document language while tracking stable upstream evolution. Current verified compatibility is partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.1. See `docs/compatibility/quarkdown/` for the matrix, evidence, and compatibility debt.
+Scribium accepts Markdown and Quarkdown-compatible documents, evaluates supported programmable-document semantics into a backend-neutral IR, lowers that IR to Typst, and can invoke the official Typst compiler to produce PDF.
 
-> Scribium is an independent project. It is not affiliated with, endorsed by, or
-> sponsored by Typst GmbH or the Quarkdown project.
+> Quarkdown compatibility is currently partial and evidence-based. The verified compatibility target is Quarkdown v2.5.1. See [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/) for the detailed inventory and evidence.
 
----
+> Scribium is an independent project. It is not affiliated with, endorsed by, or sponsored by Typst GmbH or the Quarkdown project.
 
-## What is Scribium?
+## What works today
 
-Scribium independently implements the Quarkdown syntax and document-observable
-semantics, connecting them to the official Typst compiler for high-quality
-typesetting.
+The current verified document path is:
 
-```
-Quarkdown-compatible source (.qd / .scrib)
-or Markdown
-→ clean-room parser and evaluator
-→ Quarkdown-compatible semantic model
+```text
+Markdown or Quarkdown-compatible source (.md / .qd / .scrib)
+→ pinned Rushdown Markdown substrate + Scribium Quarkdown frontend
 → backend-neutral IR
-→ scribium-typst lowering
-→ concrete Typst compiler adapter
+→ single evaluator
+→ Scribium Typst lowering
+→ generated Typst
 → official Typst compiler
-→ PDF / HTML / SVG / PNG
+→ PDF
 ```
 
-Quarkdown compatibility is a correctness contract and long-term product target,
-not a deferred optional plugin. Current claims remain limited to behavior backed
-by conformance evidence. Scribium reimplements the language independently from
-public documentation and permitted black-box behavior. No Quarkdown source code,
-tests, or fixtures are copied or translated.
+For Markdown, Scribium has an end-to-end CommonMark/GFM compatibility harness and real-document PDF smoke coverage:
+
+| Evidence | Current baseline |
+|---|---:|
+| CommonMark 0.31.2 corpus | 649 / 652 PASS, 3 accepted mismatches |
+| cmark-gfm corpus | 664 / 670 PASS, 6 accepted mismatches |
+| Supported real-document PDF smoke | 12 / 12 |
+
+The supported Markdown output path includes paragraphs, headings, blockquotes, ordered and unordered lists, GFM task lists, fenced and indented code blocks, GFM tables with alignment, emphasis, strong, strikethrough, inline code, links, autolinks/linkify, thematic breaks, entities, escapes, and soft/hard line breaks.
+
+Scribium also supports a deliberately bounded, attribute-free inline raw-HTML subset when it maps exactly to existing Markdown semantics: `<em>`, `<strong>`, `<del>`, `<s>`, and `<br>` variants. Other raw HTML is preserved with source provenance but rejected at the document-output boundary with `E8001`; Scribium does not contain a general HTML parser or DOM.
+
+Images are parsed and retained in IR but are not yet lowered because resource-resolution semantics are intentionally deferred.
+
+**HTML, SVG, and PNG output backends are not implemented yet.** PDF output through the external Typst executable is experimental; generating `.typ` does not require Typst to be installed.
+
+Detailed Markdown evidence and the accepted mismatch inventory live in [`docs/compatibility/markdown/`](docs/compatibility/markdown/).
 
 ## Quickstart
 
+From a repository checkout:
+
 ```bash
-# Build a document to generated Typst source (document.qd → document.typ)
-scribium build examples/hello/main.qd
+# Validate a real Markdown example
+cargo run -p scribium-cli -- check examples/markdown/basic.md
 
-# Build a document to PDF (document.qd → document.pdf)
-scribium build examples/hello/main.qd --format pdf
+# Markdown → generated Typst
+cargo run -p scribium-cli -- build examples/markdown/basic.md \
+  --output target/examples/basic.typ
 
-# Override the output path
-scribium build examples/hello/main.qd --output out/main.typ
-scribium build examples/hello/main.qd --format pdf --output out/main.pdf
+# Markdown → PDF (requires Typst on PATH)
+cargo run -p scribium-cli -- build examples/markdown/basic.md \
+  --format pdf --output target/examples/basic.pdf
 
-# Select a specific Typst executable for PDF output (defaults to `typst` on PATH)
-scribium build examples/hello/main.qd --format pdf --typst-path /opt/typst/bin/typst
-
-# Check for errors without compiling
-scribium check examples/hello/main.qd
-
-# Inspect intermediate representations
-scribium inspect examples/hello/main.qd --emit typst
-
-# Build a Markdown input (report.md → report.typ)
-scribium build report.md
-
-# Build a Markdown input all the way to PDF (report.md → report.pdf)
-scribium build report.md --format pdf
+# Quarkdown-compatible example
+cargo run -p scribium-cli -- check examples/hello/main.qd
+cargo run -p scribium-cli -- build examples/hello/main.qd \
+  --output target/examples/hello.typ
 ```
 
-> Supported inputs are `.qd`, `.scrib`, and `.md` (case-insensitive; files
-> without an extension are rejected). A `.typ` input is rejected until Typst
-> passthrough is implemented. The build refuses to overwrite the input file:
-> an explicit `--output` that resolves to the input — including via
-> `.`/`..` components (resolved in component order with symlinks
-> interpreted as reached, and rejected before any directory is created, so
-> a rejected build never leaves empty directories behind), symlinks, or
-> hard links — is rejected. Distinct targets behind a symlink (e.g.
-> `link/../document.qd` with `link -> ../other/subdir`) are accepted and
-> written to their real location. On Windows, root-relative output paths
-> (`\out\main.typ`) are resolved from the current drive's root, and
-> drive-relative paths (`C:out\main.typ`) are rejected with a clear error
-> because they depend on the per-drive current-directory state. Missing
-> output directories (e.g. `out/` for `--output out/main.typ`) are created
-> automatically. Output is written
-> atomically: the content goes to a uniquely named temporary file (created
-> exclusively, retrying up to 32 candidate names) in the output directory
-> and is renamed into place, so
-> readers never observe a partially written output and an erroring build
-> leaves no partial file (temporary files are cleaned up on error-return
-> paths; an abrupt crash or forced kill may leave one). This is not a
-> crash-durability guarantee — the output directory is not fsynced, so
-> power loss may not preserve the newest file. On Unix, replacing an
-> existing output keeps its permission bits, and new outputs use the
-> standard `0666 & !umask` mode (same as `fs::write`). **PDF via external
-> Typst subprocess is experimental; HTML/SVG/PNG backends are not
-> implemented yet; requesting them fails with a clear error.** PDF builds
-> invoke the configured Typst executable (`typst` on `PATH` by default,
-> overridable with `--typst-path <PATH>`) directly via `std::process::Command`
-> — never through a shell. A `--format typst` build does not require a Typst
-> install. Generated PDFs are validated for non-empty output and a `%PDF-`
-> header before being written.
+Supported input extensions are `.md`, `.qd`, and `.scrib` (case-insensitive). Files without an extension are rejected. Native `.typ` passthrough is not implemented yet.
 
-The Markdown/CommonMark+GFM baseline and its evidence-backed feature matrix
-are documented in [`docs/compatibility/markdown/`](docs/compatibility/markdown/).
+`--output` can override the destination. Missing output directories are created automatically, input files cannot be overwritten through aliases/symlinks/hard links, and output replacement is atomic on normal error-return paths. PDF builds invoke the configured Typst executable directly rather than through a shell; use `--typst-path <PATH>` to select a specific binary.
 
-## Example (.qd)
+## Runnable examples
+
+The public examples are intended to stay executable in CI rather than becoming syntax-only showcase files.
+
+- [`examples/markdown/basic.md`](examples/markdown/basic.md) — ordinary Markdown document structure and inline syntax.
+- [`examples/markdown/gfm.md`](examples/markdown/gfm.md) — task lists, tables, strikethrough, and GFM linkification/autolinks.
+- [`examples/markdown/bounded-html.md`](examples/markdown/bounded-html.md) — the supported inline raw-HTML whitelist and its explicit boundary.
+- [`examples/hello/main.qd`](examples/hello/main.qd) — a small Quarkdown-compatible example with variables, conditionals, strings, arithmetic, and numeric chaining.
+
+For a larger independently authored Markdown corpus, see [`fixtures/markdown/real/`](fixtures/markdown/real/). The compatibility workflow builds the supported documents through the complete Markdown → IR → evaluator → Typst → PDF path.
+
+## Small Markdown example
+
+```markdown
+# Release notes
+
+Scribium preserves **structured Markdown** through a backend-neutral IR.
+
+- [x] GFM task lists
+- [x] Tables
+- [x] Links and `inline code`
+
+| Input | Output |
+| :--- | ---: |
+| Markdown | Typst / PDF |
+```
+
+Build it with:
+
+```bash
+cargo run -p scribium-cli -- build document.md --format pdf
+```
+
+## Quarkdown-compatible example
+
+Scribium's programmable-document compatibility is growing in bounded, independently verified semantic slices. For example:
 
 ```quarkdown
-.heading level:{1}
-    Hello, Scribium
+.var {show_extra} {yes}
 
-This is a .strong {Quarkdown} document compiled through Typst to PDF.
+.if {.show_extra}
+    This content is emitted lazily.
 
-.list
-    .item
-        Simple code lists work
-    .item
-        Math is supported: $E = mc^2$
-
-.row
-    .col
-        Left
-    .col
-        Right
+.string {hello}::concatenate with:{" world"}::capitalize
+.sum {20} {22}
+.pi::truncate {2}
 ```
+
+The complete v2.5.1 public-language gap inventory, including unsupported and intentionally deferred surfaces, is maintained in [`docs/compatibility/quarkdown/GAP_INVENTORY.md`](docs/compatibility/quarkdown/GAP_INVENTORY.md).
 
 ## Front matter
 
-A `---`-delimited block at the start of a document provides metadata
-(`title`, `author`, `date`, and custom keys). The supported format is a
-flat line-based `key: value` form, **not full YAML**:
-
-- Keys and values are split on the first colon.
-- Nested objects, arrays, and block strings are **not** supported.
-- Delimiters and metadata lines must start at column 0; indented keys reject
-  the block, which is preserved as regular Markdown instead of being flattened.
-- Duplicate keys: last occurrence wins.
-- Custom metadata is stored in the IR in a deterministic (lexicographic) order.
+A `---`-delimited block at the start of a document provides metadata (`title`, `author`, `date`, and custom keys). The current format is a flat line-based `key: value` form, **not full YAML**.
 
 ```markdown
 ---
@@ -144,69 +133,68 @@ author: Alice
 # Heading
 ```
 
-## Current Status
+Nested objects, arrays, and block strings are not supported. Duplicate keys use the last occurrence, and custom metadata is stored deterministically in the IR.
 
-| Feature                                 | Status       |
-|-----------------------------------------|--------------|
-| Markdown heading, paragraph             | Experimental |
-| Emphasis, strong                        | Experimental |
-| Bounded inline raw HTML (`em`, `strong`, `del`, `s`, `br`) | Experimental / Partial |
-| Lists                                   | Experimental |
-| Inline links (`[text](url)`)               | Experimental |
-| Inline code spans (`` `code` ``)           | Experimental |
-| Dot-prefixed function calls               | Experimental / Parsed |
-| Positional/named/body arguments           | Experimental / Parsed |
-| Variables and conditionals              | Experimental / Implemented |
-| Iteration and components                | Planned      |
-| Tables, math, footnotes                 | Planned      |
-| Include/read, data loading              | Planned      |
-| Native `.typ` passthrough (host-level)  | Planned      |
-| Quarkdown compatibility                 | Partial / evidence-based |
-| `watch` mode, source maps               | Planned      |
-| LSP integration                         | Planned      |
-| WASM support                            | Deferred     |
-| **PDF via Typst subprocess**            | **Experimental** |
+## Current status
+
+| Area | Status |
+|---|---|
+| Markdown/CommonMark+GFM frontend | Experimental, evidence-backed |
+| Markdown → Typst | Implemented for the documented supported surface |
+| Markdown → PDF | Implemented / experimental Typst process adapter |
+| Bounded inline raw HTML input | Implemented / partial by design |
+| General raw HTML semantics | Unsupported, fail-closed with `E8001` |
+| Quarkdown variables/conditionals/callables/collections/string/numeric slices | Partial, implemented in bounded verified families |
+| Quarkdown complete v2.5.1 compatibility | In progress |
+| Images/resource resolution | Deferred |
+| Include/read/data loading | Planned host-boundary work |
+| HTML/SVG/PNG output | Not implemented |
+| Native `.typ` passthrough | Planned |
+| Watch/LSP | Planned |
+| WASM | Deferred |
 
 ## Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────┐
 │                    scribium-cli                     │
-│  build | check | inspect | watch                   │
+│              build | check | inspect               │
 └──────────────────────┬─────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────┐
 │                   scribium-core                     │
-│  facade/orchestration → frontend → engine → IR      │
-│  (current physical code may still be consolidated)  │
+│ frontend AST → IR → single evaluator               │
+└──────────────────────┬─────────────────────────────┘
+                       │ evaluated backend-neutral IR
+┌──────────────────────▼─────────────────────────────┐
+│                   scribium-typst                    │
+│              pure IR → Typst lowering              │
 └──────────────────────┬─────────────────────────────┘
                        │
-                       ▼ normalized backend-neutral IR
-┌────────────────────────────────────────────────────┐
-│                   scribium-typst                    │
-│  pure IR → Typst lowering + source maps             │
-└──────────────────────┬─────────────────────────────┘
-                       ▼ host-selected concrete adapter
+                       ▼
               official Typst compiler
+                       │
+                       ▼
+                      PDF
 ```
+
+Rushdown is the pinned Markdown parser substrate. Scribium does not preprocess and reparse Markdown to implement Quarkdown semantics; programmable semantics are preserved structurally through the frontend AST and IR and evaluated once before backend lowering.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/adr/`](docs/adr/) for the architectural contracts.
 
 ## Roadmap
 
-- **M0 Foundation** — Repository bootstrap, ADRs, spikes, CI
-- **M1 Vertical Slice** — First `.qd → PDF` (dot-call, arguments, conditional)
-- **M2 Core Language** — Quarkdown core + Markdown MVP (v0.1.0)
-- **M3 Programmable Documents** — Components, data loading, iteration
-- **M4 Developer Experience** — Watch, inspect, source maps
-- **M5 Quarkdown Compatibility Convergence** — Public-language coverage, matrix, conformance, and verified-baseline promotion
-- **M6 Library, LSP, WASM** — Embedding and tooling
-- **M7 Hardening** — Fuzzing, benchmarks, 1.0 release
+- **M0 Foundation** — repository bootstrap, ADRs, spikes, CI
+- **M1 Vertical Slice** — first `.qd → PDF`
+- **M2 Core Language** — Quarkdown core + Markdown MVP
+- **M3 Programmable Documents** — components, host/data loading, richer document semantics
+- **M4 Developer Experience** — watch, inspect, source maps
+- **M5 Quarkdown Compatibility Convergence** — public-language coverage and verified-baseline promotion
+- **M6 Library, LSP, WASM** — embedding and tooling
+- **M7 Hardening** — fuzzing, benchmarks, 1.0 release
 
 ## License
 
 Copyright 2026 The Scribium Authors
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. See [`LICENSE`](LICENSE).
