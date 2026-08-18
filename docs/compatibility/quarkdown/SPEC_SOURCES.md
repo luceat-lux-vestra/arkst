@@ -28,9 +28,10 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `ConditionalTest.kt`         | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/ConditionalTest.kt | Public integration examples for `.islower` in `.if`, false branches, and `.ifnot` | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`                | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Direct logical helper behavior and conditional control-flow results | 2026-08-18 |
 | Quarkdown v2.5.1 `Strings.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt | Public scalar string signatures, quote-delimited `.string` behavior, case transforms, emptiness predicates, and `.startswith` | 2026-08-18 |
-| Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.iseven`, and `.range` signatures and numeric operation boundaries | 2026-08-18 |
-| Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, floating math, and numeric output materialization | 2026-08-18 |
+| Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, and `.range` signatures plus Float/Double/Int operation boundaries | 2026-08-18 |
+| Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, `.truncate` positional/named forms, `.round`, negative-decimal runtime failure, and fractional-decimal type failure | 2026-08-18 |
 | Quarkdown wiki — "Math"                       | https://quarkdown.com/wiki/math/ | Public math-family scope and nested/chained arithmetic examples | 2026-08-18 |
+| Quarkdown v2.5.1 `NumberValue.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt | Integral Float normalization to Int, including the observable finite/non-finite conversion boundary | 2026-08-18 |
 | Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory | 2026-08-18 |
 | Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior used to classify conversion gaps | 2026-08-18 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
@@ -61,7 +62,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation, plain Markdown-list scalar values, and non-iterable scalar handling | 2026-08-18 |
 | Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
 | Quarkdown v2.5.1 `Range.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public source evidence for inclusive closed iteration, left-open default start, right-open rejection, and descending bounds | 2026-08-17 |
-| Quarkdown v2.5.1 `Math.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public source evidence for `.range` optional `from`/`to` bounds, dynamic evaluation, and Number-to-Int truncation | 2026-08-18 |
+| Quarkdown v2.5.1 `Math.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public source evidence for `.range` optional `from`/`to` bounds, dynamic evaluation, Number-to-Int truncation, and the decimal post-processing operation order | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`              | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Public test evidence for `..4` iteration and `1..` rejection | 2026-08-17 |
 | GitHub release tag `v2.5.1`                   | https://github.com/iamgio/quarkdown/releases/tag/v2.5.1 | Release identification and D1-D5 public delta inventory | 2026-08-13 |
 | CommonMark specification, current link rules  | https://spec.commonmark.org/current/#links | D2 balanced/escaped link destinations, literal trailing delimiters, and URI backslash-escape semantics | 2026-08-13 |
@@ -158,6 +159,45 @@ and `.groupvalues` return recursive `Collection` values, while aggregation
 returns `Number`. Materialization reserves lengths with checked arithmetic and
 publishes results only after the operation succeeds, preserving source-backed
 diagnostics for endless ranges, invalid operands, and allocation failures.
+
+## Decimal numeric post-processing evidence record
+
+The v2.5.1 [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
+definitions are `truncate(x: Number, decimals: Int)` and
+`round(x: Number)`. `truncate` rejects negative Int values at runtime, uses
+`x.toInt()` for zero decimals, and otherwise evaluates
+`(x.toFloat() * 10.0.pow(decimals)).toInt() / multiplier.toFloat()`. The
+`Double` multiplier and `Float` division are observable and are retained as
+separate evaluator steps. `round` preserves upstream Int values and otherwise
+uses Kotlin `round(x.toFloat()).toInt()`, whose exact halfway behavior is
+nearest-even rather than Rust's default ties-away-from-zero behavior.
+
+[`NumberValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt)
+normalizes integral Float values to Int before the builtin result is exposed.
+[`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
+and [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt)
+were reviewed to distinguish an integral numeric representation from a
+fractional NumberValue. The decimal slice therefore accepts `2`/`2.0` as an
+integral numeric `Int` boundary, rejects `1.5`, quoted numeric text, and NaN
+for `decimals`, and preserves the negative-Int runtime failure. The existing
+Scribium scalar numeric path remains the adaptation boundary for `x` and does
+not introduce a general DynamicValue converter.
+
+The official v2.5.1 macOS arm64 release binary from the
+[v2.5.1 release](https://github.com/iamgio/quarkdown/releases/tag/v2.5.1) was
+also probed with independently authored inputs because the final conversion
+behavior is not determined by `round()` alone. It confirmed `2.5 -> 2`,
+`3.5 -> 4`, `-2.5 -> -2`, `-3.5 -> -4`, NaN -> `0`, positive/negative
+infinity -> `Int.MAX_VALUE`/`Int.MIN_VALUE`, large finite rounding clamps, and
+integral `decimals` values above ordinary decimal precision do not hit an
+arbitrary upstream limit. Quoted numeric strings for the `Int` parameter fail
+type conversion.
+
+Scribium covers this evidence through the shared `bind_arguments` path,
+`integer_argument`, `kotlin_float_to_int`, typed `IrValue::Number` results,
+ordinary/named/mixed/chain calls, nested composition, source-backed atomic
+failure, and the independently authored
+`fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`.
 
 ## Range construction and conversion evidence record
 
@@ -273,10 +313,12 @@ through text serialization, generated Markdown, or a second parser.
   and failure for two-parameter destructuring of a non-Pair item. Explicit
   lambda scope masks implicit `.1` lookup.
 - No Quarkdown source code or tests are copied or translated. The v2.5.1
-  `Math.kt` and `MathFunctionsTest.kt` links above were consulted only as public
-  behavioral/API evidence for the numeric slice: `toFloat()` arithmetic,
-  floating division/remainder, `Number.toInt()` truncation for `.pow` and
-  `.iseven`, and `NaN` behavior for invalid floating domains. The `Flow.kt`,
+  `Math.kt`, `MathFunctionsTest.kt`, `NumberValue.kt`, and converter links above
+  were consulted only as public behavioral/API evidence for the numeric slices:
+  `toFloat()` arithmetic, the Float/Double/Float `.truncate` operation order,
+  Kotlin ties-to-even `.round`, strict `Int` binding, `Number.toInt()`
+  truncation for `.pow` and `.iseven`, and `NaN`/infinity behavior for invalid
+  floating domains. The `Flow.kt`,
   `Range.kt`, and `FlowTest.kt` links remain evidence for dynamic endpoint
   conversion and the iteration policy (including left-open, endless,
   descending, and repeat-zero behavior).

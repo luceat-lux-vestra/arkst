@@ -1,0 +1,11 @@
+.truncate {201.06194} {2}
+.truncate {201.06194} decimals:{1}
+.truncate {201.06194} {0}
+.truncate {-1.29} decimals:{1}
+.round {2.49}
+.round {2.5}
+.round {3.5}
+.round {-2.5}
+.sum {200} {1.06194}::truncate {2}
+.sum {2} {0.5}::round
+.multiply {.truncate {12.34} decimals:{1}} {10}

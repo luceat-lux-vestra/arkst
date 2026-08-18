@@ -1,0 +1,5 @@
+id = "numeric-decimal-family"
+feature = "numeric-decimal"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-math"
+description = "Typed truncate and ties-to-even round operations with chained and nested composition"
