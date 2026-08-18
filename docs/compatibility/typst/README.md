@@ -15,6 +15,11 @@ backend adapter remain usable with the selected official Typst compiler. It
 does not mean that Scribium owns a Typst parser or reproduces Typst's internal
 implementation.
 
+Source-language raw HTML is a separate compatibility concern. Typst HTML
+facilities do not authorize Scribium to reinterpret arbitrary Markdown or
+Quarkdown raw HTML at the backend boundary; see the
+[raw HTML compatibility policy](../RAW_HTML_POLICY.md).
+
 ## Current evidence
 
 CI currently validates the native subprocess path with Typst **0.15.1**. That
