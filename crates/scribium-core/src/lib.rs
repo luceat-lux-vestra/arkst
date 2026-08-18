@@ -41,6 +41,18 @@ pub(crate) enum SourceMode {
     Quarkdown,
 }
 
+fn source_mode_for_entry(entry: &VirtualPathBuf) -> SourceMode {
+    let is_markdown = entry
+        .file_name()
+        .and_then(|file_name| file_name.rsplit_once('.'))
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("md"));
+    if is_markdown {
+        SourceMode::Markdown
+    } else {
+        SourceMode::Quarkdown
+    }
+}
+
 /// Compile a Scribium project through the full pipeline.
 ///
 /// Returns a `CompileResult` with the generated IR and diagnostics.
@@ -69,11 +81,7 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
         };
     };
 
-    let source_mode = if entry.as_str().ends_with(".md") {
-        SourceMode::Markdown
-    } else {
-        SourceMode::Quarkdown
-    };
+    let source_mode = source_mode_for_entry(entry);
     let parsed = match source_mode {
         SourceMode::Markdown => {
             scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Markdown)
@@ -82,7 +90,7 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
             scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Quarkdown)
         }
     };
-    let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics(
+    let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
         &parsed.document,
         source_id,
         project.metadata(),
@@ -1835,7 +1843,7 @@ mod tests {
             .expect("source id");
         let parsed = scribium_markdown::parse_with_diagnostics(source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
-        let (ir, diagnostics) = crate::ast_to_ir::ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = crate::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
             &parsed.document,
             source_id,
             project.metadata(),
@@ -2072,6 +2080,62 @@ mod tests {
         assert_eq!(result.ir.nodes.len(), 2);
         assert!(matches!(result.ir.nodes[0], IrNode::Heading { .. }));
         assert!(matches!(result.ir.nodes[1], IrNode::Paragraph { .. }));
+    }
+
+    #[test]
+    fn compile_raw_html_mode_follows_case_insensitive_entry_extensions() {
+        let source = "before <em>x</em> after\n";
+        for entry in ["main.md", "main.MD", "main.Md"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let result = super::compile(&project, &CompileOptions::default());
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.code != "E8001"),
+                "{entry}: {result:?}"
+            );
+            let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+                panic!("{entry}: expected paragraph, got {:?}", result.ir.nodes);
+            };
+            assert!(
+                content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::Emphasis { .. })),
+                "{entry}: expected Markdown emphasis, got {content:?}"
+            );
+        }
+
+        for entry in ["main.qd", "main.QD", "main.scrib", "main.SCRIB"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let result = super::compile(&project, &CompileOptions::default());
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "E8001"),
+                "{entry}: expected unsupported raw HTML, got {:?}",
+                result.diagnostics
+            );
+            let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+                panic!("{entry}: expected paragraph, got {:?}", result.ir.nodes);
+            };
+            assert!(content
+                .iter()
+                .all(|inline| !matches!(inline, IrInline::Emphasis { .. })));
+        }
     }
 
     #[test]

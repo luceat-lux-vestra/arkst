@@ -27,12 +27,20 @@ fn ast_to_ir(
     source_id: SourceId,
     project_metadata: &ProjectMetadata,
 ) -> IrDocument {
-    ast_to_ir_with_diagnostics(doc, source_id, project_metadata, SourceMode::Markdown).0
+    ast_to_ir_with_diagnostics(doc, source_id, project_metadata).0
 }
 
 /// Convert frontend AST to IR while reporting syntax that the current IR and
 /// Typst backend cannot represent without changing its meaning.
-pub(crate) fn ast_to_ir_with_diagnostics(
+pub fn ast_to_ir_with_diagnostics(
+    doc: &Document,
+    source_id: SourceId,
+    project_metadata: &ProjectMetadata,
+) -> (IrDocument, Vec<Diagnostic>) {
+    ast_to_ir_with_diagnostics_for_mode(doc, source_id, project_metadata, SourceMode::Markdown)
+}
+
+pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
     doc: &Document,
     source_id: SourceId,
     project_metadata: &ProjectMetadata,
@@ -972,7 +980,7 @@ mod tests {
     fn preserve_call_chain_segments_and_provenance_in_ir() {
         let source = ".a {x}::b {y}\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &document,
             source_id(),
             &empty_project_metadata(),
@@ -1002,7 +1010,7 @@ mod tests {
     fn let_lambda_metadata_survives_ast_to_ir_with_original_spans() {
         let source = ".let {값}\r\n\tname:\r\n\t안녕, .name!\r\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &document,
             source_id(),
             &empty_project_metadata(),
@@ -1037,7 +1045,7 @@ mod tests {
     fn let_implicit_lambda_metadata_is_absent_in_ir() {
         let source = ".let {값}\n    .1\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &document,
             source_id(),
             &empty_project_metadata(),
@@ -1070,7 +1078,7 @@ mod tests {
             (".foreach {..}\n    .1\n", None, None, (10, 12)),
         ] {
             let document = scribium_markdown::parse_qd(source);
-            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
                 &document,
                 source_id(),
                 &empty_project_metadata(),
@@ -1110,7 +1118,7 @@ mod tests {
             (".foreach {4294967296..4294967296}\n    .1\n", None, None),
         ] {
             let document = scribium_markdown::parse_qd(source);
-            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
                 &document,
                 source_id(),
                 &empty_project_metadata(),
@@ -1200,7 +1208,7 @@ mod tests {
             let document = scribium_markdown::parse_qd(source);
             let ast_span = ast_range_span(&document);
             assert_eq!(&source[ast_span.start..ast_span.end], "2..4");
-            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
                 &document,
                 source_id(),
                 &empty_project_metadata(),
@@ -1595,7 +1603,7 @@ mod tests {
             line_count: 8,
         };
 
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &doc,
             source_id(),
             &empty_project_metadata(),
@@ -1736,7 +1744,7 @@ mod tests {
             line_count: 1,
         };
 
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &doc,
             source_id(),
             &empty_project_metadata(),
@@ -1793,7 +1801,7 @@ mod tests {
         let source =
             "before <em>italic <strong>bold</strong></em> <del>gone</del> <s>old</s><br /> after\n";
         let document = scribium_markdown::parse_md(source);
-        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &document,
             source_id(),
             &empty_project_metadata(),
@@ -1833,7 +1841,7 @@ mod tests {
     fn strikethrough_html_pairs_preserve_del_and_s_tag_identity() {
         for source in ["<del>x</del>\n", "<s>x</s>\n"] {
             let document = scribium_markdown::parse_md(source);
-            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
                 &document,
                 source_id(),
                 &empty_project_metadata(),
@@ -1850,7 +1858,7 @@ mod tests {
 
         let nested_source = "<del><s>x</s></del>\n";
         let nested_document = scribium_markdown::parse_md(nested_source);
-        let (nested_ir, nested_diagnostics) = ast_to_ir_with_diagnostics(
+        let (nested_ir, nested_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &nested_document,
             source_id(),
             &empty_project_metadata(),
@@ -1888,7 +1896,7 @@ mod tests {
             ),
         ] {
             let document = scribium_markdown::parse_md(source);
-            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
                 &document,
                 source_id(),
                 &empty_project_metadata(),
@@ -1926,7 +1934,7 @@ mod tests {
     fn unsupported_html_keeps_deterministic_diagnostics_and_original_spans() {
         let inline_source = "before <span class=\"layout\">x</span> after\n";
         let inline_document = scribium_markdown::parse_md(inline_source);
-        let (inline_ir, inline_diagnostics) = ast_to_ir_with_diagnostics(
+        let (inline_ir, inline_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &inline_document,
             source_id(),
             &empty_project_metadata(),
@@ -1948,7 +1956,7 @@ mod tests {
 
         let block_source = "<div>\n**not Markdown**\n</div>\n\ntext\n";
         let block_document = scribium_markdown::parse_md(block_source);
-        let (_, block_diagnostics) = ast_to_ir_with_diagnostics(
+        let (_, block_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &block_document,
             source_id(),
             &empty_project_metadata(),
@@ -1966,7 +1974,7 @@ mod tests {
 
         let ambiguous_source = "before <em>outer <strong>inner</strong> after\n";
         let ambiguous_document = scribium_markdown::parse_md(ambiguous_source);
-        let (ambiguous_ir, ambiguous_diagnostics) = ast_to_ir_with_diagnostics(
+        let (ambiguous_ir, ambiguous_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
             &ambiguous_document,
             source_id(),
             &empty_project_metadata(),
