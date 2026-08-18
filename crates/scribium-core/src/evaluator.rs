@@ -1321,7 +1321,8 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> CallOutcome {
         match name {
-            "size" | "first" | "last" => {
+            "size" | "first" | "second" | "third" | "last" | "sumall" | "average" | "distinct"
+            | "reversed" | "groupvalues" => {
                 let named_parameter = if name == "size" { "of" } else { "from" };
                 let value = match collection_access_operand(
                     name,
@@ -1344,11 +1345,27 @@ impl Evaluator {
                         Err(outcome) => outcome,
                     },
                     "first" => {
-                        CallOutcome::Value(elements.into_iter().next().unwrap_or(IrValue::None))
+                        CallOutcome::Value(elements.first().cloned().unwrap_or(IrValue::None))
                     }
-                    "last" => {
-                        CallOutcome::Value(elements.into_iter().last().unwrap_or(IrValue::None))
+                    "second" => {
+                        CallOutcome::Value(elements.get(1).cloned().unwrap_or(IrValue::None))
                     }
+                    "third" => {
+                        CallOutcome::Value(elements.get(2).cloned().unwrap_or(IrValue::None))
+                    }
+                    "last" => CallOutcome::Value(elements.last().cloned().unwrap_or(IrValue::None)),
+                    "sumall" => CallOutcome::Value(IrValue::Number(collection_sum_all(&elements))),
+                    "average" => match collection_average(&elements, span, diagnostics) {
+                        Ok(average) => CallOutcome::Value(IrValue::Number(average)),
+                        Err(outcome) => outcome,
+                    },
+                    "distinct" => distinct_collection_values(elements, *span, diagnostics),
+                    "reversed" => {
+                        let mut reversed = elements;
+                        reversed.reverse();
+                        CallOutcome::Value(IrValue::Collection(reversed))
+                    }
+                    "groupvalues" => group_collection_values(elements, *span, diagnostics),
                     _ => unreachable!("collection access operation was prevalidated"),
                 }
             }
@@ -2425,6 +2442,10 @@ impl Evaluator {
             [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
                 .coerce_iterable(IrValue::Content(item.nodes.clone()), span, diagnostics)
                 .map(IrValue::Collection),
+            [IrNode::Paragraph { content, .. }] => match content.as_slice() {
+                [IrInline::Text { content, .. }] => Ok(IrValue::String(content.clone())),
+                _ => Ok(IrValue::Content(item.nodes.clone())),
+            },
             _ => Ok(IrValue::Content(item.nodes.clone())),
         }
     }
@@ -3662,7 +3683,20 @@ fn is_dictionary(name: &str) -> bool {
 }
 
 fn is_collection_access(name: &str) -> bool {
-    matches!(name, "size" | "first" | "last" | "getat")
+    matches!(
+        name,
+        "size"
+            | "first"
+            | "second"
+            | "third"
+            | "last"
+            | "getat"
+            | "sumall"
+            | "average"
+            | "distinct"
+            | "reversed"
+            | "groupvalues"
+    )
 }
 
 fn is_collection_transform(name: &str) -> bool {
@@ -3976,6 +4010,166 @@ fn collection_index(
     Ok(Some(zero_based))
 }
 
+/// Applies Quarkdown's `Value.asDouble()` conversion at the evaluator value
+/// boundary. Non-numeric values become zero; String values are parsed when
+/// possible, while Boolean, None, structured values, and callables stringify
+/// to non-numeric values in the upstream implementation and therefore also
+/// become zero.
+fn collection_value_as_double(value: &IrValue) -> f64 {
+    match value {
+        IrValue::Number(value) => *value,
+        IrValue::String(value) | IrValue::Identifier(value) => {
+            value.trim().parse::<f64>().ok().unwrap_or(0.0)
+        }
+        _ => 0.0,
+    }
+}
+
+fn collection_sum_all(elements: &[IrValue]) -> f64 {
+    elements
+        .iter()
+        .fold(0.0, |sum, value| sum + collection_value_as_double(value))
+}
+
+fn collection_average(
+    elements: &[IrValue],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<f64, CallOutcome> {
+    let length = exact_collection_length(elements.len(), span, diagnostics)?;
+    if elements.is_empty() {
+        return Ok(f64::NAN);
+    }
+    Ok(collection_sum_all(elements) / length)
+}
+
+/// Value equality used by `.distinct` and `.groupvalues`.
+///
+/// This is deliberately linear and typed. It does not derive an ordering or
+/// hash from debug output, and source spans are ignored for semantic values
+/// whose upstream wrappers compare their contained values. Content keeps its
+/// structural IR equality, which retains the source-backed identity of rich
+/// nodes while allowing plain Markdown list text to be represented as String.
+fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
+    match (left, right) {
+        (IrValue::String(left), IrValue::String(right))
+        | (IrValue::Identifier(left), IrValue::Identifier(right)) => left == right,
+        (IrValue::Number(left), IrValue::Number(right)) => {
+            (left.is_nan() && right.is_nan()) || left.total_cmp(right) == Ordering::Equal
+        }
+        (IrValue::Boolean(left), IrValue::Boolean(right)) => left == right,
+        (IrValue::None, IrValue::None) => true,
+        (IrValue::Range(left), IrValue::Range(right)) => {
+            left.start == right.start && left.end == right.end
+        }
+        (IrValue::Collection(left), IrValue::Collection(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| collection_values_equal(left, right))
+        }
+        (IrValue::Pair(left), IrValue::Pair(right)) => {
+            collection_values_equal(&left.first, &right.first)
+                && collection_values_equal(&left.second, &right.second)
+        }
+        (IrValue::Dictionary(left), IrValue::Dictionary(right)) => {
+            left.entries.len() == right.entries.len()
+                && left.entries.iter().all(|left_entry| {
+                    right.entries.iter().any(|right_entry| {
+                        collection_values_equal(&left_entry.first, &right_entry.first)
+                            && collection_values_equal(&left_entry.second, &right_entry.second)
+                    })
+                })
+        }
+        (IrValue::Content(left), IrValue::Content(right)) => left == right,
+        (IrValue::Callable(left), IrValue::Callable(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn distinct_collection_values(
+    elements: Vec<IrValue>,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CallOutcome {
+    let mut distinct = Vec::new();
+    if let Err(error) = distinct.try_reserve_exact(elements.len()) {
+        diagnostics.push(iteration_error(
+            format!("distinct collection cannot be allocated: {error}"),
+            span,
+        ));
+        return CallOutcome::Failed;
+    }
+    for element in elements {
+        if !distinct
+            .iter()
+            .any(|existing| collection_values_equal(existing, &element))
+        {
+            distinct.push(element);
+        }
+    }
+    CallOutcome::Value(IrValue::Collection(distinct))
+}
+
+fn group_collection_values(
+    elements: Vec<IrValue>,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CallOutcome {
+    let mut groups: Vec<Vec<IrValue>> = Vec::new();
+    if let Err(error) = groups.try_reserve_exact(elements.len()) {
+        diagnostics.push(iteration_error(
+            format!("grouped collection cannot be allocated: {error}"),
+            span,
+        ));
+        return CallOutcome::Failed;
+    }
+
+    for element in elements {
+        let group_index = groups.iter().position(|group| {
+            group
+                .first()
+                .is_some_and(|first| collection_values_equal(first, &element))
+        });
+        match group_index {
+            Some(index) => {
+                if let Err(error) = groups[index].try_reserve(1) {
+                    diagnostics.push(iteration_error(
+                        format!("grouped collection cannot be allocated: {error}"),
+                        span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                groups[index].push(element);
+            }
+            None => {
+                let mut group = Vec::new();
+                if let Err(error) = group.try_reserve_exact(1) {
+                    diagnostics.push(iteration_error(
+                        format!("grouped collection cannot be allocated: {error}"),
+                        span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                group.push(element);
+                groups.push(group);
+            }
+        }
+    }
+
+    let mut grouped = Vec::new();
+    if let Err(error) = grouped.try_reserve_exact(groups.len()) {
+        diagnostics.push(iteration_error(
+            format!("grouped collection result cannot be allocated: {error}"),
+            span,
+        ));
+        return CallOutcome::Failed;
+    }
+    grouped.extend(groups.into_iter().map(IrValue::Collection));
+    CallOutcome::Value(IrValue::Collection(grouped))
+}
+
 fn validate_iteration_lambda(
     parameters: Option<&[IrParameter]>,
     name: &str,
@@ -4233,6 +4427,8 @@ fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
     match value {
         IrValue::Pair(pair) => pair.span,
         IrValue::Dictionary(dictionary) => dictionary.span,
+        IrValue::Range(range) => range.span,
+        IrValue::Callable(callable) => callable.span,
         IrValue::Content(nodes) => match nodes.as_slice() {
             [IrNode::FunctionCall { span, .. }] | [IrNode::ChainedFunctionCall { span, .. }] => {
                 *span
@@ -4693,6 +4889,27 @@ mod tests {
             value,
             span: span(0, name.len()),
         }
+    }
+
+    fn collection_call(
+        evaluator: &Evaluator,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        operation_span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        evaluator.evaluate_call_value(
+            name,
+            positional_args,
+            named_args,
+            None,
+            None,
+            operation_span,
+            diagnostics,
+            context,
+        )
     }
 
     fn text_paragraph(content: &str) -> IrNode {
@@ -6058,6 +6275,677 @@ mod tests {
             assert!(matches!(outcome, CallOutcome::Failed));
             assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         }
+    }
+
+    #[test]
+    fn collection_second_and_third_share_one_based_iterable_access() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 20);
+        let values = IrValue::Collection(vec![
+            IrValue::String("one".to_string()),
+            IrValue::Number(2.0),
+            IrValue::Boolean(true),
+        ]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        for (name, expected) in [
+            ("second", IrValue::Number(2.0)),
+            ("third", IrValue::Boolean(true)),
+        ] {
+            let outcome = collection_call(
+                &evaluator,
+                name,
+                std::slice::from_ref(&values),
+                &[],
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(value) if value == expected));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        for value in [
+            IrValue::Collection(Vec::new()),
+            IrValue::Collection(vec![IrValue::Number(1.0)]),
+        ] {
+            for name in ["second", "third"] {
+                let outcome = collection_call(
+                    &evaluator,
+                    name,
+                    std::slice::from_ref(&value),
+                    &[],
+                    &operation_span,
+                    &mut diagnostics,
+                    &mut context,
+                );
+                assert!(matches!(outcome, CallOutcome::Value(IrValue::None)));
+                assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            }
+        }
+
+        let pair = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("key".to_string())),
+            second: Box::new(IrValue::Boolean(true)),
+            span: span(21, 31),
+        });
+        let outcome = collection_call(
+            &evaluator,
+            "second",
+            std::slice::from_ref(&pair),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Boolean(true))
+        ));
+
+        let getat = collection_call(
+            &evaluator,
+            "getat",
+            &[values.clone(), IrValue::Number(2.0)],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            getat,
+            CallOutcome::Value(IrValue::Number(value)) if value == 2.0
+        ));
+        let getat = collection_call(
+            &evaluator,
+            "getat",
+            &[values.clone(), IrValue::Number(3.0)],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(getat, CallOutcome::Value(IrValue::Boolean(true))));
+
+        let dictionary = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("a".to_string())),
+                    second: Box::new(IrValue::Number(1.0)),
+                    span: span(32, 36),
+                },
+                IrPair {
+                    first: Box::new(IrValue::String("b".to_string())),
+                    second: Box::new(IrValue::Number(2.0)),
+                    span: span(37, 41),
+                },
+            ],
+            span: span(32, 41),
+        });
+        let outcome = collection_call(
+            &evaluator,
+            "third",
+            std::slice::from_ref(&dictionary),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Value(IrValue::None)));
+        let outcome = collection_call(
+            &evaluator,
+            "second",
+            std::slice::from_ref(&dictionary),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Pair(pair))
+                if matches!(*pair.second, IrValue::Number(value) if value == 2.0)
+        ));
+
+        for (range, expected) in [
+            (
+                IrValue::Range(IrRange {
+                    start: Some(-2),
+                    end: Some(1),
+                    span: span(42, 47),
+                }),
+                IrValue::Number(-1.0),
+            ),
+            (
+                IrValue::Range(IrRange {
+                    start: None,
+                    end: Some(3),
+                    span: span(48, 51),
+                }),
+                IrValue::Number(2.0),
+            ),
+        ] {
+            let outcome = collection_call(
+                &evaluator,
+                "second",
+                std::slice::from_ref(&range),
+                &[],
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(value) if value == expected));
+        }
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn collection_distinct_and_groupvalues_are_stable_and_typed() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 80);
+        let pair_one = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("key".to_string())),
+            second: Box::new(IrValue::Number(1.0)),
+            span: span(1, 5),
+        });
+        let pair_two = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("key".to_string())),
+            second: Box::new(IrValue::Number(1.0)),
+            span: span(20, 24),
+        });
+        let dictionary_one = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("a".to_string())),
+                second: Box::new(IrValue::Number(1.0)),
+                span: span(25, 29),
+            }],
+            span: span(25, 29),
+        });
+        let dictionary_two = IrValue::Dictionary(IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("a".to_string())),
+                second: Box::new(IrValue::Number(1.0)),
+                span: span(30, 34),
+            }],
+            span: span(30, 34),
+        });
+        let nested = IrValue::Collection(vec![IrValue::String("nested".to_string())]);
+        let input = IrValue::Collection(vec![
+            IrValue::Number(1.0),
+            IrValue::Number(1.0),
+            IrValue::String("1".to_string()),
+            IrValue::Boolean(true),
+            IrValue::None,
+            IrValue::Number(f64::NAN),
+            IrValue::Number(f64::NAN),
+            IrValue::Number(-0.0),
+            IrValue::Number(0.0),
+            pair_one.clone(),
+            pair_two,
+            nested.clone(),
+            nested,
+            dictionary_one.clone(),
+            dictionary_two,
+        ]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let empty_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            &[IrValue::Collection(Vec::new())],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            empty_distinct,
+            CallOutcome::Value(IrValue::Collection(values)) if values.is_empty()
+        ));
+        let distinct = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let CallOutcome::Value(IrValue::Collection(distinct_values)) = distinct else {
+            panic!("expected distinct collection")
+        };
+        assert_eq!(distinct_values.len(), 10);
+        assert!(matches!(distinct_values[0], IrValue::Number(1.0)));
+        assert!(matches!(distinct_values[1], IrValue::String(ref value) if value == "1"));
+        assert!(matches!(distinct_values[2], IrValue::Boolean(true)));
+        assert!(matches!(distinct_values[3], IrValue::None));
+        assert!(matches!(distinct_values[4], IrValue::Number(value) if value.is_nan()));
+        assert!(matches!(distinct_values[5], IrValue::Number(value) if value == -0.0));
+        assert!(matches!(distinct_values[6], IrValue::Number(value) if value == 0.0));
+        assert_eq!(distinct_values[7], pair_one);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let dictionary_input = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("a".to_string())),
+                    second: Box::new(IrValue::Number(1.0)),
+                    span: span(35, 39),
+                },
+                IrPair {
+                    first: Box::new(IrValue::String("b".to_string())),
+                    second: Box::new(IrValue::Number(2.0)),
+                    span: span(40, 44),
+                },
+            ],
+            span: span(35, 44),
+        });
+        let distinct_dictionary = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&dictionary_input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(distinct_dictionary, CallOutcome::Value(IrValue::Collection(values)) if values.len() == 2 && matches!(&values[0], IrValue::Pair(pair) if matches!(*pair.first, IrValue::String(ref value) if value == "a")))
+        );
+
+        let grouped_dictionary = collection_call(
+            &evaluator,
+            "groupvalues",
+            std::slice::from_ref(&dictionary_input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(grouped_dictionary, CallOutcome::Value(IrValue::Collection(groups)) if groups.len() == 2 && groups.iter().all(|group| matches!(group, IrValue::Collection(values) if values.len() == 1)))
+        );
+
+        let range = IrValue::Range(IrRange {
+            start: Some(1),
+            end: Some(3),
+            span: span(40, 44),
+        });
+        let range_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&range),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(range_distinct, CallOutcome::Value(IrValue::Collection(values)) if values == [IrValue::Number(1.0), IrValue::Number(2.0), IrValue::Number(3.0)])
+        );
+        let range_groups = collection_call(
+            &evaluator,
+            "groupvalues",
+            std::slice::from_ref(&range),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(range_groups, CallOutcome::Value(IrValue::Collection(groups)) if groups.len() == 3 && groups.iter().all(|group| matches!(group, IrValue::Collection(values) if values.len() == 1)))
+        );
+
+        let callable = IrValue::Callable(IrCallable {
+            parameters: None,
+            body: Vec::new(),
+            span: span(45, 49),
+            capture: None,
+        });
+        let callable_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            &[IrValue::Collection(vec![
+                callable.clone(),
+                callable.clone(),
+            ])],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(callable_distinct, CallOutcome::Value(IrValue::Collection(values)) if values.len() == 1)
+        );
+        let content_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            &[IrValue::Collection(vec![
+                IrValue::Content(Vec::new()),
+                IrValue::Content(Vec::new()),
+            ])],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(content_distinct, CallOutcome::Value(IrValue::Collection(values)) if values.len() == 1)
+        );
+
+        let grouped_input = IrValue::Collection(vec![
+            IrValue::String("A".to_string()),
+            IrValue::String("B".to_string()),
+            IrValue::String("A".to_string()),
+            IrValue::String("C".to_string()),
+            IrValue::String("B".to_string()),
+        ]);
+        let grouped = collection_call(
+            &evaluator,
+            "groupvalues",
+            std::slice::from_ref(&grouped_input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(grouped, CallOutcome::Value(IrValue::Collection(ref groups)) if groups == &[
+                IrValue::Collection(vec![
+                    IrValue::String("A".to_string()),
+                    IrValue::String("A".to_string()),
+                ]),
+                IrValue::Collection(vec![
+                    IrValue::String("B".to_string()),
+                    IrValue::String("B".to_string()),
+                ]),
+                IrValue::Collection(vec![IrValue::String("C".to_string())]),
+            ])
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let repeated = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&grouped_input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        let repeated = match repeated {
+            CallOutcome::Value(value) => value,
+            _ => panic!("expected repeated distinct result"),
+        };
+        let repeated_again = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&grouped_input),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert_eq!(
+            repeated,
+            match repeated_again {
+                CallOutcome::Value(value) => value,
+                _ => panic!("expected deterministic distinct result"),
+            }
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let pair_groups = collection_call(
+            &evaluator,
+            "groupvalues",
+            &[IrValue::Pair(IrPair {
+                first: Box::new(IrValue::String("same".to_string())),
+                second: Box::new(IrValue::String("same".to_string())),
+                span: span(81, 86),
+            })],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(pair_groups, CallOutcome::Value(IrValue::Collection(ref groups)) if groups.len() == 1 && matches!(&groups[0], IrValue::Collection(values) if values.len() == 2))
+        );
+
+        let empty_groups = collection_call(
+            &evaluator,
+            "groupvalues",
+            &[IrValue::Collection(Vec::new())],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            empty_groups,
+            CallOutcome::Value(IrValue::Collection(values)) if values.is_empty()
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn collection_reversed_uses_the_shared_materialized_sequence() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 30);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let cases = [
+            (
+                IrValue::Collection(Vec::new()),
+                IrValue::Collection(Vec::new()),
+            ),
+            (
+                IrValue::Collection(vec![IrValue::String("one".to_string())]),
+                IrValue::Collection(vec![IrValue::String("one".to_string())]),
+            ),
+            (
+                IrValue::Collection(vec![
+                    IrValue::Collection(vec![IrValue::Number(1.0)]),
+                    IrValue::Number(2.0),
+                ]),
+                IrValue::Collection(vec![
+                    IrValue::Number(2.0),
+                    IrValue::Collection(vec![IrValue::Number(1.0)]),
+                ]),
+            ),
+            (
+                IrValue::Pair(IrPair {
+                    first: Box::new(IrValue::String("a".to_string())),
+                    second: Box::new(IrValue::String("b".to_string())),
+                    span: span(31, 36),
+                }),
+                IrValue::Collection(vec![
+                    IrValue::String("b".to_string()),
+                    IrValue::String("a".to_string()),
+                ]),
+            ),
+            (
+                IrValue::Dictionary(IrDictionary {
+                    entries: vec![
+                        IrPair {
+                            first: Box::new(IrValue::String("a".to_string())),
+                            second: Box::new(IrValue::Number(1.0)),
+                            span: span(53, 57),
+                        },
+                        IrPair {
+                            first: Box::new(IrValue::String("b".to_string())),
+                            second: Box::new(IrValue::Number(2.0)),
+                            span: span(58, 62),
+                        },
+                    ],
+                    span: span(53, 62),
+                }),
+                IrValue::Collection(vec![
+                    IrValue::Pair(IrPair {
+                        first: Box::new(IrValue::String("b".to_string())),
+                        second: Box::new(IrValue::Number(2.0)),
+                        span: span(58, 62),
+                    }),
+                    IrValue::Pair(IrPair {
+                        first: Box::new(IrValue::String("a".to_string())),
+                        second: Box::new(IrValue::Number(1.0)),
+                        span: span(53, 57),
+                    }),
+                ]),
+            ),
+            (
+                IrValue::Range(IrRange {
+                    start: Some(-2),
+                    end: Some(0),
+                    span: span(37, 42),
+                }),
+                IrValue::Collection(vec![
+                    IrValue::Number(0.0),
+                    IrValue::Number(-1.0),
+                    IrValue::Number(-2.0),
+                ]),
+            ),
+            (
+                IrValue::Range(IrRange {
+                    start: None,
+                    end: Some(3),
+                    span: span(43, 46),
+                }),
+                IrValue::Collection(vec![
+                    IrValue::Number(3.0),
+                    IrValue::Number(2.0),
+                    IrValue::Number(1.0),
+                ]),
+            ),
+            (
+                IrValue::Range(IrRange {
+                    start: Some(4),
+                    end: Some(2),
+                    span: span(47, 52),
+                }),
+                IrValue::Collection(Vec::new()),
+            ),
+        ];
+        for (input, expected) in cases {
+            let outcome = collection_call(
+                &evaluator,
+                "reversed",
+                std::slice::from_ref(&input),
+                &[],
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(value) if value == expected));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let endless_span = span(53, 56);
+        let outcome = collection_call(
+            &evaluator,
+            "reversed",
+            &[IrValue::Range(IrRange {
+                start: Some(1),
+                end: None,
+                span: endless_span,
+            })],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].primary, Some(endless_span));
+    }
+
+    #[test]
+    fn collection_sumall_and_average_follow_as_double_and_kotlin_average() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 30);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let mixed = IrValue::Collection(vec![
+            IrValue::Number(1.5),
+            IrValue::Number(-2.0),
+            IrValue::String("3.5".to_string()),
+            IrValue::Boolean(true),
+            IrValue::None,
+            IrValue::String("invalid".to_string()),
+        ]);
+
+        let sum = collection_call(
+            &evaluator,
+            "sumall",
+            std::slice::from_ref(&mixed),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(sum, CallOutcome::Value(IrValue::Number(value)) if value == 3.0));
+        let average = collection_call(
+            &evaluator,
+            "average",
+            std::slice::from_ref(&mixed),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(average, CallOutcome::Value(IrValue::Number(value)) if value == 0.5));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let empty = IrValue::Collection(Vec::new());
+        let sum = collection_call(
+            &evaluator,
+            "sumall",
+            std::slice::from_ref(&empty),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(sum, CallOutcome::Value(IrValue::Number(value)) if value == 0.0));
+        let average = collection_call(
+            &evaluator,
+            "average",
+            std::slice::from_ref(&empty),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(average, CallOutcome::Value(IrValue::Number(value)) if value.is_nan()));
+
+        let special = IrValue::Collection(vec![
+            IrValue::Number(f64::INFINITY),
+            IrValue::Number(f64::NEG_INFINITY),
+        ]);
+        let sum = collection_call(
+            &evaluator,
+            "sumall",
+            std::slice::from_ref(&special),
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(sum, CallOutcome::Value(IrValue::Number(value)) if value.is_nan()));
+        let average = collection_call(
+            &evaluator,
+            "average",
+            &[IrValue::Collection(vec![IrValue::Number(f64::INFINITY)])],
+            &[],
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(
+            matches!(average, CallOutcome::Value(IrValue::Number(value)) if value.is_infinite() && value.is_sign_positive())
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

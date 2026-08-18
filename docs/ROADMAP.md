@@ -67,7 +67,7 @@ partial compatibility claims and a growing evidence-backed baseline.
 | Item                                | Status       |
 |-------------------------------------|--------------|
 | Document-scope variable evaluation  | Completed    |
-| Generic callables and collection transforms | Completed (evidenced slice) |
+| Generic callables, native iterable operations, and collection transforms | Completed (evidenced slice; `.map`/`.filter` retained as Scribium extensions) |
 | Remaining M2 features               | In progress  |
 
 Public Quarkdown features not yet implemented are tracked compatibility debt;

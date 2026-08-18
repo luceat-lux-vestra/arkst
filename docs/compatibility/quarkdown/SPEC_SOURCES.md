@@ -7,6 +7,7 @@ Quarkdown-compatible feature implementation.
 
 - **Reference version:** Quarkdown **v2.5.1** (released 2026-08-12;
   `iamgio/quarkdown` tag `v2.5.1`)
+- **Resolved upstream tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)
 - **Current verified baseline:** v2.5.1; current implementation is partial
 - **Historical evidence retained:** v2.5.0 sources below remain part of the
@@ -33,8 +34,10 @@ Quarkdown-compatible feature implementation.
 | Quarkdown wiki — "Dictionary" (v2.5.1)     | https://quarkdown.com/wiki/dictionary/ | String keys, recursive values, YAML-like Markdown-list syntax, ordered entry iteration, and nested dictionaries | 2026-08-18 |
 | Quarkdown wiki — "Range"                    | https://quarkdown.com/wiki/range/ | Non-negative literal Range syntax, four open/closed endpoint shapes, and dynamic `.range` as the evaluated alternative | 2026-08-18 |
 | Quarkdown wiki — "Iterable" (v2.5.1 collection operations review) | https://quarkdown.com/wiki/iterable/ | Collection, Pair, Dictionary, and Range iterable categories; Pair and dictionary-entry behavior; operation chaining | 2026-08-18 |
-| Quarkdown stdlib API — `Collection` package | https://quarkdown.com/docs/quarkdown-stdlib/com.quarkdown.stdlib.module.Collection/ | Public signatures and chaining metadata for `.size`, `.first`, `.last`, and `.getat` | 2026-08-18 |
-| Quarkdown v2.5.1 `Collection.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | Public behavioral evidence for non-negative `.size`, empty `.first`/`.last`, one-based `.getat`, integral index conversion, out-of-bounds fallback, and `orelse` | 2026-08-18 |
+| Quarkdown stdlib API — `Collection` package | https://quarkdown.com/docs/quarkdown-stdlib/com.quarkdown.stdlib.module.Collection/ | Public signatures and chaining metadata for the v2.5.1 Collection API: `.getat`, `.first`, `.second`, `.third`, `.last`, `.size`, `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues`, and `.pair` | 2026-08-18 |
+| Quarkdown v2.5.1 `Collection.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | Public source evidence for one-based access, `asDouble()`-based aggregation, Kotlin equality-based distinct/grouping, reversal, group shape/order, and the absence of public `.map`/`.filter` declarations | 2026-08-18 |
+| Quarkdown v2.5.1 `Types.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Types.kt | `Value.asDouble()` conversion: Number values are converted directly, parseable strings are converted, and other values fall back to `0.0` | 2026-08-18 |
+| Quarkdown v2.5.1 `IterableTest.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/IterableTest.kt | Independent upstream test evidence for `.sumall`, `.average`, `.distinct`, `.reversed`, `.groupvalues`, ordered Pair iteration, and nested iterable results | 2026-08-18 |
 | Quarkdown v2.5.1 `IterableValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/IterableValue.kt | Public behavioral evidence that iterable values expose ordered components and Pair participates in iterable adaptation | 2026-08-18 |
 | Quarkdown v2.5.1 `DictionaryValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/DictionaryValue.kt | Public behavioral evidence that Dictionary adapts to an iterable of key-value Pair entries | 2026-08-18 |
 | Quarkdown v2.5.1 `Lambda.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt | First-class lambda value, explicit/implicit parameters, optional arguments, forked invocation scope, and lexical parent context | 2026-08-18 |
@@ -44,7 +47,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `Sorting.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Sorting.kt | Stable selector-based sorting machinery and null-safe comparator helper used by stdlib sorting | 2026-08-18 |
 | Kotlin stdlib `sortedWith` API | https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/sorted-with.html | Public contract that the comparator sort is stable and equal elements preserve relative order | 2026-08-18 |
 | Quarkdown v2.5.1 `Range.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public behavioral evidence for inclusive finite Range iteration, left-open default start, and right-open rejection | 2026-08-18 |
-| Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation and non-iterable scalar handling | 2026-08-18 |
+| Quarkdown v2.5.1 `ValueFactory.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Public behavioral evidence for Range/Collection/Dictionary iterable adaptation, plain Markdown-list scalar values, and non-iterable scalar handling | 2026-08-18 |
 | Quarkdown v2.5.1 `Flow.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt | Public source evidence that `.repeat` delegates to `forEach(Range(1, times), body)` | 2026-08-17 |
 | Quarkdown v2.5.1 `Range.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Public source evidence for inclusive closed iteration, left-open default start, right-open rejection, and descending bounds | 2026-08-17 |
 | Quarkdown v2.5.1 `Math.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public source evidence for `.range` optional `from`/`to` bounds, dynamic evaluation, and Number-to-Int truncation | 2026-08-18 |
@@ -90,7 +93,7 @@ is recorded per source:
 The sources listed above are the sources consulted for this feature set and
 the v2.5.1 impact review.
 
-## Collection access evidence record
+## Collection and Iterable operations evidence record
 
 The v2.5.1 collection-operation review established the following observable
 contract:
@@ -104,12 +107,46 @@ contract:
   `orelse`. Indexing is one-based. Zero, negative, too-large, and out-of-range
   indices use the absence/fallback result; fractional, non-finite, and
   non-numeric indices are invalid for the `Int` parameter.
+- `.second` and `.third` are the one-based second and third element accessors;
+  insufficient length produces the same `None` absence result as `.first`,
+  `.last`, and an out-of-range `.getat` without `orelse`.
+- `.sumall` applies `Value.asDouble()` to every element and sums the converted
+  values. Non-numeric values convert to `0.0`; an empty collection sums to
+  `0.0`. `.average` uses the same conversion for every element, divides by the
+  full element count, and therefore produces `NaN` for an empty collection.
+- `.distinct` preserves the first occurrence of each upstream-equal value.
+  `.reversed` returns a new collection in reverse materialized order.
+  `.groupvalues` returns a collection of collections: groups appear in the
+  first-seen value order and each group preserves input order, as exercised by
+  the v2.5.1 iterable tests.
+- The upstream source defines no generic public `.map` or `.filter` in the
+  tracked v2.5.1 `Collection.kt`. Scribium retains both as explicit extensions;
+  they are excluded from Quarkdown v2.5.1 conformance counts. Upstream `.foreach`
+  returns an ordered collection with one result per input element and therefore
+  has map-equivalent semantics for the evidenced block form.
 - `Pair` is observed as two ordered elements. `Dictionary` is observed as an
   ordered iterable of `Pair(key, value)` entries. Strings are not iterable
   operands for these functions. Closed finite and left-open Ranges participate
   through the shared Scribium materialization policy; right-open and fully-open
   Range values remain representable but standard Iterable consumption rejects
   them as endless.
+
+Scribium routes all operations above, `.foreach`, `.sorted`, and the two
+extensions through one typed evaluator materialization path. Distinctness and
+grouping use stable linear typed comparison rather than randomized hashing or
+debug-string comparison. Number equality is deterministic, including explicit
+NaN and signed-zero handling; Pair, Collection, Dictionary, and Range values
+are compared recursively without source-span identity. Rich Content and
+Callable values use their structural IR equality because the upstream value
+classes do not define a public value-equality contract for those cases. This is
+recorded as a known behavioral difference rather than an invented upstream
+claim.
+
+The result shape remains backend-neutral `IrValue`: `.reversed`, `.distinct`,
+and `.groupvalues` return recursive `Collection` values, while aggregation
+returns `Number`. Materialization reserves lengths with checked arithmetic and
+publishes results only after the operation succeeds, preserving source-backed
+diagnostics for endless ranges, invalid operands, and allocation failures.
 
 ## Range construction and conversion evidence record
 
