@@ -71,7 +71,7 @@ partial compatibility claims and a growing evidence-backed baseline.
 | Logical/comparison predicates (`.islower`, `.isgreater`, `.equals`, `.not`) | Completed (bounded v2.5.1 slice) |
 | Conditional expressions using logical/comparison results | Completed (bounded evidence) |
 | Scalar arithmetic beyond `.sum`/`.multiply` | Completed (bounded v2.5.1 arithmetic/unary, transcendental, and decimal post-processing slices; `.range` remains separately evidenced) |
-| Scalar string operations (`.string`, `.concatenate`, case/predicate family) | Completed (bounded v2.5.1 slice; `.plaintext` and general conversion deferred) |
+| Scalar string operations (`.string`, `.concatenate`, case/predicate family) and bounded `.plaintext` projection | Completed (bounded v2.5.1 slice; Dynamic String conversion deferred) |
 | General typed value conversion | Planned (gap inventory; split by semantic family) |
 | Error/absence helpers beyond `.isnone`/`.otherwise` | In progress (bounded evidence) |
 | Public-language gap inventory and current slice ordering | Completed (see `docs/compatibility/quarkdown/GAP_INVENTORY.md`) |

@@ -1,0 +1,27 @@
+.plaintext
+    Hello, **world**!
+
+.plaintext
+    one **two *three* four** five
+
+.plaintext
+    Use `cargo test`
+
+.plaintext
+    [Scribium](https://example.com)
+
+.plaintext
+    A
+    B
+
+.plaintext
+    A\
+    B
+
+.plaintext
+    Hello **.uppercase {world}**
+
+.plaintext content:{named content}
+
+.plaintext
+    block body

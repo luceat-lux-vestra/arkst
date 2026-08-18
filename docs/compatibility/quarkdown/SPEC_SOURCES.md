@@ -27,13 +27,14 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `Comparison.kt`              | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Comparison.kt | Equality plain-text fallback for String, Number, and Markdown content | 2026-08-18 |
 | Quarkdown v2.5.1 `ConditionalTest.kt`         | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/ConditionalTest.kt | Public integration examples for `.islower` in `.if`, false branches, and `.ifnot` | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`                | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Direct logical helper behavior and conditional control-flow results | 2026-08-18 |
-| Quarkdown v2.5.1 `Strings.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt | Public scalar string signatures, quote-delimited `.string` behavior, case transforms, emptiness predicates, and `.startswith` | 2026-08-18 |
+| Quarkdown v2.5.1 `Strings.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt | Public scalar string signatures plus `.plaintext(content: InlineMarkdownContent)` returning a `StringValue` | 2026-08-18 |
+| Quarkdown v2.5.1 `NodeUtils.kt`               | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/util/node/NodeUtils.kt | `InlineContent.toPlainText()` projection: text/code and nested formatting/link labels recurse, soft breaks emit a newline, hard breaks and images emit nothing | 2026-08-18 |
 | Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, and `.range` signatures plus Float/Double/Int operation boundaries | 2026-08-18 |
 | Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, `.pi::truncate {2}`, zero trigonometry, `.cos {.pi}`, `.pi::multiply {2}::cos`, negative-decimal runtime failure, and fractional-decimal type failure | 2026-08-18 |
 | Quarkdown wiki — "Math"                       | https://quarkdown.com/wiki/math/ | Public math-family scope and nested/chained arithmetic examples | 2026-08-18 |
 | Quarkdown v2.5.1 `NumberValue.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt | Integral Float normalization to Int, including the observable finite/non-finite conversion boundary | 2026-08-18 |
 | Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory | 2026-08-18 |
-| Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior used to classify conversion gaps | 2026-08-18 |
+| Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior, plus the upstream Dynamic String → inline lexer/parser path retained as an explicit Scribium compatibility gap | 2026-08-18 |
 | Rust `libm` 0.2.16                         | https://docs.rs/libm/0.2.16/ | Pure-Rust `log`, `sin`, `cos`, and `tan` software implementation selected with default features disabled for native/WASM reproducibility; compared against 0.2.14 and 0.2.15 on the representative corpus | 2026-08-18 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call" (v2.5.1 syntax review) | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Behavior specification for the #60 multiline-argument, continuation, chaining, tight-call, and block/inline boundary fixtures | 2026-08-14 |
@@ -346,6 +347,34 @@ destructuring rule. Range callbacks consume the existing finite inclusive or
 left-open materialization and reject right-open/fully-open endless ranges.
 Markdown lists use the same supported list adaptation. No transform materializes
 through text serialization, generated Markdown, or a second parser.
+
+## `.plaintext` behavioral evidence record
+
+The v2.5.1 declaration in `Strings.kt` accepts `InlineMarkdownContent` and
+returns a `StringValue` by calling the core `NodeUtils.kt` plain-text helper.
+That helper walks the processed inline AST: text and code contribute literal
+content; emphasis, strong, strikethrough, and links recurse into their child
+content; and soft breaks contribute a newline. The v2.5.1 source path omits
+hard-break text and does not traverse image children.
+
+An independently authored runtime probe against the resolved tag commit
+`107ec3a9482f10d6f90d7580f8409b46a719d18e` confirmed these observable results:
+`A<soft-break>B` becomes `A\nB`, `A<hard-break>B` becomes `AB`,
+`[hello](...)` becomes `hello`, `![hello](...)` becomes the empty string,
+and empty inline content becomes the empty string. Nested `.uppercase` calls
+are resolved before projection. Identifier, number, and boolean arguments
+produce their scalar text; a quoted Markdown-bearing string is reparsed by
+upstream, which is why Scribium explicitly leaves String →
+InlineMarkdownContent conversion unsupported instead of returning syntax
+literally. The same probe checked the `content` named form and indented body;
+missing, extra, unknown-named, and duplicate bindings fail through the normal
+upstream argument binder.
+
+Scribium implements only the already-parsed `IrValue::Content` boundary. The
+single evaluator resolves nested calls first, then the builtin recursively
+projects `IrInline` values without invoking the Markdown parser, serializing
+source, or using Typst. Unresolved calls and unsupported structured values
+fail closed with the existing source-backed `E3001` path.
 
 ## Observational Method
 

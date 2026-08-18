@@ -596,9 +596,11 @@ can be used directly in lazy `.if`/`.ifnot` conditions.
 Strings, identifiers, numbers, booleans, and bounded plain-text content are
 adapted at this function boundary. `None`, collections, ranges, pairs,
 dictionaries, callables, and rich Markdown content are not implicitly
-stringified. `.plaintext` remains deferred because it is a separate rich
-inline-Markdown-to-plain-text projection boundary; the `.equals` fallback does
-not become a general conversion helper.
+stringified. `.plaintext` is a separate projection of already-parsed
+`IrValue::Content`: formatting delimiters are omitted, code and link labels
+recurse, soft breaks emit a newline, and hard breaks/images emit nothing.
+Markdown-bearing `String` values are not reparsed; that Dynamic String →
+InlineMarkdownContent conversion remains a documented compatibility gap.
 
 ### Iteration (Implemented first slice)
 

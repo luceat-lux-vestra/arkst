@@ -1151,6 +1151,41 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_plaintext_fixture_projects_evaluated_inline_content() {
+        let source =
+            include_str!("../../../fixtures/quarkdown-conformance/cases/plaintext-family/input.qd");
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "Hello, world!\none two three four five\nUse cargo test\nScribium\nA\nB\nAB\nHello WORLD\nnamed content\nblock body"
+        );
+    }
+
+    #[test]
+    fn compile_plaintext_rejects_unsupported_values_atomically() {
+        for source in [
+            ".plaintext {.pair {a} {b}}\n",
+            ".plaintext {1..2}\n",
+            ".plaintext {\"**hello**\"}\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert_eq!(
+                result.diagnostics[0].primary,
+                Some(crate::source::SourceSpan::new(
+                    source_id,
+                    0,
+                    source.trim_end().len(),
+                )),
+                "{source:?}"
+            );
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+    }
+
+    #[test]
     fn compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow() {
         let source = include_str!(
             "../../../fixtures/quarkdown-conformance/cases/numeric-arithmetic-family/input.qd"

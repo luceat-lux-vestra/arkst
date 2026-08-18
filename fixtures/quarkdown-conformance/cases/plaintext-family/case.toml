@@ -1,0 +1,5 @@
+id = "plaintext-family"
+feature = "plaintext-projection"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-plaintext"
+description = "Bounded structural projection of already-parsed inline Markdown content"
