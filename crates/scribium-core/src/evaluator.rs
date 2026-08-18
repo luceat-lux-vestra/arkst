@@ -4598,7 +4598,7 @@ fn scalar_to_text(
 ) -> Result<String, CallOutcome> {
     match value {
         IrValue::String(text) => Ok(text.clone()),
-        IrValue::Number(number) => Ok(number.to_string()),
+        IrValue::Number(number) => Ok(scalar_number_to_text(*number)),
         IrValue::Boolean(boolean) => Ok(boolean.to_string()),
         IrValue::Identifier(name) => Ok(name.clone()),
         IrValue::None => Ok("None".to_string()),
@@ -4632,6 +4632,19 @@ fn scalar_to_text(
             Err(CallOutcome::Failed)
         }
     }
+}
+
+/// Keeps the shortest decimal representation of numeric builtin results that
+/// crossed the upstream `Float` boundary, while preserving f64-only values
+/// originating elsewhere in the IR.
+fn scalar_number_to_text(number: f64) -> String {
+    if number.is_finite() {
+        let float = number as f32;
+        if f64::from(float) == number {
+            return float.to_string();
+        }
+    }
+    number.to_string()
 }
 
 /// Builds the `E3001` diagnostic for an unresolvable condition.

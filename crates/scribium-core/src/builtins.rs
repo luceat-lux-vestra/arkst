@@ -12,7 +12,15 @@ pub(crate) fn is_supported(name: &str) -> bool {
     matches!(
         name,
         "sum"
+            | "subtract"
             | "multiply"
+            | "divide"
+            | "rem"
+            | "pow"
+            | "abs"
+            | "negate"
+            | "sqrt"
+            | "iseven"
             | "string"
             | "concatenate"
             | "uppercase"
@@ -38,7 +46,12 @@ pub(crate) fn evaluate(
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     match name {
-        "sum" | "multiply" => evaluate_numeric(name, positional_args, named_args, has_body),
+        "sum" | "subtract" | "multiply" | "divide" | "rem" | "pow" => {
+            evaluate_numeric(name, positional_args, named_args, has_body)
+        }
+        "abs" | "negate" | "sqrt" | "iseven" => {
+            evaluate_unary_numeric(name, positional_args, named_args, has_body)
+        }
         "string" => evaluate_string(positional_args, named_args, has_body),
         "concatenate" => evaluate_concatenate(positional_args, named_args, has_body),
         "uppercase" | "lowercase" | "capitalize" => {
@@ -295,17 +308,20 @@ fn bind_arguments(
 }
 
 fn numeric_argument(value: &IrValue, parameter: &str) -> Result<f32, BuiltinError> {
-    let number = match value {
-        IrValue::Number(number) => *number,
+    Ok(numeric_argument_value(value, parameter)? as f32)
+}
+
+fn numeric_argument_value(value: &IrValue, parameter: &str) -> Result<f64, BuiltinError> {
+    match value {
+        IrValue::Number(number) => Ok(*number),
         IrValue::String(value) | IrValue::Identifier(value) => value
             .parse::<i32>()
             .map(f64::from)
             .ok()
             .or_else(|| value.parse::<f32>().ok().map(f64::from))
-            .ok_or_else(|| error(format!("`{parameter}` must be numeric")))?,
-        _ => return Err(error(format!("`{parameter}` must be numeric"))),
-    };
-    Ok(number as f32)
+            .ok_or_else(|| error(format!("`{parameter}` must be numeric"))),
+        _ => Err(error(format!("`{parameter}` must be numeric"))),
+    }
 }
 
 fn boolean_argument(value: &IrValue, parameter: &str) -> Result<bool, BuiltinError> {
@@ -459,36 +475,89 @@ fn evaluate_numeric(
         )));
     }
 
-    let mut values = Vec::with_capacity(positional_args.len() + named_args.len());
-    values.extend(positional_args.iter().cloned());
-    for arg in named_args {
-        if arg.name != "by" {
-            return Err(error(format!(
-                "`.{name}` does not support named argument `{}`",
-                arg.name
-            )));
-        }
-        values.push(arg.value.clone());
-    }
-    if values.is_empty() {
-        return Err(error(format!(
-            "`.{name}` requires at least one numeric argument"
-        )));
-    }
-
-    let mut numbers = Vec::with_capacity(values.len());
-    for value in values {
-        match value {
-            IrValue::Number(number) => numbers.push(number),
-            _ => return Err(error(format!("`.{name}` requires numeric arguments"))),
-        }
-    }
-    let result = if name == "sum" {
-        numbers.into_iter().sum()
-    } else {
-        numbers.into_iter().product()
+    let parameter_names = match name {
+        "sum" | "subtract" | "rem" => ["a", "b"],
+        "multiply" | "divide" => ["a", "by"],
+        "pow" => ["base", "to"],
+        _ => unreachable!("unrecognized binary numeric builtin: {name}"),
     };
-    Ok(IrValue::Number(result))
+    let mut arguments = bind_arguments(name, positional_args, named_args, &parameter_names, 2)?;
+    let first = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires numeric arguments")))?;
+    let second = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires numeric arguments")))?;
+    let first = numeric_argument(&first, parameter_names[0])
+        .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
+    let second = numeric_argument(&second, parameter_names[1])
+        .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
+
+    let result = match name {
+        "sum" => first + second,
+        "subtract" => first - second,
+        "multiply" => first * second,
+        "divide" => first / second,
+        "rem" => first % second,
+        "pow" => first.powi(kotlin_float_to_int(second)),
+        _ => unreachable!("unrecognized binary numeric builtin: {name}"),
+    };
+    Ok(numeric_result(result))
+}
+
+fn evaluate_unary_numeric(
+    name: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(format!("`.{name}` does not accept a block body")));
+    }
+    let mut arguments = bind_arguments(name, positional_args, named_args, &["x"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
+    let value = numeric_argument(&value, "x")
+        .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
+
+    match name {
+        "abs" => Ok(numeric_result(value.abs())),
+        "negate" => Ok(numeric_result(-value)),
+        "sqrt" => Ok(numeric_result(value.sqrt())),
+        "iseven" => Ok(IrValue::Boolean(kotlin_float_to_int(value) % 2 == 0)),
+        _ => Err(error(format!(
+            "`.{name}` has no unary numeric implementation"
+        ))),
+    }
+}
+
+/// Applies the `NumberValue` normalization visible at the upstream output
+/// boundary: integral Float values become Int values, including Kotlin's
+/// clamped conversions for infinities and out-of-range finite values.
+fn numeric_result(value: f32) -> IrValue {
+    if value.is_nan() {
+        return IrValue::Number(f64::NAN);
+    }
+    if value.ceil() == value.floor() {
+        return IrValue::Number(f64::from(kotlin_float_to_int(value)));
+    }
+    IrValue::Number(f64::from(value))
+}
+
+/// Mirrors Kotlin `Float.toInt()`: truncate toward zero, map NaN to zero,
+/// and clamp finite/infinite values to the signed Int range.
+fn kotlin_float_to_int(value: f32) -> i32 {
+    let value = f64::from(value);
+    if value.is_nan() {
+        0
+    } else if value <= f64::from(i32::MIN) {
+        i32::MIN
+    } else if value >= f64::from(i32::MAX) {
+        i32::MAX
+    } else {
+        value.trunc() as i32
+    }
 }
 
 fn evaluate_case(
@@ -577,6 +646,249 @@ mod tests {
             name_span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
             value,
             span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+        }
+    }
+
+    #[test]
+    fn numeric_surface_is_registered_and_preserves_typed_results() {
+        for name in [
+            "sum", "subtract", "multiply", "divide", "rem", "pow", "abs", "negate", "sqrt",
+            "iseven",
+        ] {
+            assert!(is_supported(name), "{name} should be supported");
+        }
+
+        assert_eq!(
+            evaluate(
+                "subtract",
+                &[number(10.0)],
+                &[named_arg("b", number(3.0))],
+                false
+            )
+            .expect("named subtraction should evaluate"),
+            number(7.0)
+        );
+        assert_eq!(
+            evaluate(
+                "multiply",
+                &[number(-2.0)],
+                &[named_arg("by", number(2.5))],
+                false,
+            )
+            .expect("mixed multiplication should evaluate"),
+            number(f64::from((-2.0_f32) * 2.5_f32))
+        );
+        assert_eq!(
+            evaluate(
+                "divide",
+                &[],
+                &[named_arg("a", number(7.0)), named_arg("by", number(2.0))],
+                false,
+            )
+            .expect("named division should evaluate"),
+            number(f64::from(3.5_f32))
+        );
+        assert_eq!(
+            evaluate(
+                "sum",
+                &[IrValue::Identifier("10".into())],
+                &[named_arg("b", IrValue::String("-2.5".into()))],
+                false,
+            )
+            .expect("numeric scalar text should adapt"),
+            number(f64::from(7.5_f32))
+        );
+        assert_eq!(
+            evaluate(
+                "abs",
+                &[],
+                &[named_arg("x", IrValue::String("-3.5".into()))],
+                false,
+            )
+            .expect("numeric text should adapt for unary operations"),
+            number(f64::from(3.5_f32))
+        );
+        assert_eq!(
+            evaluate("negate", &[number(-2.5)], &[], false)
+                .expect("negation should remain numeric"),
+            number(f64::from(2.5_f32))
+        );
+        assert_eq!(
+            evaluate("sqrt", &[number(9.0)], &[], false).expect("square root should evaluate"),
+            number(3.0)
+        );
+        assert_eq!(
+            evaluate("iseven", &[IrValue::Identifier("-4".into())], &[], false)
+                .expect("evenness should return a typed boolean"),
+            IrValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn numeric_arithmetic_matches_upstream_float_and_integer_boundaries() {
+        assert_eq!(
+            evaluate("subtract", &[number(-2.0), number(5.0)], &[], false)
+                .expect("negative subtraction should evaluate"),
+            number(-7.0)
+        );
+        assert_eq!(
+            evaluate("divide", &[number(-7.0), number(2.0)], &[], false)
+                .expect("negative division should evaluate"),
+            number(f64::from(-3.5_f32))
+        );
+        assert!(matches!(
+            evaluate("divide", &[number(1.0), number(0.0)], &[], false),
+            Ok(IrValue::Number(value)) if value == f64::from(i32::MAX)
+        ));
+        assert!(matches!(
+            evaluate("divide", &[number(0.0), number(0.0)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert_eq!(
+            evaluate("rem", &[number(-5.0), number(2.0)], &[], false)
+                .expect("negative left remainder should evaluate"),
+            number(-1.0)
+        );
+        assert_eq!(
+            evaluate("rem", &[number(5.0), number(-2.0)], &[], false)
+                .expect("negative right remainder should evaluate"),
+            number(1.0)
+        );
+        assert!(matches!(
+            evaluate("rem", &[number(1.5), number(0.0)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert_eq!(
+            evaluate(
+                "pow",
+                &[number(2.0)],
+                &[named_arg("to", number(-2.0))],
+                false
+            )
+            .expect("negative exponent should evaluate"),
+            number(f64::from((2.0_f32).powi(-2)))
+        );
+        assert_eq!(
+            evaluate(
+                "pow",
+                &[number(-2.0)],
+                &[named_arg("to", number(0.5))],
+                false
+            )
+            .expect("fractional exponent should truncate before pow"),
+            number(1.0)
+        );
+        assert_eq!(
+            evaluate(
+                "pow",
+                &[number(0.0)],
+                &[named_arg("to", number(0.0))],
+                false
+            )
+            .expect("zero exponent should use Kotlin Float.pow semantics"),
+            number(1.0)
+        );
+        assert_eq!(
+            evaluate("abs", &[number(-0.0)], &[], false).expect("absolute zero should evaluate"),
+            number(0.0)
+        );
+        assert!(matches!(
+            evaluate("negate", &[number(0.0)], &[], false),
+            Ok(IrValue::Number(value)) if value == 0.0 && value.is_sign_positive()
+        ));
+        assert!(matches!(
+            evaluate("sqrt", &[number(-1.0)], &[], false),
+            Ok(IrValue::Number(value)) if value.is_nan()
+        ));
+        assert_eq!(
+            evaluate("iseven", &[number(-3.9)], &[], false)
+                .expect("non-integral values should truncate toward zero"),
+            IrValue::Boolean(false)
+        );
+        assert_eq!(
+            evaluate("iseven", &[number(-4.9)], &[], false)
+                .expect("negative non-integral values should truncate toward zero"),
+            IrValue::Boolean(true)
+        );
+        assert_eq!(
+            evaluate("iseven", &[number(f64::NAN)], &[], false)
+                .expect("NaN should follow Kotlin Float.toInt"),
+            IrValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn numeric_builtins_share_argument_binding_and_fail_closed() {
+        let binary = ["sum", "subtract", "multiply", "divide", "rem", "pow"];
+        let unary = ["abs", "negate", "sqrt", "iseven"];
+
+        for name in binary {
+            assert!(
+                evaluate(name, &[number(1.0)], &[], false).is_err(),
+                "{name} missing"
+            );
+            assert!(
+                evaluate(name, &[number(1.0), number(2.0), number(3.0)], &[], false).is_err(),
+                "{name} too many"
+            );
+            assert!(
+                evaluate(
+                    name,
+                    &[number(1.0), number(2.0)],
+                    &[named_arg("unknown", number(3.0))],
+                    false
+                )
+                .is_err(),
+                "{name} unknown named"
+            );
+            assert!(
+                evaluate(
+                    name,
+                    &[number(1.0), number(2.0)],
+                    &[named_arg("a", number(3.0))],
+                    false
+                )
+                .is_err(),
+                "{name} duplicate binding"
+            );
+            assert!(
+                evaluate(name, &[IrValue::Boolean(true), number(2.0)], &[], false).is_err(),
+                "{name} invalid conversion"
+            );
+            assert!(
+                evaluate(name, &[number(1.0), number(2.0)], &[], true).is_err(),
+                "{name} block body"
+            );
+        }
+
+        for name in unary {
+            assert!(evaluate(name, &[], &[], false).is_err(), "{name} missing");
+            assert!(
+                evaluate(name, &[number(1.0), number(2.0)], &[], false).is_err(),
+                "{name} too many"
+            );
+            assert!(
+                evaluate(
+                    name,
+                    &[number(1.0)],
+                    &[named_arg("unknown", number(2.0))],
+                    false
+                )
+                .is_err(),
+                "{name} unknown named"
+            );
+            assert!(
+                evaluate(name, &[number(1.0)], &[named_arg("x", number(2.0))], false).is_err(),
+                "{name} duplicate binding"
+            );
+            assert!(
+                evaluate(name, &[IrValue::Boolean(true)], &[], false).is_err(),
+                "{name} invalid conversion"
+            );
+            assert!(
+                evaluate(name, &[number(1.0)], &[], true).is_err(),
+                "{name} block body"
+            );
         }
     }
 

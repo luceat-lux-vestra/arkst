@@ -1151,6 +1151,38 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/numeric-arithmetic-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "7\n3.5\n-1\n1\n3.5\n0\n1.4142135\n6\neven\nodd"
+        );
+    }
+
+    #[test]
+    fn compile_numeric_nested_failure_is_atomic_and_source_backed() {
+        let source = "앞 문장\r\n.sum {.divide {10} by:{true}} {20}\r\n뒤 문장\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                source.find(".divide").expect("nested divide call"),
+                source.find(".divide").expect("nested divide call")
+                    + ".divide {10} by:{true}".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
+        assert!(!output_text(&result).contains("20"));
+    }
+
+    #[test]
     fn compile_string_predicate_failure_is_atomic_and_source_backed() {
         let source = "앞 문장\r\n.if {.startswith {Hello} {he} ignorecase:{maybe}}\r\n    숨겨진 내용\r\n뒤 문장\r\n";
         let (result, source_id) = compile_source(source);
