@@ -444,6 +444,44 @@ fn integration_variable_evaluation_before_lowering() {
 }
 
 #[test]
+fn integration_logical_comparison_evaluation_reaches_typst_and_pdf() {
+    use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+    let source = ".if {.islower {2} than:{3}}\n    selected\n.if {.isgreater {2} than:{3}}\n    suppressed\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("logical.qd")
+        .expect("valid entry path")
+        .add_source("logical.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "logical comparison diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("selected"), "{typst_code:?}");
+    assert!(!typst_code.contains("suppressed"), "{typst_code:?}");
+    assert!(
+        !typst_code.contains(".islower"),
+        "source call leaked: {typst_code:?}"
+    );
+
+    with_typst("logical-comparison", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "logical.qd".to_string(),
+            })
+            .expect("logical comparison Typst must compile");
+        let pdf = output.pdf.expect("PDF output must be present");
+        assert!(pdf.starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_chain_evaluation_reaches_typst_and_pdf() {
     use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 
