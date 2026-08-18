@@ -166,7 +166,7 @@ Call syntax has the following properties:
   `.b {.a}` use the same value-context invocation path and therefore produce
   equivalent semantic values and observable output. The current semantic
   evidence set is `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`,
-  `.abs`, `.negate`, `.sqrt`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
+  `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
   `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith`; an
   unknown or otherwise unexecutable chain segment reports a source-backed
   `E3001` evaluation diagnostic and does not fabricate a value.
@@ -529,30 +529,37 @@ The v2.5.1 arithmetic/unary slice uses the existing typed evaluator boundary:
 .abs {-3.5}
 .negate {3}
 .sqrt {9}
+.truncate {201.06194} decimals:{2}
+.round {2.5}
 .iseven {4}
 ```
 
-The implemented functions are `.subtract`, `.divide`, `.rem`, `.pow`, `.abs`,
-`.negate`, `.sqrt`, and `.iseven`, integrated with the existing `.sum` and
-`.multiply` numeric builtins. `.range` remains a separate typed constructor.
-Binary and unary calls use the shared positional/named/mixed argument binder;
-numeric strings and identifiers use the existing narrow integer-then-floating
-adaptation. Results remain `IrValue::Number`, except `.iseven`, which returns
+The implemented functions are `.sum`, `.subtract`, `.multiply`, `.divide`,
+`.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, and
+`.iseven`, integrated with the existing numeric builtins. `.range` remains a
+separate typed constructor. Binary and unary calls use the shared
+positional/named/mixed argument binder; `x` uses the existing narrow numeric
+adaptation, while `.truncate`'s `decimals` uses a strict integral-compatible
+adapter. Results remain `IrValue::Number`, except `.iseven`, which returns
 `IrValue::Boolean` and can feed `.if`/`.ifnot` without text materialization.
 
 Arithmetic follows the v2.5.1 `Math.kt` floating boundary and its
-`NumberValue` normalization. Division-by-zero results clamp to the upstream
-Int boundaries when integral, `0/0` remains `NaN`, and remainder keeps the
-signed floating remainder behavior. `.pow` truncates its exponent through the
-upstream `Number.toInt()` boundary, `.iseven` checks that same truncated
-integer, and a negative `.sqrt` produces `NaN`. Invalid values,
+`NumberValue` normalization. `.truncate` rejects negative `decimals`, rejects
+fractional or quoted-text decimal arguments, uses `x.toInt()` for zero
+decimals, and otherwise preserves the upstream Float/Double/toInt/Float
+operation order. Negative values truncate toward zero. `.round` uses explicit
+Kotlin ties-to-even behavior followed by `toInt()`; `2.5`, `3.5`, `-2.5`, and
+`-3.5` therefore produce `2`, `4`, `-2`, and `-4`. Division-by-zero results
+clamp to the upstream Int boundaries when integral, `0/0` remains `NaN`, and
+remainder keeps signed floating behavior. `.pow` truncates its exponent
+through the upstream `Number.toInt()` boundary, `.iseven` checks that same
+truncated integer, and a negative `.sqrt` produces `NaN`. Invalid values,
 unsupported structured conversions, arity errors, unknown/duplicate names, and
 block bodies fail closed with the existing source-backed evaluator diagnostic.
 Nested failure does not publish a partial value or enclosing document output.
 
-The separate `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, and `.round`
-functions remain compatibility gaps and are intentionally not implemented in
-this slice.
+The separate `.logn`, `.pi`, `.sin`, `.cos`, and `.tan` functions remain
+compatibility gaps and are intentionally not implemented in this slice.
 
 ### Scalar string operations (Implemented bounded slice)
 

@@ -20,6 +20,8 @@ pub(crate) fn is_supported(name: &str) -> bool {
             | "abs"
             | "negate"
             | "sqrt"
+            | "truncate"
+            | "round"
             | "iseven"
             | "string"
             | "concatenate"
@@ -52,6 +54,8 @@ pub(crate) fn evaluate(
         "abs" | "negate" | "sqrt" | "iseven" => {
             evaluate_unary_numeric(name, positional_args, named_args, has_body)
         }
+        "truncate" => evaluate_truncate(positional_args, named_args, has_body),
+        "round" => evaluate_round(positional_args, named_args, has_body),
         "string" => evaluate_string(positional_args, named_args, has_body),
         "concatenate" => evaluate_concatenate(positional_args, named_args, has_body),
         "uppercase" | "lowercase" | "capitalize" => {
@@ -532,6 +536,72 @@ fn evaluate_unary_numeric(
     }
 }
 
+fn evaluate_truncate(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(
+            "`.truncate` does not accept a block body".to_string(),
+        ));
+    }
+    let mut arguments = bind_arguments(
+        "truncate",
+        positional_args,
+        named_args,
+        &["x", "decimals"],
+        2,
+    )?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.truncate` requires a numeric `x` argument".to_string()))?;
+    let decimals = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.truncate` requires an integer `decimals` argument".to_string()))?;
+    let value = numeric_argument(&value, "x")
+        .map_err(|_| error("`.truncate` requires a numeric `x` argument".to_string()))?;
+    let decimals = integer_argument(&decimals, "decimals")?;
+    if decimals < 0 {
+        return Err(error(
+            "`.truncate` requires non-negative `decimals`".to_string(),
+        ));
+    }
+
+    // NumberValue turns every integral Float (including infinities after
+    // Kotlin's clamped toInt conversion) into an Int before truncate sees it.
+    // Keep that branch separate from the floating post-processing formula.
+    if decimals == 0 || number_value_is_integral(value) {
+        return Ok(IrValue::Number(f64::from(kotlin_float_to_int(value))));
+    }
+
+    // This deliberately follows Math.kt's observable boundaries:
+    // x.toFloat() * (10.0.pow(decimals)) is Double arithmetic, the product is
+    // converted with Double.toInt(), and the final division is Float.
+    let multiplier = 10.0_f64.powi(decimals);
+    let product = f64::from(value) * multiplier;
+    let truncated = kotlin_double_to_int(product);
+    let result = truncated as f32 / multiplier as f32;
+    Ok(numeric_result(result))
+}
+
+fn evaluate_round(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error("`.round` does not accept a block body".to_string()));
+    }
+    let mut arguments = bind_arguments("round", positional_args, named_args, &["x"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.round` requires one numeric argument".to_string()))?;
+    let value = numeric_argument(&value, "x")
+        .map_err(|_| error("`.round` requires a numeric argument".to_string()))?;
+    Ok(IrValue::Number(f64::from(kotlin_round_to_int(value))))
+}
+
 /// Applies the `NumberValue` normalization visible at the upstream output
 /// boundary: integral Float values become Int values, including Kotlin's
 /// clamped conversions for infinities and out-of-range finite values.
@@ -558,6 +628,65 @@ fn kotlin_float_to_int(value: f32) -> i32 {
     } else {
         value.trunc() as i32
     }
+}
+
+/// Mirrors Kotlin `Double.toInt()` for the truncate multiplier product.
+fn kotlin_double_to_int(value: f64) -> i32 {
+    if value.is_nan() {
+        0
+    } else if value <= f64::from(i32::MIN) {
+        i32::MIN
+    } else if value >= f64::from(i32::MAX) {
+        i32::MAX
+    } else {
+        value.trunc() as i32
+    }
+}
+
+/// NumberValue's normalization predicate, including its NaN/Infinity edges.
+fn number_value_is_integral(value: f32) -> bool {
+    value.ceil() == value.floor()
+}
+
+/// Strictly adapts the narrow `decimals: Int` parameter boundary.
+///
+/// Quarkdown accepts an integral numeric representation such as `2` or `2.0`
+/// after NumberValue normalization, but a fractional NumberValue and quoted
+/// text are not silently converted to an Int.
+fn integer_argument(value: &IrValue, parameter: &str) -> Result<i32, BuiltinError> {
+    let number = match value {
+        IrValue::Number(value) => *value as f32,
+        IrValue::Identifier(value) => value
+            .parse::<i32>()
+            .map(|value| value as f32)
+            .ok()
+            .or_else(|| value.parse::<f32>().ok())
+            .ok_or_else(|| error(format!("`{parameter}` must be an integer")))?,
+        _ => return Err(error(format!("`{parameter}` must be an integer"))),
+    };
+    if !number_value_is_integral(number) {
+        return Err(error(format!("`{parameter}` must be an integer")));
+    }
+    Ok(kotlin_float_to_int(number))
+}
+
+/// Reproduces Kotlin's `kotlin.math.round(Float)` followed by `toInt()`.
+/// Kotlin uses ties-to-even; Rust's default `round` is not used here.
+fn kotlin_round_to_int(value: f32) -> i32 {
+    if !value.is_finite() || number_value_is_integral(value) {
+        return kotlin_float_to_int(value);
+    }
+
+    let lower = value.floor();
+    let fraction = value - lower;
+    let rounded = if fraction < 0.5 {
+        lower
+    } else if fraction > 0.5 || lower % 2.0 != 0.0 {
+        lower + 1.0
+    } else {
+        lower
+    };
+    kotlin_float_to_int(rounded)
 }
 
 fn evaluate_case(
@@ -653,7 +782,7 @@ mod tests {
     fn numeric_surface_is_registered_and_preserves_typed_results() {
         for name in [
             "sum", "subtract", "multiply", "divide", "rem", "pow", "abs", "negate", "sqrt",
-            "iseven",
+            "truncate", "round", "iseven",
         ] {
             assert!(is_supported(name), "{name} should be supported");
         }
@@ -722,6 +851,198 @@ mod tests {
                 .expect("evenness should return a typed boolean"),
             IrValue::Boolean(true)
         );
+    }
+
+    #[test]
+    fn decimal_numeric_surface_matches_upstream_boundaries() {
+        assert_eq!(
+            evaluate("truncate", &[number(201.06194), number(2.0)], &[], false)
+                .expect("positional decimals should bind"),
+            number(f64::from(201.06_f32))
+        );
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[number(201.06194)],
+                &[named_arg("decimals", number(1.0))],
+                false,
+            )
+            .expect("named decimals should bind"),
+            number(201.0)
+        );
+        assert_eq!(
+            evaluate("truncate", &[number(-1.29), number(1.0)], &[], false)
+                .expect("negative truncation should use zero direction"),
+            number(f64::from(-1.2_f32))
+        );
+        assert_eq!(
+            evaluate("truncate", &[number(201.06194), number(0.0)], &[], false)
+                .expect("zero decimals should use toInt"),
+            number(201.0)
+        );
+        assert_eq!(
+            evaluate("truncate", &[number(201.0), number(2.0)], &[], false)
+                .expect("integral values should remain integral"),
+            number(201.0)
+        );
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[IrValue::String("-1.29".into()), number(1.0)],
+                &[],
+                false,
+            )
+            .expect("numeric text x should use the existing Number boundary"),
+            number(f64::from(-1.2_f32))
+        );
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[
+                    evaluate("sum", &[number(100.0), number(1.06194)], &[], false)
+                        .expect("nested numeric x should evaluate")
+                ],
+                &[named_arg("decimals", number(2.0))],
+                false,
+            )
+            .expect("nested numeric result should bind as x"),
+            number(f64::from(101.06_f32))
+        );
+
+        assert!(evaluate("truncate", &[number(1.0), number(1.5)], &[], false).is_err());
+        assert!(evaluate("truncate", &[], &[], false).is_err());
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0), number(2.0), number(3.0)],
+            &[],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0)],
+            &[named_arg("decimals", IrValue::String("2".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0)],
+            &[named_arg("decimals", IrValue::String("2.0".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0)],
+            &[named_arg("decimals", IrValue::String("1.5".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate("truncate", &[number(1.0), number(-1.0)], &[], false).is_err());
+        assert!(evaluate("truncate", &[number(1.0), number(-1.5)], &[], false).is_err());
+        assert!(evaluate("truncate", &[number(1.0), number(f64::NAN)], &[], false).is_err());
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[number(1.25), number(f64::INFINITY)],
+                &[],
+                false
+            )
+            .expect("infinite decimals should follow Int normalization"),
+            number(0.0)
+        );
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[number(1.25), number(f64::from(i32::MAX))],
+                &[],
+                false,
+            )
+            .expect("large decimals should not use a Scribium-only limit"),
+            number(0.0)
+        );
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0)],
+            &[named_arg("unknown", number(2.0))],
+            false
+        )
+        .is_err());
+        assert!(evaluate(
+            "truncate",
+            &[number(1.0), number(2.0)],
+            &[named_arg("x", number(3.0))],
+            false
+        )
+        .is_err());
+        assert!(evaluate("truncate", &[number(1.0), number(2.0)], &[], true).is_err());
+
+        assert_eq!(
+            evaluate("round", &[number(2.5)], &[], false).expect("2.5 should round"),
+            number(2.0)
+        );
+        assert_eq!(
+            evaluate("round", &[number(3.5)], &[], false).expect("3.5 should round"),
+            number(4.0)
+        );
+        assert_eq!(
+            evaluate("round", &[number(-2.5)], &[], false).expect("-2.5 should round"),
+            number(-2.0)
+        );
+        assert_eq!(
+            evaluate("round", &[number(-3.5)], &[], false).expect("-3.5 should round"),
+            number(-4.0)
+        );
+        for (input, expected) in [(2.49, 2.0), (2.51, 3.0), (-2.49, -2.0), (-2.51, -3.0)] {
+            assert_eq!(
+                evaluate("round", &[number(input)], &[], false).expect("non-tie should round"),
+                number(expected)
+            );
+        }
+        assert_eq!(
+            evaluate("round", &[], &[named_arg("x", number(2.5))], false)
+                .expect("named x should bind"),
+            number(2.0)
+        );
+        assert_eq!(
+            evaluate("round", &[number(f64::NAN)], &[], false)
+                .expect("NaN should follow Kotlin Float.toInt"),
+            number(0.0)
+        );
+        assert_eq!(
+            evaluate("round", &[number(f64::INFINITY)], &[], false)
+                .expect("positive infinity should clamp"),
+            number(f64::from(i32::MAX))
+        );
+        assert_eq!(
+            evaluate("round", &[number(f64::NEG_INFINITY)], &[], false)
+                .expect("negative infinity should clamp"),
+            number(f64::from(i32::MIN))
+        );
+        assert_eq!(
+            evaluate("round", &[number(1.0e30)], &[], false)
+                .expect("large finite values should clamp"),
+            number(f64::from(i32::MAX))
+        );
+        assert!(evaluate("round", &[IrValue::Boolean(true)], &[], false).is_err());
+        assert!(evaluate("round", &[], &[], false).is_err());
+        assert!(evaluate("round", &[number(1.0), number(2.0)], &[], false).is_err());
+        assert!(evaluate(
+            "round",
+            &[number(1.0)],
+            &[named_arg("x", number(2.0))],
+            false
+        )
+        .is_err());
+        assert!(evaluate(
+            "round",
+            &[number(1.0)],
+            &[named_arg("unknown", number(2.0))],
+            false
+        )
+        .is_err());
+        assert!(evaluate("round", &[number(1.0)], &[], true).is_err());
     }
 
     #[test]

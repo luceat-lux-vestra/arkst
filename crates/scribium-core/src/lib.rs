@@ -1164,6 +1164,27 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_numeric_decimal_fixture_preserves_typed_value_flow() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "201.06\n201\n201\n-1.2\n2\n2\n4\n-2\n201.06\n2\n123"
+        );
+    }
+
+    #[test]
+    fn compile_numeric_decimal_forms_share_one_semantic_path() {
+        let source = ".var {value} {201.06194}\n.truncate {.value} {2}\n.truncate {.value} decimals:{2}\n.round x:{3.5}\n.sum {2} {0.5}::round\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "201.06\n201.06\n4\n2");
+    }
+
+    #[test]
     fn compile_numeric_nested_failure_is_atomic_and_source_backed() {
         let source = "앞 문장\r\n.sum {.divide {10} by:{true}} {20}\r\n뒤 문장\r\n";
         let (result, source_id) = compile_source(source);
@@ -1180,6 +1201,24 @@ mod tests {
         );
         assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
         assert!(!output_text(&result).contains("20"));
+    }
+
+    #[test]
+    fn compile_numeric_decimal_failure_is_atomic_and_source_backed() {
+        let source = "앞 문장\r\n.sum {.truncate {12.34} decimals:{1.5}} {100}\r\n뒤 문장\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        let call_start = source.find(".truncate").expect("nested truncate call");
+        let call_end = call_start + ".truncate {12.34} decimals:{1.5}".len();
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id, call_start, call_end
+            ))
+        );
+        assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
+        assert!(!output_text(&result).contains("100"));
     }
 
     #[test]

@@ -59,7 +59,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
-| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding and the evidenced scalar numeric adaptation boundary; remaining math functions are deferred | Implemented (bounded v2.5.1 arithmetic/unary slice) |
+| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, strict `decimals: Int` adaptation, upstream Float/Double/Float truncation, Kotlin ties-to-even rounding, and the evidenced scalar numeric boundary; `.logn`, `.pi`, `.sin`, `.cos`, and `.tan` remain deferred | Implemented (bounded v2.5.1 decimal post-processing slice) |
 | String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates for the evidenced scalar/plain-text adaptation boundary; rich Markdown plain-text projection remains deferred | Implemented (bounded v2.5.1 slice) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
@@ -469,7 +469,7 @@ surfaces below: `.name`, positional arguments `{arg}`, named arguments
 Scribium AST/IR. Multiline braced arguments, line continuations, and tight
 brace-wrapped calls are syntax-supported with source-backed spans. The
 evidenced `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`,
-`.negate`, `.sqrt`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
+`.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
 `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`,
 `.islower`, `.isgreater`, `.equals`, and `.not` chain forms and their documented
 nested-call equivalents are **Semantically supported** with strict
@@ -523,35 +523,47 @@ DynamicValue conversions or other logical helpers are complete.
 ### Mathematical and numeric evidence
 
 The v2.5.1 [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
-source defines `.sum(a, b)`, `.subtract(a, b)`, `.multiply(a, by)`,
-`.divide(a, by)`, `.rem(a, b)`, `.pow(base, to)`, `.abs(x)`, `.negate(x)`,
-`.sqrt(x)`, and `.iseven(x)` over `Number` values. The implementation performs
-the binary arithmetic and unary floating operations through `toFloat()`;
-`.pow` and `.iseven` apply `Number.toInt()`, which truncates toward zero and
-maps non-finite values according to the Kotlin conversion boundary. The
-resulting `NumberValue` normalizes integral Float results to Int, so positive
-and negative division-by-zero results clamp to the Int boundaries while `0/0`
-and negative square roots remain `NaN`; remainder keeps the signed floating
-remainder behavior.
+source defines the arithmetic/unary functions plus `.truncate(x,
+decimals: Int)` and `.round(x)` over `Number` values. The decimal slice has
+the following observable boundaries:
 
-[`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt)
+- `.truncate` rejects negative `decimals` at runtime; fractional `decimals`
+  fail the `Int` argument binding rather than being silently truncated.
+- `decimals == 0` uses `x.toInt()`. Otherwise, non-integral `x` uses
+  `x.toFloat() * 10.0.pow(decimals)` as Double arithmetic, `Double.toInt()`,
+  and Float division by `multiplier.toFloat()` in that order.
+- `.round` preserves an upstream Int, otherwise applies Kotlin
+  `kotlin.math.round(x.toFloat())` (ties-to-even) and then `toInt()`.
+- `NumberValue` normalizes integral Float values, including clamped
+  non-finite conversions, to Int. This is why the final NaN/Infinity behavior
+  must be checked after rounding or conversion, not from `round()` alone.
+
+The existing arithmetic path retains the v2.5.1 `toFloat()` boundary;
+`.pow` and `.iseven` apply `Number.toInt()`, division-by-zero results clamp to
+the upstream Int boundaries when integral, `0/0` and negative square roots
+remain `NaN`, and remainder keeps signed floating behavior.
+
+[`NumberValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt),
+[`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt),
 and [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
-establish the invocation-time numeric boundary: numeric strings first use
-integer parsing and then floating parsing; unsupported values fail conversion.
-Scribium reuses its existing narrow scalar adaptation rather than introducing a
-general DynamicValue conversion framework. All numeric functions use the
-existing argument binder, preserve `IrValue::Number` or `IrValue::Boolean`, and
-reject unsupported values, unknown/duplicate bindings, arity errors, and block
-bodies without publishing partial nested output.
+establish the invocation-time numeric and normalization boundaries. Scribium
+reuses its existing narrow scalar adaptation and adds only the local strict
+integer-compatible `decimals` adapter; it does not introduce a general
+DynamicValue conversion framework. All numeric functions use the existing
+argument binder, preserve `IrValue::Number` or `IrValue::Boolean`, and reject
+unsupported values, unknown/duplicate bindings, arity errors, and block bodies
+without publishing partial nested output.
 
 The independent unit and integration evidence is:
-`scribium-core/src/builtins.rs::tests::numeric_*`,
-`scribium-core/src/lib.rs::tests::compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow`,
-`compile_numeric_nested_failure_is_atomic_and_source_backed`,
-`scribium-test-support/src/lib.rs::tests::test_verify_numeric_arithmetic_family_is_semantically_supported`,
-and `fixtures/quarkdown-conformance/cases/numeric-arithmetic-family/input.qd`.
-The remaining `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, and `.round`
-functions are deliberately outside this slice.
+`scribium-core/src/builtins.rs::tests::decimal_numeric_surface_matches_upstream_boundaries`,
+`scribium-core/src/lib.rs::tests::compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`,
+`compile_numeric_decimal_forms_share_one_semantic_path`,
+`compile_numeric_decimal_failure_is_atomic_and_source_backed`,
+`scribium-test-support/src/lib.rs::tests::test_verify_numeric_decimal_family_is_semantically_supported`,
+and `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`.
+The arithmetic/unary regression remains covered by the existing numeric tests
+and `numeric-arithmetic-family` fixture. The remaining `.logn`, `.pi`, `.sin`,
+`.cos`, and `.tan` functions are deliberately outside this slice.
 
 ### String and text evidence
 
