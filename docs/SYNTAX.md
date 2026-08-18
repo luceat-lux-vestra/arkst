@@ -360,7 +360,35 @@ typed `Collection` values. `.filter` requires a Boolean predicate. `.sorted`
 is stable ascending natural/selector ordering for homogeneous Number, String,
 or Boolean keys; unsupported, heterogeneous, `None`, and invalid key values
 produce diagnostics. Descending options and arbitrary comparator syntax are
-not part of this slice.
+not part of this slice. `.foreach` and `.sorted` are the Quarkdown v2.5.1
+evidenced operations. The retained `.map` and `.filter` calls are Scribium
+extensions, not upstream v2.5.1 functions, and are excluded from compatibility
+coverage counts.
+
+### Collection operations (Quarkdown v2.5.1 evidenced slice)
+
+All operations consume the same typed iterable sequence as `.foreach`, so
+`Collection`, `Pair`, ordered `Dictionary` entries, finite `Range`, and a
+supported Markdown list have identical element semantics:
+
+```text
+.values::second
+.values::third
+.values::distinct
+.values::reversed
+.values::sumall
+.values::average
+.values::groupvalues
+```
+
+`.second` and `.third` are one-based accessors and return `None` when the
+sequence is too short, matching `.getat {2}` and `.getat {3}` without a
+fallback. `.distinct` keeps the first occurrence. `.reversed` returns a new
+typed Collection. `.groupvalues` returns a Collection of Collections in
+first-seen group order, preserving order inside each group. `.sumall` applies
+the upstream `asDouble()` conversion to every element; invalid conversions
+contribute zero, and `.average` divides by the full input count (empty input
+therefore produces `NaN`). These results remain typed until an output boundary.
 
 ### Scoped `.let` (Implemented slice)
 
@@ -514,8 +542,10 @@ only when a value is required by `.foreach`; ordinary document lists remain
 `UnorderedList` or `OrderedList` IR nodes. Nested list-only items adapt
 recursively to nested Collections, while rich list-item content remains typed
 content. Pair, Dictionary, and generalized destructuring remain bounded to the
-evidenced forms. Collection transforms such as `.map`, `.filter`, and `.sorted`
-use the typed callable path described above. Dynamic
+evidenced forms. Native `.foreach`, `.sorted`, and the Collection operations
+listed above use the shared typed iterable path. `.map` and `.filter` use that
+same path as Scribium extensions; they are not asserted as Quarkdown v2.5.1
+functions. Dynamic
 `.range` is a typed constructor with optional `from`/`to` bounds; its numeric
 bounds are evaluated normally and truncated to signed integer endpoints using
 the verified upstream Number-to-Int behavior.

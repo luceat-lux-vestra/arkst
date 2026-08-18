@@ -973,6 +973,17 @@ mod tests {
     }
 
     #[test]
+    fn compile_collection_api_parity_uses_frontend_lists_and_shared_iterables() {
+        let source = ".var {letters}\n    - A\n    - B\n    - A\n.var {numbers}\n    - 1\n    - 2\n    - 3\n.var {pair}\n    .pair {left} {right}\n.var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n.var {negative} {.range {-2} {0}}\n\n.letters::second\n.letters::third\n.letters::distinct::size\n.letters::reversed::first\n.letters::groupvalues::size\n.numbers::sumall\n.numbers::average\n.pair::reversed::first\n.table::second::first\n.table::reversed::first::first\n.table::distinct::size\n.table::groupvalues::size\n.negative::reversed::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "B\nA\n2\nA\n2\n6\n2\nright\nb\nb\n2\n2\n0"
+        );
+    }
+
+    #[test]
     fn compile_iteration_accepts_left_open_and_rejects_endless_ranges() {
         let (result, _) = compile_source(".foreach {..4}\n    .1\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");
