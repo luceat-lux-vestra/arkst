@@ -28,6 +28,9 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `ConditionalTest.kt`         | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/ConditionalTest.kt | Public integration examples for `.islower` in `.if`, false branches, and `.ifnot` | 2026-08-18 |
 | Quarkdown v2.5.1 `FlowTest.kt`                | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt | Direct logical helper behavior and conditional control-flow results | 2026-08-18 |
 | Quarkdown v2.5.1 `Strings.kt`                 | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt | Public scalar string signatures, quote-delimited `.string` behavior, case transforms, emptiness predicates, and `.startswith` | 2026-08-18 |
+| Quarkdown v2.5.1 `Math.kt`                    | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt | Public `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.iseven`, and `.range` signatures and numeric operation boundaries | 2026-08-18 |
+| Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, floating math, and numeric output materialization | 2026-08-18 |
+| Quarkdown wiki — "Math"                       | https://quarkdown.com/wiki/math/ | Public math-family scope and nested/chained arithmetic examples | 2026-08-18 |
 | Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory | 2026-08-18 |
 | Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior used to classify conversion gaps | 2026-08-18 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
@@ -270,10 +273,13 @@ through text serialization, generated Markdown, or a second parser.
   and failure for two-parameter destructuring of a non-Pair item. Explicit
   lambda scope masks implicit `.1` lookup.
 - No Quarkdown source code or tests are copied or translated. The v2.5.1
-  `Math.kt`, `Flow.kt`, `Range.kt`, and `FlowTest.kt` links above were consulted
-  only as public behavioral evidence for dynamic endpoint conversion and the
-  iteration policy (including left-open, endless, descending, and repeat-zero
-  behavior).
+  `Math.kt` and `MathFunctionsTest.kt` links above were consulted only as public
+  behavioral/API evidence for the numeric slice: `toFloat()` arithmetic,
+  floating division/remainder, `Number.toInt()` truncation for `.pow` and
+  `.iseven`, and `NaN` behavior for invalid floating domains. The `Flow.kt`,
+  `Range.kt`, and `FlowTest.kt` links remain evidence for dynamic endpoint
+  conversion and the iteration policy (including left-open, endless,
+  descending, and repeat-zero behavior).
 - The test inputs in `fixtures/` are independently authored from the
   specification documents above; they are not copied from reference inputs
 - Each feature's provenance is recorded in

@@ -1,0 +1,14 @@
+.subtract {10} {3}
+.divide {7} by:{2}
+.rem {-5} {2}
+.pow {-2} to:{0.5}
+.var {text} {.string {-3.5}}
+.abs {.text}
+.negate {0}
+.sqrt {2}
+.sum {.abs {-3}} {.sqrt {9}}
+
+.if {.iseven {.subtract {10} {2}}}
+    even
+.ifnot {.iseven {-3}}
+    odd

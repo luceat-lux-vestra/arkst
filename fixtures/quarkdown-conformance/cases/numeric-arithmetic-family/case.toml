@@ -1,0 +1,5 @@
+id = "numeric-arithmetic-family"
+feature = "numeric-arithmetic"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-math"
+description = "Typed arithmetic and unary numeric operations with nested and conditional composition"

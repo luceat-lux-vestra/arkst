@@ -165,7 +165,8 @@ Call syntax has the following properties:
   For the evidenced surface, `.a::b` and its documented nested equivalent
   `.b {.a}` use the same value-context invocation path and therefore produce
   equivalent semantic values and observable output. The current semantic
-  evidence set is `.sum`, `.multiply`, `.string`, `.concatenate`, `.uppercase`,
+  evidence set is `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`,
+  `.abs`, `.negate`, `.sqrt`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
   `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith`; an
   unknown or otherwise unexecutable chain segment reports a source-backed
   `E3001` evaluation diagnostic and does not fabricate a value.
@@ -430,10 +431,13 @@ this same invocation machinery.
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
 output context materializes them as nodes or inline text. Conditional bodies
-remain lazy until the callee selects a branch. The current string-family
-builtins use a deliberately small invocation-boundary adaptation contract for
-strings, identifiers, booleans, numbers, and plain text content; this is not a
-claim of complete Quarkdown `DynamicValue` or standard-library compatibility.
+remain lazy until the callee selects a branch. The current string-family and
+numeric builtins use deliberately small invocation-boundary adaptation
+contracts for strings, identifiers, booleans, numbers, and plain text content;
+this is not a claim of complete Quarkdown `DynamicValue` or standard-library
+compatibility. Numeric functions accept only the scalar number forms evidenced
+by the v2.5.1 `ValueFactory` boundary; structured values are not coerced
+through text or a backend.
 
 For a user-defined call, positional and named arguments are evaluated in
 source order before the callee body can run. A successful argument set creates
@@ -510,6 +514,45 @@ strings, numbers, and Markdown content. Invalid values produce one
 source-backed `E3001`, and a failing condition does not evaluate or publish its
 body. Other function-call conditions remain outside this bounded slice until
 their owning semantic family is implemented.
+
+### Mathematical and numeric operations (Implemented bounded slice)
+
+The v2.5.1 arithmetic/unary slice uses the existing typed evaluator boundary:
+
+```text
+.sum {1} {2}
+.subtract {10} {3}
+.multiply {4} by:{2}
+.divide {7} by:{2}
+.rem {-5} {2}
+.pow {-2} to:{0.5}
+.abs {-3.5}
+.negate {3}
+.sqrt {9}
+.iseven {4}
+```
+
+The implemented functions are `.subtract`, `.divide`, `.rem`, `.pow`, `.abs`,
+`.negate`, `.sqrt`, and `.iseven`, integrated with the existing `.sum` and
+`.multiply` numeric builtins. `.range` remains a separate typed constructor.
+Binary and unary calls use the shared positional/named/mixed argument binder;
+numeric strings and identifiers use the existing narrow integer-then-floating
+adaptation. Results remain `IrValue::Number`, except `.iseven`, which returns
+`IrValue::Boolean` and can feed `.if`/`.ifnot` without text materialization.
+
+Arithmetic follows the v2.5.1 `Math.kt` floating boundary and its
+`NumberValue` normalization. Division-by-zero results clamp to the upstream
+Int boundaries when integral, `0/0` remains `NaN`, and remainder keeps the
+signed floating remainder behavior. `.pow` truncates its exponent through the
+upstream `Number.toInt()` boundary, `.iseven` checks that same truncated
+integer, and a negative `.sqrt` produces `NaN`. Invalid values,
+unsupported structured conversions, arity errors, unknown/duplicate names, and
+block bodies fail closed with the existing source-backed evaluator diagnostic.
+Nested failure does not publish a partial value or enclosing document output.
+
+The separate `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, and `.round`
+functions remain compatibility gaps and are intentionally not implemented in
+this slice.
 
 ### Scalar string operations (Implemented bounded slice)
 
