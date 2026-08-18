@@ -36,6 +36,7 @@ pub(crate) fn is_supported(name: &str) -> bool {
             | "isempty"
             | "isnotempty"
             | "startswith"
+            | "plaintext"
             | "otherwise"
             | "isnone"
             | "islower"
@@ -74,6 +75,7 @@ pub(crate) fn evaluate(
             evaluate_empty_check(name, positional_args, named_args, has_body)
         }
         "startswith" => evaluate_startswith(positional_args, named_args, has_body),
+        "plaintext" => evaluate_plaintext(positional_args, named_args, has_body),
         "otherwise" => evaluate_otherwise(positional_args, named_args, has_body),
         "isnone" => evaluate_isnone(positional_args, named_args, has_body),
         "islower" | "isgreater" => evaluate_ordering(name, positional_args, named_args, has_body),
@@ -283,6 +285,29 @@ fn evaluate_startswith(
     Ok(IrValue::Boolean(result))
 }
 
+fn evaluate_plaintext(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(
+            "`.plaintext` body must bind as `content` before evaluation".to_string(),
+        ));
+    }
+    let mut arguments = bind_arguments("plaintext", positional_args, named_args, &["content"], 1)?;
+    let content = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.plaintext` requires one content argument".to_string()))?;
+    let text = plain_text_argument(&content).ok_or_else(|| {
+        error(
+            "`.plaintext` requires already-parsed inline content or a supported scalar value"
+                .to_string(),
+        )
+    })?;
+    Ok(IrValue::String(text))
+}
+
 fn bind_arguments(
     name: &str,
     positional_args: &[IrValue],
@@ -439,6 +464,56 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
         IrInline::DirectiveCall { .. } | IrInline::ChainedDirectiveCall { .. } => return None,
         IrInline::Image { .. } => return None,
+    }
+    Some(())
+}
+
+/// Projects the bounded `.plaintext` input contract without converting a
+/// value back into source text or invoking a Markdown parser.
+fn plain_text_argument(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::Identifier(value) => Some(value.clone()),
+        IrValue::Boolean(value) => Some(value.to_string()),
+        IrValue::Number(value) => Some(value.to_string()),
+        IrValue::Content(nodes) => plain_text_from_content(nodes),
+        IrValue::String(_)
+        | IrValue::Range(_)
+        | IrValue::Collection(_)
+        | IrValue::Pair(_)
+        | IrValue::Dictionary(_)
+        | IrValue::Callable(_)
+        | IrValue::None => None,
+    }
+}
+
+fn plain_text_from_content(nodes: &[IrNode]) -> Option<String> {
+    let mut output = String::new();
+    for node in nodes {
+        let IrNode::Paragraph { content, .. } = node else {
+            return None;
+        };
+        plain_text_from_inlines(content, &mut output)?;
+    }
+    Some(output)
+}
+
+fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<()> {
+    for inline in inlines {
+        match inline {
+            IrInline::Text { content, .. } | IrInline::Code { content, .. } => {
+                output.push_str(content);
+            }
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. } => plain_text_from_inlines(content, output)?,
+            IrInline::SoftBreak { .. } => output.push('\n'),
+            // v2.5.1 `NodeUtils.toPlainText()` does not emit hard-break text.
+            IrInline::HardBreak { .. } | IrInline::Image { .. } => {}
+            IrInline::DirectiveCall { .. } | IrInline::ChainedDirectiveCall { .. } => {
+                return None;
+            }
+        }
     }
     Some(())
 }
@@ -824,7 +899,8 @@ fn adapt_string_argument(value: &IrValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{deterministic_transcendental, evaluate, is_supported};
-    use crate::ir::{IrInline, IrNode, IrValue};
+    use crate::ir::{IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrValue};
+    use crate::source::{SourceId, SourceSpan};
 
     fn number(value: f64) -> IrValue {
         IrValue::Number(value)
@@ -1413,6 +1489,7 @@ mod tests {
             "isempty",
             "isnotempty",
             "startswith",
+            "plaintext",
         ] {
             assert!(is_supported(name), "{name} should be supported");
         }
@@ -1435,6 +1512,180 @@ mod tests {
             )
             .expect("named string argument should bind"),
             IrValue::String("true".into())
+        );
+    }
+
+    #[test]
+    fn plaintext_projects_evaluated_inline_structure() {
+        let span = |start, end| SourceSpan::new(SourceId(0), start, end);
+        let content = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![
+                IrInline::Text {
+                    content: "one ".into(),
+                    span: span(0, 4),
+                },
+                IrInline::Strong {
+                    content: vec![IrInline::Emphasis {
+                        content: vec![IrInline::Strikethrough {
+                            content: vec![IrInline::Text {
+                                content: "two".into(),
+                                span: span(4, 7),
+                            }],
+                            span: span(4, 7),
+                        }],
+                        span: span(4, 7),
+                    }],
+                    span: span(4, 7),
+                },
+                IrInline::Text {
+                    content: " ".into(),
+                    span: span(7, 8),
+                },
+                IrInline::Code {
+                    content: "cargo test".into(),
+                    span: span(8, 20),
+                },
+                IrInline::Text {
+                    content: " ".into(),
+                    span: span(20, 21),
+                },
+                IrInline::Link {
+                    content: vec![IrInline::Text {
+                        content: "label".into(),
+                        span: span(21, 26),
+                    }],
+                    destination: "https://example.com".into(),
+                    title: None,
+                    span: span(21, 50),
+                },
+                IrInline::SoftBreak { span: span(50, 51) },
+                IrInline::Text {
+                    content: "next".into(),
+                    span: span(51, 55),
+                },
+                IrInline::HardBreak { span: span(55, 57) },
+                IrInline::Image {
+                    content: vec![IrInline::Text {
+                        content: "alt must be skipped".into(),
+                        span: span(57, 76),
+                    }],
+                    destination: "image.png".into(),
+                    title: None,
+                    span: span(57, 76),
+                },
+            ],
+            span: span(0, 76),
+        }]);
+
+        assert_eq!(
+            evaluate("plaintext", &[content], &[], false).expect("content projects"),
+            IrValue::String("one two cargo test label\nnext".into())
+        );
+        assert_eq!(
+            evaluate("plaintext", &[IrValue::Content(Vec::new())], &[], false,)
+                .expect("empty content projects to an empty string"),
+            IrValue::String(String::new())
+        );
+        assert_eq!(
+            evaluate(
+                "plaintext",
+                &[IrValue::Identifier("hello".into())],
+                &[],
+                false
+            )
+            .expect("identifier scalar is supported"),
+            IrValue::String("hello".into())
+        );
+        assert_eq!(
+            evaluate("plaintext", &[number(123.0)], &[], false)
+                .expect("number scalar is supported"),
+            IrValue::String("123".into())
+        );
+        assert_eq!(
+            evaluate("plaintext", &[IrValue::Boolean(true)], &[], false)
+                .expect("boolean scalar is supported"),
+            IrValue::String("true".into())
+        );
+    }
+
+    #[test]
+    fn plaintext_rejects_reparse_and_unsupported_values() {
+        let span = SourceSpan::new(SourceId(0), 0, 1);
+        let values = [
+            IrValue::String("**not parsed**".into()),
+            IrValue::None,
+            IrValue::Collection(Vec::new()),
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span,
+            }),
+            IrValue::Pair(IrPair {
+                first: Box::new(IrValue::Identifier("a".into())),
+                second: Box::new(IrValue::Identifier("b".into())),
+                span,
+            }),
+            IrValue::Dictionary(IrDictionary {
+                entries: Vec::new(),
+                span,
+            }),
+            IrValue::Callable(IrCallable {
+                parameters: None,
+                body: Vec::new(),
+                span,
+                capture: None,
+            }),
+        ];
+
+        for value in values {
+            assert!(
+                evaluate("plaintext", &[value], &[], false).is_err(),
+                "unsupported value must fail closed"
+            );
+        }
+
+        let unresolved = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::DirectiveCall {
+                name: "unknown".into(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                body: None,
+                span,
+            }],
+            span,
+        }]);
+        assert!(evaluate("plaintext", &[unresolved], &[], false).is_err());
+        assert!(evaluate("plaintext", &[], &[], true).is_err());
+    }
+
+    #[test]
+    fn plaintext_reuses_single_content_argument_binding() {
+        let content = IrValue::Identifier("hello".into());
+        assert!(evaluate("plaintext", &[], &[], false).is_err());
+        assert!(evaluate("plaintext", &[content.clone(), content.clone()], &[], false).is_err());
+        assert!(evaluate(
+            "plaintext",
+            std::slice::from_ref(&content),
+            &[named_arg("unknown", content.clone())],
+            false
+        )
+        .is_err());
+        assert!(evaluate(
+            "plaintext",
+            std::slice::from_ref(&content),
+            &[named_arg("content", content.clone())],
+            false
+        )
+        .is_err());
+        assert_eq!(
+            evaluate(
+                "plaintext",
+                &[],
+                &[named_arg("content", IrValue::Identifier("hello".into()))],
+                false
+            )
+            .expect("named content should bind"),
+            IrValue::String("hello".into())
         );
     }
 

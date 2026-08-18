@@ -1281,11 +1281,21 @@ impl Evaluator {
         }
 
         if builtins::is_supported(name) {
-            let evaluated_positional =
+            let mut evaluated_positional =
                 match self.evaluate_values(positional_args, span, diagnostics, context) {
                     Ok(values) => values,
                     Err(outcome) => return outcome,
                 };
+            let has_body = body.is_some();
+            if name == "plaintext" {
+                if let Some(body) = body {
+                    let body = match self.evaluate_call_body(body, span, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        outcome => return outcome,
+                    };
+                    evaluated_positional.push(body);
+                }
+            }
             let evaluated_named = match self.evaluate_named(named_args, span, diagnostics, context)
             {
                 Ok(values) => values,
@@ -1295,7 +1305,7 @@ impl Evaluator {
                 name,
                 &evaluated_positional,
                 &evaluated_named,
-                body.is_some(),
+                has_body && name != "plaintext",
             ) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {

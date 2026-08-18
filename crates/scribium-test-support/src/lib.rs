@@ -213,6 +213,14 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_plaintext_family_is_semantically_supported() {
+        let case = ConformanceCase::load("plaintext-family");
+        let result = case.verify_parses();
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(!result.ir.nodes.is_empty());
+    }
+
+    #[test]
     fn test_verify_numeric_arithmetic_family_is_semantically_supported() {
         let case = ConformanceCase::load("numeric-arithmetic-family");
         let result = case.verify_parses();
