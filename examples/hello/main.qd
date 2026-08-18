@@ -2,25 +2,21 @@
 title: "Hello, Scribium"
 ---
 
-.heading level:{1}
-    Hello, Scribium
+# Hello, Scribium
 
-This is a .strong {Quarkdown-compatible} document compiled through Typst to PDF.
+This document mixes ordinary **Markdown** with Quarkdown-compatible evaluator semantics.
 
-.list
-    .item
-        Simple lists work
-    .item
-        Math is supported: $E = mc^2$
+.var {show_extra} {yes}
 
-.if {show_code}
-    .code_block language:{rust}
-        fn main() {
-            println!("hello");
-        }
+.if {.show_extra}
+    This paragraph is emitted from a boolean-backed conditional.
 
-.row
-    .col width:{0.5}
-        Left column
-    .col width:{0.5}
-        Right column
+## Typed value flow
+
+The following expressions are evaluated before Typst lowering:
+
+.string {hello}::concatenate with:{" world"}::capitalize
+
+.sum {20} {22}
+
+.pi::truncate {2}
