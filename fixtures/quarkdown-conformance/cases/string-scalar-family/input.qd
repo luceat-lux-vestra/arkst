@@ -1,0 +1,17 @@
+.var {value} {"  Hello  "}
+.string value:{.value}
+.concatenate {abc} with:{def}
+.concatenate {abc} with:{def} if:{no}
+.capitalize {hello, world!}
+.string {hello}::concatenate with:{" world"}::capitalize
+.uppercase {hello}::startswith {HE}
+.if {.startswith {Hello} {He}}
+    starts
+.ifnot {.startswith {Hello} {he}}
+    case-sensitive
+.if {.startswith {Hello} {he} ignorecase:{yes}}
+    ignored
+.if {.isempty {""}}
+    empty
+.if {.isnotempty {" "}}
+    space

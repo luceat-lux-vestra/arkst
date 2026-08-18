@@ -1,0 +1,5 @@
+id = "string-scalar-family"
+feature = "string-operations"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-strings"
+description = "Scalar string operations with typed predicates and chained results"

@@ -205,6 +205,14 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_string_scalar_family_is_semantically_supported() {
+        let case = ConformanceCase::load("string-scalar-family");
+        let result = case.verify_parses();
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(!result.ir.nodes.is_empty());
+    }
+
+    #[test]
     fn test_baseline_consistency() {
         // Verify that the verified baseline in upstream.toml matches
         // the explicitly declared reference version in documentation files.

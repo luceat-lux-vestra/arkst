@@ -165,7 +165,8 @@ Call syntax has the following properties:
   For the evidenced surface, `.a::b` and its documented nested equivalent
   `.b {.a}` use the same value-context invocation path and therefore produce
   equivalent semantic values and observable output. The current semantic
-  evidence set is `.sum`, `.multiply`, `.uppercase`, and `.lowercase`; an
+  evidence set is `.sum`, `.multiply`, `.string`, `.concatenate`, `.uppercase`,
+  `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith`; an
   unknown or otherwise unexecutable chain segment reports a source-backed
   `E3001` evaluation diagnostic and does not fabricate a value.
   The parser's structural representation is consumed directly; no synthetic
@@ -429,7 +430,7 @@ this same invocation machinery.
 Function arguments and chain intermediates are evaluated in value context,
 which preserves scalar values and evaluated content until a final document
 output context materializes them as nodes or inline text. Conditional bodies
-remain lazy until the callee selects a branch. The current case-transform
+remain lazy until the callee selects a branch. The current string-family
 builtins use a deliberately small invocation-boundary adaptation contract for
 strings, identifiers, booleans, numbers, and plain text content; this is not a
 claim of complete Quarkdown `DynamicValue` or standard-library compatibility.
@@ -509,6 +510,39 @@ strings, numbers, and Markdown content. Invalid values produce one
 source-backed `E3001`, and a failing condition does not evaluate or publish its
 body. Other function-call conditions remain outside this bounded slice until
 their owning semantic family is implemented.
+
+### Scalar string operations (Implemented bounded slice)
+
+The v2.5.1 scalar string family uses the existing typed evaluator invocation
+boundary:
+
+```text
+.string {value}
+.concatenate {abc} with:{def} if:{yes}
+.uppercase {hello}
+.lowercase {HELLO}
+.capitalize {hello, world!}
+.isempty {""}
+.isnotempty {" "}
+.startswith {Hello} {he} ignorecase:{yes}
+```
+
+`.string` accepts the bounded scalar forms already represented by the frontend
+and returns `IrValue::String`. A quote-delimited scalar such as
+`.string {"  Hello  "}` is classified by the Quarkdown grammar, with only the
+outer quotes removed and the inner whitespace preserved. `.concatenate` uses
+`a`, `with`, and optional `if` (default `true`); `.startswith` uses
+`string`, `prefix`, and optional `ignorecase` (default `false`). The case
+transforms and predicates use the same named/positional binding and scalar
+adaptation contract. The predicates return typed `IrValue::Boolean` values and
+can be used directly in lazy `.if`/`.ifnot` conditions.
+
+Strings, identifiers, numbers, booleans, and bounded plain-text content are
+adapted at this function boundary. `None`, collections, ranges, pairs,
+dictionaries, callables, and rich Markdown content are not implicitly
+stringified. `.plaintext` remains deferred because it is a separate rich
+inline-Markdown-to-plain-text projection boundary; the `.equals` fallback does
+not become a general conversion helper.
 
 ### Iteration (Implemented first slice)
 

@@ -13,8 +13,14 @@ pub(crate) fn is_supported(name: &str) -> bool {
         name,
         "sum"
             | "multiply"
+            | "string"
+            | "concatenate"
             | "uppercase"
             | "lowercase"
+            | "capitalize"
+            | "isempty"
+            | "isnotempty"
+            | "startswith"
             | "otherwise"
             | "isnone"
             | "islower"
@@ -33,7 +39,15 @@ pub(crate) fn evaluate(
 ) -> Result<IrValue, BuiltinError> {
     match name {
         "sum" | "multiply" => evaluate_numeric(name, positional_args, named_args, has_body),
-        "uppercase" | "lowercase" => evaluate_case(name, positional_args, named_args, has_body),
+        "string" => evaluate_string(positional_args, named_args, has_body),
+        "concatenate" => evaluate_concatenate(positional_args, named_args, has_body),
+        "uppercase" | "lowercase" | "capitalize" => {
+            evaluate_case(name, positional_args, named_args, has_body)
+        }
+        "isempty" | "isnotempty" => {
+            evaluate_empty_check(name, positional_args, named_args, has_body)
+        }
+        "startswith" => evaluate_startswith(positional_args, named_args, has_body),
         "otherwise" => evaluate_otherwise(positional_args, named_args, has_body),
         "isnone" => evaluate_isnone(positional_args, named_args, has_body),
         "islower" | "isgreater" => evaluate_ordering(name, positional_args, named_args, has_body),
@@ -118,6 +132,129 @@ fn evaluate_not(
         .remove(0)
         .ok_or_else(|| error("`.not` requires exactly one boolean argument".to_string()))?;
     Ok(IrValue::Boolean(!boolean_argument(&value, "value")?))
+}
+
+fn evaluate_string(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error("`.string` does not accept a block body".to_string()));
+    }
+    let mut arguments = bind_arguments("string", positional_args, named_args, &["value"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
+    let text = adapt_string_argument(&value).ok_or_else(|| {
+        error("`.string` requires a scalar value that can adapt to text".to_string())
+    })?;
+    Ok(IrValue::String(text))
+}
+
+fn evaluate_concatenate(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(
+            "`.concatenate` does not accept a block body".to_string(),
+        ));
+    }
+    let mut arguments = bind_arguments(
+        "concatenate",
+        positional_args,
+        named_args,
+        &["a", "with", "if"],
+        3,
+    )?;
+    let a = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.concatenate` requires an `a` string argument".to_string()))?;
+    let with = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.concatenate` requires a `with` string argument".to_string()))?;
+    let condition = arguments
+        .remove(0)
+        .map(|value| boolean_argument(&value, "if"))
+        .transpose()?
+        .unwrap_or(true);
+    let a = adapt_string_argument(&a)
+        .ok_or_else(|| error("`.concatenate` argument `a` cannot adapt to text".to_string()))?;
+    let with = adapt_string_argument(&with)
+        .ok_or_else(|| error("`.concatenate` argument `with` cannot adapt to text".to_string()))?;
+    if condition {
+        Ok(IrValue::String(format!("{a}{with}")))
+    } else {
+        Ok(IrValue::String(a))
+    }
+}
+
+fn evaluate_empty_check(
+    name: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(format!("`.{name}` does not accept a block body")));
+    }
+    let mut arguments = bind_arguments(name, positional_args, named_args, &["string"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
+    let text = adapt_string_argument(&value).ok_or_else(|| {
+        error(format!(
+            "`.{name}` requires a scalar value that can adapt to text"
+        ))
+    })?;
+    let is_empty = text.is_empty();
+    Ok(IrValue::Boolean(if name == "isempty" {
+        is_empty
+    } else {
+        !is_empty
+    }))
+}
+
+fn evaluate_startswith(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body {
+        return Err(error(
+            "`.startswith` does not accept a block body".to_string(),
+        ));
+    }
+    let mut arguments = bind_arguments(
+        "startswith",
+        positional_args,
+        named_args,
+        &["string", "prefix", "ignorecase"],
+        3,
+    )?;
+    let string = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.startswith` requires a `string` argument".to_string()))?;
+    let prefix = arguments
+        .remove(0)
+        .ok_or_else(|| error("`.startswith` requires a `prefix` argument".to_string()))?;
+    let ignorecase = arguments
+        .remove(0)
+        .map(|value| boolean_argument(&value, "ignorecase"))
+        .transpose()?
+        .unwrap_or(false);
+    let string = adapt_string_argument(&string)
+        .ok_or_else(|| error("`.startswith` argument `string` cannot adapt to text".to_string()))?;
+    let prefix = adapt_string_argument(&prefix)
+        .ok_or_else(|| error("`.startswith` argument `prefix` cannot adapt to text".to_string()))?;
+    let result = if ignorecase {
+        string.to_lowercase().starts_with(&prefix.to_lowercase())
+    } else {
+        string.starts_with(&prefix)
+    };
+    Ok(IrValue::Boolean(result))
 }
 
 fn bind_arguments(
@@ -360,20 +497,31 @@ fn evaluate_case(
     named_args: &[IrNamedArg],
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    if has_body || !named_args.is_empty() || positional_args.len() != 1 {
-        return Err(error(format!(
-            "`.{name}` requires exactly one positional text argument"
-        )));
+    if has_body {
+        return Err(error(format!("`.{name}` does not accept a block body")));
     }
-    let text = adapt_scalar_to_text(&positional_args[0]).ok_or_else(|| {
+    let mut arguments = bind_arguments(name, positional_args, named_args, &["string"], 1)?;
+    let value = arguments
+        .remove(0)
+        .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
+    let text = adapt_string_argument(&value).ok_or_else(|| {
         error(format!(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
     })?;
-    let transformed = if name == "uppercase" {
-        text.to_uppercase()
-    } else {
-        text.to_lowercase()
+    let transformed = match name {
+        "uppercase" => text.to_uppercase(),
+        "lowercase" => text.to_lowercase(),
+        "capitalize" => {
+            let mut characters = text.chars();
+            let Some(first) = characters.next() else {
+                return Ok(IrValue::String(text));
+            };
+            let mut result = first.to_uppercase().collect::<String>();
+            result.push_str(characters.as_str());
+            result
+        }
+        _ => return Err(error(format!("`.{name}` has no case transformation"))),
     };
     Ok(IrValue::String(transformed))
 }
@@ -383,9 +531,9 @@ fn error(message: String) -> BuiltinError {
 }
 
 /// Applies the small invocation-boundary text adaptation contract used by the
-/// evidenced case builtins. Plain text content is adapted structurally; rich
+/// evidenced string builtins. Plain text content is adapted structurally; rich
 /// content is not rendered or round-tripped through a backend.
-fn adapt_scalar_to_text(value: &IrValue) -> Option<String> {
+fn adapt_string_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),
@@ -421,6 +569,269 @@ mod tests {
 
     fn number(value: f64) -> IrValue {
         IrValue::Number(value)
+    }
+
+    fn named_arg(name: &str, value: IrValue) -> crate::ir::IrNamedArg {
+        crate::ir::IrNamedArg {
+            name: name.to_string(),
+            name_span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+            value,
+            span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+        }
+    }
+
+    #[test]
+    fn string_surface_is_registered_and_returns_typed_values() {
+        for name in [
+            "string",
+            "concatenate",
+            "uppercase",
+            "lowercase",
+            "capitalize",
+            "isempty",
+            "isnotempty",
+            "startswith",
+        ] {
+            assert!(is_supported(name), "{name} should be supported");
+        }
+
+        assert_eq!(
+            evaluate("string", &[IrValue::String("  Hello  ".into())], &[], false,)
+                .expect("quoted scalar should preserve inner whitespace"),
+            IrValue::String("  Hello  ".into())
+        );
+        assert_eq!(
+            evaluate("string", &[number(3.5)], &[], false).expect("number adapts to text"),
+            IrValue::String("3.5".into())
+        );
+        assert_eq!(
+            evaluate(
+                "string",
+                &[],
+                &[named_arg("value", IrValue::Boolean(true))],
+                false,
+            )
+            .expect("named string argument should bind"),
+            IrValue::String("true".into())
+        );
+    }
+
+    #[test]
+    fn string_operations_bind_named_arguments_and_defaults() {
+        assert_eq!(
+            evaluate(
+                "concatenate",
+                &[IrValue::Identifier("abc".into())],
+                &[named_arg("with", IrValue::Identifier("def".into()))],
+                false,
+            )
+            .expect("named concatenate argument should bind"),
+            IrValue::String("abcdef".into())
+        );
+        assert_eq!(
+            evaluate(
+                "concatenate",
+                &[
+                    IrValue::Identifier("abc".into()),
+                    IrValue::Identifier("def".into()),
+                    IrValue::Identifier("no".into()),
+                ],
+                &[],
+                false,
+            )
+            .expect("boolean identifier should adapt at the invocation boundary"),
+            IrValue::String("abc".into())
+        );
+        assert_eq!(
+            evaluate(
+                "startswith",
+                &[
+                    IrValue::String("Hello".into()),
+                    IrValue::String("He".into())
+                ],
+                &[],
+                false,
+            )
+            .expect("startswith should use a false default"),
+            IrValue::Boolean(true)
+        );
+        assert_eq!(
+            evaluate(
+                "startswith",
+                &[
+                    IrValue::String("Hello".into()),
+                    IrValue::String("he".into()),
+                ],
+                &[named_arg("ignorecase", IrValue::Identifier("yes".into()))],
+                false,
+            )
+            .expect("named ignorecase should bind"),
+            IrValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn string_case_and_empty_operations_cover_unicode_and_boundaries() {
+        for name in ["uppercase", "lowercase"] {
+            assert!(matches!(
+                evaluate(
+                    name,
+                    &[],
+                    &[named_arg("string", IrValue::Identifier("Hello".into()))],
+                    false,
+                ),
+                Ok(IrValue::String(_))
+            ));
+        }
+        assert_eq!(
+            evaluate(
+                "capitalize",
+                &[IrValue::Identifier("hello, world!".into())],
+                &[],
+                false,
+            )
+            .expect("capitalize should adapt a scalar identifier"),
+            IrValue::String("Hello, world!".into())
+        );
+        assert_eq!(
+            evaluate("capitalize", &[IrValue::String(String::new())], &[], false)
+                .expect("empty capitalization should succeed"),
+            IrValue::String(String::new())
+        );
+        assert_eq!(
+            evaluate("capitalize", &[IrValue::String("É".into())], &[], false)
+                .expect("one-character capitalization should succeed"),
+            IrValue::String("É".into())
+        );
+        assert_eq!(
+            evaluate(
+                "capitalize",
+                &[IrValue::String("éclair".into())],
+                &[],
+                false
+            )
+            .expect("Unicode capitalization should succeed"),
+            IrValue::String("Éclair".into())
+        );
+        assert_eq!(
+            evaluate("isempty", &[IrValue::String(String::new())], &[], false)
+                .expect("empty string should be accepted"),
+            IrValue::Boolean(true)
+        );
+        assert_eq!(
+            evaluate("isnotempty", &[IrValue::String(" ".into())], &[], false)
+                .expect("whitespace is not empty"),
+            IrValue::Boolean(true)
+        );
+        assert_eq!(
+            evaluate("isempty", &[IrValue::String(" ".into())], &[], false)
+                .expect("whitespace should not be trimmed"),
+            IrValue::Boolean(false)
+        );
+        for value in ["", " ", "value", "값"] {
+            let empty = evaluate("isempty", &[IrValue::String(value.to_string())], &[], false)
+                .expect("isempty should evaluate");
+            let not_empty = evaluate(
+                "isnotempty",
+                &[IrValue::String(value.to_string())],
+                &[],
+                false,
+            )
+            .expect("isnotempty should evaluate");
+            assert_eq!(
+                not_empty,
+                IrValue::Boolean(!matches!(empty, IrValue::Boolean(true))),
+                "predicate complement for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn string_operations_reject_unsupported_values_and_invalid_bindings() {
+        for name in [
+            "string",
+            "uppercase",
+            "lowercase",
+            "capitalize",
+            "isempty",
+            "isnotempty",
+            "startswith",
+        ] {
+            let arguments = if name == "startswith" {
+                vec![IrValue::String("value".into()), IrValue::None]
+            } else {
+                vec![IrValue::None]
+            };
+            assert!(evaluate(name, &arguments, &[], false).is_err(), "{name}");
+        }
+        assert!(evaluate("string", &[IrValue::Collection(Vec::new())], &[], false).is_err());
+        let rich_content = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Strong {
+                content: vec![IrInline::Text {
+                    content: "rich".into(),
+                    span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+                }],
+                span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+            }],
+            span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+        }]);
+        assert!(evaluate("string", &[rich_content], &[], false).is_err());
+        assert!(evaluate(
+            "concatenate",
+            &[
+                IrValue::Identifier("a".into()),
+                IrValue::Identifier("b".into())
+            ],
+            &[named_arg("if", IrValue::Identifier("maybe".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "startswith",
+            &[
+                IrValue::String("Hello".into()),
+                IrValue::String("he".into())
+            ],
+            &[named_arg("ignorecase", IrValue::Identifier("maybe".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate("capitalize", &[], &[], false).is_err());
+        assert!(evaluate(
+            "capitalize",
+            &[IrValue::Identifier("a".into())],
+            &[named_arg("string", IrValue::Identifier("b".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate("isnotempty", &[IrValue::Identifier("a".into())], &[], true,).is_err());
+        assert!(evaluate(
+            "concatenate",
+            &[
+                IrValue::Identifier("a".into()),
+                IrValue::Identifier("b".into())
+            ],
+            &[named_arg("unknown", IrValue::Identifier("c".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "concatenate",
+            &[
+                IrValue::Identifier("a".into()),
+                IrValue::Identifier("b".into())
+            ],
+            &[named_arg("a", IrValue::Identifier("c".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate(
+            "startswith",
+            &[IrValue::String("a".into()), IrValue::String("b".into())],
+            &[named_arg("ignorecase", IrValue::Boolean(false))],
+            true,
+        )
+        .is_err());
     }
 
     #[test]
