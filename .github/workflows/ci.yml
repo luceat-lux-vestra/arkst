@@ -54,6 +54,23 @@ jobs:
         run: cargo test --workspace --all-targets --all-features
         env:
           SCRIBIUM_REQUIRE_TYPST: "1"
+      - name: Smoke-test public examples
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          cargo build -p scribium-cli
+          mkdir -p target/example-smoke
+          for input in \
+            examples/markdown/basic.md \
+            examples/markdown/gfm.md \
+            examples/markdown/bounded-html.md \
+            examples/hello/main.qd
+          do
+            name="$(basename "${input%.*}")"
+            target/debug/scribium check "$input"
+            target/debug/scribium build "$input" --output "target/example-smoke/${name}.typ"
+            target/debug/scribium build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
+          done
 
   wasm:
     name: wasm
