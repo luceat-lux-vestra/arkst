@@ -6,8 +6,8 @@
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
 - **Review date:** 2026-08-18
-- **Scribium comparison head:** `48af224ca8e119026845f26a596302dc016ba542` (the
-  merged collection-operations baseline)
+- **Scribium comparison head:** `bed4ff72c48b725360877bd19ae60ca85e32fc28` (the
+  merged logical/comparison baseline)
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
@@ -54,7 +54,7 @@ Classification index:
 | Collection and Iterable operations | `.getat`, `.first`, `.second`, `.third`, `.last`, `.size`, `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues`; Pair, Dictionary, and Range adapt as iterables. Evidence: [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt), [`IterableTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/IterableTest.kt). | **Partially compatible.** The reviewed typed operations and ordering/absence behavior are implemented. Comparator-language syntax and table-specific operations are missing. Scribium also exposes `.map` and `.filter` as explicit extensions; they are not counted as v2.5.1 compatibility. | `collection_*`, `compile_collection_*`, and transform tests in `crates/scribium-core`; extension behavior is documented separately in `docs/SYNTAX.md`. | M2 collection slice completed; comparator/table operations follow only after a bounded semantic proposal. |
 | Dictionary, Pair, and Range values | `.pair`, `.dictionary`, one-based Pair/Dictionary entry access, ordered dictionary entries, last-write-wins keys, literal `A..B`/`..B`/`A..`/`..`, and dynamic `.range`. Evidence: [dictionary](https://quarkdown.com/wiki/dictionary/), [range](https://quarkdown.com/wiki/range/), [`DictionaryValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/DictionaryValue.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt). | **Partially compatible.** Recursive typed values, ordered iteration, access, finite range behavior, and atomic construction work. Nested/general destructuring, mutation, and direct materialization of every value shape are intentionally limited. | Pair/dictionary/range tests in `crates/scribium-core/src/lib.rs` and `evaluator.rs`; frontend range-span tests. | M2 reviewed slice; do not expand into generalized patterns without architecture review. |
 | Type and value conversion | Dynamic typing adapts a value at invocation time to `String`, `Number`, `Boolean`, `Range`, Markdown content, collections, and other public value types. Evidence: [typing](https://quarkdown.com/wiki/typing/), [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt), [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt). | **Partially compatible.** Scribium keeps typed `IrValue`s and has narrow, explicit conversions for the implemented operations (including collection `asDouble` behavior and selected scalar comparisons). It does not expose a general DynamicValue conversion layer and rejects unsupported structured-to-text coercions. | Typed evaluator, conversion, absence, and failure-atomicity tests; no claim of complete DynamicValue compatibility. | M2 debt, but implementation must be split by semantic family; general conversion is not part of this PR. |
-| String and text operations | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext`. Evidence: [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [typing](https://quarkdown.com/wiki/typing/). | **Partially compatible.** `.uppercase` and `.lowercase` are supported for the evidenced scalar forms. The remaining string family and complete rich-content plain-text semantics are unsupported. | Existing case-transform chain tests; selected `.equals` plain-text fallback tests. | M2; prioritize a separate string family after logical predicates. |
+| String and text operations | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext`. Evidence: [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [typing](https://quarkdown.com/wiki/typing/). | **Partially compatible.** The scalar string family is implemented for the bounded invocation contract: `.string` preserves already-parsed quoted scalar whitespace, `.concatenate` supports `with` and default-true `if`, case transforms use Unicode-aware Rust operations, and the emptiness/prefix predicates return typed booleans. Plain strings, identifiers, numbers, booleans, and bounded plain-text content adapt at the invocation boundary; `None`, collections, and other structured/rich values fail closed. `.plaintext` rich Markdown-content projection and complete upstream DynamicValue conversion remain unsupported. | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `scribium-core/src/builtins.rs::tests::string_*`; `scribium-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_string_predicates_feed_lazy_conditionals_without_text_materialization`, `compile_string_predicate_failure_is_atomic_and_source_backed`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`. | M2; scalar string family implemented as a bounded slice. `.plaintext` and general DynamicValue conversion remain separate gaps. |
 | Mathematical and numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, and `.range`. Evidence: [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [math](https://quarkdown.com/wiki/math/). | **Partially compatible.** `.sum`, `.multiply`, dynamic/literal range behavior, and collection aggregation are covered. The remaining numeric functions and exact upstream numeric adaptation are gaps. | Existing scalar/range/collection tests; no conformance claim for the unimplemented functions. | M2; split arithmetic/rounding/trigonometry rather than widening this PR. |
 | Logical and comparison operations | `.islower {a} than:{b} orequals:{bool}`, `.isgreater`, `.equals {a} to:{b}`, and `.not {value}`. Evidence: [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt), [`Comparison.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Comparison.kt), conditional examples/tests. | **Compatible for the bounded slice implemented here.** Numeric ordering uses upstream `toFloat` comparison and accepts the reviewed numeric scalar text forms; equality preserves typed values with the documented plain-text fallback; negation requires a boolean. Unsupported conversion inputs fail with one source-backed `E3001` and no partial branch output. | `builtins::tests::logical_*`; `compile_logical_comparisons_*`; frontend structural/span test; CLI verification below. | **Selected next M2 slice; highest priority remaining bounded family.** |
 | Include, read, and data loading | `.include`, `.includeall`, `.read`, `.json`, `.csv`, `.listfiles`, `.filename`, and context sandbox modes. Evidence: [including other files](https://quarkdown.com/wiki/including-other-quarkdown-files/), [`Ecosystem.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Ecosystem.kt), [`Data.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Data.kt). | **Unsupported / intentionally deferred.** Scribium core is filesystem-free; `VirtualProject` is the accepted host boundary and no include/read evaluator is present. | Architecture and threat-model review; no implementation evidence. | M3 host/data-loading work; excluded from this M2 PR. |
@@ -64,23 +64,26 @@ Classification index:
 
 ## Selection record
 
-The selected slice is the logical/comparison family: `.islower`, `.isgreater`,
-`.equals`, and `.not`, including use as a lazy `.if`/`.ifnot` condition.
+The current selected slice is the scalar string family: `.string`,
+`.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`,
+`.isnotempty`, and `.startswith`, including typed predicate use as a lazy
+`.if`/`.ifnot` condition. It follows the completed logical/comparison slice
+and uses the same typed invocation boundary.
 
-It outranks the other remaining gaps because it is a small public semantic
-family with direct v2.5.1 evidence, supplies expression-valued conditions used
-by later functions, and fits the existing typed evaluator/value-flow boundary.
-It needs no new parser, filesystem capability, IR tier, or backend escape hatch.
-The implementation preserves numeric/boolean/structured values until the
-operation boundary, then returns typed `IrValue::Boolean`; output materializes
+This is a small public semantic family with direct v2.5.1 evidence, supplies
+expression-valued predicates for lazy conditionals, and fits the existing typed
+evaluator/value-flow boundary. It needs no new parser, filesystem capability,
+IR tier, or backend escape hatch. The implementation adapts only the supported
+scalar/plain-text cases at the function invocation boundary, preserves typed
+results, and returns `IrValue::String` or `IrValue::Boolean`; output materializes
 only through the existing normal IR-to-Typst path.
 
-The PR intentionally excludes the rest of arithmetic, the remaining string
-functions, general DynamicValue conversion, `.ifpresent`/`.takeif`, comparator
-language syntax for sorting, include/read/data loading, metadata functions,
-components, and layout/document primitives. Those are separate inventory rows
-because combining them would leave multiple public families only partially
-implemented and would cross M2 host/architecture boundaries.
+The PR intentionally excludes `.plaintext`, general DynamicValue conversion,
+the rest of arithmetic, `.ifpresent`/`.takeif`, comparator-language syntax for
+sorting, include/read/data loading, metadata functions, components, and
+layout/document primitives. Those are separate inventory rows because
+combining them would leave multiple public families only partially implemented
+and would cross M2 host/architecture boundaries.
 
 ## Conformance evidence for the selected slice
 
@@ -98,3 +101,10 @@ implemented and would cross M2 host/architecture boundaries.
 - The repository's required `examples/hello` CLI smoke commands remain a
   pre-existing failure because that example references unresolved `show_code`;
   this slice does not alter the example or invent configuration semantics.
+
+The scalar string conformance fixture covers quoted whitespace preservation,
+positional/named/mixed binding, conditional concatenation, Unicode and boundary
+case behavior, typed chain results, lazy predicate conditionals, and the
+source-backed invalid-boolean failure path. `.plaintext` remains deferred
+because it projects rich inline Markdown content rather than adapting a scalar
+string; the `.equals` plain-text fallback remains private to equality.

@@ -1138,6 +1138,52 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_string_scalar_fixture_preserves_typed_value_flow() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "  Hello  \nabcdef\nabc\nHello, world!\nHello world\ntrue\nstarts\ncase-sensitive\nignored\nempty\nspace"
+        );
+    }
+
+    #[test]
+    fn compile_string_predicate_failure_is_atomic_and_source_backed() {
+        let source = "앞 문장\r\n.if {.startswith {Hello} {he} ignorecase:{maybe}}\r\n    숨겨진 내용\r\n뒤 문장\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3001");
+        let call_start = source.find(".startswith").expect("startswith call");
+        let call_end = call_start + ".startswith {Hello} {he} ignorecase:{maybe}".len();
+        assert_eq!(
+            diagnostic.primary,
+            Some(crate::source::SourceSpan::new(
+                source_id, call_start, call_end
+            ))
+        );
+        assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
+        assert!(!output_text(&result).contains("숨겨진 내용"));
+    }
+
+    #[test]
+    fn compile_string_predicates_feed_lazy_conditionals_without_text_materialization() {
+        let source = "\
+.if {.isempty {\"\"}}\n\
+    empty\n\
+.ifnot {.isnotempty {\"\"}}\n\
+    not-empty\n\
+.if {.startswith {Hello} {he} ignorecase:{yes}}\n\
+    case-insensitive\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "empty\nnot-empty\ncase-insensitive");
+    }
+
+    #[test]
     fn compile_let_reports_arity_and_implicit_parameter_spans() {
         let missing_value = ".let\n    value:\n    .value\n";
         let (result, source_id) = compile_source(missing_value);

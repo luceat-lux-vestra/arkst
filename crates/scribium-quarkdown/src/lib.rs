@@ -1092,6 +1092,10 @@ mod tests {
                 ".foo {\"hello world\"}",
                 Value::String("hello world".into()),
             ),
+            (
+                ".foo {\"  hello world  \"}",
+                Value::String("  hello world  ".into()),
+            ),
             (".foo {show_code}", Value::Identifier("show_code".into())),
             (".foo {0.5}", Value::Number(0.5)),
             (".foo {-1}", Value::Number(-1.0)),
