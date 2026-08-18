@@ -2139,6 +2139,89 @@ mod tests {
     }
 
     #[test]
+    fn compile_html_comment_noop_is_markdown_only_for_case_insensitive_entries() {
+        let inline_source = "before <!-- note --> after\n";
+        for entry in ["main.md", "main.MD", "main.Md"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, inline_source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let result = super::compile(&project, &CompileOptions::default());
+            assert!(result.diagnostics.is_empty(), "{entry}: {result:?}");
+            let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+                panic!("{entry}: expected paragraph, got {:?}", result.ir.nodes);
+            };
+            assert_eq!(
+                content
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        IrInline::Text { content, .. } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                vec!["before ", " after"]
+            );
+        }
+
+        for entry in ["main.qd", "main.QD", "main.scrib", "main.SCRIB"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, inline_source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let source_id = project
+                .sources()
+                .get_id(project.entry())
+                .expect("source id");
+            let result = super::compile(&project, &CompileOptions::default());
+            let diagnostic = result
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "E8001")
+                .unwrap_or_else(|| panic!("{entry}: expected E8001, got {:?}", result.diagnostics));
+            let span = diagnostic.primary.expect("raw HTML primary span");
+            assert_eq!(span.source_id, source_id);
+            assert_eq!(
+                inline_source.get(span.start..span.end),
+                Some("<!-- note -->")
+            );
+        }
+
+        let block_source = "<!-- note -->\n";
+        for entry in [
+            "main.md",
+            "main.MD",
+            "main.qd",
+            "main.QD",
+            "main.scrib",
+            "main.SCRIB",
+        ] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, block_source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let result = super::compile(&project, &CompileOptions::default());
+            if entry.to_ascii_lowercase().ends_with(".md") {
+                assert!(result.diagnostics.is_empty(), "{entry}: {result:?}");
+                assert!(result.ir.nodes.is_empty(), "{entry}: {:?}", result.ir.nodes);
+            } else {
+                assert_eq!(result.diagnostics.len(), 1, "{entry}: {result:?}");
+                assert_eq!(result.diagnostics[0].code, "E8001");
+                let span = result.diagnostics[0].primary.expect("block HTML span");
+                assert_eq!(block_source.get(span.start..span.end), Some(block_source));
+            }
+        }
+    }
+
+    #[test]
     fn compile_raw_html_semantics_follow_the_entry_source_mode() {
         let source = "before <em>one <strong>two</strong></em><br>after\n";
         for entry in ["main.md", "main.qd", "main.scrib"] {

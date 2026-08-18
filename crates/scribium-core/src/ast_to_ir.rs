@@ -254,7 +254,10 @@ fn block_to_ir(
                 .collect(),
             span: byte_to_source_span(span, source_id),
         }),
-        Block::RawHtml { span, .. } => {
+        Block::RawHtml { source, span } => {
+            if source_mode == SourceMode::Markdown && is_comment_only_raw_html_block(source) {
+                return None;
+            }
             push_unsupported(diagnostics, "raw HTML block", span, source_id);
             None
         }
@@ -377,6 +380,10 @@ fn inlines_to_ir(
         if source_mode == SourceMode::Markdown {
             if let Inline::RawHtml { content, span } = &inlines[index] {
                 match classify_raw_html(content) {
+                    Some(RawHtmlToken::Comment) => {
+                        index += 1;
+                        continue;
+                    }
                     Some(RawHtmlToken::HardBreak) => {
                         output.push(IrInline::HardBreak {
                             span: byte_to_source_span(span, source_id),
@@ -439,15 +446,72 @@ enum RawHtmlTag {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RawHtmlToken {
+    Comment,
     Open(RawHtmlTag),
     Close(RawHtmlTag),
     HardBreak,
+}
+
+/// Return the end of the first parser-recognized HTML comment token.
+///
+/// CommonMark 0.31.2 has two short comment tokens (`<!-->` and `<!--->`) in
+/// addition to the ordinary `<!-- ... -->` form. The ordinary form ends at
+/// the first `-->`; the body is otherwise intentionally opaque here.
+fn comment_token_end(content: &str) -> Option<usize> {
+    if content.starts_with("<!-->") {
+        return Some("<!-->".len());
+    }
+    if content.starts_with("<!--->") {
+        return Some("<!--->".len());
+    }
+    if !content.starts_with("<!--") {
+        return None;
+    }
+    content["<!--".len()..]
+        .find("-->")
+        .map(|offset| "<!--".len() + offset + "-->".len())
+}
+
+fn classify_comment_raw_html(content: &str) -> Option<RawHtmlToken> {
+    (comment_token_end(content) == Some(content.len())).then_some(RawHtmlToken::Comment)
+}
+
+/// A Rushdown HTML block includes the source line's permitted indentation and
+/// line ending. Accept only that parser-owned boundary material around one
+/// complete comment; visible same-line content remains unsupported.
+fn is_comment_only_raw_html_block(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut content_start = 0;
+    while content_start < bytes.len() && content_start < 3 && bytes[content_start] == b' ' {
+        content_start += 1;
+    }
+
+    let content = &source[content_start..];
+    let Some(comment_end) = comment_token_end(content) else {
+        return false;
+    };
+    if !is_comment_raw_html_boundary(&content[comment_end..]) {
+        return false;
+    }
+    classify_comment_raw_html(&content[..comment_end]).is_some()
+}
+
+fn is_comment_raw_html_boundary(suffix: &str) -> bool {
+    let bytes = suffix.as_bytes();
+    let mut boundary_end = 0;
+    while boundary_end < bytes.len() && matches!(bytes[boundary_end], b' ' | b'\t') {
+        boundary_end += 1;
+    }
+    matches!(&bytes[boundary_end..], [] | [b'\n'] | [b'\r', b'\n'])
 }
 
 /// Classify only exact, attribute-free tags whose existing IR already has the
 /// same document meaning. This is a whitelist, not an HTML parser: all other
 /// opaque Rushdown segments remain unsupported and source-backed.
 fn classify_raw_html(content: &str) -> Option<RawHtmlToken> {
+    if let Some(comment) = classify_comment_raw_html(content) {
+        return Some(comment);
+    }
     for (opening, tag) in [
         ("<em>", RawHtmlTag::Em),
         ("<strong>", RawHtmlTag::Strong),
@@ -522,6 +586,7 @@ fn raw_html_pairs(inlines: &[Inline]) -> Vec<RawHtmlPair> {
                 }
             }
             Some(RawHtmlToken::HardBreak) => {}
+            Some(RawHtmlToken::Comment) => {}
             None => {
                 for frame in &mut stack {
                     frame.invalid = true;
@@ -1928,6 +1993,186 @@ mod tests {
                 "mismatched tags must not lower to strikethrough: {source:?}: {content:?}"
             );
         }
+    }
+
+    #[test]
+    fn markdown_html_comments_are_inline_semantic_noops_and_neutral_for_pairs() {
+        for source in [
+            "before <!-- note --> after\n",
+            "before <!-- this is a --\ncomment - with hyphens --> after\n",
+            "before <!--> after\n",
+            "before <!---> after\n",
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+                panic!("expected paragraph, got {:?}", ir.nodes);
+            };
+            for inline in content {
+                if let IrInline::Text { content, span } = inline {
+                    assert_eq!(span.source_id, source_id());
+                    assert_eq!(source.get(span.start..span.end), Some(content.as_str()));
+                }
+            }
+            assert_eq!(
+                content
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        IrInline::Text { content, .. } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                vec!["before ", " after"]
+            );
+        }
+
+        for source in [
+            "<em>before <!-- note --> after</em>\n",
+            "<em>a <strong>b<!-- note -->c</strong> d</em>\n",
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert!(matches!(
+                ir.nodes.first(),
+                Some(IrNode::Paragraph { content, .. })
+                    if content.iter().any(|inline| matches!(inline, IrInline::Emphasis { .. }))
+            ));
+        }
+
+        let unknown_source = "<em>before <span>unknown</span> after</em>\n";
+        let document = scribium_markdown::parse_md(unknown_source);
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
+        assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "E8001"));
+        assert!(
+            matches!(ir.nodes.first(), Some(IrNode::Paragraph { content, .. }) if content
+            .iter()
+            .all(|inline| !matches!(inline, IrInline::Emphasis { .. })))
+        );
+    }
+
+    #[test]
+    fn markdown_comment_only_blocks_drop_without_widening_raw_html_support() {
+        for source in [
+            "<!-- note -->\n",
+            "<!--\nnote\n-->\n",
+            "  <!-- indented -->\r\n",
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert!(ir.nodes.is_empty(), "{source:?}: {:?}", ir.nodes);
+        }
+
+        for source in [
+            "<!-- note -->VISIBLE\n",
+            "<!--> VISIBLE -->\n",
+            "<!---> VISIBLE -->\n",
+            "<!-- one --><!-- two -->\n",
+            "<!-- unterminated\nvisible\n",
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            assert_eq!(ir.nodes.len(), 0, "{source:?}: {:?}", ir.nodes);
+            assert_eq!(diagnostics.len(), 1, "{source:?}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].code, "E8001");
+            let span = diagnostics[0].primary.expect("raw HTML span");
+            assert_eq!(span.source_id, source_id());
+            assert_eq!(span.start, 0);
+            assert_eq!(span.end, source.len());
+        }
+
+        for source in [
+            "<?processing instruction?>\n",
+            "<!DOCTYPE html>\n",
+            "<![CDATA[content]]>\n",
+            "<span>x</span>\n",
+            "<div>\nvisible\n</div>\n",
+        ] {
+            let document = scribium_markdown::parse_md(source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            if source.starts_with("<span>") {
+                assert!(matches!(
+                    ir.nodes.as_slice(),
+                    [IrNode::Paragraph { content, .. }]
+                        if matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "x")
+                ));
+            } else {
+                assert!(ir.nodes.is_empty(), "{source:?}: {:?}", ir.nodes);
+            }
+            assert!(!diagnostics.is_empty(), "{source:?} unexpectedly succeeded");
+            assert!(diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "E8001"));
+            assert!(diagnostics.iter().all(|diagnostic| {
+                diagnostic
+                    .primary
+                    .is_some_and(|span| span.source_id == source_id() && span.end > span.start)
+            }));
+        }
+    }
+
+    #[test]
+    fn markdown_comment_separator_preserves_distinct_list_and_code_nodes() {
+        let lists = scribium_markdown::parse_md("- foo\n- bar\n\n<!-- -->\n\n- baz\n- bim\n");
+        let (list_ir, list_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &lists,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
+        assert!(list_diagnostics.is_empty(), "{list_diagnostics:?}");
+        assert!(matches!(
+            list_ir.nodes.as_slice(),
+            [IrNode::UnorderedList { .. }, IrNode::UnorderedList { .. }]
+        ));
+
+        let list_and_code = scribium_markdown::parse_md("- foo\n- bar\n\n<!-- -->\n\n    code\n");
+        let (code_ir, code_diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &list_and_code,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
+        assert!(code_diagnostics.is_empty(), "{code_diagnostics:?}");
+        assert!(matches!(
+            code_ir.nodes.as_slice(),
+            [IrNode::UnorderedList { .. }, IrNode::CodeBlock { .. }]
+        ));
     }
 
     #[test]
