@@ -37,6 +37,11 @@ documentation, notably *"Syntax of a function call"* on the Quarkdown wiki.
 No Quarkdown source code is copied or translated. See `SPEC_SOURCES.md` for
 provenance records.
 
+The remaining public-language surface is tracked in the
+[`GAP_INVENTORY.md`](GAP_INVENTORY.md). It records upstream evidence, Scribium
+status, semantic gaps, conformance evidence, and recommended order for
+subsequent bounded slices; it replaces an opaque remaining-M2 list.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
@@ -52,7 +57,8 @@ provenance records.
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
 | Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Implemented      |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
-| Conditionals                   | `.if {cond}` / `.ifnot {cond}` | Semantically supported | Implemented      |
+| Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
+| Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
 | Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
@@ -330,6 +336,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | M2 blockquotes / strikethrough / task lists / tables | `scribium-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `scribium-core/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `scribium-core/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `scribium-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `scribium-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
 | v2.5.1 call syntax slice | `scribium-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `scribium-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `scribium-core/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`, `scribium-core/src/lib.rs::compile_evaluates_block_and_inline_chain_value_flow`, `compile_evaluates_chain_inside_a_content_argument`, `compile_chain_and_nested_call_are_semantically_equivalent`, `compile_variable_values_keep_types_across_chain_and_nested_forms`, `compile_numeric_variable_reassignment_preserves_numeric_value_context`, `compile_chain_and_ordinary_conditional_are_equally_lazy`, `compile_reports_unimplemented_chain_callees_with_specific_spans`, `compile_reports_chain_failures_in_inline_and_content_paths`; `scribium-core/src/evaluator.rs::nested_call_and_chain_share_the_same_value_context`, `nested_and_chained_case_transforms_share_dynamic_scalar_adaptation`, `variable_values_remain_semantic_through_nested_and_chained_calls`, `chain_value_flow_is_left_to_right_and_injects_first`, `chain_preserves_explicit_positional_arguments_after_previous_value`, `chain_keeps_named_arguments_named_while_injecting_previous_value`, `false_final_conditional_chain_does_not_evaluate_its_body`, `false_final_inline_conditional_chain_does_not_evaluate_its_body`, `child_scope_inherits_parent_and_isolates_local_bindings`; `scribium-cli/src/commands.rs::unimplemented_chain_callee_fails_before_typst_or_pdf_output`; `scribium-typst/tests/backend_integration.rs::integration_chain_evaluation_reaches_typst_and_pdf`; `fixtures/markdown/quarkdown_v251_syntax.qd` syntax/provenance fixture |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
+| Logical/comparison predicates | `scribium-core/src/builtins.rs::tests::logical_surface_is_registered_and_evaluates_typed_results`, `equality_preserves_types_and_uses_upstream_plain_text_fallback`, `logical_builtins_reject_invalid_values_and_duplicate_bindings`; `scribium-core/src/lib.rs::compile_logical_comparisons_drive_conditionals_and_nested_calls`, `compile_logical_comparisons_work_in_user_functions_and_chains`, `compile_logical_comparison_failure_is_atomic_and_source_backed`, `compile_logical_comparison_execution_is_deterministic_for_utf8_crlf`; `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_logical_comparison_expression_remains_structural_and_source_backed`; `scribium-typst/tests/backend_integration.rs::integration_logical_comparison_evaluation_reaches_typst_and_pdf` | `.islower`, `.isgreater`, `.equals`, and `.not` return typed booleans, preserve the value boundary, support lazy conditional use, and fail closed on invalid input | Implemented (bounded v2.5.1 slice) |
 | User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_non_lambda_body_with_colon_is_not_stripped`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
 | Scoped `.let`                | `scribium-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `scribium-core/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `scribium-core/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `scribium-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |
 | Iteration                    | `scribium-quarkdown/src/lib.rs::parses_typed_ranges_without_confusing_numbers_or_references`; `scribium-markdown/src/parser.rs::iteration_lambda_headers_are_contextual_and_source_backed`; `scribium-core/src/ast_to_ir.rs::range_survives_ast_to_ir_as_a_typed_source_backed_value`, `literal_range_endpoint_conversion_is_checked_at_the_signed_boundary`; `scribium-core/src/ir.rs::range_and_nested_collection_roundtrip_serde`, `pair_and_dictionary_roundtrip_serde_preserves_recursive_values`; `scribium-core/src/evaluator.rs::dynamic_range_returns_typed_signed_truncated_endpoints`, `dynamic_range_number_conversion_matches_upstream_edges`, `range_materialization_handles_signed_and_left_open_bounds_once`, `pair_evaluation_is_typed_recursive_and_atomic_on_child_failure`, `dictionary_iteration_reuses_pair_items_and_explicit_destructuring`, `pair_destructuring_rejects_non_pair_items_without_coercion`; `scribium-core/src/lib.rs::compile_foreach_closed_range_is_inclusive_and_preserves_numbers`, `compile_dynamic_range_converges_with_literal_and_supports_signed_bounds`, `compile_dynamic_range_supports_nested_bounds_and_typed_interoperability`, `compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed`, `compile_foreach_reads_parent_values_and_functions_with_isolated_children`, `compile_foreach_adapts_only_list_values_and_preserves_nested_collections`, `compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary`, `compile_dictionary_foreach_destructures_ordered_pairs`, `compile_dictionary_duplicate_keys_are_last_write_wins_in_first_slot`, `compile_dictionary_entry_failure_is_atomic_and_stops_before_output`, `compile_dictionary_implicit_scope_keeps_the_pair_typed`, `compile_dictionary_explicit_scope_masks_implicit_positional_references`, `compile_dictionary_destructuring_masks_and_restores_parent_bindings`, `compile_nested_dictionary_destructuring_restores_outer_scope`, `compile_pair_is_a_typed_recursive_value_at_the_output_boundary`, `compile_repeat_is_one_based_and_uses_the_shared_collection_result`, `compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence`, `compile_iteration_accepts_left_open_and_rejects_endless_ranges`, `compile_dynamic_range_rejects_invalid_shapes_and_preserves_atomic_failures`, `compile_dynamic_range_diagnostics_keep_utf8_crlf_and_nested_bound_spans`, `compile_iteration_body_no_value_and_failure_are_single_diagnostics` | Semantically supported for typed literal/dynamic values, signed endpoint conversion, closed and left-open iterable ranges, descending-empty behavior, ordered list adaptation, ordered dictionary entries, Pair destructuring, block explicit/implicit lambdas, typed collection results, parent visibility, and child isolation | Implemented (evidenced slice; endless right-open/fully-open consumption and generalized patterns deferred) |
@@ -458,11 +465,12 @@ surfaces below: `.name`, positional arguments `{arg}`, named arguments
 `name:{arg}`, nested calls, and indented block bodies are parsed into the
 Scribium AST/IR. Multiline braced arguments, line continuations, and tight
 brace-wrapped calls are syntax-supported with source-backed spans. The
-evidenced `.sum`, `.multiply`, `.uppercase`, and `.lowercase` chain forms and
-their documented nested-call equivalents are **Semantically supported** with
-strict left-to-right value flow; an unimplemented chain callee reports a
-source-backed `E3001` evaluation error. The case builtins' small scalar
-adaptation contract is evidenced, not complete DynamicValue compatibility.
+evidenced `.sum`, `.multiply`, `.uppercase`, `.lowercase`, `.islower`,
+`.isgreater`, `.equals`, and `.not` chain forms and their documented
+nested-call equivalents are **Semantically supported** with strict
+left-to-right value flow; an unimplemented chain callee reports a source-backed
+`E3001` evaluation error. The case and comparison builtins' small scalar
+adaptation contracts are evidenced, not complete DynamicValue compatibility.
 **User-defined functions are also semantically supported for the evidenced
 slice**: headerless implicit and required/optional explicit-parameter
 declarations, positional/named binding where applicable, block-last-parameter
@@ -472,7 +480,10 @@ scalar/structured-content results. Missing optional parameters bind semantic
 conversion in value context. Headerless `.1`/`.2` references are 1-based,
 invocation-local, and preserve typed `IrValue`s; missing indices produce a
 source-backed `E3003` diagnostic. **Conditional evaluation (`.if` / `.ifnot`)
-with boolean literals and variable references (`.if {.name}`) is implemented**.
+with boolean literals, variable references (`.if {.name}`), and the selected
+logical/comparison expressions is implemented**. The comparison family is
+documented in [`GAP_INVENTORY.md`](GAP_INVENTORY.md) and uses typed boolean
+results rather than text reparsing.
 Standalone lambda values, components, and complete programmable-document
 compatibility remain unimplemented. Typed block iteration is limited to the
 evidenced first slice above. A matrix row can
@@ -481,6 +492,27 @@ forms at its stated level; an input form that currently fails to parse (for
 example with an `E2xxx` diagnostic) is a compatibility gap, not evidence of
 support for that form. `Unsupported` is reserved for the explicit compatibility
 diagnostic state.
+
+### Logical and comparison evidence
+
+The v2.5.1 public [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt)
+surface defines numeric `.islower` and `.isgreater` with `than` and optional
+`orequals`, value `.equals` with `to`, and boolean `.not`. The public
+[`Comparison.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Comparison.kt)
+helper shows that equality first compares values and then compares a plain-text
+projection for strings, numbers, and Markdown content. The v2.5.1 conditional
+tests exercise `.islower` directly inside `.if`, including the lazy branch
+behavior documented by the [conditional statements](https://quarkdown.com/wiki/conditional-statements/)
+page.
+
+Scribium implements this family as typed evaluator builtins. Numeric ordering
+uses the upstream float comparison boundary and accepts the reviewed scalar
+numeric text forms; `.equals` preserves typed equality and applies only the
+documented plain-text fallback; `.not` accepts boolean values and boolean
+literals. Invalid values, duplicate bindings, and unsupported bodies produce a
+single source-backed `E3001`; the conditional body is not evaluated and no
+partial result is published. The selected family is not a claim that all
+DynamicValue conversions or other logical helpers are complete.
 
 ### Tight-call boundaries
 

@@ -595,3 +595,39 @@ fn qd251_qd_body_uses_dynamic_indent_before_markdown_list_parsing() {
         Block::Paragraph { ref content, .. } if text_content(content) == "outside"
     ));
 }
+
+#[test]
+fn qd251_logical_comparison_expression_remains_structural_and_source_backed() {
+    let source = ".if {.islower {2} than:{3}}\r\n    result\r\n";
+    let document = parse_without_diagnostics(source, Mode::Quarkdown);
+    let Block::DirectiveCall {
+        name,
+        positional_args,
+        body: Some(body),
+        span,
+        ..
+    } = &document.nodes[0]
+    else {
+        panic!("expected conditional directive, got {:?}", document.nodes);
+    };
+    assert_eq!(name, "if");
+    assert_eq!(
+        &source[span.start..span.end],
+        ".if {.islower {2} than:{3}}\r\n    result"
+    );
+    let Some(scribium_markdown::ast::Value::Content(condition)) = positional_args.first() else {
+        panic!("expected content condition, got {positional_args:?}");
+    };
+    assert!(matches!(
+        condition.first(),
+        Some(Inline::DirectiveCall { name, .. }) if name == "islower"
+    ));
+    assert_document_spans(
+        &Document {
+            nodes: body.clone(),
+            front_matter: None,
+            line_count: 0,
+        },
+        source,
+    );
+}

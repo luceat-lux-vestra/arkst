@@ -68,10 +68,19 @@ partial compatibility claims and a growing evidence-backed baseline.
 |-------------------------------------|--------------|
 | Document-scope variable evaluation  | Completed    |
 | Generic callables, native iterable operations, and collection transforms | Completed (evidenced slice; `.map`/`.filter` retained as Scribium extensions) |
-| Remaining M2 features               | In progress  |
+| Logical/comparison predicates (`.islower`, `.isgreater`, `.equals`, `.not`) | Completed (bounded v2.5.1 slice) |
+| Conditional expressions using logical/comparison results | Completed (bounded evidence) |
+| Scalar arithmetic beyond `.sum`/`.multiply` | Planned (gap inventory; separate M2 slice) |
+| String operations beyond case conversion | Planned (gap inventory; separate M2 slice) |
+| General typed value conversion | Planned (gap inventory; split by semantic family) |
+| Error/absence helpers beyond `.isnone`/`.otherwise` | In progress (bounded evidence) |
+| Public-language gap inventory and next-slice ordering | Completed (see `docs/compatibility/quarkdown/GAP_INVENTORY.md`) |
 
 Public Quarkdown features not yet implemented are tracked compatibility debt;
-they are not permanent product exclusions. v0.1 may be partial.
+they are not permanent product exclusions. Include/read/data loading is
+deferred to M3 because it crosses the host filesystem boundary; function-driven
+metadata and layout/components are deferred to M3+; see the gap inventory for
+the complete evidence-backed classification. v0.1 may be partial.
 
 ## M3 — Programmable Documents
 

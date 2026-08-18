@@ -486,7 +486,29 @@ scalar), or nothing.
 `.ifnot` inverts the condition: its content is rendered when the
 condition is false.
 
-Nested conditionals are supported. Variable references (`.name`) in conditions resolve to the variable's boolean value. Function-call conditions (e.g., `.if {.func {x}}`) are not supported and produce an `E3001` diagnostic.
+Nested conditionals are supported. Variable references (`.name`) in conditions
+resolve to the variable's boolean value. The bounded logical/comparison family
+also produces typed condition values:
+
+```text
+.if {.islower {2} than:{3}}
+    lower
+.ifnot {.isgreater {2} than:{3}}
+    not-greater
+.if {.equals {2} to:{"2"}}
+    equal
+.if {.not {.equals {2} to:{3}}}
+    different
+```
+
+`.islower` and `.isgreater` accept numeric `a`/`than` values and optional
+`orequals:{true|false}`; `.equals` accepts `a` and `to`; `.not` accepts one
+boolean. Numeric ordering follows the upstream float comparison boundary, and
+equality applies the documented plain-text fallback only for comparable
+strings, numbers, and Markdown content. Invalid values produce one
+source-backed `E3001`, and a failing condition does not evaluate or publish its
+body. Other function-call conditions remain outside this bounded slice until
+their owning semantic family is implemented.
 
 ### Iteration (Implemented first slice)
 

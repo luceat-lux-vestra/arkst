@@ -2316,4 +2316,80 @@ mod tests {
         };
         assert_eq!(text, "body");
     }
+
+    #[test]
+    fn compile_logical_comparisons_drive_conditionals_and_nested_calls() {
+        let source = "\
+.var {value} {2}
+.if {.islower {.value} than:{3}}
+    below
+.ifnot {.isgreater {.value} than:{3}}
+    not-greater
+.if {.isgreater {3} than:{3} orequals:{yes}}
+    inclusive
+.if {.equals {2} to:{\"2\"}}
+    equal
+.if {.not {.equals {2} to:{3}}}
+    distinct
+";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "below\nnot-greater\ninclusive\nequal\ndistinct"
+        );
+    }
+
+    #[test]
+    fn compile_logical_comparisons_work_in_user_functions_and_chains() {
+        let source = "\
+.function {classify}
+    value:
+    .if {.value::islower than:{3}}
+        small
+    .ifnot {.value::islower than:{3}}
+        large
+
+.classify {2}
+.classify {4}
+";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "small\nlarge");
+    }
+
+    #[test]
+    fn compile_logical_comparison_failure_is_atomic_and_source_backed() {
+        let source = "앞 문장\r\n.if {.islower {not-a-number} than:{3}}\r\n    숨겨진 내용\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3001");
+        let comparison_start = source.find(".islower").expect("comparison call");
+        let comparison_end = comparison_start + ".islower {not-a-number} than:{3}".len();
+        assert_eq!(
+            diagnostic.primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                comparison_start,
+                comparison_end,
+            ))
+        );
+        assert_eq!(output_text(&result), "앞 문장");
+        assert!(!output_text(&result).contains("숨겨진 내용"));
+    }
+
+    #[test]
+    fn compile_logical_comparison_execution_is_deterministic_for_utf8_crlf() {
+        let source = "한글\r\n.if {.equals {값} to:{값}}\r\n    통과\r\n";
+        let first = compile_source(source).0;
+        let second = compile_source(source).0;
+        assert_eq!(first.ir, second.ir);
+        assert_eq!(
+            serde_json::to_string(&first.diagnostics).expect("diagnostics serialize"),
+            serde_json::to_string(&second.diagnostics).expect("diagnostics serialize")
+        );
+        assert!(first.diagnostics.is_empty(), "{first:?}");
+        assert_eq!(output_text(&first), "한글\n통과");
+    }
 }
