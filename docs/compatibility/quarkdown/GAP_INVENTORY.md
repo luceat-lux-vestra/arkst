@@ -6,7 +6,7 @@
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
 - **Review date:** 2026-08-18
-- **Scribium comparison head:** `9893ebccada8a94d91c328b3979990887721bfe2`
+- **Scribium comparison head:** `6a98df1a548e27fa61cb80b5f78dcc269187b0c5`
   (the exact current-main snapshot for this review)
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
@@ -37,7 +37,8 @@ Classification index:
 | Classification | Inventory rows |
 |---|---|
 | Compatible at the stated bounded boundary | Logical and comparison operations |
-| Partially compatible | Function declarations/calls; variables; conditionals; lambdas/callables; iteration; collections; Dictionary/Pair/Range; type/value conversion; strings/text; mathematics/numeric; metadata/document setup; error/absence |
+| Partially compatible | Function declarations/calls; variables; conditionals; lambdas/callables; iteration; collections; Dictionary/Pair/Range; type/value conversion; strings/text; metadata/document setup; error/absence |
+| Compatible at the evidenced bounded boundary | Mathematics/numeric operations |
 | Unsupported | Layout/document functions; include/read/data loading before its host boundary is introduced |
 | Scribium extension | `.map` and `.filter` collection transforms; they are tested Scribium behavior but are not v2.5.1 upstream features |
 | Intentionally deferred | Include/read/data loading, function-driven metadata, layout/components, comparator-language sorting, and generalized DynamicValue conversion |
@@ -55,7 +56,7 @@ Classification index:
 | Dictionary, Pair, and Range values | `.pair`, `.dictionary`, one-based Pair/Dictionary entry access, ordered dictionary entries, last-write-wins keys, literal `A..B`/`..B`/`A..`/`..`, and dynamic `.range`. Evidence: [dictionary](https://quarkdown.com/wiki/dictionary/), [range](https://quarkdown.com/wiki/range/), [`DictionaryValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/DictionaryValue.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt). | **Partially compatible.** Recursive typed values, ordered iteration, access, finite range behavior, and atomic construction work. Nested/general destructuring, mutation, and direct materialization of every value shape are intentionally limited. | Pair/dictionary/range tests in `crates/scribium-core/src/lib.rs` and `evaluator.rs`; frontend range-span tests. | M2 reviewed slice; do not expand into generalized patterns without architecture review. |
 | Type and value conversion | Dynamic typing adapts a value at invocation time to `String`, `Number`, `Boolean`, `Range`, Markdown content, collections, and other public value types. Evidence: [typing](https://quarkdown.com/wiki/typing/), [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt), [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt). | **Partially compatible.** Scribium keeps typed `IrValue`s and has narrow, explicit conversions for the implemented operations (including collection `asDouble` behavior and selected scalar comparisons). It does not expose a general DynamicValue conversion layer and rejects unsupported structured-to-text coercions. | Typed evaluator, conversion, absence, and failure-atomicity tests; no claim of complete DynamicValue compatibility. | M2 debt, but implementation must be split by semantic family; general conversion is not part of this PR. |
 | String and text operations | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext`. Evidence: [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [typing](https://quarkdown.com/wiki/typing/). | **Partially compatible.** The scalar string family is implemented for the bounded invocation contract: `.string` preserves already-parsed quoted scalar whitespace, `.concatenate` supports `with` and default-true `if`, case transforms use Unicode-aware Rust operations, and the emptiness/prefix predicates return typed booleans. Plain strings, identifiers, numbers, booleans, and bounded plain-text content adapt at the invocation boundary; `None`, collections, and other structured/rich values fail closed. `.plaintext` rich Markdown-content projection and complete upstream DynamicValue conversion remain unsupported. | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `scribium-core/src/builtins.rs::tests::string_*`; `scribium-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_string_predicates_feed_lazy_conditionals_without_text_materialization`, `compile_string_predicate_failure_is_atomic_and_source_backed`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`. | M2; scalar string family implemented as a bounded slice. `.plaintext` and general DynamicValue conversion remain separate gaps. |
-| Mathematical and numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, and `.range`. Evidence: [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [`MathFunctionsTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt), [math](https://quarkdown.com/wiki/math/). | **Partially compatible.** Implemented through typed evaluator paths: `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, and `.iseven`; dynamic/literal `.range` remains covered separately. `.truncate` reproduces the upstream Float/Double/toInt/Float boundary, requires strict integral `decimals: Int`, rejects fractional and negative decimals with the corresponding failure class, and `.round` reproduces Kotlin ties-to-even followed by Int conversion. `.logn`, `.pi`, `.sin`, `.cos`, and `.tan` remain gaps; this is not a claim of complete numeric compatibility. | Arithmetic regression: `crates/scribium-core/src/builtins.rs::tests::numeric_*`, `crates/scribium-core/src/lib.rs::tests::compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow`. Decimal slice: `decimal_numeric_surface_matches_upstream_boundaries`, `compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`, `compile_numeric_decimal_forms_share_one_semantic_path`, `compile_numeric_decimal_failure_is_atomic_and_source_backed`, `crates/scribium-test-support/src/lib.rs::tests::test_verify_numeric_decimal_family_is_semantically_supported`; `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`. | M2 decimal post-processing slice; remaining trigonometry, logarithm, and constant functions require separate evidence and review. |
+| Mathematical and numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, and `.range`. Evidence: [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [`MathFunctionsTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt), [math](https://quarkdown.com/wiki/math/). | **Compatible at the evidenced numeric boundary.** Typed evaluator paths implement the arithmetic, unary, decimal, and transcendental functions; dynamic/literal `.range` remains covered separately. `.logn`, `.sin`, `.cos`, and `.tan` adapt through the shared `numeric_argument()` Float boundary, then use pinned pure-Rust `libm` binary64 software functions on the adapted Float and narrow to Float. `.pi` preserves the upstream binary64 `PI` constant and does not pass through Float normalization. `.truncate` reproduces the upstream Float/Double/toInt/Float boundary, requires strict integral `decimals: Int`, and `.round` reproduces Kotlin ties-to-even followed by Int conversion. `NumberValue`-style integral Float normalization remains the evaluator output boundary. | Arithmetic regression: `crates/scribium-core/src/builtins.rs::tests::numeric_*`, `crates/scribium-core/src/lib.rs::tests::compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow`. Decimal slice: `decimal_numeric_surface_matches_upstream_boundaries`, `compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`, `compile_numeric_decimal_forms_share_one_semantic_path`, `compile_numeric_decimal_failure_is_atomic_and_source_backed`, `crates/scribium-test-support/src/lib.rs::tests::test_verify_numeric_decimal_family_is_semantically_supported`; `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`. Transcendental slice: `transcendental_numeric_surface_matches_upstream_boundaries`, `deterministic_transcendental_math_has_stable_representative_bits`, `compile_v251_numeric_transcendental_fixture_preserves_typed_value_flow`, `compile_numeric_transcendental_failure_is_atomic_and_source_backed`, `crates/scribium-test-support/src/lib.rs::tests::test_verify_numeric_transcendental_family_is_semantically_supported`; `fixtures/quarkdown-conformance/cases/numeric-transcendental-family/input.qd`. | M2 numeric family slice; `.range` remains a separately evidenced existing semantic path. |
 | Logical and comparison operations | `.islower {a} than:{b} orequals:{bool}`, `.isgreater`, `.equals {a} to:{b}`, and `.not {value}`. Evidence: [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt), [`Comparison.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Comparison.kt), conditional examples/tests. | **Compatible for the bounded slice implemented here.** Numeric ordering uses upstream `toFloat` comparison and accepts the reviewed numeric scalar text forms; equality preserves typed values with the documented plain-text fallback; negation requires a boolean. Unsupported conversion inputs fail with one source-backed `E3001` and no partial branch output. | `builtins::tests::logical_*`; `compile_logical_comparisons_*`; frontend structural/span test; CLI verification below. | M2 completed bounded logical/comparison slice; future logical expansion remains separately evidenced. |
 | Include, read, and data loading | `.include`, `.includeall`, `.read`, `.json`, `.csv`, `.listfiles`, `.filename`, and context sandbox modes. Evidence: [including other files](https://quarkdown.com/wiki/including-other-quarkdown-files/), [`Ecosystem.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Ecosystem.kt), [`Data.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Data.kt). | **Unsupported / intentionally deferred.** Scribium core is filesystem-free; `VirtualProject` is the accepted host boundary and no include/read evaluator is present. | Architecture and threat-model review; no implementation evidence. | M3 host/data-loading work; excluded from this M2 PR. |
 | Metadata and document setup | `.doctype`, `.docname`, `.docdescription`, `.docauthor(s)`, `.dockeywords`, `.doclang`, `.theme`, page/paragraph metadata, numbering, and related document state. Evidence: [document metadata](https://quarkdown.com/wiki/document-metadata/), [`Document.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Document.kt). | **Partially compatible at a different boundary.** Scribium supports project/front-matter metadata (`title`, `author`, `date`, raw fields), but not the Quarkdown function-driven document context or all observable layout metadata. | `VirtualProject` and front-matter tests; no Quarkdown document-function conformance claim. | M2 metadata baseline is partial; function-driven document setup is M3+/backend work and excluded. |
@@ -64,29 +65,38 @@ Classification index:
 
 ## Selection record
 
-The current selected slice is the decimal numeric post-processing family:
-`.truncate` and `.round`, integrated with the completed arithmetic/unary
-numeric family and the existing `.sum`, `.multiply`, and `.range` paths. It
-follows the completed logical/comparison, scalar-string, and arithmetic slices
-and uses the same typed invocation boundary.
+The current selected slice is the transcendental numeric family: `.logn`,
+`.pi`, `.sin`, `.cos`, and `.tan`, integrated with the completed
+arithmetic/unary and decimal numeric families and the existing `.sum`,
+`.multiply`, and `.range` paths. It follows the completed
+logical/comparison, scalar-string, arithmetic, and decimal slices and uses the
+same typed invocation boundary.
 
 This is a bounded public semantic family with direct v2.5.1 source/test
-evidence and an official release-binary probe for the Int and non-finite
-boundaries. It fits the existing evaluator/value-flow boundary and needs no
-new parser, filesystem capability, IR tier, or backend escape hatch. Decimal
-arguments reuse the shared binder and existing scalar numeric path for `x`,
-while `decimals` has a narrow strict integer-compatible adapter: integral
+evidence and an official v2.5.1 macOS arm64 runtime probe for rendered edge
+behavior. It fits the existing evaluator/value-flow boundary and needs no new
+parser, filesystem capability, IR tier, or backend escape hatch. Unary
+transcendental arguments reuse the shared binder and existing scalar numeric
+path. The deterministic implementation pins `libm` `0.2.16` with
+`default-features = false`; after Float adaptation it calls pure-Rust binary64
+software functions and narrows to Float. This mirrors the Kotlin/JVM Float
+overload's `float -> double Math.* -> float` boundary without Rust `std` math,
+OS libc/libm FFI, or target-specific transcendental calls. Representative bits
+are fixed in unit tests; the helper preserves signed zero and IEEE non-finite
+classes before the existing NumberValue-style evaluator normalization.
+
+The earlier decimal family remains implemented under the same boundary:
+`decimals` has a narrow strict integer-compatible adapter, integral
 NumberValue representations are accepted, fractional values and quoted text
 are rejected, and negative accepted Int values fail at runtime. The evaluator
-preserves `IrValue::Number`, applies NumberValue-style normalization, and
-materializes only through the existing normal IR-to-Typst path.
+preserves `IrValue::Number` and materializes only through the existing normal
+IR-to-Typst path.
 
-The PR intentionally excludes `.logn`, `.pi`, `.sin`, `.cos`, `.tan`,
-`.plaintext`, general DynamicValue conversion,
+The PR intentionally excludes `.plaintext`, general DynamicValue conversion,
 `.ifpresent`/`.takeif`, comparator-language syntax for sorting, include/read/data
-loading, metadata functions, components, and layout/document primitives. The
-remaining numeric functions require separate evidence and are not represented
-as complete compatibility here.
+loading, metadata functions, components, and layout/document primitives. These
+other families require separate evidence and are not represented as complete
+compatibility here.
 
 ## Conformance evidence for the current numeric slice
 
@@ -110,6 +120,20 @@ as complete compatibility here.
   partial enclosing output: `crates/scribium-core/src/lib.rs::tests::compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`,
   `compile_numeric_decimal_forms_share_one_semantic_path`, and
   `compile_numeric_decimal_failure_is_atomic_and_source_backed`.
+- The independently authored transcendental fixture covers binary64 `.pi`,
+  Float-normalized `.logn`/trigonometry, zero and pi composition, nested
+  typed values, and a chain into `.logn`:
+  `fixtures/quarkdown-conformance/cases/numeric-transcendental-family/input.qd`.
+- Transcendental unit coverage fixes representative `to_bits()` results for
+  logarithm, sine, cosine, and tangent; checks `ln(0)`, negative-domain NaN,
+  infinities, and `sin(-0)`, `cos(-0)`, and `tan(-0)`; and exercises named,
+  textual, nested, chained, arity, body, and invalid-structured-input paths:
+  `crates/scribium-core/src/builtins.rs::tests::transcendental_numeric_surface_matches_upstream_boundaries`
+  and `deterministic_transcendental_math_has_stable_representative_bits`.
+- Integration coverage verifies the rendered oracle cases, typed flow, one
+  source-backed `E3001`, and no partial output on nested transcendental
+  failure: `crates/scribium-core/src/lib.rs::tests::compile_v251_numeric_transcendental_fixture_preserves_typed_value_flow`
+  and `compile_numeric_transcendental_failure_is_atomic_and_source_backed`.
 - The prior arithmetic/unary regression remains covered by
   `crates/scribium-core/src/builtins.rs::tests::numeric_*`,
   `compile_v251_numeric_arithmetic_fixture_preserves_typed_value_flow`, and

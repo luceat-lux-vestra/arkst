@@ -1,0 +1,10 @@
+.pi
+.pi::truncate {2}
+.logn {1}
+.sin {0}
+.cos {0}
+.tan {0}
+.cos {.pi}
+.pi::multiply {2}::cos
+.sum {.sin {0}} {.cos {0}}
+.sum {1} {1}::logn

@@ -535,9 +535,10 @@ The v2.5.1 arithmetic/unary slice uses the existing typed evaluator boundary:
 ```
 
 The implemented functions are `.sum`, `.subtract`, `.multiply`, `.divide`,
-`.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.truncate`, `.round`, and
-`.iseven`, integrated with the existing numeric builtins. `.range` remains a
-separate typed constructor. Binary and unary calls use the shared
+`.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`,
+`.tan`, `.truncate`, `.round`, and `.iseven`, integrated with the existing
+numeric builtins. `.range` remains a separate typed constructor. Binary and
+unary calls use the shared
 positional/named/mixed argument binder; `x` uses the existing narrow numeric
 adaptation, while `.truncate`'s `decimals` uses a strict integral-compatible
 adapter. Results remain `IrValue::Number`, except `.iseven`, which returns
@@ -558,8 +559,13 @@ unsupported structured conversions, arity errors, unknown/duplicate names, and
 block bodies fail closed with the existing source-backed evaluator diagnostic.
 Nested failure does not publish a partial value or enclosing document output.
 
-The separate `.logn`, `.pi`, `.sin`, `.cos`, and `.tan` functions remain
-compatibility gaps and are intentionally not implemented in this slice.
+The transcendental functions reuse the shared `x` numeric boundary. They first
+adapt to Float, then use the pinned pure-Rust `libm` binary64 software
+operation and narrow to Float, matching the Kotlin/JVM Float overload without
+Rust `std` transcendental calls or OS math FFI. `.pi` preserves the upstream
+binary64 `PI` constant and bypasses Float result normalization; the existing
+`NumberValue`-compatible evaluator normalization remains authoritative for
+the four Float results, including NaN, infinity, and signed-zero cases.
 
 ### Scalar string operations (Implemented bounded slice)
 
