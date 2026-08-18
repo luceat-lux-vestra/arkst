@@ -11,6 +11,7 @@ use crate::ir::{
 };
 use crate::source::{ByteSpan, SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
+use crate::SourceMode;
 use scribium_markdown::ast::{
     Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
 };
@@ -26,21 +27,22 @@ fn ast_to_ir(
     source_id: SourceId,
     project_metadata: &ProjectMetadata,
 ) -> IrDocument {
-    ast_to_ir_with_diagnostics(doc, source_id, project_metadata).0
+    ast_to_ir_with_diagnostics(doc, source_id, project_metadata, SourceMode::Markdown).0
 }
 
 /// Convert frontend AST to IR while reporting syntax that the current IR and
 /// Typst backend cannot represent without changing its meaning.
-pub fn ast_to_ir_with_diagnostics(
+pub(crate) fn ast_to_ir_with_diagnostics(
     doc: &Document,
     source_id: SourceId,
     project_metadata: &ProjectMetadata,
+    source_mode: SourceMode,
 ) -> (IrDocument, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
     let nodes: Vec<IrNode> = doc
         .nodes
         .iter()
-        .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics))
+        .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics, source_mode))
         .collect();
 
     // Start with project metadata as defaults
@@ -86,6 +88,7 @@ fn block_to_ir(
     block: &Block,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> Option<IrNode> {
     match block {
         Block::Heading {
@@ -94,11 +97,11 @@ fn block_to_ir(
             span,
         } => Some(IrNode::Heading {
             level: *level,
-            content: inlines_to_ir(content, source_id, diagnostics),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
             span: byte_to_source_span(span, source_id),
         }),
         Block::Paragraph { content, span } => {
-            let inlines = inlines_to_ir(content, source_id, diagnostics);
+            let inlines = inlines_to_ir(content, source_id, diagnostics, source_mode);
             if inlines.is_empty() {
                 return None;
             }
@@ -110,14 +113,14 @@ fn block_to_ir(
         Block::Blockquote { content, span } => Some(IrNode::Blockquote {
             content: content
                 .iter()
-                .filter_map(|child| block_to_ir(child, source_id, diagnostics))
+                .filter_map(|child| block_to_ir(child, source_id, diagnostics, source_mode))
                 .collect(),
             span: byte_to_source_span(span, source_id),
         }),
         Block::UnorderedList { items, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| list_item_to_ir(item, source_id, diagnostics))
+                .map(|item| list_item_to_ir(item, source_id, diagnostics, source_mode))
                 .collect();
             Some(IrNode::UnorderedList {
                 items: ir_items,
@@ -127,7 +130,7 @@ fn block_to_ir(
         Block::OrderedList { items, start, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| list_item_to_ir(item, source_id, diagnostics))
+                .map(|item| list_item_to_ir(item, source_id, diagnostics, source_mode))
                 .collect();
             Some(IrNode::OrderedList {
                 items: ir_items,
@@ -162,21 +165,21 @@ fn block_to_ir(
         } => {
             let ir_positional: Vec<_> = positional_args
                 .iter()
-                .map(|v| value_to_ir(v, source_id, diagnostics))
+                .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
                 .map(|arg| IrNamedArg {
                     name: arg.name.clone(),
                     name_span: byte_to_source_span(&arg.name_span, source_id),
-                    value: value_to_ir(&arg.value, source_id, diagnostics),
+                    value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
                     span: byte_to_source_span(&arg.span, source_id),
                 })
                 .collect();
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
                     .iter()
-                    .filter_map(|b| block_to_ir(b, source_id, diagnostics))
+                    .filter_map(|b| block_to_ir(b, source_id, diagnostics, source_mode))
                     .collect::<Vec<_>>()
             });
             if name == "function" {
@@ -222,7 +225,9 @@ fn block_to_ir(
                     },
                     chain: chain
                         .iter()
-                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .map(|segment| {
+                            call_segment_to_ir(segment, source_id, diagnostics, source_mode)
+                        })
                         .collect(),
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
@@ -234,10 +239,10 @@ fn block_to_ir(
             None
         }
         Block::Table { header, rows, span } => Some(IrNode::Table {
-            header: table_row_to_ir(header, source_id, diagnostics),
+            header: table_row_to_ir(header, source_id, diagnostics, source_mode),
             rows: rows
                 .iter()
-                .map(|row| table_row_to_ir(row, source_id, diagnostics))
+                .map(|row| table_row_to_ir(row, source_id, diagnostics, source_mode))
                 .collect(),
             span: byte_to_source_span(span, source_id),
         }),
@@ -274,12 +279,13 @@ fn list_item_to_ir(
     item: &scribium_markdown::ast::ListItem,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> IrListItem {
     IrListItem {
         nodes: item
             .content
             .iter()
-            .filter_map(|child| block_to_ir(child, source_id, diagnostics))
+            .filter_map(|child| block_to_ir(child, source_id, diagnostics, source_mode))
             .collect(),
         task: item.task.map(task_status_to_ir),
         span: byte_to_source_span(&item.span, source_id),
@@ -297,13 +303,14 @@ fn table_row_to_ir(
     row: &scribium_markdown::ast::TableRow,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> IrTableRow {
     IrTableRow {
         cells: row
             .cells
             .iter()
             .map(|cell| IrTableCell {
-                content: inlines_to_ir(&cell.content, source_id, diagnostics),
+                content: inlines_to_ir(&cell.content, source_id, diagnostics, source_mode),
                 alignment: table_alignment_to_ir(cell.alignment),
                 span: byte_to_source_span(&cell.span, source_id),
             })
@@ -325,6 +332,7 @@ fn call_segment_to_ir(
     segment: &CallSegment,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> IrCallSegment {
     IrCallSegment {
         name: segment.name.clone(),
@@ -332,7 +340,7 @@ fn call_segment_to_ir(
         positional_args: segment
             .positional_args
             .iter()
-            .map(|value| value_to_ir(value, source_id, diagnostics))
+            .map(|value| value_to_ir(value, source_id, diagnostics, source_mode))
             .collect(),
         named_args: segment
             .named_args
@@ -340,7 +348,7 @@ fn call_segment_to_ir(
             .map(|arg| IrNamedArg {
                 name: arg.name.clone(),
                 name_span: byte_to_source_span(&arg.name_span, source_id),
-                value: value_to_ir(&arg.value, source_id, diagnostics),
+                value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
                 span: byte_to_source_span(&arg.span, source_id),
             })
             .collect(),
@@ -352,55 +360,60 @@ fn inlines_to_ir(
     inlines: &[Inline],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> Vec<IrInline> {
     let mut output = Vec::new();
-    let html_pairs = raw_html_pairs(inlines);
+    let html_pairs = (source_mode == SourceMode::Markdown).then(|| raw_html_pairs(inlines));
     let mut index = 0;
     while index < inlines.len() {
-        if let Inline::RawHtml { content, span } = &inlines[index] {
-            match classify_raw_html(content) {
-                Some(RawHtmlToken::HardBreak) => {
-                    output.push(IrInline::HardBreak {
-                        span: byte_to_source_span(span, source_id),
-                    });
-                    index += 1;
-                    continue;
-                }
-                Some(RawHtmlToken::Open(tag)) => {
-                    if let Some((_, close_index, _)) = html_pairs
-                        .iter()
-                        .find(|(open_index, _, pair_tag)| *open_index == index && *pair_tag == tag)
-                    {
-                        let content = inlines_to_ir(
-                            &inlines[index + 1..*close_index],
-                            source_id,
-                            diagnostics,
-                        );
-                        let span =
-                            ByteSpan::new(span.start, inline_span_end(&inlines[*close_index]));
-                        output.push(match tag {
-                            RawHtmlTag::Em => IrInline::Emphasis {
-                                content,
-                                span: byte_to_source_span(&span, source_id),
-                            },
-                            RawHtmlTag::Strong => IrInline::Strong {
-                                content,
-                                span: byte_to_source_span(&span, source_id),
-                            },
-                            RawHtmlTag::Del | RawHtmlTag::S => IrInline::Strikethrough {
-                                content,
-                                span: byte_to_source_span(&span, source_id),
-                            },
+        if source_mode == SourceMode::Markdown {
+            if let Inline::RawHtml { content, span } = &inlines[index] {
+                match classify_raw_html(content) {
+                    Some(RawHtmlToken::HardBreak) => {
+                        output.push(IrInline::HardBreak {
+                            span: byte_to_source_span(span, source_id),
                         });
-                        index = *close_index + 1;
+                        index += 1;
                         continue;
                     }
+                    Some(RawHtmlToken::Open(tag)) => {
+                        if let Some((_, close_index, _)) = html_pairs.as_ref().and_then(|pairs| {
+                            pairs.iter().find(|(open_index, _, pair_tag)| {
+                                *open_index == index && *pair_tag == tag
+                            })
+                        }) {
+                            let content = inlines_to_ir(
+                                &inlines[index + 1..*close_index],
+                                source_id,
+                                diagnostics,
+                                source_mode,
+                            );
+                            let span =
+                                ByteSpan::new(span.start, inline_span_end(&inlines[*close_index]));
+                            output.push(match tag {
+                                RawHtmlTag::Em => IrInline::Emphasis {
+                                    content,
+                                    span: byte_to_source_span(&span, source_id),
+                                },
+                                RawHtmlTag::Strong => IrInline::Strong {
+                                    content,
+                                    span: byte_to_source_span(&span, source_id),
+                                },
+                                RawHtmlTag::Del | RawHtmlTag::S => IrInline::Strikethrough {
+                                    content,
+                                    span: byte_to_source_span(&span, source_id),
+                                },
+                            });
+                            index = *close_index + 1;
+                            continue;
+                        }
+                    }
+                    Some(RawHtmlToken::Close(_)) | None => {}
                 }
-                Some(RawHtmlToken::Close(_)) | None => {}
             }
         }
 
-        if let Some(inline) = inline_to_ir(&inlines[index], source_id, diagnostics) {
+        if let Some(inline) = inline_to_ir(&inlines[index], source_id, diagnostics, source_mode) {
             output.push(inline);
         }
         index += 1;
@@ -515,6 +528,7 @@ fn inline_to_ir(
     inline: &Inline,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> Option<IrInline> {
     match inline {
         Inline::Text { content, span } => Some(IrInline::Text {
@@ -522,21 +536,21 @@ fn inline_to_ir(
             span: byte_to_source_span(span, source_id),
         }),
         Inline::Emphasis { content, span } => {
-            let children = inlines_to_ir(content, source_id, diagnostics);
+            let children = inlines_to_ir(content, source_id, diagnostics, source_mode);
             Some(IrInline::Emphasis {
                 content: children,
                 span: byte_to_source_span(span, source_id),
             })
         }
         Inline::Strong { content, span } => {
-            let children = inlines_to_ir(content, source_id, diagnostics);
+            let children = inlines_to_ir(content, source_id, diagnostics, source_mode);
             Some(IrInline::Strong {
                 content: children,
                 span: byte_to_source_span(span, source_id),
             })
         }
         Inline::Strikethrough { content, span } => Some(IrInline::Strikethrough {
-            content: inlines_to_ir(content, source_id, diagnostics),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
             span: byte_to_source_span(span, source_id),
         }),
         Inline::DirectiveCall {
@@ -551,20 +565,20 @@ fn inline_to_ir(
         } => {
             let ir_positional: Vec<_> = positional_args
                 .iter()
-                .map(|v| value_to_ir(v, source_id, diagnostics))
+                .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
                 .collect();
             let ir_named: Vec<_> = named_args
                 .iter()
                 .map(|arg| IrNamedArg {
                     name: arg.name.clone(),
                     name_span: byte_to_source_span(&arg.name_span, source_id),
-                    value: value_to_ir(&arg.value, source_id, diagnostics),
+                    value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
                     span: byte_to_source_span(&arg.span, source_id),
                 })
                 .collect();
             let ir_body = body
                 .as_ref()
-                .map(|b| inlines_to_ir(b, source_id, diagnostics));
+                .map(|b| inlines_to_ir(b, source_id, diagnostics, source_mode));
             if chain.is_empty() {
                 Some(IrInline::DirectiveCall {
                     name: name.clone(),
@@ -584,7 +598,9 @@ fn inline_to_ir(
                     },
                     chain: chain
                         .iter()
-                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .map(|segment| {
+                            call_segment_to_ir(segment, source_id, diagnostics, source_mode)
+                        })
                         .collect(),
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
@@ -603,7 +619,7 @@ fn inline_to_ir(
             title,
             span,
         } => Some(IrInline::Link {
-            content: inlines_to_ir(content, source_id, diagnostics),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
             destination: destination.clone(),
             title: title.clone(),
             span: byte_to_source_span(span, source_id),
@@ -616,7 +632,7 @@ fn inline_to_ir(
         } => {
             push_unsupported(diagnostics, "image", span, source_id);
             Some(IrInline::Image {
-                content: inlines_to_ir(content, source_id, diagnostics),
+                content: inlines_to_ir(content, source_id, diagnostics, source_mode),
                 destination: destination.clone(),
                 title: title.clone(),
                 span: byte_to_source_span(span, source_id),
@@ -641,6 +657,7 @@ fn value_to_ir(
     value: &Value,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
 ) -> crate::ir::IrValue {
     match value {
         Value::String(s) => crate::ir::IrValue::String(s.clone()),
@@ -667,7 +684,7 @@ fn value_to_ir(
             parameters: parameters
                 .as_ref()
                 .map(|header| lambda_parameters_to_ir(header, source_id)),
-            body: inline_lambda_body_to_ir(body, source_id, diagnostics, *span),
+            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span),
             span: byte_to_source_span(span, source_id),
             capture: None,
         }),
@@ -685,20 +702,20 @@ fn value_to_ir(
             {
                 let ir_positional: Vec<_> = positional_args
                     .iter()
-                    .map(|v| value_to_ir(v, source_id, diagnostics))
+                    .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
                     .collect();
                 let ir_named: Vec<_> = named_args
                     .iter()
                     .map(|arg| IrNamedArg {
                         name: arg.name.clone(),
                         name_span: byte_to_source_span(&arg.name_span, source_id),
-                        value: value_to_ir(&arg.value, source_id, diagnostics),
+                        value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
                         span: byte_to_source_span(&arg.span, source_id),
                     })
                     .collect();
                 let ir_body = body.as_ref().map(|b| {
                     vec![IrNode::Paragraph {
-                        content: inlines_to_ir(b, source_id, diagnostics),
+                        content: inlines_to_ir(b, source_id, diagnostics, source_mode),
                         span: byte_to_source_span(span, source_id),
                     }]
                 });
@@ -722,7 +739,9 @@ fn value_to_ir(
                         },
                         chain: chain
                             .iter()
-                            .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                            .map(|segment| {
+                                call_segment_to_ir(segment, source_id, diagnostics, source_mode)
+                            })
                             .collect(),
                         body: ir_body,
                         span: byte_to_source_span(span, source_id),
@@ -733,7 +752,7 @@ fn value_to_ir(
                 let end = inlines.last().map(inline_span_end);
                 let span = crate::source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
                 crate::ir::IrValue::Content(vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id, diagnostics),
+                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode),
                     span: byte_to_source_span(&span, source_id),
                 }])
             }
@@ -745,6 +764,7 @@ fn inline_lambda_body_to_ir(
     body: &[Inline],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
+    source_mode: SourceMode,
     fallback_span: ByteSpan,
 ) -> Vec<IrNode> {
     match body {
@@ -761,20 +781,20 @@ fn inline_lambda_body_to_ir(
         }] => {
             let positional_args = positional_args
                 .iter()
-                .map(|value| value_to_ir(value, source_id, diagnostics))
+                .map(|value| value_to_ir(value, source_id, diagnostics, source_mode))
                 .collect();
             let named_args = named_args
                 .iter()
                 .map(|argument| IrNamedArg {
                     name: argument.name.clone(),
                     name_span: byte_to_source_span(&argument.name_span, source_id),
-                    value: value_to_ir(&argument.value, source_id, diagnostics),
+                    value: value_to_ir(&argument.value, source_id, diagnostics, source_mode),
                     span: byte_to_source_span(&argument.span, source_id),
                 })
                 .collect();
             let body = body.as_ref().map(|inlines| {
                 vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id, diagnostics),
+                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode),
                     span: byte_to_source_span(span, source_id),
                 }]
             });
@@ -798,7 +818,9 @@ fn inline_lambda_body_to_ir(
                     },
                     chain: chain
                         .iter()
-                        .map(|segment| call_segment_to_ir(segment, source_id, diagnostics))
+                        .map(|segment| {
+                            call_segment_to_ir(segment, source_id, diagnostics, source_mode)
+                        })
                         .collect(),
                     body,
                     span: byte_to_source_span(span, source_id),
@@ -806,7 +828,7 @@ fn inline_lambda_body_to_ir(
             }
         }
         _ => vec![IrNode::Paragraph {
-            content: inlines_to_ir(body, source_id, diagnostics),
+            content: inlines_to_ir(body, source_id, diagnostics, source_mode),
             span: byte_to_source_span(&fallback_span, source_id),
         }],
     }
@@ -950,8 +972,12 @@ mod tests {
     fn preserve_call_chain_segments_and_provenance_in_ir() {
         let source = ".a {x}::b {y}\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Quarkdown,
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::ChainedFunctionCall {
             head, chain, span, ..
@@ -976,8 +1002,12 @@ mod tests {
     fn let_lambda_metadata_survives_ast_to_ir_with_original_spans() {
         let source = ".let {값}\r\n\tname:\r\n\t안녕, .name!\r\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Quarkdown,
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionCall {
             name,
@@ -1007,8 +1037,12 @@ mod tests {
     fn let_implicit_lambda_metadata_is_absent_in_ir() {
         let source = ".let {값}\n    .1\n";
         let document = scribium_markdown::parse_qd(source);
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Quarkdown,
+        );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionCall {
             name,
@@ -1036,8 +1070,12 @@ mod tests {
             (".foreach {..}\n    .1\n", None, None, (10, 12)),
         ] {
             let document = scribium_markdown::parse_qd(source);
-            let (ir, diagnostics) =
-                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Quarkdown,
+            );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let IrNode::FunctionCall {
                 positional_args,
@@ -1072,8 +1110,12 @@ mod tests {
             (".foreach {4294967296..4294967296}\n    .1\n", None, None),
         ] {
             let document = scribium_markdown::parse_qd(source);
-            let (ir, diagnostics) =
-                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Quarkdown,
+            );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let IrNode::FunctionCall {
                 positional_args, ..
@@ -1158,8 +1200,12 @@ mod tests {
             let document = scribium_markdown::parse_qd(source);
             let ast_span = ast_range_span(&document);
             assert_eq!(&source[ast_span.start..ast_span.end], "2..4");
-            let (ir, diagnostics) =
-                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Quarkdown,
+            );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let ir_span = ir_range_span(&ir);
             assert_eq!(
@@ -1549,8 +1595,12 @@ mod tests {
             line_count: 8,
         };
 
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&doc, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &doc,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert!(
             diagnostics.is_empty(),
             "unexpected diagnostics: {diagnostics:?}"
@@ -1686,8 +1736,12 @@ mod tests {
             line_count: 1,
         };
 
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&doc, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &doc,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
 
         let paragraph = ir
             .nodes
@@ -1739,8 +1793,12 @@ mod tests {
         let source =
             "before <em>italic <strong>bold</strong></em> <del>gone</del> <s>old</s><br /> after\n";
         let document = scribium_markdown::parse_md(source);
-        let (ir, diagnostics) =
-            ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert!(
             diagnostics.is_empty(),
             "unexpected diagnostics: {diagnostics:?}"
@@ -1775,8 +1833,12 @@ mod tests {
     fn strikethrough_html_pairs_preserve_del_and_s_tag_identity() {
         for source in ["<del>x</del>\n", "<s>x</s>\n"] {
             let document = scribium_markdown::parse_md(source);
-            let (ir, diagnostics) =
-                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
 
             let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
@@ -1788,8 +1850,12 @@ mod tests {
 
         let nested_source = "<del><s>x</s></del>\n";
         let nested_document = scribium_markdown::parse_md(nested_source);
-        let (nested_ir, nested_diagnostics) =
-            ast_to_ir_with_diagnostics(&nested_document, source_id(), &empty_project_metadata());
+        let (nested_ir, nested_diagnostics) = ast_to_ir_with_diagnostics(
+            &nested_document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
         let IrNode::Paragraph {
             content: nested_content,
@@ -1822,8 +1888,12 @@ mod tests {
             ),
         ] {
             let document = scribium_markdown::parse_md(source);
-            let (ir, diagnostics) =
-                ast_to_ir_with_diagnostics(&document, source_id(), &empty_project_metadata());
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
             assert_eq!(diagnostics.len(), expected_raw.len(), "{source:?}");
             assert!(
                 diagnostics
@@ -1856,8 +1926,12 @@ mod tests {
     fn unsupported_html_keeps_deterministic_diagnostics_and_original_spans() {
         let inline_source = "before <span class=\"layout\">x</span> after\n";
         let inline_document = scribium_markdown::parse_md(inline_source);
-        let (inline_ir, inline_diagnostics) =
-            ast_to_ir_with_diagnostics(&inline_document, source_id(), &empty_project_metadata());
+        let (inline_ir, inline_diagnostics) = ast_to_ir_with_diagnostics(
+            &inline_document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert_eq!(inline_diagnostics.len(), 2, "{inline_diagnostics:?}");
         assert!(inline_diagnostics
             .iter()
@@ -1874,8 +1948,12 @@ mod tests {
 
         let block_source = "<div>\n**not Markdown**\n</div>\n\ntext\n";
         let block_document = scribium_markdown::parse_md(block_source);
-        let (_, block_diagnostics) =
-            ast_to_ir_with_diagnostics(&block_document, source_id(), &empty_project_metadata());
+        let (_, block_diagnostics) = ast_to_ir_with_diagnostics(
+            &block_document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert_eq!(block_diagnostics.len(), 1, "{block_diagnostics:?}");
         let block_span = block_diagnostics[0]
             .primary
@@ -1888,8 +1966,12 @@ mod tests {
 
         let ambiguous_source = "before <em>outer <strong>inner</strong> after\n";
         let ambiguous_document = scribium_markdown::parse_md(ambiguous_source);
-        let (ambiguous_ir, ambiguous_diagnostics) =
-            ast_to_ir_with_diagnostics(&ambiguous_document, source_id(), &empty_project_metadata());
+        let (ambiguous_ir, ambiguous_diagnostics) = ast_to_ir_with_diagnostics(
+            &ambiguous_document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
         assert_eq!(ambiguous_diagnostics.len(), 3, "{ambiguous_diagnostics:?}");
         let IrNode::Paragraph { content, .. } = &ambiguous_ir.nodes[0] else {
             panic!("expected ambiguous HTML paragraph");

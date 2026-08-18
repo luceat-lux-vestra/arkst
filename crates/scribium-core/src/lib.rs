@@ -35,6 +35,12 @@ pub enum Error {
     Internal(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourceMode {
+    Markdown,
+    Quarkdown,
+}
+
 /// Compile a Scribium project through the full pipeline.
 ///
 /// Returns a `CompileResult` with the generated IR and diagnostics.
@@ -63,13 +69,25 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
         };
     };
 
-    let parsed = if entry.as_str().ends_with(".md") {
-        scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Markdown)
+    let source_mode = if entry.as_str().ends_with(".md") {
+        SourceMode::Markdown
     } else {
-        scribium_markdown::parse_with_diagnostics(source)
+        SourceMode::Quarkdown
     };
-    let (ir, lowering_diagnostics) =
-        ast_to_ir::ast_to_ir_with_diagnostics(&parsed.document, source_id, project.metadata());
+    let parsed = match source_mode {
+        SourceMode::Markdown => {
+            scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Markdown)
+        }
+        SourceMode::Quarkdown => {
+            scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Quarkdown)
+        }
+    };
+    let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics(
+        &parsed.document,
+        source_id,
+        project.metadata(),
+        source_mode,
+    );
     let (ir, evaluation_diagnostics) = evaluator::Evaluator::new().evaluate(&ir);
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
@@ -108,7 +126,7 @@ pub struct CompileResult {
 #[cfg(test)]
 mod tests {
     use crate::ir::{IrInline, IrNode};
-    use crate::{CompileOptions, Severity, VirtualPathBuf, VirtualProjectBuilder};
+    use crate::{CompileOptions, Severity, SourceMode, VirtualPathBuf, VirtualProjectBuilder};
     #[test]
     fn it_compiles_empty_document() {
         let project = VirtualProjectBuilder::new()
@@ -1821,6 +1839,7 @@ mod tests {
             &parsed.document,
             source_id,
             project.metadata(),
+            SourceMode::Quarkdown,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionDeclaration { parameters, .. } = &ir.nodes[0] else {
@@ -2053,6 +2072,222 @@ mod tests {
         assert_eq!(result.ir.nodes.len(), 2);
         assert!(matches!(result.ir.nodes[0], IrNode::Heading { .. }));
         assert!(matches!(result.ir.nodes[1], IrNode::Paragraph { .. }));
+    }
+
+    #[test]
+    fn compile_raw_html_semantics_follow_the_entry_source_mode() {
+        let source = "before <em>one <strong>two</strong></em><br>after\n";
+        for entry in ["main.md", "main.qd", "main.scrib"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let source_id = project.sources().get_id(project.entry()).unwrap();
+            let result = super::compile(&project, &CompileOptions::default());
+            let html_diagnostics = result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "E8001")
+                .collect::<Vec<_>>();
+
+            if entry.ends_with(".md") {
+                assert!(html_diagnostics.is_empty(), "{entry}: {result:?}");
+                let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+                    panic!("{entry}: expected paragraph, got {:?}", result.ir.nodes);
+                };
+                let Some(IrInline::Emphasis {
+                    content: emphasis_content,
+                    ..
+                }) = content
+                    .iter()
+                    .find(|inline| matches!(inline, IrInline::Emphasis { .. }))
+                else {
+                    panic!("{entry}: expected HTML emphasis, got {content:?}");
+                };
+                assert!(emphasis_content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::Strong { .. })));
+                assert!(content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::HardBreak { .. })));
+                assert!(content.iter().any(
+                    |inline| matches!(inline, IrInline::Text { content, .. } if content == "before ")
+                ));
+                assert!(content.iter().any(
+                    |inline| matches!(inline, IrInline::Text { content, .. } if content == "after")
+                ));
+            } else {
+                assert_eq!(html_diagnostics.len(), 5, "{entry}: {result:?}");
+                assert_eq!(
+                    html_diagnostics
+                        .iter()
+                        .map(|diagnostic| {
+                            let span = diagnostic.primary.expect("raw HTML primary span");
+                            assert_eq!(span.source_id, source_id);
+                            source[span.start..span.end].to_string()
+                        })
+                        .collect::<Vec<_>>(),
+                    vec!["<em>", "<strong>", "</strong>", "</em>", "<br>"]
+                );
+                let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
+                    panic!("{entry}: expected paragraph, got {:?}", result.ir.nodes);
+                };
+                assert!(content.iter().all(|inline| {
+                    !matches!(
+                        inline,
+                        IrInline::Emphasis { .. }
+                            | IrInline::Strong { .. }
+                            | IrInline::Strikethrough { .. }
+                            | IrInline::HardBreak { .. }
+                    )
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn compile_raw_html_whitelist_is_markdown_only_for_all_supported_forms() {
+        for source in [
+            "<em>x</em>\n",
+            "<strong>x</strong>\n",
+            "<del>x</del>\n",
+            "<s>x</s>\n",
+            "before <br> after\n",
+            "before <br/> after\n",
+            "before <br /> after\n",
+            "<EM>x</EM>\n",
+            "<Strong>x</Strong>\n",
+            "before <BR> after\n",
+        ] {
+            let markdown_project = VirtualProjectBuilder::new()
+                .entry("main.md")
+                .expect("valid path")
+                .add_source("main.md", source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let markdown_result = super::compile(&markdown_project, &CompileOptions::default());
+            assert!(
+                markdown_result.diagnostics.is_empty(),
+                "Markdown source {source:?}: {:?}",
+                markdown_result.diagnostics
+            );
+            let IrNode::Paragraph {
+                content: markdown_content,
+                ..
+            } = &markdown_result.ir.nodes[0]
+            else {
+                panic!("Markdown source {source:?}: expected paragraph");
+            };
+            let source_lower = source.to_ascii_lowercase();
+            if source_lower.contains("<em>") {
+                assert!(markdown_content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::Emphasis { .. })));
+            }
+            if source_lower.contains("<strong>") {
+                assert!(markdown_content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::Strong { .. })));
+            }
+            if source_lower.contains("<del>") || source_lower.contains("<s>") {
+                assert!(markdown_content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::Strikethrough { .. })));
+            }
+            if source_lower.contains("<br") {
+                assert!(markdown_content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::HardBreak { .. })));
+            }
+
+            for entry in ["main.qd", "main.scrib"] {
+                let project = VirtualProjectBuilder::new()
+                    .entry(entry)
+                    .expect("valid path")
+                    .add_source(entry, source)
+                    .expect("valid path")
+                    .build()
+                    .expect("valid project");
+                let result = super::compile(&project, &CompileOptions::default());
+                assert!(
+                    result
+                        .diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == "E8001"),
+                    "{entry} source {source:?}: {:?}",
+                    result.diagnostics
+                );
+                assert!(result.ir.nodes.iter().all(|node| match node {
+                    IrNode::Paragraph { content, .. } => content.iter().all(|inline| {
+                        !matches!(
+                            inline,
+                            IrInline::Emphasis { .. }
+                                | IrInline::Strong { .. }
+                                | IrInline::Strikethrough { .. }
+                                | IrInline::HardBreak { .. }
+                        )
+                    }),
+                    _ => true,
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn compile_raw_html_diagnostics_preserve_utf8_crlf_source_spans_in_each_quarkdown_mode() {
+        let source = "한글 <em>내용</em> 끝\r\n";
+        for entry in ["main.qd", "main.scrib"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let source_id = project.sources().get_id(project.entry()).unwrap();
+            let result = super::compile(&project, &CompileOptions::default());
+            let diagnostics = result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "E8001")
+                .collect::<Vec<_>>();
+            assert_eq!(diagnostics.len(), 2, "{entry}: {result:?}");
+            for (diagnostic, expected) in diagnostics.iter().zip(["<em>", "</em>"]) {
+                let span = diagnostic.primary.expect("raw HTML primary span");
+                assert_eq!(span.source_id, source_id);
+                assert!(span.start > 0);
+                assert!(span.start < span.end);
+                assert_eq!(source.get(span.start..span.end), Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn compile_block_raw_html_remains_source_backed_and_unsupported_in_each_mode() {
+        let source = "<div>\r\n**not Markdown**\r\n</div>\r\n";
+        for entry in ["main.md", "main.qd", "main.scrib"] {
+            let project = VirtualProjectBuilder::new()
+                .entry(entry)
+                .expect("valid path")
+                .add_source(entry, source)
+                .expect("valid path")
+                .build()
+                .expect("valid project");
+            let source_id = project.sources().get_id(project.entry()).unwrap();
+            let result = super::compile(&project, &CompileOptions::default());
+            assert_eq!(result.diagnostics.len(), 1, "{entry}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E8001");
+            let span = result.diagnostics[0]
+                .primary
+                .expect("block raw HTML primary span");
+            assert_eq!(span.source_id, source_id);
+            assert_eq!(source.get(span.start..span.end), Some(source));
+            assert!(result.ir.nodes.is_empty());
+        }
     }
 
     #[test]
