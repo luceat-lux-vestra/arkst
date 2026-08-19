@@ -83,8 +83,11 @@ impl LoweringContext {
         }
 
         for node in &doc.nodes {
+            let before = self.output.len();
             self.lower_node(node);
-            self.push('\n');
+            if self.output.len() > before {
+                self.push('\n');
+            }
         }
     }
 
@@ -108,9 +111,11 @@ impl LoweringContext {
             IrNode::Paragraph { content, span } => {
                 let before = self.output.len();
                 self.lower_inlines(content);
-                self.push('\n');
-                if span.source_id != scribium_core::SourceId(0) {
-                    self.record_span(*span, self.output.len() - before);
+                if self.output.len() > before {
+                    self.push('\n');
+                    if span.source_id != scribium_core::SourceId(0) {
+                        self.record_span(*span, self.output.len() - before);
+                    }
                 }
             }
             IrNode::Blockquote { content, span } => {
@@ -214,6 +219,11 @@ impl LoweringContext {
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
+            }
+            IrNode::RawHtml { .. } | IrNode::TargetSpecificContent { .. } => {
+                // Raw HTML is either rejected by core evaluation or consumed
+                // by a future HTML output backend. Typst/PDF intentionally
+                // omit both forms without creating source-map ranges.
             }
             IrNode::FunctionDeclaration { .. } => {
                 // Declarations are consumed by the evaluator and are
@@ -332,6 +342,10 @@ impl LoweringContext {
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
+            }
+            IrInline::RawHtml { .. } | IrInline::TargetSpecificContent { .. } => {
+                // Target-specific HTML and parser-owned raw HTML never become
+                // Typst source or visible placeholder text.
             }
             IrInline::Emphasis { content, span } => {
                 let before = self.output.len();

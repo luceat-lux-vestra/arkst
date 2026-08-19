@@ -435,6 +435,8 @@ fn append_node_plain_text(node: &IrNode, output: &mut String) -> Option<()> {
         | IrNode::ChainedFunctionCall { .. }
         | IrNode::FunctionDeclaration { .. }
         | IrNode::RawTypst { .. }
+        | IrNode::RawHtml { .. }
+        | IrNode::TargetSpecificContent { .. }
         | IrNode::ThematicBreak { .. }
         | IrNode::Math { .. } => return None,
     }
@@ -462,7 +464,10 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
             }
         }
         IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
-        IrInline::DirectiveCall { .. } | IrInline::ChainedDirectiveCall { .. } => return None,
+        IrInline::DirectiveCall { .. }
+        | IrInline::ChainedDirectiveCall { .. }
+        | IrInline::RawHtml { .. }
+        | IrInline::TargetSpecificContent { .. } => return None,
         IrInline::Image { .. } => return None,
     }
     Some(())
@@ -510,7 +515,10 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::SoftBreak { .. } => output.push('\n'),
             // v2.5.1 `NodeUtils.toPlainText()` does not emit hard-break text.
             IrInline::HardBreak { .. } | IrInline::Image { .. } => {}
-            IrInline::DirectiveCall { .. } | IrInline::ChainedDirectiveCall { .. } => {
+            IrInline::DirectiveCall { .. }
+            | IrInline::ChainedDirectiveCall { .. }
+            | IrInline::RawHtml { .. }
+            | IrInline::TargetSpecificContent { .. } => {
                 return None;
             }
         }
@@ -867,7 +875,7 @@ fn error(message: String) -> BuiltinError {
 /// Applies the small invocation-boundary text adaptation contract used by the
 /// evidenced string builtins. Plain text content is adapted structurally; rich
 /// content is not rendered or round-tripped through a backend.
-fn adapt_string_argument(value: &IrValue) -> Option<String> {
+pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),

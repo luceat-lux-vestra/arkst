@@ -23,6 +23,57 @@ pub use diagnostics::*;
 pub use source::*;
 pub use virtual_project::*;
 
+/// The closed evaluator capability set used by the compatibility pipeline.
+///
+/// This is deliberately narrow: granting native content authorizes creation
+/// of the opaque target-specific semantic payload, not execution, parsing, or
+/// access to any host capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Capability {
+    NativeContent,
+}
+
+/// Explicit evaluator capabilities for one compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Capabilities {
+    native_content: bool,
+}
+
+impl Capabilities {
+    /// The normal Quarkdown-compatible default, matching v2.5.1.
+    pub const fn compatibility_default() -> Self {
+        Self {
+            native_content: true,
+        }
+    }
+
+    /// No optional evaluator capabilities are granted.
+    pub const fn none() -> Self {
+        Self {
+            native_content: false,
+        }
+    }
+
+    /// Returns a copy with NativeContent explicitly granted or denied.
+    pub const fn with_native_content(self, granted: bool) -> Self {
+        Self {
+            native_content: granted,
+        }
+    }
+
+    pub const fn allows(self, capability: Capability) -> bool {
+        match capability {
+            Capability::NativeContent => self.native_content,
+        }
+    }
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self::compatibility_default()
+    }
+}
+
 /// The Scribium core result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -58,7 +109,16 @@ fn source_mode_for_entry(entry: &VirtualPathBuf) -> SourceMode {
 /// Returns a `CompileResult` with the generated IR and diagnostics.
 /// The entry point source and its `SourceId` come from the project's
 /// `SourceStore`; no global ID generator is involved.
-pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileResult {
+pub fn compile(project: &VirtualProject, options: &CompileOptions) -> CompileResult {
+    compile_with_capabilities(project, options, Capabilities::compatibility_default())
+}
+
+/// Compile a Scribium project with an explicit evaluator capability set.
+pub fn compile_with_capabilities(
+    project: &VirtualProject,
+    _options: &CompileOptions,
+    capabilities: Capabilities,
+) -> CompileResult {
     let entry = project.entry();
 
     // Use get_with_id to get both source and SourceId atomically.
@@ -96,7 +156,8 @@ pub fn compile(project: &VirtualProject, _options: &CompileOptions) -> CompileRe
         project.metadata(),
         source_mode,
     );
-    let (ir, evaluation_diagnostics) = evaluator::Evaluator::new().evaluate(&ir);
+    let (ir, evaluation_diagnostics) =
+        evaluator::Evaluator::with_capabilities(capabilities).evaluate(&ir);
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()
@@ -151,6 +212,14 @@ mod tests {
             },
         );
         assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn old_compile_options_struct_literal_remains_source_compatible() {
+        let options = CompileOptions {
+            compatibility_profile: None,
+        };
+        assert!(options.compatibility_profile.is_none());
     }
 
     #[test]

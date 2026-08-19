@@ -50,7 +50,7 @@ pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
     let nodes: Vec<IrNode> = doc
         .nodes
         .iter()
-        .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics, source_mode))
+        .filter_map(|b| block_to_ir(b, source_id, &mut diagnostics, source_mode, false))
         .collect();
 
     // Start with project metadata as defaults
@@ -97,6 +97,7 @@ fn block_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: SourceMode,
+    function_body: bool,
 ) -> Option<IrNode> {
     match block {
         Block::Heading {
@@ -105,11 +106,12 @@ fn block_to_ir(
             span,
         } => Some(IrNode::Heading {
             level: *level,
-            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
             span: byte_to_source_span(span, source_id),
         }),
         Block::Paragraph { content, span } => {
-            let inlines = inlines_to_ir(content, source_id, diagnostics, source_mode);
+            let inlines =
+                inlines_to_ir(content, source_id, diagnostics, source_mode, function_body);
             if inlines.is_empty() {
                 return None;
             }
@@ -121,14 +123,18 @@ fn block_to_ir(
         Block::Blockquote { content, span } => Some(IrNode::Blockquote {
             content: content
                 .iter()
-                .filter_map(|child| block_to_ir(child, source_id, diagnostics, source_mode))
+                .filter_map(|child| {
+                    block_to_ir(child, source_id, diagnostics, source_mode, function_body)
+                })
                 .collect(),
             span: byte_to_source_span(span, source_id),
         }),
         Block::UnorderedList { items, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| list_item_to_ir(item, source_id, diagnostics, source_mode))
+                .map(|item| {
+                    list_item_to_ir(item, source_id, diagnostics, source_mode, function_body)
+                })
                 .collect();
             Some(IrNode::UnorderedList {
                 items: ir_items,
@@ -138,7 +144,9 @@ fn block_to_ir(
         Block::OrderedList { items, start, span } => {
             let ir_items: Vec<IrListItem> = items
                 .iter()
-                .map(|item| list_item_to_ir(item, source_id, diagnostics, source_mode))
+                .map(|item| {
+                    list_item_to_ir(item, source_id, diagnostics, source_mode, function_body)
+                })
                 .collect();
             Some(IrNode::OrderedList {
                 items: ir_items,
@@ -187,7 +195,7 @@ fn block_to_ir(
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
                     .iter()
-                    .filter_map(|b| block_to_ir(b, source_id, diagnostics, source_mode))
+                    .filter_map(|b| block_to_ir(b, source_id, diagnostics, source_mode, true))
                     .collect::<Vec<_>>()
             });
             if name == "function" {
@@ -247,11 +255,15 @@ fn block_to_ir(
             None
         }
         Block::Table { header, rows, span } => Some(IrNode::Table {
-            header: table_row_to_ir(header, source_id, diagnostics, source_mode),
+            header: table_row_to_ir(header, source_id, diagnostics, source_mode, function_body),
             rows: rows
                 .iter()
-                .map(|row| table_row_to_ir(row, source_id, diagnostics, source_mode))
+                .map(|row| table_row_to_ir(row, source_id, diagnostics, source_mode, function_body))
                 .collect(),
+            span: byte_to_source_span(span, source_id),
+        }),
+        Block::RawHtml { source, span } if function_body => Some(IrNode::RawHtml {
+            source: source.clone(),
             span: byte_to_source_span(span, source_id),
         }),
         Block::RawHtml { source, span } => {
@@ -291,12 +303,15 @@ fn list_item_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: SourceMode,
+    function_body: bool,
 ) -> IrListItem {
     IrListItem {
         nodes: item
             .content
             .iter()
-            .filter_map(|child| block_to_ir(child, source_id, diagnostics, source_mode))
+            .filter_map(|child| {
+                block_to_ir(child, source_id, diagnostics, source_mode, function_body)
+            })
             .collect(),
         task: item.task.map(task_status_to_ir),
         span: byte_to_source_span(&item.span, source_id),
@@ -315,13 +330,20 @@ fn table_row_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: SourceMode,
+    function_body: bool,
 ) -> IrTableRow {
     IrTableRow {
         cells: row
             .cells
             .iter()
             .map(|cell| IrTableCell {
-                content: inlines_to_ir(&cell.content, source_id, diagnostics, source_mode),
+                content: inlines_to_ir(
+                    &cell.content,
+                    source_id,
+                    diagnostics,
+                    source_mode,
+                    function_body,
+                ),
                 alignment: table_alignment_to_ir(cell.alignment),
                 span: byte_to_source_span(&cell.span, source_id),
             })
@@ -372,6 +394,7 @@ fn inlines_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: SourceMode,
+    function_body: bool,
 ) -> Vec<IrInline> {
     let mut output = Vec::new();
     let html_pairs = (source_mode == SourceMode::Markdown).then(|| raw_html_pairs(inlines));
@@ -402,6 +425,7 @@ fn inlines_to_ir(
                                 source_id,
                                 diagnostics,
                                 source_mode,
+                                function_body,
                             );
                             let span =
                                 ByteSpan::new(span.start, inline_span_end(&inlines[*close_index]));
@@ -428,7 +452,13 @@ fn inlines_to_ir(
             }
         }
 
-        if let Some(inline) = inline_to_ir(&inlines[index], source_id, diagnostics, source_mode) {
+        if let Some(inline) = inline_to_ir(
+            &inlines[index],
+            source_id,
+            diagnostics,
+            source_mode,
+            function_body,
+        ) {
             output.push(inline);
         }
         index += 1;
@@ -602,6 +632,7 @@ fn inline_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: SourceMode,
+    function_body: bool,
 ) -> Option<IrInline> {
     match inline {
         Inline::Text { content, span } => Some(IrInline::Text {
@@ -609,21 +640,23 @@ fn inline_to_ir(
             span: byte_to_source_span(span, source_id),
         }),
         Inline::Emphasis { content, span } => {
-            let children = inlines_to_ir(content, source_id, diagnostics, source_mode);
+            let children =
+                inlines_to_ir(content, source_id, diagnostics, source_mode, function_body);
             Some(IrInline::Emphasis {
                 content: children,
                 span: byte_to_source_span(span, source_id),
             })
         }
         Inline::Strong { content, span } => {
-            let children = inlines_to_ir(content, source_id, diagnostics, source_mode);
+            let children =
+                inlines_to_ir(content, source_id, diagnostics, source_mode, function_body);
             Some(IrInline::Strong {
                 content: children,
                 span: byte_to_source_span(span, source_id),
             })
         }
         Inline::Strikethrough { content, span } => Some(IrInline::Strikethrough {
-            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
             span: byte_to_source_span(span, source_id),
         }),
         Inline::DirectiveCall {
@@ -651,7 +684,7 @@ fn inline_to_ir(
                 .collect();
             let ir_body = body
                 .as_ref()
-                .map(|b| inlines_to_ir(b, source_id, diagnostics, source_mode));
+                .map(|b| inlines_to_ir(b, source_id, diagnostics, source_mode, function_body));
             if chain.is_empty() {
                 Some(IrInline::DirectiveCall {
                     name: name.clone(),
@@ -692,7 +725,7 @@ fn inline_to_ir(
             title,
             span,
         } => Some(IrInline::Link {
-            content: inlines_to_ir(content, source_id, diagnostics, source_mode),
+            content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
             destination: destination.clone(),
             title: title.clone(),
             span: byte_to_source_span(span, source_id),
@@ -705,12 +738,16 @@ fn inline_to_ir(
         } => {
             push_unsupported(diagnostics, "image", span, source_id);
             Some(IrInline::Image {
-                content: inlines_to_ir(content, source_id, diagnostics, source_mode),
+                content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
                 destination: destination.clone(),
                 title: title.clone(),
                 span: byte_to_source_span(span, source_id),
             })
         }
+        Inline::RawHtml { content, span } if function_body => Some(IrInline::RawHtml {
+            content: content.clone(),
+            span: byte_to_source_span(span, source_id),
+        }),
         Inline::RawHtml { span, .. } => {
             push_unsupported(diagnostics, "raw HTML inline", span, source_id);
             None
@@ -788,7 +825,7 @@ fn value_to_ir(
                     .collect();
                 let ir_body = body.as_ref().map(|b| {
                     vec![IrNode::Paragraph {
-                        content: inlines_to_ir(b, source_id, diagnostics, source_mode),
+                        content: inlines_to_ir(b, source_id, diagnostics, source_mode, false),
                         span: byte_to_source_span(span, source_id),
                     }]
                 });
@@ -825,7 +862,7 @@ fn value_to_ir(
                 let end = inlines.last().map(inline_span_end);
                 let span = crate::source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
                 crate::ir::IrValue::Content(vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode),
+                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
                     span: byte_to_source_span(&span, source_id),
                 }])
             }
@@ -867,7 +904,7 @@ fn inline_lambda_body_to_ir(
                 .collect();
             let body = body.as_ref().map(|inlines| {
                 vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode),
+                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
                     span: byte_to_source_span(span, source_id),
                 }]
             });
@@ -901,7 +938,7 @@ fn inline_lambda_body_to_ir(
             }
         }
         _ => vec![IrNode::Paragraph {
-            content: inlines_to_ir(body, source_id, diagnostics, source_mode),
+            content: inlines_to_ir(body, source_id, diagnostics, source_mode, false),
             span: byte_to_source_span(&fallback_span, source_id),
         }],
     }

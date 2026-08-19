@@ -204,7 +204,11 @@ The implementation preserves these invariants:
 1. **Mode separation:** **Completed.** The Markdown bounded raw-HTML semantic adapter cannot become Quarkdown mixed-HTML support.
 2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.scrib` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
 3. **Comment decision:** **Completed.** Complete parser-owned Markdown HTML comments are a bounded semantic no-op; trailing, malformed, and non-comment raw HTML remains fail-closed.
-4. **`.html` function:** **contract defined in ADR-0018; implementation pending.** Add no builtin, IR variant, permission API, or HTML backend until the architecture review accepts the closed target-specific representation and capability boundary.
+4. **`.html` function:** **closed semantic slice implemented.** The evaluator
+   creates only `TargetSpecificContent { target: Html, ... }` after the
+   explicit `NativeContent` check (`E3004` on denial); Typst/PDF omit it
+   silently. No HTML output backend exists, and `.css`/`.htmloptions` remain
+   unsupported.
 5. **Do not expand arbitrary HTML semantics** unless a concrete source-language compatibility requirement cannot be represented with existing portable IR/functions.
 
 ## Non-goals

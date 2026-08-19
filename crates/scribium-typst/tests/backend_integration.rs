@@ -11,7 +11,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use scribium_core::ir::{IrInline, IrNode, NativeTarget};
+use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
+use scribium_typst::lowering::{lower_to_typst, lower_to_typst_code};
 
 /// Locates a Typst executable, in order of preference:
 ///
@@ -83,6 +86,117 @@ fn integration_compile_produces_valid_pdf() {
             &pdf[..pdf.len().min(8)]
         );
     });
+}
+
+#[test]
+fn target_specific_html_is_omitted_without_typst_source_or_source_map_entries() {
+    let source = "Before .html {<em>hidden inline</em>} after.\n\n.html {<div>hidden block</div>}\n\nAfter.\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+
+    let target_span = result
+        .ir
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            IrNode::Paragraph { content, .. } => content.iter().find_map(|inline| match inline {
+                IrInline::TargetSpecificContent { content }
+                    if content.target == NativeTarget::Html =>
+                {
+                    Some(content.span)
+                }
+                _ => None,
+            }),
+            IrNode::TargetSpecificContent { content } if content.target == NativeTarget::Html => {
+                Some(content.span)
+            }
+            _ => None,
+        })
+        .expect("inline target-specific node");
+    assert!(matches!(
+        result.ir.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::TargetSpecificContent { .. },
+            IrNode::Paragraph { .. }
+        ]
+    ));
+
+    let (typst, source_map) = lower_to_typst(&result.ir);
+    assert!(typst.contains("Before"), "generated Typst: {typst:?}");
+    assert!(typst.contains("after."), "generated Typst: {typst:?}");
+    assert!(typst.contains("After."), "generated Typst: {typst:?}");
+    assert!(!typst.contains("<em>"));
+    assert!(!typst.contains("hidden"));
+    assert!(
+        source_map.iter().all(|entry| entry.original != target_span),
+        "target-specific HTML fabricated a source-map entry: {source_map:?}"
+    );
+}
+
+#[test]
+fn target_specific_html_typst_and_pdf_smoke() {
+    let source = "Before.\n\n.html {<div>hidden</div>}\n\nAfter.\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    let typst = lower_to_typst_code(&result.ir);
+    assert!(typst.contains("Before."));
+    assert!(typst.contains("After."));
+    assert!(!typst.contains("<div>"));
+    assert!(!typst.contains("hidden"));
+
+    with_typst("target-specific-html", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "main.qd".to_string(),
+            })
+            .expect("Typst/PDF compilation should succeed");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn unknown_function_html_body_stays_fail_closed_before_typst() {
+    let source = ".unknown\n    <div>not owned</div>\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E8001"));
+    let typst = lower_to_typst_code(&result.ir);
+    assert!(!typst.contains("<div>"));
+    assert!(!typst.contains("not owned"));
 }
 
 #[test]

@@ -1533,7 +1533,11 @@ fn parse_original_content(
                 _ => {}
             }
         }
-        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~' | b'<' | b'>') {
+        // Angle-bracket text remains an exact source-backed String boundary;
+        // it does not require the unavailable Quarkdown inline-fragment
+        // parser. Keep E3010 for Markdown constructs whose structure would be
+        // lost by preserving the original text.
+        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~') {
             has_unsupported_markdown = true;
         }
         cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
