@@ -1,7 +1,7 @@
 # Architecture — Scribium
 
 This document describes the accepted target architecture defined by ADR-0014,
-ADR-0015, ADR-0016, and ADR-0017. The source, Quarkdown, and Markdown
+ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, Quarkdown, and Markdown
 frontend boundary crates are now physically present; project and broader
 compiler-layer extraction remains migration work. Implementation and
 migration status must not be confused with target ownership.
@@ -585,6 +585,20 @@ syntax and provenance. It does not depend on xberg, convert HTML to Typst,
 reconstruct Markdown strings, or recursively parse synthetic Markdown. The
 engine invokes `scribium-html` for HTML requiring semantic normalization.
 
+This HTML interoperability path is for parser-owned Markdown raw HTML and
+bounded foreign-content normalization. It does not recognize or implement the
+Quarkdown `.html` function. `.html {<em>x</em>}` is an evaluated Quarkdown
+function whose future target-specific semantic representation, permission
+boundary, HTML consumption, and intentional Typst/PDF omission are defined by
+ADR-0018; ordinary `<em>x</em>` in `.qd`/`.scrib` remains the source-backed
+`E8001` case in `RAW_HTML_POLICY.md`.
+
+The Quarkdown `.html` payload does not pass through `scribium-html`. A future
+HTML output backend consumes `TargetSpecificContent(Html)` after backend
+selection; its physical crate/name is not frozen by ADR-0018. `scribium-html`
+remains the Markdown/foreign-HTML normalization boundary and is not an output
+renderer. This ADR does not create or rename a crate.
+
 The selected dependency is:
 
 ```text
@@ -774,11 +788,15 @@ There is no direct `scribium-core -> scribium-typst` dependency. The core
 facade produces the normalized IR, and the host composes it with lowering and,
 when selected, compiler execution.
 
-Supported HTML is normalized before backend code generation. If foreign HTML
-reaches `scribium-typst` as `ForeignContent(Html)`, it must be handled
-explicitly under the applicable lowering/compatibility policy. It must not be
-passed directly into Typst source, sent to xberg from `scribium-typst`, or
-silently discarded. `RawTypst` remains forbidden in backend-neutral IR; the
+Supported Markdown foreign HTML is normalized before backend code generation.
+If that foreign HTML reaches `scribium-typst` as `ForeignContent(Html)`, it
+must be handled explicitly under the applicable lowering/compatibility policy.
+The separate Quarkdown `.html` target-specific node defined by ADR-0018 is
+intentionally omitted by Typst/PDF lowering after evaluation; that omission
+must not be confused with dropping unsupported Markdown foreign content. No
+HTML payload may be passed directly into Typst source, sent to xberg from
+`scribium-typst`, or silently reinterpreted. `RawTypst` remains forbidden in
+backend-neutral IR; the
 exact foreign-HTML diagnostic and policy are outside this section.
 
 The current physical `scribium-typst` implementation may still combine

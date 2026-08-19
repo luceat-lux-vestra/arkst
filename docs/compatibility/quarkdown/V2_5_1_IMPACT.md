@@ -40,6 +40,23 @@ remain absent from Scribium, including v2.5.0 built-ins and other deferred
 Quarkdown syntax, remain compatibility debt and are not silently promoted by
 this review.
 
+### Target-specific `.html` contract audit
+
+The `.html` function is not a v2.5.1 release-note delta; it is an existing
+public-language gap that was previously insufficiently specified in the
+compatibility record. This review closes that evidence ambiguity against the
+fixed tag commit
+`107ec3a9482f10d6f90d7580f8409b46a719d18e` and records the implementation
+boundary in [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md).
+The v2.5.1 contract is one evaluated `String` argument, evaluator-time
+`NativeContent` authorization, generic-node block/inline placement, verbatim
+HTML-target output, and empty output for non-HTML visitors. Scribium remains
+unsupported/pending: no production IR, evaluator builtin, permission context,
+or HTML backend is added by this audit. Typst/PDF is intended to retain the
+future semantic node until lowering and then omit it silently, while ordinary
+mixed raw HTML in `.qd`/`.scrib` remains `E8001` under the separate Markdown
+raw-HTML policy.
+
 ## Clean-room and substrate record
 
 - No Quarkdown implementation source, source diff, internal test, or upstream

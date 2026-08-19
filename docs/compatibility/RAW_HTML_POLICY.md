@@ -49,7 +49,37 @@ The Quarkdown compatibility contract is therefore:
 
 - ordinary mixed raw HTML in `.qd` / `.scrib` is **not** a compatibility feature;
 - Scribium must not promote Markdown raw-HTML recognition into successful Quarkdown semantics;
-- `.html` is a separate Quarkdown language feature and must be implemented, if/when supported, with its explicit target-specific contract rather than by enabling arbitrary mixed HTML globally.
+- `.html` is a separate Quarkdown language feature and must be implemented, if/when supported, with its explicit target-specific contract rather than by enabling arbitrary mixed HTML globally;
+- `.html {<em>x</em>}` evaluates a single `String` argument and eventually requires a closed, HTML-only target-specific semantic representation; and
+- the feature remains unsupported/pending in Scribium until the capability, IR-carrier, evaluator, and HTML-backend boundaries are implemented and reviewed. See [ADR-0018](../adr/0018-quarkdown-target-specific-native-content.md).
+
+### Quarkdown `.html` is not Markdown raw HTML
+
+The fixed Quarkdown v2.5.1 tag is `107ec3a9482f10d6f90d7580f8409b46a719d18e`.
+Its `.html` function takes one regular `content: String` parameter, checks
+`Permission.NativeContent`, and returns an `Html(content)` node. The function
+is valid both as an isolated block call and inside a paragraph. The upstream
+HTML renderer emits the evaluated string verbatim; the tracked plaintext and
+GFM renderers return empty output for the node. Other-target ignoring is
+therefore an evaluator-node/target-renderer contract, not an instruction to
+discard the call during parsing.
+
+The v2.5.1 CLI grants `native-content` through its default permission set, but
+the capability is checked before node construction and denial raises a typed
+missing-permission error. Scribium's eventual normal/default
+Quarkdown-compatible compilation therefore starts with `NativeContent`
+granted; the host/API may explicitly deny it. Scribium has no equivalent
+compile/evaluation permission context today, so this is a documented future
+contract rather than an implemented permission API. Granting it must not
+authorize CSS, JavaScript, filesystem/network access, Markdown mixed raw HTML,
+Typst injection, or arbitrary native payloads. `.css` shares the upstream
+permission but remains outside this slice.
+
+The intended future Typst/PDF behavior is deliberate silent omission after
+evaluation and capability checking: retain the target-specific HTML semantic
+node until backend selection, then emit no Typst output and no warning. A
+future HTML backend may consume the node and emit the evaluated content
+verbatim. This is not a generic native-content or MIME escape hatch.
 
 ### Typst
 
@@ -154,7 +184,8 @@ This divergence is resolved. The compile entry boundary now determines one
 internal source mode and passes it to both frontend parsing and AST-to-IR
 conversion. The whitelist adapter is enabled only for Markdown; `.qd` and
 `.scrib` preserve parser-exposed raw HTML as source-backed nodes and emit
-`E8001`. Block raw HTML remains unsupported in every mode.
+`E8001`. Arbitrary/non-comment block raw HTML remains unsupported; complete
+parser-owned Markdown comment-only blocks are the explicit bounded exception.
 
 The implementation preserves these invariants:
 
@@ -173,7 +204,7 @@ The implementation preserves these invariants:
 1. **Mode separation:** **Completed.** The Markdown bounded raw-HTML semantic adapter cannot become Quarkdown mixed-HTML support.
 2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.scrib` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
 3. **Comment decision:** **Completed.** Complete parser-owned Markdown HTML comments are a bounded semantic no-op; trailing, malformed, and non-comment raw HTML remains fail-closed.
-4. **`.html` function:** implement only when its target-specific behavior and backend contract are explicitly defined.
+4. **`.html` function:** **contract defined in ADR-0018; implementation pending.** Add no builtin, IR variant, permission API, or HTML backend until the architecture review accepts the closed target-specific representation and capability boundary.
 5. **Do not expand arbitrary HTML semantics** unless a concrete source-language compatibility requirement cannot be represented with existing portable IR/functions.
 
 ## Non-goals
@@ -186,6 +217,12 @@ This policy does not authorize:
 - unsafe HTML passthrough as a PDF/Typst workaround;
 - expanding the Markdown subset merely because Typst or a future HTML backend could emit an equivalent element;
 - using Rushdown's HTML renderer as Scribium's Quarkdown evaluator/backend.
+- treating Quarkdown `.html` as permission-free or as a Markdown raw-HTML
+  parser mode;
+- making Typst/PDF emit a warning or visible text for an upstream-ignored
+  `.html` node; or
+- allowing the future target-specific mechanism to authorize `.css`,
+  JavaScript, SVG, LaTeX, Typst source, arbitrary MIME, or plugin payloads.
 
 Rushdown's renderer can still be useful as a Markdown-only differential oracle, but production Scribium semantics continue through frontend AST -> backend-neutral IR -> single evaluator -> backend lowering.
 
@@ -196,3 +233,4 @@ Rushdown's renderer can still be useful as a Markdown-only differential oracle, 
 - [Quarkdown compatibility specification](quarkdown/README.md)
 - [Typst backend compatibility](typst/README.md)
 - [ADR-0003: Typst as the rendering backend](../adr/0003-typst-as-the-rendering-backend.md)
+- [ADR-0018: Quarkdown target-specific native content](../adr/0018-quarkdown-target-specific-native-content.md)
