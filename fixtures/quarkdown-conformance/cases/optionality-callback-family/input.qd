@@ -1,0 +1,10 @@
+.ifpresent {Quarkdown} {@lambda text: .uppercase {.text}}
+
+.ifpresent {.none} {@lambda text: .uppercase {.text}}::otherwise {missing}
+
+.takeif {4} condition:{@lambda number: .iseven {.number}}
+
+.takeif {5} {@lambda number: .iseven {.number}}::otherwise {odd}
+
+.takeif {4}
+    .iseven {.1}

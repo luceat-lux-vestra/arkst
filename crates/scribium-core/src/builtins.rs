@@ -37,6 +37,7 @@ pub(crate) fn is_supported(name: &str) -> bool {
             | "isnotempty"
             | "startswith"
             | "plaintext"
+            | "none"
             | "otherwise"
             | "isnone"
             | "islower"
@@ -76,6 +77,7 @@ pub(crate) fn evaluate(
         }
         "startswith" => evaluate_startswith(positional_args, named_args, has_body),
         "plaintext" => evaluate_plaintext(positional_args, named_args, has_body),
+        "none" => evaluate_none(positional_args, named_args, has_body),
         "otherwise" => evaluate_otherwise(positional_args, named_args, has_body),
         "isnone" => evaluate_isnone(positional_args, named_args, has_body),
         "islower" | "isgreater" => evaluate_ordering(name, positional_args, named_args, has_body),
@@ -541,6 +543,19 @@ fn evaluate_otherwise(
     } else {
         Ok(positional_args[0].clone())
     }
+}
+
+fn evaluate_none(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    if has_body || !named_args.is_empty() || !positional_args.is_empty() {
+        return Err(error(
+            "`.none` does not accept arguments or a block body".to_string(),
+        ));
+    }
+    Ok(IrValue::None)
 }
 
 fn evaluate_isnone(
