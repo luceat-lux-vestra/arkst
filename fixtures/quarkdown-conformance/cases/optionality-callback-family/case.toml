@@ -1,0 +1,5 @@
+id = "optionality-callback-family"
+feature = "optional-callbacks"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-optionality"
+description = "Typed none propagation with lazy ifpresent and Boolean takeif callbacks"

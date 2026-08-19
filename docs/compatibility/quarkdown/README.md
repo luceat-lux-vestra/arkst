@@ -64,12 +64,12 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
-| Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
+| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; lazy callbacks through first-class `@lambda` or headerless indented bodies; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |
 | Iteration                      | typed `Range` / `Collection` / `Pair` / ordered `Dictionary`; block `.foreach` and `.repeat` | Semantically supported for typed values, closed inclusive ranges, left-open ranges starting at 1, descending-empty behavior, ordered list adaptation, ordered dictionary entries, block explicit/implicit lambdas, Pair destructuring, typed collection results, parent visibility, and child isolation | Implemented (evidenced slice; right-open/fully-open iterable rejection and generalized patterns deferred) |
 | Collection access              | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat` | Typed access over `Collection`, `Pair`, ordered `Dictionary` entries, finite closed or left-open `Range`, and Markdown list values; one-based access with upstream absence/fallback behavior | Implemented (evidenced slice) |
-| Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, and nested first-seen groups | Implemented (evidenced v2.5.1 slice) |
+| Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, nested first-seen groups, and stable `by` selector sorting | Implemented (evidenced v2.5.1 slice; table operations remain deferred) |
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
-| Functions/components            | —                                | —                        | Planned          |
+| Functions/components            | —                                | Complete public component/layout semantics remain unimplemented; current pure callbacks are tracked separately | Planned          |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
 | Metadata                       | —                                | —                        | Planned          |
 | Row/column/grid                | —                                | —                        | Planned          |
@@ -214,8 +214,8 @@ and a two-column table for Dictionary; Typst lowering does not implement these
 language semantics.
 
 This slice intentionally does not add nested or generalized destructuring,
-rest/spread patterns, mutation, comparator-language syntax, descending sorting,
-or transform forms beyond the shared first-class `by` callback. `.map`,
+rest/spread patterns, mutation, arbitrary comparator syntax, descending
+sorting, or transform forms beyond the shared first-class `by` callback. `.map`,
 `.filter`, and `.sorted` now use the generic callable and iterable machinery
 described below; `.filter` is Boolean-only and the requested `.map`/`.filter`
 surface is not asserted as an upstream v2.5.1 compatibility claim because the
@@ -330,6 +330,31 @@ Pair, Dictionary, Range, and supported Markdown-list transforms reuse the exact
 `.foreach` element sequence and Range policy. Callback failures, invalid
 predicates, unsupported sort keys, and endless ranges publish no partial
 result; no value is serialized or reparsed.
+
+## Optionality and callback semantics
+
+The v2.5.1 [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt)
+surface defines `.none`, `.isnone`, `.otherwise`, `.ifpresent`, and `.takeif`.
+`.ifpresent` maps a non-`None` value through a one-argument lambda and returns
+`None` without invoking that lambda for an absent value. `.takeif` invokes its
+one-argument condition only for a present value, requires a Boolean result, and
+returns the original value or semantic `None`.
+
+Scribium implements this bounded semantic slice in the evaluator. `IrValue::None`
+is distinct from terminal `NoValue`; direct output retains the existing text
+`None` boundary, while value-context composition retains typed `None`.
+First-class `@lambda` callbacks and headerless indented callback bodies reuse
+`IrValue::Callable`, immutable capture snapshots, `EvaluationContext::child()`,
+nearest-scope implicit parameters, and the existing failure-atomic invocation
+path. No source text is generated or reparsed. Ordinary content is not
+silently classified as a lambda, so unmarked explicit inline callback headers
+remain outside this bounded parser-independent slice.
+
+Evidence is independently authored in
+`fixtures/quarkdown-conformance/cases/optionality-callback-family/input.qd` and
+covered by `compile_optionality_*` tests for lazy absence, named/mixed callback
+binding, capture, shadowing, callback failure, UTF-8/CRLF spans, and atomic
+results.
 
 ## Range construction and iterable semantics
 
@@ -528,7 +553,7 @@ operations. The Collection slice also covers `.second`, `.third`, `.sumall`,
 typed materialization path. `.foreach` and `.sorted` are native v2.5.1
 evidence; the retained `.map`/`.filter` surface is explicitly a Scribium
 extension and is excluded from conformance claims. Deferred are generalized or
-nested destructuring, comparator-language syntax, descending sorting, and
+nested destructuring, arbitrary comparator syntax, descending sorting, and
 table-specific collection operations. Right-open and fully-open Range values
 are represented but are rejected by the standard finite Iterable path as
 endless.
@@ -716,7 +741,7 @@ Scribium has not implemented yet. They are listed in the Feature Matrix as
 debt against the complete target. Standalone lambda values outside the
 supported first-class/callback forms, layout semantics, unimplemented data
 loading families, and other v2.5.0 built-ins remain additional gaps; generalized or nested
-destructuring, comparator-language syntax, descending sorting, and unrelated
+destructuring, arbitrary comparator syntax, descending sorting, and unrelated
 collection operations remain deferred within the iteration slice. Right-open and
 fully-open Range values are not globally unsupported: their representation is
 supported, while standard Iterable consumption rejects them as endless. The
@@ -845,8 +870,8 @@ language features. If a public-language behavior is deliberately divergent, it
 requires the rationale, compatibility documentation, appropriate diagnostics,
 and an ADR when substantial.
 
-New v2.5.0 builtins (data loading via `.json`, `.markdown`, `.llmstxt`,
-stdlib `foreach`/iterables) are tracked as `Planned` above; they do not belong
-to the non-language exclusions above. As features are implemented, their matrix
-status and evidence are promoted; until then they remain explicit gaps against
-the complete target.
+The remaining v2.5.1 data-loading families (`.csv`, `.includeall`,
+`.listfiles`, `.filename`) and `.llmstxt` are tracked as deferred above; they do
+not belong to the non-language exclusions above. As features are implemented,
+their matrix status and evidence are promoted; until then they remain explicit
+gaps against the complete target.

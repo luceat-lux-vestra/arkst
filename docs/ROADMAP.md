@@ -73,13 +73,14 @@ partial compatibility claims and a growing evidence-backed baseline.
 | Scalar arithmetic beyond `.sum`/`.multiply` | Completed (bounded v2.5.1 arithmetic/unary, transcendental, and decimal post-processing slices; `.range` remains separately evidenced) |
 | Scalar string operations (`.string`, `.concatenate`, case/predicate family) and bounded `.plaintext` projection | Completed (bounded v2.5.1 slice; Dynamic String conversion deferred) |
 | General typed value conversion | Planned (gap inventory; split by semantic family) |
-| Error/absence helpers beyond `.isnone`/`.otherwise` | In progress (bounded evidence) |
+| Error/absence helpers (`.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif`) | Completed (bounded callback evidence; full error taxonomy remains partial) |
 | Public-language gap inventory and current slice ordering | Completed (see `docs/compatibility/quarkdown/GAP_INVENTORY.md`) |
 
 Public Quarkdown features not yet implemented are tracked compatibility debt;
-they are not permanent product exclusions. Include/read/data loading is
-deferred to M3 because it crosses the host filesystem boundary; function-driven
-metadata and layout/components are deferred to M3+; see the gap inventory for
+they are not permanent product exclusions. Project-backed `.read`, `.json`, and
+`.include` are implemented through `VirtualProject`; remaining data-loading
+families are deferred because they require separate host/resource evidence.
+Function-driven metadata and layout/components are deferred to M3+; see the gap inventory for
 the complete evidence-backed classification. v0.1 may be partial.
 
 ## M3 — Programmable Documents

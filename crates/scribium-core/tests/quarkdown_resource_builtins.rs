@@ -193,6 +193,64 @@ fn include_changes_the_base_for_nested_source_relative_read() {
 }
 
 #[test]
+fn nested_include_reuses_function_lambda_and_resource_context() {
+    let project = project(
+        "docs/main.qd",
+        &[
+            ("docs/main.qd", ".include {partials/child.qd}\n"),
+            (
+                "docs/partials/child.qd",
+                ".function {render}\n    text:\n    .ifpresent {.text} {@lambda value: .uppercase {.value}}\n\n.render {.read {data/value.txt}}\n",
+            ),
+        ],
+        &[("docs/partials/data/value.txt", b"nested")],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), "NESTED");
+}
+
+#[test]
+fn nested_include_callback_failure_keeps_child_source_and_atomic_output() {
+    let child = ".ifpresent {hello} {@lambda value: .sum {true} {2}}\n";
+    let project = project(
+        "main.qd",
+        &[
+            ("main.qd", ".include {partials/child.qd}\n"),
+            ("partials/child.qd", child),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert_eq!(
+        result.diagnostics.len(),
+        1,
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert_eq!(
+        result.diagnostics[0]
+            .primary
+            .as_ref()
+            .map(|span| span.source_id.0),
+        Some(2)
+    );
+    assert_eq!(
+        result.diagnostics[0]
+            .primary
+            .as_ref()
+            .map(|span| span.start),
+        Some(child.find(".sum").expect("nested callback failure"))
+    );
+    assert!(result.ir.nodes.is_empty());
+}
+
+#[test]
 fn nested_resource_failure_keeps_the_included_source_identity() {
     let project = project(
         "docs/main.qd",

@@ -57,6 +57,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `Lambda.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt | First-class lambda value, explicit/implicit parameters, optional arguments, forked invocation scope, and lexical parent context | 2026-08-18 |
 | Quarkdown v2.5.1 `LambdaValue.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/LambdaValue.kt | Lambda as a typed Value wrapper rather than a backend expression | 2026-08-18 |
 | Quarkdown v2.5.1 `LambdaTest.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/LambdaTest.kt | Public examples for nested implicit scope, explicit inline parameters, callback passing, and legacy `@lambda` syntax | 2026-08-18 |
+| Quarkdown v2.5.1 `Optionality.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt | `.none`, `.isnone`, `.otherwise`, lazy `.ifpresent` callback results, and Boolean-only `.takeif` callbacks | 2026-08-19 |
 | Quarkdown v2.5.1 `Collection.kt` transform section | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt | `.sorted(from, by?)` signature, natural-order vs selector behavior, and no public `.map`/`.filter` declarations in the tracked tag | 2026-08-18 |
 | Quarkdown v2.5.1 `Sorting.kt` | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Sorting.kt | Stable selector-based sorting machinery and null-safe comparator helper used by stdlib sorting | 2026-08-18 |
 | Kotlin stdlib `sortedWith` API | https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/sorted-with.html | Public contract that the comparator sort is stable and equal elements preserve relative order | 2026-08-18 |
@@ -356,6 +357,26 @@ destructuring rule. Range callbacks consume the existing finite inclusive or
 left-open materialization and reject right-open/fully-open endless ranges.
 Markdown lists use the same supported list adaptation. No transform materializes
 through text serialization, generated Markdown, or a second parser.
+
+## Optionality callback evidence record
+
+The v2.5.1 [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt)
+source defines `.none`, `.isnone`, `.otherwise`, `.ifpresent`, and `.takeif`.
+`.ifpresent` returns `None` without invoking its mapping lambda when the value
+is absent; otherwise it returns the lambda's typed result. `.takeif` evaluates
+its condition only for a present value, requires a Boolean result, and returns
+the original value or `None` accordingly. These are lazy callback contracts,
+not negative/zero/positive comparators or text transformations.
+
+Scribium implements the reviewed boundary with `IrValue::None` and the shared
+`IrValue::Callable` path. First-class `@lambda` values and headerless indented
+callback bodies use the existing lexical capture, child-scope, and implicit
+parameter machinery. Callback errors remain source-backed and atomic: no
+partial optionality result is published. The independently authored evidence
+fixture is
+`fixtures/quarkdown-conformance/cases/optionality-callback-family/input.qd`;
+compile coverage includes lazy absence, named/mixed callback arguments,
+capture/shadowing, UTF-8/CRLF spans, and callback failure atomicity.
 
 ## `.plaintext` behavioral evidence record
 

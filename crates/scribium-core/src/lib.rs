@@ -1258,6 +1258,16 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_optionality_fixture_preserves_lazy_typed_callbacks() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/optionality-callback-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "QUARKDOWN\nmissing\n4\nodd\n4");
+    }
+
+    #[test]
     fn compile_plaintext_rejects_unsupported_values_atomically() {
         for source in [
             ".plaintext {.pair {a} {b}}\n",
@@ -1894,6 +1904,65 @@ mod tests {
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(output_text(&result), "true\nfalse");
+    }
+
+    #[test]
+    fn compile_optionality_callbacks_reuse_typed_values_and_lazy_none() {
+        let source = ".ifpresent {hello} {@lambda value: .uppercase {.value}}\n\
+.ifpresent {.none} {@lambda x: .x::uppercase}::otherwise {fallback}\n\
+.takeif {4} condition:{@lambda x: .x::iseven}\n\
+.takeif {5} {@lambda x: .x::iseven}::otherwise {fallback}\n\
+.takeif {4}\n    .iseven {.1}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "HELLO\nfallback\n4\nfallback\n4");
+    }
+
+    #[test]
+    fn compile_optionality_callbacks_capture_and_shadow_lexical_scope() {
+        let source = ".var {suffix} {!}\n\
+.ifpresent {hello} {@lambda value: .concatenate {.value} {.suffix}}\n\
+.var {value} {outer}\n\
+.ifpresent {inner} {@lambda value: .value}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "hello!\ninner");
+    }
+
+    #[test]
+    fn compile_optionality_callback_failure_is_atomic_and_source_backed() {
+        let source = ".ifpresent {hello} {@lambda .sum {true} {2}}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        let failure_start = source.find(".sum").expect("callback failure span");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                failure_start,
+                failure_start + ".sum {true} {2}".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_optionality_callback_failure_preserves_utf8_crlf_provenance() {
+        let source = ".takeif {세계}\r\n    .sum {true} {2}\r\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        let failure_start = source.find(".sum").expect("callback failure span");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                failure_start,
+                failure_start + ".sum {true} {2}".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
     }
 
     #[test]

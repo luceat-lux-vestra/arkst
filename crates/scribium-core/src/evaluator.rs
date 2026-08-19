@@ -1283,6 +1283,19 @@ impl Evaluator {
             );
         }
 
+        if is_optionality_callback(name) {
+            return self.evaluate_optionality_callback(
+                name,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if is_collection_transform(name) {
             return self.evaluate_collection_transform(
                 name,
@@ -2695,6 +2708,134 @@ impl Evaluator {
                 ));
                 CallOutcome::Failed
             }
+        }
+    }
+
+    /// Evaluates the bounded callback-based optionality functions from the
+    /// v2.5.1 Optionality module. The value is resolved before a callback is
+    /// invoked, and a semantic `None` short-circuits the callback entirely.
+    /// This keeps the operation lazy while reusing the shared callable scope,
+    /// capture, destructuring, and failure-atomicity path.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_optionality_callback(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let (raw_value, raw_callback) = match optionality_operands(
+            name,
+            positional_args,
+            named_args,
+            body.is_some(),
+            *span,
+            diagnostics,
+        ) {
+            Ok(operands) => operands,
+            Err(outcome) => return outcome,
+        };
+        let value = match self.evaluate_value(&raw_value, diagnostics, context) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::Unresolved => {
+                match self.preserve_value_expression(&raw_value, diagnostics, context) {
+                    Ok(value) => value,
+                    Err(outcome) => return outcome,
+                }
+            }
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(value_source_span(&raw_value, span)));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+        };
+
+        if matches!(value, IrValue::None) {
+            return CallOutcome::Value(IrValue::None);
+        }
+
+        let callable = match body {
+            Some(CallBody::Block(nodes)) => {
+                self.make_callable(lambda_parameters, nodes, *span, context)
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(function_error(
+                    format!("`.{name}` requires a block or first-class lambda callback"),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                let Some(raw_callback) = raw_callback else {
+                    diagnostics.push(function_error(
+                        format!("`.{name}` requires a callback lambda"),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let callback = match self.evaluate_value(&raw_callback, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Callable(callable)) => callable,
+                    CallOutcome::Value(value) => {
+                        diagnostics.push(iteration_error(
+                            format!("`.{name}` callback must be a first-class callable"),
+                            value_source_span(&value, span),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Unresolved => {
+                        diagnostics.push(iteration_error(
+                            format!("`.{name}` callback must be a first-class callable"),
+                            value_source_span(&raw_callback, span),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(value_source_span(&raw_callback, span)));
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                };
+                callback
+            }
+        };
+        let callback_result = match self.invoke_callable(
+            &callable,
+            vec![value.clone()],
+            IterationOptions {
+                span: *span,
+                allow_destructuring: false,
+            },
+            diagnostics,
+            context,
+        ) {
+            CallOutcome::Value(value) => value,
+            CallOutcome::NoValue => {
+                diagnostics.push(no_value_required(callable.span));
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+            CallOutcome::Unresolved => return CallOutcome::Unresolved,
+        };
+
+        if name == "ifpresent" {
+            return CallOutcome::Value(callback_result);
+        }
+
+        let Some(condition) = scalar_boolean_value(&callback_result) else {
+            diagnostics.push(iteration_error(
+                "`.takeif` condition must return Boolean".to_string(),
+                value_source_span(&callback_result, &callable.span),
+            ));
+            return CallOutcome::Failed;
+        };
+        if condition {
+            CallOutcome::Value(value)
+        } else {
+            CallOutcome::Value(IrValue::None)
         }
     }
 
@@ -4401,6 +4542,10 @@ fn is_repeat(name: &str) -> bool {
     name == "repeat"
 }
 
+fn is_optionality_callback(name: &str) -> bool {
+    matches!(name, "ifpresent" | "takeif")
+}
+
 fn is_range(name: &str) -> bool {
     name == "range"
 }
@@ -4498,6 +4643,75 @@ fn transform_operands(
         return Err(CallOutcome::Failed);
     }
     Ok((collection, callback))
+}
+
+fn optionality_operands(
+    name: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    has_body: bool,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(IrValue, Option<IrValue>), CallOutcome> {
+    if positional_args.len() > 2 {
+        diagnostics.push(function_error(
+            format!("`.{name}` accepts a value and one callback"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    let callback_name = if name == "ifpresent" {
+        "mapping"
+    } else {
+        "condition"
+    };
+    let mut value = positional_args.first().cloned();
+    let mut callback = positional_args.get(1).cloned();
+    for argument in named_args {
+        let target = match argument.name.as_str() {
+            "value" => &mut value,
+            name if name == callback_name => &mut callback,
+            _ => {
+                diagnostics.push(function_error_at(
+                    format!("Unknown named parameter `{}`", argument.name),
+                    argument.name_span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+        if target.is_some() {
+            diagnostics.push(function_error_at(
+                format!("Parameter `{}` was bound more than once", argument.name),
+                argument.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *target = Some(argument.value.clone());
+    }
+
+    let Some(value) = value else {
+        diagnostics.push(function_error(
+            format!("`.{name}` requires a value argument"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    };
+    if has_body && callback.is_some() {
+        diagnostics.push(function_error(
+            format!("`.{name}` received both a callback argument and a block body"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    if !has_body && callback.is_none() {
+        diagnostics.push(function_error(
+            format!("`.{name}` requires a callback lambda"),
+            span,
+        ));
+        return Err(CallOutcome::Failed);
+    }
+    Ok((value, callback))
 }
 
 fn collection_access_operand(
@@ -6550,6 +6764,11 @@ mod tests {
                     second: Box::new(IrValue::Number(1.0)),
                     span: span(6, 10),
                 },
+                IrPair {
+                    first: Box::new(IrValue::String("c".to_string())),
+                    second: Box::new(IrValue::Number(1.0)),
+                    span: span(11, 15),
+                },
             ],
             span: span(0, 10),
         });
@@ -6570,7 +6789,11 @@ mod tests {
         assert!(matches!(
             mapped,
             CallOutcome::Value(IrValue::Collection(values))
-                if values == vec![IrValue::Number(3.0), IrValue::Number(1.0)]
+                if values == vec![
+                    IrValue::Number(3.0),
+                    IrValue::Number(1.0),
+                    IrValue::Number(1.0),
+                ]
         ));
 
         let sorted = evaluator.evaluate_call_value(
@@ -6596,6 +6819,14 @@ mod tests {
             unreachable!()
         };
         assert_eq!(*first.second, IrValue::Number(1.0));
+        let IrValue::Pair(second) = &values[1] else {
+            unreachable!()
+        };
+        let IrValue::Pair(third) = &values[2] else {
+            unreachable!()
+        };
+        assert_eq!(*second.first, IrValue::String("c".to_string()));
+        assert_eq!(*third.first, IrValue::String("a".to_string()));
     }
 
     #[test]
