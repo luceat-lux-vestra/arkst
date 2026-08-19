@@ -363,10 +363,10 @@ through text serialization, generated Markdown, or a second parser.
 The v2.5.1 [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt)
 source defines `.none`, `.isnone`, `.otherwise`, `.ifpresent`, and `.takeif`.
 `.ifpresent` returns `None` without invoking its mapping lambda when the value
-is absent; otherwise it returns the lambda's typed result. `.takeif` evaluates
-its condition only for a present value, requires a Boolean result, and returns
-the original value or `None` accordingly. These are lazy callback contracts,
-not negative/zero/positive comparators or text transformations.
+is absent; otherwise it returns the lambda's typed result. `.takeif` always
+evaluates its condition, including for `None`, requires a Boolean result, and
+returns the original value or `None` accordingly. Only `.ifpresent` has an
+absence short-circuit; `.takeif` remains callback-observable for `None`.
 
 Scribium implements the reviewed boundary with `IrValue::None` and the shared
 `IrValue::Callable` path. First-class `@lambda` values and headerless indented

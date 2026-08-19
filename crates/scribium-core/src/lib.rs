@@ -1930,6 +1930,24 @@ mod tests {
     }
 
     #[test]
+    fn compile_takeif_none_still_invokes_condition() {
+        let source = ".takeif {.none} {@lambda value: .sum {true} {2}}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        let failure_start = source.find(".sum").expect("callback failure span");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                failure_start,
+                failure_start + ".sum {true} {2}".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_optionality_callback_failure_is_atomic_and_source_backed() {
         let source = ".ifpresent {hello} {@lambda .sum {true} {2}}\n";
         let (result, source_id) = compile_source(source);

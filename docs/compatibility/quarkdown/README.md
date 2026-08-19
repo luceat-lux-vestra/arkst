@@ -64,7 +64,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
-| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; lazy callbacks through first-class `@lambda` or headerless indented bodies; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |
+| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; `.ifpresent` absence short-circuit; first-class `@lambda` or headerless indented callbacks; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |
 | Iteration                      | typed `Range` / `Collection` / `Pair` / ordered `Dictionary`; block `.foreach` and `.repeat` | Semantically supported for typed values, closed inclusive ranges, left-open ranges starting at 1, descending-empty behavior, ordered list adaptation, ordered dictionary entries, block explicit/implicit lambdas, Pair destructuring, typed collection results, parent visibility, and child isolation | Implemented (evidenced slice; right-open/fully-open iterable rejection and generalized patterns deferred) |
 | Collection access              | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat` | Typed access over `Collection`, `Pair`, ordered `Dictionary` entries, finite closed or left-open `Range`, and Markdown list values; one-based access with upstream absence/fallback behavior | Implemented (evidenced slice) |
 | Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, nested first-seen groups, and stable `by` selector sorting | Implemented (evidenced v2.5.1 slice; table operations remain deferred) |
@@ -337,8 +337,8 @@ The v2.5.1 [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown
 surface defines `.none`, `.isnone`, `.otherwise`, `.ifpresent`, and `.takeif`.
 `.ifpresent` maps a non-`None` value through a one-argument lambda and returns
 `None` without invoking that lambda for an absent value. `.takeif` invokes its
-one-argument condition only for a present value, requires a Boolean result, and
-returns the original value or semantic `None`.
+one-argument condition for every value, including `None`, requires a Boolean
+result, and returns the original value or semantic `None`.
 
 Scribium implements this bounded semantic slice in the evaluator. `IrValue::None`
 is distinct from terminal `NoValue`; direct output retains the existing text
@@ -352,7 +352,7 @@ remain outside this bounded parser-independent slice.
 
 Evidence is independently authored in
 `fixtures/quarkdown-conformance/cases/optionality-callback-family/input.qd` and
-covered by `compile_optionality_*` tests for lazy absence, named/mixed callback
+covered by `compile_optionality_*` tests for `.ifpresent` lazy absence, named/mixed callback
 binding, capture, shadowing, callback failure, UTF-8/CRLF spans, and atomic
 results.
 

@@ -2712,9 +2712,9 @@ impl Evaluator {
     }
 
     /// Evaluates the bounded callback-based optionality functions from the
-    /// v2.5.1 Optionality module. The value is resolved before a callback is
-    /// invoked, and a semantic `None` short-circuits the callback entirely.
-    /// This keeps the operation lazy while reusing the shared callable scope,
+    /// v2.5.1 Optionality module. `.ifpresent` short-circuits a semantic `None`
+    /// before invoking its mapping callback, while `.takeif` always invokes its
+    /// condition, including for `None`. Both reuse the shared callable scope,
     /// capture, destructuring, and failure-atomicity path.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_optionality_callback(
@@ -2754,7 +2754,7 @@ impl Evaluator {
             CallOutcome::Failed => return CallOutcome::Failed,
         };
 
-        if matches!(value, IrValue::None) {
+        if name == "ifpresent" && matches!(value, IrValue::None) {
             return CallOutcome::Value(IrValue::None);
         }
 
