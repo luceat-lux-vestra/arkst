@@ -137,6 +137,153 @@ fn integration_relative_image_uses_project_source_context() {
 }
 
 #[test]
+fn integration_markdown_images_compile_from_source_relative_paths_to_pdf() {
+    with_typst("markdown-images-e2e", |backend| {
+        let project_root = tempdir().expect("project temp directory");
+        let docs = project_root.path().join("docs");
+        let assets = docs.join("assets");
+        let shared = project_root.path().join("shared");
+        fs::create_dir_all(&assets).expect("asset directory");
+        fs::create_dir_all(&shared).expect("shared asset directory");
+        fs::write(
+            docs.join("guide.md"),
+            "# Image Test\n\nBefore.\n\n![Square](./assets/square.svg)\n\n![Shared](../shared/logo.svg \"Logo\")\n\n![Pixel](./assets/pixel.png)\n\nAfter.\n",
+        )
+        .expect("Markdown source fixture");
+        fs::write(
+            assets.join("square.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32"/></svg>"#,
+        )
+        .expect("SVG fixture");
+        fs::write(
+            shared.join("logo.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8"/></svg>"#,
+        )
+        .expect("parent-relative SVG fixture");
+        fs::write(
+            assets.join("pixel.png"),
+            [
+                0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+                0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                0x00, 0x37, 0x6e, 0xf9, 0x24, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x08,
+                0xd7, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00,
+                0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+            ],
+        )
+        .expect("PNG fixture");
+
+        let source = fs::read_to_string(docs.join("guide.md")).expect("read Markdown fixture");
+        let project = VirtualProjectBuilder::new()
+            .entry("docs/guide.md")
+            .expect("valid entry")
+            .add_source("docs/guide.md", source)
+            .expect("valid source")
+            .build()
+            .expect("valid project");
+        let result = compile(&project, &CompileOptions::default());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected: {:?}",
+            result.diagnostics
+        );
+
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(typst.contains("#image(\"./assets/square.svg\")"));
+        assert!(typst.contains("#image(\"../shared/logo.svg\")"));
+        assert!(typst.contains("#image(\"./assets/pixel.png\")"));
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project_root.path()))
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "docs/guide.md".to_string(),
+            })
+            .expect("Markdown images should compile through Typst");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn integration_missing_image_is_a_typst_resource_failure() {
+    with_typst("missing-image", |backend| {
+        let project_root = tempdir().expect("project temp directory");
+        let docs = project_root.path().join("docs");
+        fs::create_dir_all(&docs).expect("docs directory");
+        let result = backend
+            .with_source_context(TypstSourceContext::new(project_root.path()))
+            .compile(&TypstInput {
+                source: "#image(\"./assets/missing.svg\")\n".to_string(),
+                entry_path: "docs/guide.md".to_string(),
+            })
+            .expect_err("missing image must fail closed");
+        let error = result.to_string();
+        assert!(error.contains("Typst compilation failed"), "error: {error}");
+        assert!(!error.contains(project_root.path().to_string_lossy().as_ref()));
+    });
+}
+
+#[test]
+fn integration_image_path_escape_is_rejected_by_project_root() {
+    with_typst("image-boundary", |backend| {
+        let parent = tempdir().expect("project parent directory");
+        let project_root = parent.path().join("project");
+        let outside = parent.path().join("outside");
+        fs::create_dir_all(project_root.join("docs")).expect("project docs");
+        fs::create_dir_all(&outside).expect("outside directory");
+        fs::write(outside.join("secret.svg"), "not an image").expect("outside fixture");
+
+        let result = backend
+            .with_source_context(TypstSourceContext::new(&project_root))
+            .compile(&TypstInput {
+                source: "#image(\"../../outside/secret.svg\")\n".to_string(),
+                entry_path: "docs/guide.md".to_string(),
+            })
+            .expect_err("image path escape must fail closed");
+        let error = result.to_string();
+        assert!(error.contains("Typst compilation failed"), "error: {error}");
+        assert!(error.contains("project"), "error: {error}");
+        assert!(
+            !error.contains("not an image"),
+            "error leaked resource: {error}"
+        );
+        assert!(!error.contains(parent.path().to_string_lossy().as_ref()));
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn integration_image_symlink_escape_is_rejected_before_typst() {
+    use std::os::unix::fs::symlink;
+
+    with_typst("image-symlink-boundary", |backend| {
+        let parent = tempdir().expect("project parent directory");
+        let project_root = parent.path().join("project");
+        let outside = parent.path().join("outside");
+        fs::create_dir_all(project_root.join("docs/assets")).expect("project assets");
+        fs::create_dir_all(&outside).expect("outside directory");
+        fs::write(outside.join("secret.svg"), "secret").expect("outside fixture");
+        symlink(
+            outside.join("secret.svg"),
+            project_root.join("docs/assets/leak.svg"),
+        )
+        .expect("image symlink");
+
+        let result = backend
+            .with_source_context(TypstSourceContext::new(&project_root))
+            .compile(&TypstInput {
+                source: "#image(\"./assets/leak.svg\")\n".to_string(),
+                entry_path: "docs/guide.md".to_string(),
+            })
+            .expect_err("image symlink escape must fail closed");
+        assert!(matches!(
+            result,
+            scribium_typst::backend::TypstError::ResourceBoundaryViolation(path)
+                if path == "docs/assets/leak.svg"
+        ));
+    });
+}
+
+#[test]
 fn integration_relative_read_does_not_depend_on_temp_directory() {
     with_typst("relative-read", |backend| {
         let project = tempdir().expect("project temp directory");

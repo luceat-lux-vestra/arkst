@@ -7,7 +7,7 @@ use scribium_core::ir::{
     IrCallSegment, IrDocument, IrInline, IrNode, IrTableAlignment, IrTableCell, IrTableRow,
     IrTaskStatus, IrValue, SourceMapEntry,
 };
-use scribium_core::source::SourceSpan;
+use scribium_core::source::{ResourceReference, SourceSpan};
 
 /// Lower a Scribium IR document to Typst source code.
 ///
@@ -462,13 +462,22 @@ impl LoweringContext {
                 ..
             } => {
                 let before = self.output.len();
-                self.push_str("/* Scribium image resource deferred: ");
-                self.push_str(&escape_typst_comment(destination));
-                if let Some(title) = title {
-                    self.push_str("; title: ");
-                    self.push_str(&escape_typst_comment(title));
+                if ResourceReference::classify(destination).is_local_path() {
+                    self.push_str("#image(\"");
+                    self.push_str(&escape_typst_string(destination));
+                    self.push_str("\")");
+                } else {
+                    // Core compilation diagnoses non-local Markdown image
+                    // references. Keep defensive direct-IR lowering
+                    // non-fetching if a caller bypasses that diagnostic gate.
+                    self.push_str("/* Scribium image resource rejected: ");
+                    self.push_str(&escape_typst_comment(destination));
+                    if let Some(title) = title {
+                        self.push_str("; title: ");
+                        self.push_str(&escape_typst_comment(title));
+                    }
+                    self.push_str(" */");
                 }
-                self.push_str(" */");
                 if span.source_id != scribium_core::SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -1037,6 +1046,57 @@ mod tests {
                 original: link_span,
             }]
         );
+    }
+
+    #[test]
+    fn lower_image_emits_a_local_typst_image_and_preserves_source_map() {
+        use scribium_core::ir::SourceMapEntry;
+
+        let image_span = SourceSpan::new(scribium_core::SourceId(1), 7, 42);
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Image {
+                    content: vec![text("alt")],
+                    destination: "./assets/a\"b logo.svg".into(),
+                    title: Some("title is preserved upstream".into()),
+                    span: image_span,
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let (code, map) = super::lower_to_typst(&doc);
+        assert_eq!(code, "#image(\"./assets/a\\\"b logo.svg\")\n\n");
+        assert_eq!(
+            map,
+            vec![SourceMapEntry {
+                generated_start: 0,
+                generated_end: 32,
+                original: image_span,
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_image_never_emits_nonlocal_resources() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::Paragraph {
+                content: vec![IrInline::Image {
+                    content: vec![text("remote")],
+                    destination: "https://example.com/image.png".into(),
+                    title: None,
+                    span: empty_span(),
+                }],
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let code = super::lower_to_typst_code(&doc);
+        assert!(!code.contains("#image("));
+        assert!(code.contains("image resource rejected"));
+        assert!(!code.contains("https://example.com/image.png\")"));
     }
 
     #[test]

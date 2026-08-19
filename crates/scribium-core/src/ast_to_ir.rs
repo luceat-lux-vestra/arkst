@@ -9,7 +9,7 @@ use crate::ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
     IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
-use crate::source::{ByteSpan, SourceId, SourceSpan};
+use crate::source::{ByteSpan, ResourceReference, SourceId, SourceSpan};
 use crate::virtual_project::ProjectMetadata;
 use crate::SourceMode;
 use scribium_markdown::ast::{
@@ -736,7 +736,13 @@ fn inline_to_ir(
             title,
             span,
         } => {
-            push_unsupported(diagnostics, "image", span, source_id);
+            if source_mode == SourceMode::Markdown {
+                if let Some(diagnostic) = image_resource_diagnostic(destination, span, source_id) {
+                    diagnostics.push(diagnostic);
+                }
+            } else {
+                push_unsupported(diagnostics, "image", span, source_id);
+            }
             Some(IrInline::Image {
                 content: inlines_to_ir(content, source_id, diagnostics, source_mode, function_body),
                 destination: destination.clone(),
@@ -962,6 +968,35 @@ fn push_unsupported(
             "The source semantics were not coerced into a different Markdown node.".to_string(),
         ],
     });
+}
+
+fn image_resource_diagnostic(
+    destination: &str,
+    span: &crate::source::ByteSpan,
+    source_id: SourceId,
+) -> Option<Diagnostic> {
+    let reference = ResourceReference::classify(destination);
+    let message = match reference {
+        ResourceReference::LocalPath(_) => return None,
+        ResourceReference::AbsolutePath(_) => {
+            "absolute or platform-specific Markdown image resource paths are not allowed"
+                .to_string()
+        }
+        ResourceReference::Uri { scheme, .. } => {
+            format!("unsupported Markdown image resource scheme: {scheme}")
+        }
+    };
+    Some(Diagnostic {
+        code: "E8001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(byte_to_source_span(span, source_id)),
+        secondary: Vec::new(),
+        hints: vec![
+            "Use a project-relative local image path; network and absolute resources are not fetched by Scribium."
+                .to_string(),
+        ],
+    })
 }
 
 fn invalid_function_declaration(
@@ -1885,7 +1920,7 @@ mod tests {
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())
             .collect();
-        assert!(messages.iter().any(|message| message.contains("image")));
+        assert!(!messages.iter().any(|message| message.contains("image")));
         assert!(messages
             .iter()
             .any(|message| message.contains("raw HTML inline")));
@@ -1896,6 +1931,74 @@ mod tests {
             .iter()
             .any(|message| message.contains("strikethrough")));
         assert!(!messages.iter().any(|message| message.contains("GFM table")));
+    }
+
+    #[test]
+    fn markdown_images_preserve_nested_alt_and_classify_nonlocal_resources() {
+        let source = "before ![*formatted* alt](<./assets/my image.png> \"Image title\") after\n";
+        let document = scribium_markdown::parse_md(source);
+        let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Markdown,
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+
+        let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
+            panic!("expected image paragraph")
+        };
+        let IrInline::Image {
+            content: alt,
+            destination,
+            title,
+            span,
+        } = &content[1]
+        else {
+            panic!("expected image, got {content:?}")
+        };
+        assert_eq!(destination, "./assets/my image.png");
+        assert_eq!(title.as_deref(), Some("Image title"));
+        assert!(matches!(alt[0], IrInline::Emphasis { .. }));
+        assert_eq!(
+            &source[span.start..span.end],
+            "![*formatted* alt](<./assets/my image.png> \"Image title\")"
+        );
+
+        for destination in [
+            "https://example.com/image.png",
+            "data:image/svg+xml;base64,abc",
+            "/etc/passwd",
+            r"C:\\Users\\foo\\image.png",
+        ] {
+            let document = scribium_markdown::parse_md(&format!("![alt]({destination})\n"));
+            let (_, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                SourceMode::Markdown,
+            );
+            assert_eq!(diagnostics.len(), 1, "destination {destination:?}");
+            assert_eq!(diagnostics[0].code, "E8001");
+            assert!(diagnostics[0].message.contains("image"));
+        }
+    }
+
+    #[test]
+    fn quarkdown_images_keep_the_existing_unsupported_boundary() {
+        let document = scribium_markdown::parse_qd("![alt](image.png)\n");
+        let (_, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+            &document,
+            source_id(),
+            &empty_project_metadata(),
+            SourceMode::Quarkdown,
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E8001" && diagnostic.message.contains("image")
+        }));
     }
 
     #[test]

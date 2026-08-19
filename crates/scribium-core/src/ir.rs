@@ -187,8 +187,11 @@ pub enum IrInline {
         title: Option<String>,
         span: SourceSpan,
     },
-    /// A Markdown image. Resource resolution is intentionally outside the
-    /// backend-neutral IR; the source metadata remains structurally present.
+    /// A Markdown image.
+    ///
+    /// `destination` remains a logical resource reference. It is never
+    /// rewritten to a host path in the backend-neutral IR; a native backend
+    /// resolves local references against its explicit source context.
     Image {
         content: Vec<IrInline>,
         destination: String,

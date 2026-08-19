@@ -13,6 +13,27 @@ against the same pinned corpus and reference executables; its real-document
 run includes the independently authored `14-metadata-normalization.md`
 fixture.
 
+## Current image support slice
+
+Markdown image syntax is no longer an output-path gap. The pinned Rushdown
+frontend exposes inline and reference images, and Scribium preserves each
+image's nested alt inline tree, logical destination, optional title, and
+source-backed span. `scribium-core` keeps that logical reference in the
+backend-neutral IR and rejects absolute paths and URI schemes with E8001; it
+does not resolve host paths or fetch remote resources.
+
+For local relative destinations, `scribium-typst` emits `#image("...")` and
+the native source-context backend resolves the path from the source entry's
+logical directory inside the project-root mirror. The end-to-end tests cover
+`./` and `../` SVG resources, a PNG resource, missing resources, project-root
+escapes, and symlink escapes. Alt and title metadata are preserved through
+IR but are not currently emitted as PDF accessibility metadata by Typst.
+
+The CommonMark/GFM differential baseline has no image-related known mismatch;
+the image work therefore does not remove any existing baseline exception. The
+remaining known cases below retain their reviewed policy, canonicalization,
+and pinned-Rushdown ownership.
+
 ## Evidence and method
 
 The actual run used:
@@ -388,10 +409,11 @@ separate frontend, canonical-mapping, policy, and Rushdown-boundary questions.
 The final review follow-up below resolves the actionable frontend and mapping
 items; the leading front-matter boundary remains a separate policy decision.
 
-The following remain explicitly outside this remediation batch: Rushdown
-upgrade/fork/patch, parser replacement, source preprocessing or reparsing,
-IR/evaluator changes, resource resolution, raw HTML policy expansion, and
-`.let`/`.foreach`/`.repeat` semantics.
+The following remain explicitly outside this historical remediation batch:
+Rushdown upgrade/fork/patch, parser replacement, source preprocessing or
+reparsing, raw HTML policy expansion, and `.let`/`.foreach`/`.repeat` semantics.
+The later Markdown image slice adds only bounded local resource lowering; it
+does not add remote acquisition, caching, or a general resource framework.
 
 ## Markdown remediation closure
 

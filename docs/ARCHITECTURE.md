@@ -443,6 +443,16 @@ passes the host-selected logical project root (the existing entry-directory
 fallback); future `scribium.toml` discovery can change that selection without
 changing the backend contract.
 
+Markdown image destinations follow the same logical resource contract. The
+Markdown frontend and backend-neutral IR retain the source destination rather
+than injecting an OS path. For a local relative image, Typst lowering emits
+`#image("...")`, so the source-context entry directory determines the
+resolution base. The native mirror and `--root` boundary reject project-root
+escapes and symlink escapes. Absolute filesystem paths and URI schemes,
+including `http`, `https`, and `data`, are rejected before Typst; Scribium does
+not fetch network images. Image alt content and titles remain in AST/IR, while
+the current Typst backend does not emit PDF accessibility metadata for them.
+
 ### Synchronous Core, Async Host
 
 The host gathers all required filesystem and explicitly supplied resource input
