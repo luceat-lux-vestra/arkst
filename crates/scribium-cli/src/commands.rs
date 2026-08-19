@@ -155,7 +155,6 @@ fn compile_project(
 ) -> anyhow::Result<scribium_core::CompileResult> {
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
-        capabilities: scribium_core::Capabilities::default(),
     };
     Ok(scribium_core::compile(project, &options))
 }

@@ -109,8 +109,9 @@ Scribium's implementation status is **implemented for the closed `Html` target
 semantic slice**. The evaluator accepts one regular `content: String` through
 positional, named, inline, and indented-body forms, grants `NativeContent` by
 default through `CompileOptions::default()`, and exposes explicit denial with
-`CompileOptions::with_native_content(false)`. Denial emits one source-backed
-`E3004` diagnostic before node creation.
+`compile_with_capabilities(..., Capabilities::none())`. The ordinary `compile`
+entry point always uses the compatibility-default grant. Denial emits one
+source-backed `E3004` diagnostic before node creation.
 
 - `.html {<em>world</em>}` evaluates to a block `TargetSpecificContent` node;
 - `**Hello** .html {<em>world</em>}!` keeps the target node inline between

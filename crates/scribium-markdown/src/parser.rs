@@ -1543,9 +1543,7 @@ fn parse_original_content(
         cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
     }
     push_content_text(&mut inlines, source, text_start, span.end, base);
-    let has_opaque_angle_fragment =
-        source[span.start..span.end].contains('<') && source[span.start..span.end].contains('>');
-    if has_unsupported_markdown && !has_opaque_angle_fragment {
+    if has_unsupported_markdown {
         diagnostics.push(ParserDiagnostic {
             code: "E3010",
             message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because Rushdown exposes no original-span inline-fragment parser".to_string(),

@@ -179,6 +179,27 @@ fn target_specific_html_typst_and_pdf_smoke() {
 }
 
 #[test]
+fn unknown_function_html_body_stays_fail_closed_before_typst() {
+    let source = ".unknown\n    <div>not owned</div>\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid path")
+        .add_source("main.qd", source)
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E8001"));
+    let typst = lower_to_typst_code(&result.ir);
+    assert!(!typst.contains("<div>"));
+    assert!(!typst.contains("not owned"));
+}
+
+#[test]
 fn integration_version_succeeds() {
     with_typst("version", |backend| {
         let version = backend.version().expect("version should succeed");

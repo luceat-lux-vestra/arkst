@@ -110,6 +110,15 @@ fn source_mode_for_entry(entry: &VirtualPathBuf) -> SourceMode {
 /// The entry point source and its `SourceId` come from the project's
 /// `SourceStore`; no global ID generator is involved.
 pub fn compile(project: &VirtualProject, options: &CompileOptions) -> CompileResult {
+    compile_with_capabilities(project, options, Capabilities::compatibility_default())
+}
+
+/// Compile a Scribium project with an explicit evaluator capability set.
+pub fn compile_with_capabilities(
+    project: &VirtualProject,
+    _options: &CompileOptions,
+    capabilities: Capabilities,
+) -> CompileResult {
     let entry = project.entry();
 
     // Use get_with_id to get both source and SourceId atomically.
@@ -148,7 +157,7 @@ pub fn compile(project: &VirtualProject, options: &CompileOptions) -> CompileRes
         source_mode,
     );
     let (ir, evaluation_diagnostics) =
-        evaluator::Evaluator::with_capabilities(options.capabilities).evaluate(&ir);
+        evaluator::Evaluator::with_capabilities(capabilities).evaluate(&ir);
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()
@@ -174,16 +183,6 @@ pub fn compile(project: &VirtualProject, options: &CompileOptions) -> CompileRes
 #[derive(Debug, Clone, Default)]
 pub struct CompileOptions {
     pub compatibility_profile: Option<String>,
-    pub capabilities: Capabilities,
-}
-
-impl CompileOptions {
-    /// Returns options with the compatibility-default NativeContent grant
-    /// changed without exposing stringly-typed permission state.
-    pub const fn with_native_content(mut self, granted: bool) -> Self {
-        self.capabilities = self.capabilities.with_native_content(granted);
-        self
-    }
 }
 
 /// Result of compilation through the frontend.
@@ -196,9 +195,7 @@ pub struct CompileResult {
 #[cfg(test)]
 mod tests {
     use crate::ir::{IrInline, IrNode};
-    use crate::{
-        Capabilities, CompileOptions, Severity, SourceMode, VirtualPathBuf, VirtualProjectBuilder,
-    };
+    use crate::{CompileOptions, Severity, SourceMode, VirtualPathBuf, VirtualProjectBuilder};
     #[test]
     fn it_compiles_empty_document() {
         let project = VirtualProjectBuilder::new()
@@ -212,10 +209,17 @@ mod tests {
             &project,
             &CompileOptions {
                 compatibility_profile: None,
-                capabilities: Capabilities::default(),
             },
         );
         assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn old_compile_options_struct_literal_remains_source_compatible() {
+        let options = CompileOptions {
+            compatibility_profile: None,
+        };
+        assert!(options.compatibility_profile.is_none());
     }
 
     #[test]

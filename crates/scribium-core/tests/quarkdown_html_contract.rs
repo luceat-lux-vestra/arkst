@@ -1,32 +1,35 @@
 use scribium_core::ir::{IrInline, IrNode, NativeTarget};
 use scribium_core::{
-    compile, Capabilities, Capability, CompileOptions, Severity, SourceId, SourceSpan,
-    VirtualProjectBuilder,
+    compile, compile_with_capabilities, Capabilities, Capability, CompileOptions, Severity,
+    SourceId, SourceSpan, VirtualProjectBuilder,
 };
 
-fn compile_source_with_options(
-    source: &str,
-    options: &CompileOptions,
-) -> scribium_core::CompileResult {
-    let project = VirtualProjectBuilder::new()
+fn project_for(source: &str) -> scribium_core::VirtualProject {
+    VirtualProjectBuilder::new()
         .entry("main.qd")
         .expect("valid path")
         .add_source("main.qd", source)
         .expect("valid source")
         .build()
-        .expect("valid project");
-    compile(&project, options)
+        .expect("valid project")
+}
+
+fn compile_source_with_capabilities(
+    source: &str,
+    capabilities: Capabilities,
+) -> scribium_core::CompileResult {
+    let project = project_for(source);
+    compile_with_capabilities(&project, &CompileOptions::default(), capabilities)
 }
 
 fn compile_source(source: &str) -> scribium_core::CompileResult {
-    compile_source_with_options(source, &CompileOptions::default())
+    let project = project_for(source);
+    compile(&project, &CompileOptions::default())
 }
 
 #[test]
 fn capability_defaults_are_explicit_and_closed() {
-    assert!(CompileOptions::default()
-        .capabilities
-        .allows(Capability::NativeContent));
+    assert!(Capabilities::default().allows(Capability::NativeContent));
     assert!(!Capabilities::none().allows(Capability::NativeContent));
 }
 
@@ -170,13 +173,18 @@ fn html_argument_binding_reports_required_failures_without_unresolved_duplicates
             result.diagnostics[0]
         );
     }
+
+    let result = compile_source(".html {explicit}\n    body\n");
+    assert_eq!(result.ir.nodes, Vec::<IrNode>::new());
+    assert_eq!(result.diagnostics.len(), 1);
+    assert_eq!(result.diagnostics[0].code, "E3003");
+    assert!(result.diagnostics[0].message.contains("both a body"));
 }
 
 #[test]
 fn native_content_denial_is_one_source_backed_error_before_node_creation() {
     let source = ".html {<em>denied</em>}\n";
-    let options = CompileOptions::default().with_native_content(false);
-    let result = compile_source_with_options(source, &options);
+    let result = compile_source_with_capabilities(source, Capabilities::none());
 
     assert_eq!(result.ir.nodes, Vec::<IrNode>::new());
     assert_eq!(result.diagnostics.len(), 1);
@@ -190,6 +198,47 @@ fn native_content_denial_is_one_source_backed_error_before_node_creation() {
     assert!(diagnostic.message.contains("NativeContent"));
     assert!(diagnostic.hints.iter().any(|hint| hint.contains("Grant")));
     assert!(!format!("{:?}", result.ir).contains("denied"));
+}
+
+#[test]
+fn native_content_denial_owns_the_indented_html_body_boundary() {
+    let source = ".html\n    <div>denied</div>\n";
+    let result = compile_source_with_capabilities(source, Capabilities::none());
+
+    assert_eq!(result.ir.nodes, Vec::<IrNode>::new());
+    assert_eq!(
+        result.diagnostics.len(),
+        1,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.diagnostics[0].code, "E3004");
+    assert!(!result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E3010"));
+    assert!(!result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E8001"));
+    assert!(!format!("{:?}", result.ir).contains("TargetSpecificContent"));
+    assert!(!format!("{:?}", result.ir).contains("denied"));
+}
+
+#[test]
+fn parser_owned_html_body_is_not_a_generic_raw_html_escape_hatch() {
+    let result = compile_source(".unknown\n    <div>not owned</div>\n");
+
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E8001"));
+    assert!(!result
+        .ir
+        .nodes
+        .iter()
+        .any(|node| matches!(node, IrNode::TargetSpecificContent { .. })));
+    assert!(!format!("{:?}", result.ir).contains("not owned"));
 }
 
 #[test]

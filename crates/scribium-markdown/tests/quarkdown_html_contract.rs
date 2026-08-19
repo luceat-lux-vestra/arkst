@@ -63,6 +63,31 @@ fn html_inline_call_preserves_text_call_text_order() {
 }
 
 #[test]
+fn html_angle_text_does_not_widen_e3010_suppression_for_other_arguments() {
+    let html = parse_with_mode(".html {<em>world</em>}\n", Mode::Quarkdown);
+    assert!(
+        html.diagnostics.is_empty(),
+        "unexpected .html diagnostics: {:?}",
+        html.diagnostics
+    );
+
+    for source in [
+        ".foo {**hello** <em>world</em>}\n",
+        ".foo {2 < 3 and 5 > 4 **hello**}\n",
+    ] {
+        let output = parse_with_mode(source, Mode::Quarkdown);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E3010"),
+            "expected E3010 for {source:?}, got {:?}",
+            output.diagnostics
+        );
+    }
+}
+
+#[test]
 fn html_indented_body_remains_parser_owned_raw_html() {
     let source = ".html\n    <div>\n        Hello\n    </div>\n";
     let output = parse_with_mode(source, Mode::Quarkdown);
