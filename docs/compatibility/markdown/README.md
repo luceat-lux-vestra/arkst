@@ -1,6 +1,6 @@
 # Markdown/CommonMark+GFM baseline audit
 
-Audit date: 2026-08-16
+Audit date: 2026-08-19
 
 This document records the end-to-end Markdown baseline at the pinned
 Rushdown revision. It distinguishes parser capability from Scribium output
@@ -60,7 +60,7 @@ silently flattening the syntax into another Markdown node.
 | Strikethrough | Yes | Yes | Yes | Yes | Yes | GFM extension; covered by existing and baseline tests. |
 | Inline code | Yes | Yes | Yes | Yes | Yes | Opaque code-span content is preserved. |
 | Links | Yes | Yes | Yes | Yes | Yes | Label, destination, title metadata, and source span are retained; Typst emits clickable links. |
-| Images | Yes | Yes | Yes | Yes | Yes | Inline and reference images retain nested alt content, logical destination, title, and source span. Project-relative local images resolve from the source entry directory through the explicit Typst source context; absolute paths and URI schemes are rejected with E8001, and no network fetching is performed. |
+| Images | Yes | Yes | Yes | Yes | Yes | Inline and reference images retain nested alt content, logical destination, title, and source span. Project-relative local images resolve from the source entry directory through the explicit Typst source context; absolute paths and URI schemes are rejected with E8001, and no network fetching is performed. The current differential run has no image-related known mismatch. |
 | Soft line breaks | Yes | Yes | Yes | Yes | Yes | Preserved as an IR break and lowered as a Typst newline; UTF-8 + CRLF is covered end-to-end. |
 | Hard line breaks | Yes | Yes | Yes | Yes | Yes | Backslash/two-space delimiter and UTF-8 + CRLF span remain source-backed; lowered as Typst hard break and PDF-tested. |
 | Escaped punctuation | Yes | Yes | Yes | Yes | Yes | Normalized through Rushdown's public `unescape_puncts` utility and re-escaped for Typst markup. |

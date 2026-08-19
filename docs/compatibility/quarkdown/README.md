@@ -70,7 +70,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, and nested first-seen groups | Implemented (evidenced v2.5.1 slice) |
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | —                        | Planned          |
-| Include/read                   | —                                | —                        | Planned          |
+| Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
 | Metadata                       | —                                | —                        | Planned          |
 | Row/column/grid                | —                                | —                        | Planned          |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -78,8 +78,9 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Implemented      |
 | Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Implemented      |
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Implemented      |
-| `.json` data loading           | `.json {path}` (new in v2.5.0)   | Not implemented          | Planned          |
-| `.markdown` / `.llmstxt`       | (new in v2.5.0)                  | Not implemented          | Planned          |
+| `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
+| `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
+| `.llmstxt`                     | (candidate name from issue scope) | No `.llmstxt` standard builtin was present in the reviewed Quarkdown v2.5.1 source; Scribium reports an explicit deferred diagnostic | Intentionally deferred |
 
 The v2.5.1 Markdown deltas are recorded in
 [`V2_5_1_IMPACT.md`](V2_5_1_IMPACT.md). D2 link-parenthesis behavior and D3
@@ -132,14 +133,52 @@ separate source-language raw-HTML case and continues to fail closed with
 `E8001`. See [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md)
 and [RAW_HTML_POLICY.md](../RAW_HTML_POLICY.md).
 
+### Project-backed resource builtins
+
+The reviewed v2.5.1 [`Data.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Data.kt)
+contract makes `.read` a UTF-8 text operation with normalized line separators
+and an optional one-based inclusive `lines` range. `.json` parses a resource
+into recursive object/array/scalar values. The reviewed
+[`Ecosystem.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Ecosystem.kt)
+contract evaluates `.include` as a separate source with a working directory
+at that source's parent and supports `share`, `scope`, and `subdocument`
+sandbox modes. Scribium implements this evidenced subset over the
+host-supplied `VirtualProject`.
+
+| Builtin | Arguments / result | Resource semantics | Missing/unsupported behavior | Status |
+|---|---|---|---|---|
+| `.read` | `path`, optional `lines`; `String` | UTF-8 text, normalized line separators, source-relative | structured missing, boundary, URI, and invalid-UTF-8 diagnostics | Implemented |
+| `.json` | `path`; recursive `IrValue` | UTF-8 JSON object/array/scalar mapping; deterministic insertion order | structured parse and numeric-precision diagnostics | Implemented |
+| `.include` | `path`, optional `sandbox`; evaluated content | parses/evaluates a separate source with its own `SourceId` and working directory | structured missing/boundary diagnostics and active-stack cycle detection | Implemented |
+| `.markdown` | raw `content`; `NativeContent` | preserves content; it does not load a file | native-content capability diagnostic when denied | Implemented |
+| `.llmstxt` | no evidenced v2.5.1 signature | no reviewed standard builtin implementation | explicit deferred diagnostic | Deferred |
+
+Resource paths are logical and source-relative. A nested include changes the
+base for subsequent `.read`/`.json`/`.include` calls to the included source;
+the active source stack detects cycles while repeated, completed includes are
+allowed. `VirtualPathBuf` enforces the project boundary. Absolute paths,
+Windows paths, URI schemes, missing resources, and invalid UTF-8 are reported
+as structured diagnostics without exposing a physical host root. The same
+evaluator path works with an in-memory `VirtualProject`, which is the WASM
+model; the CLI is responsible only for bounded native project loading.
+
+`.markdown` follows the reviewed v2.5.1 [`Markdown.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Markdown.kt)
+contract: it preserves raw Markdown content as a `NativeContent` node and is
+not a file-loading alias. A Markdown source included with `.include` is parsed
+with its own source identity, so relative Markdown images retain the included
+document's resource base. Typst currently omits native Markdown content;
+image alt text and titles remain preserved in the Markdown AST/IR but are not
+emitted as PDF accessibility metadata. `.llmstxt` was not present as a standard
+v2.5.1 builtin in the reviewed source and remains explicitly deferred.
+
 Issue #57 adds a separate end-to-end Markdown evidence slice for structures
 already preserved by the frontend: blockquotes, single- and double-tilde
 strikethrough, GFM task lists, and GFM tables. The slice carries recursive
 content, task state, table
 alignment, source spans, evaluator recursion, and deterministic Typst
 lowering through `.md`, `.qd`, and an indented Quarkdown body. It is evidence
-for the tested structures and forms only; it does not promote images, raw HTML,
-or complete CommonMark/GFM support.
+for the tested structures and forms only; it does not promote raw HTML or
+complete CommonMark/GFM support.
 
 For an indented body, the minimum eligibility rule is at least two leading
 spaces or one leading tab in the current Rushdown container context. The first
@@ -675,8 +714,8 @@ Quarkdown has documented features represented in the v2.5.0/v2.5.1 evidence set 
 Scribium has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
 debt against the complete target. Standalone lambda values outside the
-supported first-class/callback forms, layout semantics, resource/data loading,
-and other v2.5.0 built-ins remain additional gaps; generalized or nested
+supported first-class/callback forms, layout semantics, unimplemented data
+loading families, and other v2.5.0 built-ins remain additional gaps; generalized or nested
 destructuring, comparator-language syntax, descending sorting, and unrelated
 collection operations remain deferred within the iteration slice. Right-open and
 fully-open Range values are not globally unsupported: their representation is

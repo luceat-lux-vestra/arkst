@@ -156,8 +156,8 @@ pub fn compile_with_capabilities(
         project.metadata(),
         source_mode,
     );
-    let (ir, evaluation_diagnostics) =
-        evaluator::Evaluator::with_capabilities(capabilities).evaluate(&ir);
+    let (ir, evaluation_diagnostics) = evaluator::Evaluator::with_capabilities(capabilities)
+        .evaluate_project(project, source_id, &ir);
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()

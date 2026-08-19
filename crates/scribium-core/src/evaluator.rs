@@ -50,8 +50,10 @@ use crate::ir::{
     IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
     TargetSpecificContent,
 };
-use crate::source::SourceSpan;
+use crate::source::{ResourceAccessError, SourceId, SourceSpan};
+use crate::VirtualProject;
 use crate::{Capabilities, Capability};
+use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -520,6 +522,9 @@ struct EvaluationContext {
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, FunctionBinding>,
     lambda_scope: Option<LambdaScope>,
+    project: Option<VirtualProject>,
+    current_source: Option<SourceId>,
+    active_sources: Vec<SourceId>,
 }
 
 impl EvaluationContext {
@@ -535,6 +540,18 @@ impl EvaluationContext {
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             lambda_scope: None,
+            project: self.project.clone(),
+            current_source: self.current_source,
+            active_sources: self.active_sources.clone(),
+        }
+    }
+
+    fn project(project: &VirtualProject, source_id: SourceId) -> Self {
+        Self {
+            project: Some(project.clone()),
+            current_source: Some(source_id),
+            active_sources: vec![source_id],
+            ..Self::new()
         }
     }
 
@@ -719,13 +736,36 @@ impl Evaluator {
     pub fn evaluate(&self, document: &IrDocument) -> (IrDocument, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
-        let nodes = self.evaluate_nodes(&document.nodes, &mut diagnostics, &mut context);
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Evaluates an IR document with access to the host-supplied virtual
+    /// project. The project is cloned into the explicit evaluation context;
+    /// no filesystem capability is introduced into the evaluator.
+    pub fn evaluate_project(
+        &self,
+        project: &VirtualProject,
+        source_id: SourceId,
+        document: &IrDocument,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::project(project, source_id);
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    fn evaluate_with_context(
+        &self,
+        document: &IrDocument,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let nodes = self.evaluate_nodes(&document.nodes, diagnostics, context);
         (
             IrDocument {
                 nodes,
                 metadata: document.metadata.clone(),
             },
-            diagnostics,
+            std::mem::take(diagnostics),
         )
     }
 
@@ -1174,6 +1214,39 @@ impl Evaluator {
             );
         }
 
+        if name == "markdown" {
+            return self.evaluate_markdown(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if matches!(name, "read" | "json" | "include") {
+            return self.evaluate_resource_builtin(
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        if name == "llmstxt" {
+            diagnostics.push(resource_diagnostic(
+                "E8001",
+                "`.llmstxt` is not part of the tracked Quarkdown v2.5.1 standard builtin surface",
+                *span,
+                "This resource/document feature remains deferred until an evidenced upstream contract is available.",
+            ));
+            return CallOutcome::Failed;
+        }
+
         if is_let(name) {
             return self.evaluate_let(
                 positional_args,
@@ -1497,6 +1570,400 @@ impl Evaluator {
             }
             body => self.evaluate_call_body(body, span, diagnostics, context),
         }
+    }
+
+    /// Evaluates Quarkdown's raw native Markdown-content builtin. This is
+    /// intentionally not a file loader: the v2.5.1 contract accepts Markdown
+    /// content and returns an opaque native-content node.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_markdown(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if !self.capabilities.allows(Capability::NativeContent) {
+            diagnostics.push(Diagnostic {
+                code: "E3004".to_string(),
+                severity: Severity::Error,
+                message: "NativeContent capability is required for `.markdown`".to_string(),
+                primary: Some(*span),
+                secondary: Vec::new(),
+                hints: vec![
+                    "Grant the NativeContent capability for this compilation to enable `.markdown`."
+                        .to_string(),
+                ],
+            });
+            return CallOutcome::Failed;
+        }
+        if positional_args.len() > 1 {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.markdown` accepts exactly one `content` argument".to_string(),
+                *span,
+                "Pass Markdown content as the body or as `content`.",
+            ));
+            return CallOutcome::Failed;
+        }
+        let mut content_argument = None;
+        for argument in named_args {
+            if argument.name != "content" || content_argument.is_some() {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    format!(
+                        "`.markdown` does not accept named argument `{}` more than once",
+                        argument.name
+                    ),
+                    argument.name_span,
+                    "Use one positional or `content` argument.",
+                ));
+                return CallOutcome::Failed;
+            }
+            content_argument = Some(&argument.value);
+        }
+        if positional_args.len() == 1 && content_argument.is_some() {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.markdown` received `content` more than once".to_string(),
+                *span,
+                "Use either the positional argument or the named argument.",
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() && (positional_args.len() == 1 || content_argument.is_some()) {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.markdown` received both a body and an explicit `content` argument".to_string(),
+                *span,
+                "Use either the body or the explicit content argument.",
+            ));
+            return CallOutcome::Failed;
+        }
+        let content = if let Some(body) = body {
+            match self.evaluate_call_body(body, span, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                outcome => return outcome,
+            }
+        } else if let Some(value) = positional_args.first().or(content_argument) {
+            match self.evaluate_value(value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    match self.preserve_value_expression(value, diagnostics, context) {
+                        Ok(value) => value,
+                        Err(outcome) => return outcome,
+                    }
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+            }
+        } else {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.markdown` requires Markdown content".to_string(),
+                *span,
+                "Pass Markdown content as the body or as `content`.",
+            ));
+            return CallOutcome::Failed;
+        };
+        let Some(content) = builtins::adapt_string_argument(&content) else {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.markdown` content must adapt to the supported String boundary".to_string(),
+                *span,
+                "Rich semantic values are not silently rendered into native Markdown text.",
+            ));
+            return CallOutcome::Failed;
+        };
+        CallOutcome::Value(IrValue::Content(vec![IrNode::TargetSpecificContent {
+            content: TargetSpecificContent {
+                target: NativeTarget::Markdown,
+                content,
+                span: *span,
+            },
+        }]))
+    }
+
+    /// Evaluates the resource-backed subset of the Quarkdown standard library.
+    ///
+    /// Resource access is deliberately routed through the host-supplied
+    /// `VirtualProject`. The evaluator never receives a native path and never
+    /// performs filesystem or network I/O itself.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_resource_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                format!("`.{name}` does not accept a block body"),
+                *span,
+                "Pass the logical project resource path as an argument.",
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let evaluated_positional =
+            match self.evaluate_values(positional_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let evaluated_named = match self.evaluate_named(named_args, span, diagnostics, context) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+
+        match name {
+            "read" => self.evaluate_read(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+            ),
+            "json" => self.evaluate_json(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+            ),
+            "include" => self.evaluate_include(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+            ),
+            _ => CallOutcome::Failed,
+        }
+    }
+
+    fn evaluate_read(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext,
+    ) -> CallOutcome {
+        let Some(reference) =
+            resource_path_argument("read", positional_args, named_args, span, diagnostics)
+        else {
+            return CallOutcome::Failed;
+        };
+        let lines = match resource_lines_argument(named_args, span, diagnostics) {
+            Ok(lines) => lines,
+            Err(()) => return CallOutcome::Failed,
+        };
+        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let (path, text) = match project.read_resource_text(source_id, &reference) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(resource_access_diagnostic("read", error, *span));
+                return CallOutcome::Failed;
+            }
+        };
+        let value = match lines {
+            None => normalize_line_separators(&text),
+            Some(range) => match select_lines(&text, range) {
+                Ok(value) => value,
+                Err(message) => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3001",
+                        format!("`.read` cannot select lines from `{path}`: {message}"),
+                        *span,
+                        "Use a one-based, inclusive line range within the resource.",
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+        };
+        CallOutcome::Value(IrValue::String(value))
+    }
+
+    fn evaluate_json(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext,
+    ) -> CallOutcome {
+        let Some(reference) =
+            resource_path_argument("json", positional_args, named_args, span, diagnostics)
+        else {
+            return CallOutcome::Failed;
+        };
+        if !named_args.is_empty() {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.json` does not support named arguments".to_string(),
+                named_args[0].name_span,
+                "Pass exactly one logical project resource path.",
+            ));
+            return CallOutcome::Failed;
+        }
+        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let (path, text) = match project.read_resource_text(source_id, &reference) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(resource_access_diagnostic("json", error, *span));
+                return CallOutcome::Failed;
+            }
+        };
+        let value = match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!("`.json` could not parse `{path}`: {error}"),
+                    *span,
+                    "Provide valid UTF-8 JSON in the logical project resource.",
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        match json_value_to_ir(&value, *span) {
+            Ok(value) => CallOutcome::Value(value),
+            Err(message) => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!("`.json` value in `{path}` is unsupported: {message}"),
+                    *span,
+                    "Use JSON values representable by Scribium's typed evaluator model.",
+                ));
+                CallOutcome::Failed
+            }
+        }
+    }
+
+    fn evaluate_include(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        let Some(reference) =
+            resource_path_argument("include", positional_args, named_args, span, diagnostics)
+        else {
+            return CallOutcome::Failed;
+        };
+        let sandbox = match include_sandbox_argument(named_args, span, diagnostics) {
+            Ok(sandbox) => sandbox,
+            Err(()) => return CallOutcome::Failed,
+        };
+        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let path = match project.resolve_resource_path(source_id, &reference) {
+            Ok(path) => path,
+            Err(error) => {
+                diagnostics.push(resource_access_diagnostic("include", error, *span));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some((source, target_id)) = project.sources().get_with_id(&path) else {
+            diagnostics.push(resource_diagnostic(
+                "E3001",
+                format!("`.include` resource not found: `{path}`"),
+                *span,
+                "Add the target source to the VirtualProject supplied by the host.",
+            ));
+            return CallOutcome::Failed;
+        };
+        if let Some(position) = context
+            .active_sources
+            .iter()
+            .position(|id| *id == target_id)
+        {
+            let mut chain = context.active_sources[position..]
+                .iter()
+                .filter_map(|id| project.sources().path_by_id(*id).map(ToString::to_string))
+                .collect::<Vec<_>>();
+            chain.push(path.to_string());
+            diagnostics.push(resource_diagnostic(
+                "E3001",
+                format!("`.include` cycle detected: {}", chain.join(" -> ")),
+                *span,
+                "An active include may not include a source already on its call stack.",
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let mode = source_mode_for_resource_path(&path);
+        let include_diagnostics_start = diagnostics.len();
+        let parsed = scribium_markdown::parse_with_mode(source, mode);
+        for diagnostic in parsed.diagnostics {
+            diagnostics.push(Diagnostic {
+                code: diagnostic.code.to_string(),
+                severity: Severity::Error,
+                message: diagnostic.message,
+                primary: Some(SourceSpan {
+                    source_id: target_id,
+                    start: diagnostic.span.start,
+                    end: diagnostic.span.end,
+                }),
+                secondary: Vec::new(),
+                hints: Vec::new(),
+            });
+        }
+        if diagnostics.len() != include_diagnostics_start {
+            return CallOutcome::Failed;
+        }
+        let (document, lowering_diagnostics) =
+            crate::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+                &parsed.document,
+                target_id,
+                project.metadata(),
+                source_mode_for_path_mode(mode),
+            );
+        diagnostics.extend(lowering_diagnostics);
+        if diagnostics.len() != include_diagnostics_start {
+            return CallOutcome::Failed;
+        }
+
+        let previous_source = context.current_source;
+        let previous_active = context.active_sources.clone();
+        context.active_sources.push(target_id);
+        let evaluation_diagnostics_start = diagnostics.len();
+        let result = match sandbox {
+            IncludeSandbox::Share => {
+                context.current_source = Some(target_id);
+                let result = self.evaluate_nodes(&document.nodes, diagnostics, context);
+                context.current_source = previous_source;
+                result
+            }
+            IncludeSandbox::Scope | IncludeSandbox::Subdocument => {
+                let mut child = context.child();
+                child.current_source = Some(target_id);
+                child.active_sources = context.active_sources.clone();
+                self.evaluate_nodes(&document.nodes, diagnostics, &mut child)
+            }
+        };
+        context.active_sources = previous_active;
+        if diagnostics.len() != evaluation_diagnostics_start {
+            return CallOutcome::Failed;
+        }
+        CallOutcome::Value(IrValue::Content(result))
     }
 
     /// Evaluates the bounded Collection access operations through the same
@@ -4642,6 +5109,351 @@ fn implicit_parameter_error(
             "Provide the positional argument required by the implicit lambda parameter."
                 .to_string(),
         ],
+    }
+}
+
+fn resource_diagnostic(
+    code: &str,
+    message: impl Into<String>,
+    span: SourceSpan,
+    hint: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic {
+        code: code.to_string(),
+        severity: Severity::Error,
+        message: message.into(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![hint.into()],
+    }
+}
+
+fn resource_access_diagnostic(
+    builtin: &str,
+    error: ResourceAccessError,
+    span: SourceSpan,
+) -> Diagnostic {
+    match error {
+        ResourceAccessError::UnsupportedReference { reference } => resource_diagnostic(
+            "E8001",
+            format!("`.{builtin}` does not support non-local resource reference `{reference}`"),
+            span,
+            "Only source-relative paths inside the supplied VirtualProject are available; network fetching is disabled.",
+        ),
+        ResourceAccessError::UnknownSource(source_id) => resource_diagnostic(
+            "E9001",
+            format!("`.{builtin}` cannot resolve the current source identity {source_id:?}"),
+            span,
+            "The host must provide the calling source through the VirtualProject SourceStore.",
+        ),
+        ResourceAccessError::Boundary(error) => resource_diagnostic(
+            "E8001",
+            format!("`.{builtin}` resource path is outside the project boundary: {error}"),
+            span,
+            "Use a source-relative path that remains inside the supplied VirtualProject.",
+        ),
+        ResourceAccessError::NotFound(path) => resource_diagnostic(
+            "E3001",
+            format!("`.{builtin}` resource not found: `{path}`"),
+            span,
+            "Add the logical resource to the VirtualProject supplied by the host.",
+        ),
+        ResourceAccessError::InvalidUtf8 { path, message } => resource_diagnostic(
+            "E3001",
+            format!("`.{builtin}` resource `{path}` is not valid UTF-8: {message}"),
+            span,
+            "Text resource builtins require valid UTF-8 and do not perform lossy decoding.",
+        ),
+    }
+}
+
+fn resource_context<'a>(
+    context: &'a EvaluationContext,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(&'a VirtualProject, SourceId)> {
+    let Some(project) = context.project.as_ref() else {
+        diagnostics.push(resource_diagnostic(
+            "E8001",
+            "Resource builtin requires a host-supplied VirtualProject".to_string(),
+            *span,
+            "Compile through the project API so logical resources are supplied explicitly.",
+        ));
+        return None;
+    };
+    let Some(source_id) = context.current_source else {
+        diagnostics.push(resource_diagnostic(
+            "E9001",
+            "Resource builtin has no current source identity".to_string(),
+            *span,
+            "The evaluator must retain the logical source identity of the current document.",
+        ));
+        return None;
+    };
+    Some((project, source_id))
+}
+
+fn resource_path_argument(
+    builtin: &str,
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<String> {
+    if positional_args.len() > 1 {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            format!("`.{builtin}` accepts exactly one resource path"),
+            *span,
+            "Pass one source-relative logical resource path.",
+        ));
+        return None;
+    }
+    let mut named_path = None;
+    for argument in named_args {
+        if argument.name == "path" {
+            if named_path.is_some() {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    format!("`.{builtin}` received `path` more than once"),
+                    argument.name_span,
+                    "Pass one resource path.",
+                ));
+                return None;
+            }
+            named_path = Some(&argument.value);
+        } else if !matches!(
+            (builtin, argument.name.as_str()),
+            ("read", "lines") | ("include", "sandbox")
+        ) {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                format!(
+                    "`.{builtin}` does not support named argument `{}`",
+                    argument.name
+                ),
+                argument.name_span,
+                "Use one path argument and only the builtin's documented optional arguments.",
+            ));
+            return None;
+        }
+    }
+    if positional_args.len() == 1 && named_path.is_some() {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            format!("`.{builtin}` received `path` more than once"),
+            *span,
+            "Use either the positional path or `path`.",
+        ));
+        return None;
+    }
+    let Some(value) = positional_args.first().or(named_path) else {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            format!("`.{builtin}` requires a resource path"),
+            *span,
+            "Pass a source-relative logical resource path.",
+        ));
+        return None;
+    };
+    let Some(path) = builtins::adapt_string_argument(value) else {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            format!("`.{builtin}` resource path must adapt to String"),
+            value_source_span(value, span),
+            "Use a scalar or plain-text path value.",
+        ));
+        return None;
+    };
+    Some(path)
+}
+
+fn resource_lines_argument(
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Option<IrRange>, ()> {
+    let mut lines = None;
+    for argument in named_args {
+        if argument.name != "lines" {
+            continue;
+        }
+        if lines.is_some() {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.read` received `lines` more than once".to_string(),
+                argument.name_span,
+                "Pass one inclusive line range.",
+            ));
+            return Err(());
+        }
+        let IrValue::Range(range) = &argument.value else {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.read` named argument `lines` must be a typed Range".to_string(),
+                argument.span,
+                "Use a one-based inclusive range such as `1..3`.",
+            ));
+            return Err(());
+        };
+        lines = Some(range.clone());
+    }
+    let _ = span;
+    Ok(lines)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum IncludeSandbox {
+    Share,
+    Scope,
+    Subdocument,
+}
+
+fn include_sandbox_argument(
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<IncludeSandbox, ()> {
+    let mut sandbox = None;
+    for argument in named_args {
+        if argument.name != "sandbox" {
+            continue;
+        }
+        if sandbox.is_some() {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.include` received `sandbox` more than once".to_string(),
+                argument.name_span,
+                "Pass one sandbox mode: share, scope, or subdocument.",
+            ));
+            return Err(());
+        }
+        let Some(value) = builtins::adapt_string_argument(&argument.value) else {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.include` `sandbox` must be a String".to_string(),
+                argument.span,
+                "Use `share`, `scope`, or `subdocument`.",
+            ));
+            return Err(());
+        };
+        sandbox = Some(match value.to_ascii_lowercase().as_str() {
+            "share" => IncludeSandbox::Share,
+            "scope" => IncludeSandbox::Scope,
+            "subdocument" => IncludeSandbox::Subdocument,
+            _ => {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    format!("unsupported `.include` sandbox `{value}`"),
+                    argument.span,
+                    "Use `share`, `scope`, or `subdocument`.",
+                ));
+                return Err(());
+            }
+        });
+    }
+    let _ = span;
+    Ok(sandbox.unwrap_or(IncludeSandbox::Share))
+}
+
+fn normalize_line_separators(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(character) = chars.next() {
+        if character == '\r' {
+            if chars.as_str().starts_with('\n') {
+                let _ = chars.next();
+            }
+            normalized.push('\n');
+        } else {
+            normalized.push(character);
+        }
+    }
+    normalized
+}
+
+fn select_lines(text: &str, range: IrRange) -> Result<String, String> {
+    let start = range.start.unwrap_or(1);
+    let normalized = normalize_line_separators(text);
+    let lines = normalized.lines().collect::<Vec<_>>();
+    let end = range.end.unwrap_or(lines.len() as i32);
+    if start < 1 || end < start || end as usize > lines.len() {
+        return Err(format!(
+            "range {start}..{end} is outside 1..{}",
+            lines.len()
+        ));
+    }
+    Ok(lines[(start as usize - 1)..end as usize].join("\n"))
+}
+
+fn json_value_to_ir(value: &serde_json::Value, span: SourceSpan) -> Result<IrValue, String> {
+    match value {
+        serde_json::Value::Null => Ok(IrValue::None),
+        serde_json::Value::Bool(value) => Ok(IrValue::Boolean(*value)),
+        serde_json::Value::String(value) => Ok(IrValue::String(value.clone())),
+        serde_json::Value::Number(value) => json_number_to_ir(value),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(|value| json_value_to_ir(value, span))
+            .collect::<Result<Vec<_>, _>>()
+            .map(IrValue::Collection),
+        serde_json::Value::Object(entries) => entries
+            .iter()
+            .map(|(key, value)| {
+                Ok(IrPair {
+                    first: Box::new(IrValue::String(key.clone())),
+                    second: Box::new(json_value_to_ir(value, span)?),
+                    span,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map(|entries| IrValue::Dictionary(IrDictionary { entries, span })),
+    }
+}
+
+fn json_number_to_ir(value: &serde_json::Number) -> Result<IrValue, String> {
+    const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_991;
+    if let Some(value) = value.as_i64() {
+        if value.unsigned_abs() > MAX_EXACT_F64_INTEGER {
+            return Err(format!(
+                "integer {value} cannot be represented exactly by evaluator Number"
+            ));
+        }
+        return Ok(IrValue::Number(value as f64));
+    }
+    if let Some(value) = value.as_u64() {
+        if value > MAX_EXACT_F64_INTEGER {
+            return Err(format!(
+                "integer {value} cannot be represented exactly by evaluator Number"
+            ));
+        }
+        return Ok(IrValue::Number(value as f64));
+    }
+    let value = value
+        .as_f64()
+        .ok_or_else(|| "JSON number cannot be represented by evaluator Number".to_string())?;
+    if !value.is_finite() {
+        return Err("JSON number is not finite".to_string());
+    }
+    Ok(IrValue::Number(value))
+}
+
+fn source_mode_for_resource_path(path: &crate::source::VirtualPathBuf) -> Mode {
+    let is_markdown = path
+        .file_name()
+        .and_then(|file_name| file_name.rsplit_once('.'))
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("md"));
+    if is_markdown {
+        Mode::Markdown
+    } else {
+        Mode::Quarkdown
+    }
+}
+
+fn source_mode_for_path_mode(mode: Mode) -> crate::SourceMode {
+    match mode {
+        Mode::Markdown => crate::SourceMode::Markdown,
+        Mode::Quarkdown => crate::SourceMode::Quarkdown,
     }
 }
 

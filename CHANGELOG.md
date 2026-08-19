@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown project-backed resource builtins (M2):** `.read`, `.json`, and
+  `.include` now operate through the in-memory `VirtualProject`, with
+  source-relative nested resolution, recursive typed JSON values, active-stack
+  include-cycle detection, deterministic missing/boundary/UTF-8 diagnostics,
+  and identical in-memory/WASM semantics. `.markdown` preserves the upstream
+  raw native Markdown-content contract; `.llmstxt` remains deferred because it
+  is not present in the reviewed Quarkdown v2.5.1 standard builtin surface.
+  The native CLI loads bounded project resources before compilation and never
+  exposes arbitrary host filesystem access to the evaluator.
+
 - **Markdown local images (M2):** Inline and reference image syntax now flows
   from the Rushdown-backed AST through backend-neutral IR to Typst `#image(...)`
   and real PDF output. Relative resources resolve from the source entry

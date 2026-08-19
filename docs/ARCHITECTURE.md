@@ -272,6 +272,7 @@ are not subject to that requirement.
 - `VirtualProjectBuilder`
 - `SourceStore`
 - `AssetStore`
+- `ResourceReference`
 - `VirtualPathBuf`
 - `ProjectMetadata`
 
@@ -322,6 +323,25 @@ Ownership of the I/O boundary is explicit:
 `scribium-project` and `scribium-core` remain filesystem-free. The host
 acquires the required inputs and applies native filesystem policy before core
 compilation.
+
+Resource-backed Quarkdown builtins use the same logical project model. The
+evaluator receives an explicit `VirtualProject` and current `SourceId`, then
+uses source-relative APIs such as `resolve_resource_path` and
+`read_resource_text`; it never constructs a native `PathBuf` or calls a host
+filesystem API. `ResourceReference` classifies local paths separately from
+absolute paths and URI schemes before `VirtualPathBuf` normalization enforces
+the project boundary. `.include` temporarily changes the current source
+identity while evaluating the included IR, so nested resource operations use
+the included document directory and diagnostics retain that document's
+`SourceId`. The active include stack detects cycles, while completed repeated
+includes are not globally suppressed.
+
+The native CLI loads the bounded project tree into sources/assets at the host
+boundary and does not import symlink targets outside the canonical project
+root; the native Typst mirror rejects such an escape if the source context is
+used. WASM and embedded hosts provide the same logical source/resource data
+directly in memory. This is a read-only project capability: there is no
+evaluator write, directory-listing, or network-fetch API.
 
 - CLI builds `VirtualProject` from disk
 - WASM builds `VirtualProject` from in-memory sources

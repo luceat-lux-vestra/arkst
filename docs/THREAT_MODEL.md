@@ -12,7 +12,7 @@ vulnerabilities (report to Typst GmbH).
 |----|-----------------------------|----------------------|-------------------|----------------|-------------------------------------|---------------|
 | T1 | Path traversal via include  | Filesystem           | Malicious doc     | Include/read   | VirtualPath resolution; Typst `--root`; canonicalized mirror scope | Low        |
 | T2 | Symlink escape              | Filesystem           | Malicious doc     | Include/read   | Final canonical target must remain inside the explicit root; mirror copies no symlinks | Low |
-| T3 | Unrestricted include        | Filesystem           | Malicious doc     | Include/read   | Max depth, root scope               | Low           |
+| T3 | Unrestricted include        | Filesystem           | Malicious doc     | Include/read   | Active include-stack cycle detection; root scope; future configured depth limit | Low |
 | T4 | Malicious image or font     | Process              | Malicious doc     | Asset loading  | Typst compiler handles              | Low (inherited) |
 | T5 | Decompression bomb          | Memory               | Malicious doc     | Asset loading  | Max file size, format validation    | Medium        |
 | T6 | Deep nesting (AST)          | Memory               | Malicious doc     | Parser         | Max nesting depth                   | Low           |
@@ -52,7 +52,9 @@ adapter translates VirtualPath → `PathBuf` at the boundary, applying:
 
 A WASM frontend does not perform this translation at all — there is no
 filesystem to traverse. This eliminates the T1/T2 attack surface entirely
-for browser targets.
+for browser targets. Resource-backed evaluator builtins use the same
+source-relative logical paths in WASM and native builds; native loading is the
+only stage that reads the host tree.
 
 For the native Typst subprocess path, the explicit source root is copied into
 an isolated temporary mirror. The generated entry file is created in that

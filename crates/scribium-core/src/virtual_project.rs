@@ -7,8 +7,10 @@
 //! - Easy testing with in-memory fixtures
 //! - CLI and WASM builds from same core
 
-use crate::source::{AssetStore, SourceStore, VirtualPathBuf, VirtualPathError};
-use crate::source::{AssetStoreError, SourceStoreError};
+use crate::source::{
+    AssetStore, AssetStoreError, ResourceAccessError, ResourceReference, SourceId, SourceStore,
+    SourceStoreError, VirtualPathBuf, VirtualPathError,
+};
 
 /// A compilation project with all sources and assets in memory.
 ///
@@ -63,6 +65,57 @@ impl VirtualProject {
     /// Gets the project metadata.
     pub fn metadata(&self) -> &ProjectMetadata {
         &self.metadata
+    }
+
+    /// Resolves a local logical resource relative to the source document that
+    /// issued the request. This never touches the host filesystem.
+    pub fn resolve_resource_path(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+    ) -> Result<VirtualPathBuf, ResourceAccessError> {
+        let ResourceReference::LocalPath(reference) = ResourceReference::classify(reference) else {
+            return Err(ResourceAccessError::UnsupportedReference {
+                reference: reference.to_string(),
+            });
+        };
+        let source_path = self
+            .sources
+            .path_by_id(source_id)
+            .ok_or(ResourceAccessError::UnknownSource(source_id))?;
+        let base = source_path.parent().unwrap_or_else(VirtualPathBuf::root);
+        base.join(reference).map_err(ResourceAccessError::Boundary)
+    }
+
+    /// Reads a project resource as bytes after source-relative resolution.
+    pub fn read_resource_bytes(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+    ) -> Result<(VirtualPathBuf, Vec<u8>), ResourceAccessError> {
+        let path = self.resolve_resource_path(source_id, reference)?;
+        if let Some(source) = self.sources.get(&path) {
+            return Ok((path, source.as_bytes().to_vec()));
+        }
+        if let Some(asset) = self.assets.get(&path) {
+            return Ok((path, asset.to_vec()));
+        }
+        Err(ResourceAccessError::NotFound(path))
+    }
+
+    /// Reads a project resource as UTF-8 text after source-relative
+    /// resolution. The bytes are not normalized or lossily converted.
+    pub fn read_resource_text(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+    ) -> Result<(VirtualPathBuf, String), ResourceAccessError> {
+        let (path, bytes) = self.read_resource_bytes(source_id, reference)?;
+        let text = String::from_utf8(bytes).map_err(|error| ResourceAccessError::InvalidUtf8 {
+            path: path.clone(),
+            message: error.utf8_error().to_string(),
+        })?;
+        Ok((path, text))
     }
 }
 
@@ -410,6 +463,87 @@ mod tests {
                 .get(&VirtualPathBuf::parse("font.ttf").unwrap()),
             Some(b"font data".as_ref())
         );
+    }
+
+    #[test]
+    fn resources_resolve_relative_to_the_source_identity() {
+        let project = VirtualProjectBuilder::new()
+            .entry("docs/main.qd")
+            .unwrap()
+            .add_source("docs/main.qd", ".read {data/main.txt}")
+            .unwrap()
+            .add_source("docs/partials/a.qd", ".read {data/nested.txt}")
+            .unwrap()
+            .add_asset("docs/data/main.txt", b"main".to_vec())
+            .unwrap()
+            .add_asset("docs/partials/data/nested.txt", b"nested".to_vec())
+            .unwrap()
+            .build()
+            .unwrap();
+        let main_id = project.sources().get_id(project.entry()).unwrap();
+        let nested_id = project
+            .sources()
+            .get_id(&VirtualPathBuf::parse("docs/partials/a.qd").unwrap())
+            .unwrap();
+
+        assert_eq!(
+            project
+                .read_resource_text(main_id, "data/main.txt")
+                .unwrap(),
+            (
+                VirtualPathBuf::parse("docs/data/main.txt").unwrap(),
+                "main".into()
+            )
+        );
+        assert_eq!(
+            project
+                .read_resource_text(nested_id, "data/nested.txt")
+                .unwrap(),
+            (
+                VirtualPathBuf::parse("docs/partials/data/nested.txt").unwrap(),
+                "nested".into()
+            )
+        );
+    }
+
+    #[test]
+    fn resource_access_rejects_nonlocal_and_out_of_root_references() {
+        let project = VirtualProjectBuilder::new()
+            .entry("docs/main.qd")
+            .unwrap()
+            .add_source("docs/main.qd", "main")
+            .unwrap()
+            .build()
+            .unwrap();
+        let source_id = project.sources().get_id(project.entry()).unwrap();
+
+        assert!(matches!(
+            project.resolve_resource_path(source_id, "https://example.com/file"),
+            Err(crate::source::ResourceAccessError::UnsupportedReference { .. })
+        ));
+        assert!(matches!(
+            project.resolve_resource_path(source_id, "../../secret"),
+            Err(crate::source::ResourceAccessError::Boundary(_))
+        ));
+    }
+
+    #[test]
+    fn invalid_utf8_is_not_lossily_decoded() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .unwrap()
+            .add_source("main.qd", ".read {bad.bin}")
+            .unwrap()
+            .add_asset("bad.bin", vec![0xff, 0xfe])
+            .unwrap()
+            .build()
+            .unwrap();
+        let source_id = project.sources().get_id(project.entry()).unwrap();
+
+        assert!(matches!(
+            project.read_resource_text(source_id, "bad.bin"),
+            Err(crate::source::ResourceAccessError::InvalidUtf8 { .. })
+        ));
     }
 
     #[test]

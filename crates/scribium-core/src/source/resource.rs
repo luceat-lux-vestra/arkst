@@ -4,6 +4,31 @@
 //! resource context. This module deliberately does not resolve paths or touch
 //! the filesystem.
 
+use crate::source::{SourceId, VirtualPathBuf, VirtualPathError};
+
+/// Failure while resolving or reading a logical project resource.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ResourceAccessError {
+    /// The reference is not a project-relative local path.
+    #[error("resource reference is not a local project path: {reference}")]
+    UnsupportedReference { reference: String },
+    /// The source identity used as the relative base is not present.
+    #[error("source identity is not present in the project: {0:?}")]
+    UnknownSource(SourceId),
+    /// The normalized reference leaves the virtual project root.
+    #[error("resource path leaves the project boundary: {0}")]
+    Boundary(VirtualPathError),
+    /// No source or asset exists at the normalized path.
+    #[error("resource not found: {0}")]
+    NotFound(VirtualPathBuf),
+    /// A text-oriented builtin received bytes that are not valid UTF-8.
+    #[error("resource is not valid UTF-8: {path}: {message}")]
+    InvalidUtf8 {
+        path: VirtualPathBuf,
+        message: String,
+    },
+}
+
 /// The semantic class of a source-language resource reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceReference {
