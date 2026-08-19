@@ -1,15 +1,16 @@
 name: PR 104 semantic fix
 
 on:
-  push:
-    branches:
-      - agent/quarkdown-evaluator-semantics-expansion
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 permissions:
   contents: write
 
 jobs:
   fix:
+    if: github.event.pull_request.number == 104
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -91,76 +92,60 @@ jobs:
           text = text.replace(marker, regression + marker, 1)
           lib.write_text(text)
 
-          spec = Path('docs/compatibility/quarkdown/SPEC_SOURCES.md')
-          text = spec.read_text()
-          old = '''`.ifpresent` returns `None` without invoking its mapping lambda when the value
+          replacements = {
+              Path('docs/compatibility/quarkdown/SPEC_SOURCES.md'): [(
+                  '''`.ifpresent` returns `None` without invoking its mapping lambda when the value
           is absent; otherwise it returns the lambda's typed result. `.takeif` evaluates
           its condition only for a present value, requires a Boolean result, and returns
           the original value or `None` accordingly. These are lazy callback contracts,
           not negative/zero/positive comparators or text transformations.
-          '''
-          new = '''`.ifpresent` returns `None` without invoking its mapping lambda when the value
+          ''',
+                  '''`.ifpresent` returns `None` without invoking its mapping lambda when the value
           is absent; otherwise it returns the lambda's typed result. `.takeif` always
           evaluates its condition, including for `None`, requires a Boolean result, and
           returns the original value or `None` accordingly. Only `.ifpresent` has an
           absence short-circuit; `.takeif` remains callback-observable for `None`.
-          '''
-          if old not in text:
-              raise SystemExit('SPEC optionality wording not found')
-          spec.write_text(text.replace(old, new, 1))
-
-          gap = Path('docs/compatibility/quarkdown/GAP_INVENTORY.md')
-          text = gap.read_text()
-          old = '''The v2.5.1 `Optionality.kt` contract defines `.none`, `.isnone`, `.otherwise`,
+          ''')],
+              Path('docs/compatibility/quarkdown/GAP_INVENTORY.md'): [(
+                  '''The v2.5.1 `Optionality.kt` contract defines `.none`, `.isnone`, `.otherwise`,
           `.ifpresent(value, mapping)`, and `.takeif(value, condition)`. The latter two
           are lazy with respect to the callback: a `None` value returns `None` without
           invoking the callback, `.ifpresent` returns the callback's typed result, and
           `.takeif` requires a Boolean callback result and otherwise returns the original
           value or `None`.
-          '''
-          new = '''The v2.5.1 `Optionality.kt` contract defines `.none`, `.isnone`, `.otherwise`,
+          ''',
+                  '''The v2.5.1 `Optionality.kt` contract defines `.none`, `.isnone`, `.otherwise`,
           `.ifpresent(value, mapping)`, and `.takeif(value, condition)`. `.ifpresent`
           returns `None` without invoking its mapping callback for a `None` value and
           otherwise returns the callback's typed result. `.takeif` invokes its condition
           for every value, including `None`, requires a Boolean callback result, and
           returns the original value or `None`.
-          '''
-          if old not in text:
-              raise SystemExit('GAP optionality evidence wording not found')
-          text = text.replace(old, new, 1)
-          text = text.replace(
-              'lazy callback execution, Boolean-only `.takeif`, source-backed evaluator errors',
-              'the `.ifpresent` absence short-circuit, Boolean-only `.takeif` callback execution, source-backed evaluator errors',
-              1,
-          )
-          gap.write_text(text)
-
-          readme = Path('docs/compatibility/quarkdown/README.md')
-          text = readme.read_text()
-          old = '''`.ifpresent` maps a non-`None` value through a one-argument lambda and returns
+          '''),(
+                  'lazy callback execution, Boolean-only `.takeif`, source-backed evaluator errors',
+                  'the `.ifpresent` absence short-circuit, Boolean-only `.takeif` callback execution, source-backed evaluator errors')],
+              Path('docs/compatibility/quarkdown/README.md'): [(
+                  '''`.ifpresent` maps a non-`None` value through a one-argument lambda and returns
           `None` without invoking that lambda for an absent value. `.takeif` invokes its
           one-argument condition only for a present value, requires a Boolean result, and
           returns the original value or semantic `None`.
-          '''
-          new = '''`.ifpresent` maps a non-`None` value through a one-argument lambda and returns
+          ''',
+                  '''`.ifpresent` maps a non-`None` value through a one-argument lambda and returns
           `None` without invoking that lambda for an absent value. `.takeif` invokes its
           one-argument condition for every value, including `None`, requires a Boolean
           result, and returns the original value or semantic `None`.
-          '''
-          if old not in text:
-              raise SystemExit('README optionality wording not found')
-          text = text.replace(old, new, 1)
-          text = text.replace(
-              '| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; lazy callbacks through first-class `@lambda` or headerless indented bodies; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |',
-              '| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; `.ifpresent` absence short-circuit; first-class `@lambda` or headerless indented callbacks; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |',
-              1,
-          )
-          text = text.replace(
-              'covered by `compile_optionality_*` tests for lazy absence, named/mixed callback',
-              'covered by `compile_optionality_*` tests for `.ifpresent` lazy absence, named/mixed callback',
-              1,
-          )
-          readme.write_text(text)
+          '''),(
+                  '| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; lazy callbacks through first-class `@lambda` or headerless indented bodies; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |',
+                  '| Optionality and callback values | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | Typed `IrValue::None`; `.ifpresent` absence short-circuit; first-class `@lambda` or headerless indented callbacks; Boolean-only `.takeif`; source-backed atomic failures | Implemented (bounded v2.5.1 slice) |'),(
+                  'covered by `compile_optionality_*` tests for lazy absence, named/mixed callback',
+                  'covered by `compile_optionality_*` tests for `.ifpresent` lazy absence, named/mixed callback')],
+          }
+          for path, pairs in replacements.items():
+              text = path.read_text()
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'expected text not found in {path}: {old[:80]!r}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
       - name: Format and regression test
         run: |
           cargo fmt --all -- --check
