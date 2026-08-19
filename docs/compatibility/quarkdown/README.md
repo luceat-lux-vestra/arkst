@@ -61,7 +61,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
 | Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, strict `decimals: Int` adaptation, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
 | String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; Dynamic String → InlineMarkdownContent conversion remains unsupported | Implemented (bounded v2.5.1 slice) |
-| Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Upstream evaluates one `String`, checks `NativeContent`, emits verbatim only for HTML, and permits other targets to ignore the node; Scribium has no capability context, target-specific IR carrier, or HTML backend | Planned (contract defined in ADR-0018) |
+| Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
 | Scoped `.let` evaluation        | block explicit one-parameter or headerless `.1` lambda | Semantically supported for the evidenced slice | Implemented (block form) |
 | Optional parameter values      | omitted `parameter?` → `None`, `.otherwise`, `.isnone` | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
@@ -105,25 +105,27 @@ returns the content verbatim, while the v2.5.1 plaintext and GFM visitors
 return empty output. The normal CLI permission default includes
 `native-content`; denial is an evaluator-time missing-permission failure.
 
-Scribium's implementation status is **unsupported/pending**. Current evidence
-fixtures cover parser and evaluator fallback shape only:
+Scribium's implementation status is **implemented for the closed `Html` target
+semantic slice**. The evaluator accepts one regular `content: String` through
+positional, named, inline, and indented-body forms, grants `NativeContent` by
+default through `CompileOptions::default()`, and exposes explicit denial with
+`CompileOptions::with_native_content(false)`. Denial emits one source-backed
+`E3004` diagnostic before node creation.
 
-- `.html {<em>world</em>}` is a Quarkdown directive with one source-backed
-  content argument and current `E3010` preservation diagnostic;
-- `**Hello** .html {<em>world</em>}!` preserves strong/text/call/text order;
-- an indented `.html` body is currently parser-owned raw HTML and reaches the
-  existing `E8001` boundary.
+- `.html {<em>world</em>}` evaluates to a block `TargetSpecificContent` node;
+- `**Hello** .html {<em>world</em>}!` keeps the target node inline between
+  surrounding text;
+- an indented body is retained as an opaque function-body String boundary;
+- Typst/PDF omit the target-specific payload without warnings or source-map
+  entries.
 
-The intended future representation is a closed backend-neutral target-specific
+The implemented representation is a closed backend-neutral target-specific
 content payload carrying `NativeTarget::Html`, the evaluated String, and its
-`SourceSpan`, with placement-preserving block and inline carriers. The engine
-will own evaluation and permission checking; normal/default
-Quarkdown-compatible compilation will start with `NativeContent` granted, with
-host/API denial available. A future HTML output backend, whose physical
-crate/name is not frozen here, will emit the string verbatim; Typst/PDF will
-intentionally emit no output and no warning after evaluation. `scribium-html`
-continues to normalize Markdown/foreign HTML only and does not consume this
-payload. This is not a generic raw backend/MIME mechanism.
+`SourceSpan`, with placement-preserving block and inline carriers. A future
+HTML output backend, whose physical crate/name is not frozen here, will emit the
+string verbatim. `scribium-html` continues to normalize Markdown/foreign HTML
+only and does not consume this payload. This is not a generic raw backend/MIME
+mechanism.
 Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.scrib` remains the
 separate source-language raw-HTML case and continues to fail closed with
 `E8001`. See [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md)

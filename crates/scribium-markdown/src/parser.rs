@@ -1533,13 +1533,19 @@ fn parse_original_content(
                 _ => {}
             }
         }
-        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~' | b'<' | b'>') {
+        // Angle-bracket text remains an exact source-backed String boundary;
+        // it does not require the unavailable Quarkdown inline-fragment
+        // parser. Keep E3010 for Markdown constructs whose structure would be
+        // lost by preserving the original text.
+        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~') {
             has_unsupported_markdown = true;
         }
         cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
     }
     push_content_text(&mut inlines, source, text_start, span.end, base);
-    if has_unsupported_markdown {
+    let has_opaque_angle_fragment =
+        source[span.start..span.end].contains('<') && source[span.start..span.end].contains('>');
+    if has_unsupported_markdown && !has_opaque_angle_fragment {
         diagnostics.push(ParserDiagnostic {
             code: "E3010",
             message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because Rushdown exposes no original-span inline-fragment parser".to_string(),

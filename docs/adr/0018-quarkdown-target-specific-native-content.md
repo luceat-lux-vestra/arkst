@@ -1,6 +1,9 @@
 # ADR-0018: Quarkdown Target-Specific Native Content
 
 - **Status:** Accepted
+- **Implementation status:** Implemented for the closed `Html` target in the
+  existing evaluator → IR → Typst/PDF path; no HTML output backend
+- **Implementation diagnostic:** `E3004` for denied `NativeContent`
 - **Date:** 2026-08-19
 - **Owners:** Scribium maintainers
 - **Related ADRs:** 0003, 0015, 0016, 0017
@@ -367,15 +370,15 @@ as HTML security filtering.
 
 ## Consequences
 
-This ADR makes `.html` a documented compatibility gap with a mechanical next
-implementation shape but deliberately leaves implementation pending. The next
-slice must add the capability context and the closed target-specific IR
-carriers together with evaluator, HTML-backend, Typst omission, diagnostic,
-provenance, WASM, and security tests. It must not broaden Markdown raw HTML.
+At acceptance, this ADR recorded `.html` as a documented compatibility gap with
+the mechanical implementation shape defined above. The implementation slice
+now adds the explicit capability context, closed target-specific IR carriers,
+evaluator String boundary, `E3004` denial diagnostic, provenance tests, WASM
+checks, and silent Typst/PDF omission. It does not broaden Markdown raw HTML.
 
-Until then, Scribium must not claim `.html` compatibility. Current evidence
-fixtures document parser/evaluator fallback shapes and existing `E3010`/
-`E8001` behavior only.
+The current claim remains bounded: closed `Html` semantic evaluation and
+Typst/PDF omission are implemented, while an HTML output backend, `.css`,
+`.htmloptions`, and arbitrary mixed `.qd`/`.scrib` HTML remain unsupported.
 
 ## Explicit non-goals
 

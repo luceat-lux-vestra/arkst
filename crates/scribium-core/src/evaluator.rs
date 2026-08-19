@@ -47,9 +47,11 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrDictionary, IrDocument, IrInline, IrListItem, IrNamedArg, IrNode, IrPair, IrParameter,
-    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
+    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use crate::source::SourceSpan;
+use crate::{Capabilities, Capability};
 use scribium_quarkdown::is_valid_normal_call_name;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -495,11 +497,13 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::Table { span, .. }
         | IrNode::CodeBlock { span, .. }
         | IrNode::RawTypst { span, .. }
+        | IrNode::RawHtml { span, .. }
         | IrNode::FunctionCall { span, .. }
         | IrNode::ChainedFunctionCall { span, .. }
         | IrNode::FunctionDeclaration { span, .. }
         | IrNode::ThematicBreak { span }
         | IrNode::Math { span, .. } => *span,
+        IrNode::TargetSpecificContent { content } => content.span,
     }
 }
 
@@ -687,13 +691,26 @@ impl EvaluationContext {
 
 /// Evaluates Quarkdown conditionals, variables, user-defined functions, and
 /// the currently supported semantic chain builtins in the IR.
-#[derive(Debug, Default)]
-pub struct Evaluator {}
+#[derive(Debug, Clone, Copy)]
+pub struct Evaluator {
+    capabilities: Capabilities,
+}
+
+impl Default for Evaluator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Evaluator {
     /// Creates a new evaluator.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_capabilities(Capabilities::default())
+    }
+
+    /// Creates an evaluator with the explicit capabilities for one compile.
+    pub fn with_capabilities(capabilities: Capabilities) -> Self {
+        Self { capabilities }
     }
 
     /// Evaluates the document, resolving conditionals, variables, and chains.
@@ -854,6 +871,15 @@ impl Evaluator {
                     .collect(),
                 span: *span,
             }],
+            IrNode::RawHtml { span, .. } => {
+                diagnostics.push(unsupported_raw_html(*span));
+                Vec::new()
+            }
+            IrNode::TargetSpecificContent { content } => {
+                vec![IrNode::TargetSpecificContent {
+                    content: content.clone(),
+                }]
+            }
             other => vec![other.clone()],
         }
     }
@@ -924,6 +950,15 @@ impl Evaluator {
                 body,
                 span,
             } => self.evaluate_inline_chain(head, chain, body, span, diagnostics, context),
+            IrInline::RawHtml { span, .. } => {
+                diagnostics.push(unsupported_raw_html(*span));
+                Vec::new()
+            }
+            IrInline::TargetSpecificContent { content } => {
+                vec![IrInline::TargetSpecificContent {
+                    content: content.clone(),
+                }]
+            }
             IrInline::Code { content, span } => {
                 // Code spans are opaque: the content is never resolved,
                 // recursed into, or evaluated. It passes straight through.
@@ -1128,6 +1163,17 @@ impl Evaluator {
             };
         }
 
+        if name == "html" {
+            return self.evaluate_html(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if is_let(name) {
             return self.evaluate_let(
                 positional_args,
@@ -1318,6 +1364,139 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Evaluates the closed Quarkdown `.html(content: String)` builtin.
+    ///
+    /// The result is kept in an ordinary content value so the existing block
+    /// and inline materialization paths preserve placement independently.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_html(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if !self.capabilities.allows(Capability::NativeContent) {
+            diagnostics.push(native_content_denied(*span));
+            return CallOutcome::Failed;
+        }
+
+        if positional_args.len() > 1 {
+            diagnostics.push(html_argument_error(
+                "`.html` accepts exactly one `content` argument",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let mut named_content = None;
+        for argument in named_args {
+            if argument.name != "content" {
+                diagnostics.push(html_argument_error_at(
+                    format!(
+                        "`.html` does not support named argument `{}`",
+                        argument.name
+                    ),
+                    argument.name_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            if named_content.is_some() {
+                diagnostics.push(html_argument_error_at(
+                    "`.html` received named argument `content` more than once".to_string(),
+                    argument.name_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            named_content = Some(&argument.value);
+        }
+
+        if positional_args.len() == 1 && named_content.is_some() {
+            diagnostics.push(html_argument_error(
+                "`.html` received `content` more than once",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() && (positional_args.len() == 1 || named_content.is_some()) {
+            diagnostics.push(html_argument_error(
+                "`.html` received both a body and an explicit `content` argument",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let content = if let Some(body) = body {
+            match self.evaluate_html_body(body, span, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                outcome => return outcome,
+            }
+        } else if let Some(value) = positional_args.first().or(named_content) {
+            match self.evaluate_value(value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    match self.preserve_value_expression(value, diagnostics, context) {
+                        Ok(value) => value,
+                        Err(outcome) => return outcome,
+                    }
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+            }
+        } else {
+            diagnostics.push(html_argument_error(
+                "`.html` requires one `content` argument or body",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        };
+
+        let Some(content) = builtins::adapt_string_argument(&content) else {
+            diagnostics.push(html_argument_error(
+                "`.html` content must adapt to the supported String boundary",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::TargetSpecificContent {
+            content: TargetSpecificContent {
+                target: NativeTarget::Html,
+                content,
+                span: *span,
+            },
+        }]))
+    }
+
+    fn evaluate_html_body(
+        &self,
+        body: CallBody<'_>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        match body {
+            CallBody::Block(nodes) if body_contains_raw_html(nodes) => {
+                match opaque_html_body_string(nodes) {
+                    Some(content) => CallOutcome::Value(IrValue::String(content)),
+                    None => {
+                        diagnostics.push(html_argument_error(
+                            "`.html` body contains structure that cannot adapt to String",
+                            *span,
+                        ));
+                        CallOutcome::Failed
+                    }
+                }
+            }
+            body => self.evaluate_call_body(body, span, diagnostics, context),
+        }
     }
 
     /// Evaluates the bounded Collection access operations through the same
@@ -3311,6 +3490,9 @@ impl Evaluator {
         }
         match first {
             IrNode::Paragraph { content, .. } => content,
+            IrNode::TargetSpecificContent { content } => {
+                vec![IrInline::TargetSpecificContent { content }]
+            }
             _ => {
                 diagnostics.push(function_error(
                     "Rich block content cannot be inserted into an inline context unless it is exactly one paragraph".to_string(),
@@ -3658,8 +3840,80 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::Image { span, .. }
         | IrInline::Code { span, .. }
         | IrInline::SoftBreak { span }
-        | IrInline::HardBreak { span } => *span,
+        | IrInline::HardBreak { span }
+        | IrInline::RawHtml { span, .. } => *span,
+        IrInline::TargetSpecificContent { content } => content.span,
     }
+}
+
+fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
+    nodes.iter().any(|node| match node {
+        IrNode::RawHtml { .. } => true,
+        IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {
+            content.iter().any(|inline| {
+                matches!(inline, IrInline::RawHtml { .. })
+                    || match inline {
+                        IrInline::Emphasis { content, .. }
+                        | IrInline::Strong { content, .. }
+                        | IrInline::Strikethrough { content, .. }
+                        | IrInline::Link { content, .. }
+                        | IrInline::Image { content, .. } => content
+                            .iter()
+                            .any(|child| matches!(child, IrInline::RawHtml { .. })),
+                        _ => false,
+                    }
+            })
+        }
+        IrNode::Blockquote { content, .. } => body_contains_raw_html(content),
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+            items.iter().any(|item| body_contains_raw_html(&item.nodes))
+        }
+        IrNode::Table { header, rows, .. } => header
+            .cells
+            .iter()
+            .chain(rows.iter().flat_map(|row| row.cells.iter()))
+            .any(|cell| {
+                cell.content
+                    .iter()
+                    .any(|inline| matches!(inline, IrInline::RawHtml { .. }))
+            }),
+        _ => false,
+    })
+}
+
+fn opaque_html_body_string(nodes: &[IrNode]) -> Option<String> {
+    let mut output = String::new();
+    for node in nodes {
+        match node {
+            IrNode::RawHtml { source, .. } => output.push_str(source),
+            IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {
+                for inline in content {
+                    append_opaque_html_inline(inline, &mut output)?;
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(output)
+}
+
+fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<()> {
+    match inline {
+        IrInline::Text { content, .. } | IrInline::RawHtml { content, .. } => {
+            output.push_str(content);
+        }
+        IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
+        IrInline::Emphasis { .. }
+        | IrInline::Strong { .. }
+        | IrInline::Strikethrough { .. }
+        | IrInline::DirectiveCall { .. }
+        | IrInline::ChainedDirectiveCall { .. }
+        | IrInline::Link { .. }
+        | IrInline::Image { .. }
+        | IrInline::Code { .. }
+        | IrInline::TargetSpecificContent { .. } => return None,
+    }
+    Some(())
 }
 
 /// Returns true for the conditional constructs this evaluator resolves.
@@ -4415,6 +4669,50 @@ fn function_error_at(message: String, span: SourceSpan) -> Diagnostic {
         secondary: Vec::new(),
         hints: vec![
             "Function declarations and calls must satisfy the supported required-parameter contract."
+                .to_string(),
+        ],
+    }
+}
+
+fn html_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    html_argument_error_at(message.to_string(), span)
+}
+
+fn html_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["`.html` accepts exactly one regular `content` String argument.".to_string()],
+    }
+}
+
+fn native_content_denied(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3004".to_string(),
+        severity: Severity::Error,
+        message: "NativeContent capability is required for `.html`".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Grant the NativeContent capability for this compilation to enable `.html`."
+                .to_string(),
+        ],
+    }
+}
+
+fn unsupported_raw_html(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E8001".to_string(),
+        severity: Severity::Error,
+        message: "Raw HTML is unsupported outside an owning target-specific function argument"
+            .to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Use Quarkdown `.html` for target-specific HTML content; ordinary mixed raw HTML remains unsupported."
                 .to_string(),
         ],
     }

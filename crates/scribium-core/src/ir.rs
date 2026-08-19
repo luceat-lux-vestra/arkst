@@ -26,6 +26,21 @@ pub struct IrMetadata {
     pub raw: Vec<(String, String)>,
 }
 
+/// A closed target discriminator for native content that remains opaque until
+/// backend selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NativeTarget {
+    Html,
+}
+
+/// Evaluated target-specific content with source provenance.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TargetSpecificContent {
+    pub target: NativeTarget,
+    pub content: String,
+    pub span: SourceSpan,
+}
+
 /// A block-level IR node — ready for Typst code generation.
 ///
 /// Unlike AST nodes, IR nodes carry no unresolved references, no directive syntax,
@@ -76,6 +91,12 @@ pub enum IrNode {
     },
     /// Raw Typst source — inserted verbatim into the output.
     RawTypst { source: String, span: SourceSpan },
+    /// Parser-owned raw HTML retained only while a function body can claim it
+    /// as an opaque String argument. Ordinary document raw HTML is rejected
+    /// before it reaches evaluated IR.
+    RawHtml { source: String, span: SourceSpan },
+    /// Target-specific content retained until backend selection.
+    TargetSpecificContent { content: TargetSpecificContent },
     /// A function/component call that was resolved during evaluation.
     /// The lowering pass renders this as the corresponding Typst construct.
     FunctionCall {
@@ -184,6 +205,10 @@ pub enum IrInline {
     SoftBreak { span: SourceSpan },
     /// A source-backed hard line break.
     HardBreak { span: SourceSpan },
+    /// Parser-owned raw HTML retained only inside an opaque function body.
+    RawHtml { content: String, span: SourceSpan },
+    /// Target-specific content retained until backend selection.
+    TargetSpecificContent { content: TargetSpecificContent },
 }
 
 /// An evaluated list item in the IR.
@@ -348,7 +373,10 @@ pub enum IrValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{IrDictionary, IrPair, IrRange, IrValue};
+    use super::{
+        IrDictionary, IrInline, IrNode, IrPair, IrRange, IrValue, NativeTarget,
+        TargetSpecificContent,
+    };
     use crate::source::{SourceId, SourceSpan};
 
     #[test]
@@ -397,6 +425,27 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IrValue>(encoded).expect("structured values deserialize"),
             value
+        );
+    }
+
+    #[test]
+    fn target_specific_content_roundtrips_in_block_and_inline_carriers() {
+        let content = TargetSpecificContent {
+            target: NativeTarget::Html,
+            content: "<em>world</em>".to_string(),
+            span: SourceSpan::new(SourceId(1), 4, 18),
+        };
+        let block = IrNode::TargetSpecificContent {
+            content: content.clone(),
+        };
+        let inline = IrInline::TargetSpecificContent { content };
+
+        let block_json = serde_json::to_value(&block).expect("block target content serializes");
+        let inline_json = serde_json::to_value(&inline).expect("inline target content serializes");
+        assert_eq!(serde_json::from_value::<IrNode>(block_json).unwrap(), block);
+        assert_eq!(
+            serde_json::from_value::<IrInline>(inline_json).unwrap(),
+            inline
         );
     }
 }
