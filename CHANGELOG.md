@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown local images (M2):** Inline and reference image syntax now flows
+  from the Rushdown-backed AST through backend-neutral IR to Typst `#image(...)`
+  and real PDF output. Relative resources resolve from the source entry
+  directory inside the explicit project root; parent-relative in-root paths
+  and SVG/PNG resources are covered by Typst-required integration tests.
+  Image alt content and titles remain source-backed in AST/IR. Absolute paths,
+  URI schemes, and remote fetching are rejected, while missing or unsupported
+  local formats fail through the Typst backend.
+
 - **Compatibility policy:** ADR-0016 establishes complete compatibility with
   the publicly documented Quarkdown language and document-observable semantics
   as the long-term target while keeping current verified claims partial and

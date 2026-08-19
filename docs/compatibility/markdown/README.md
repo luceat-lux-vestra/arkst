@@ -60,7 +60,7 @@ silently flattening the syntax into another Markdown node.
 | Strikethrough | Yes | Yes | Yes | Yes | Yes | GFM extension; covered by existing and baseline tests. |
 | Inline code | Yes | Yes | Yes | Yes | Yes | Opaque code-span content is preserved. |
 | Links | Yes | Yes | Yes | Yes | Yes | Label, destination, title metadata, and source span are retained; Typst emits clickable links. |
-| Images | Yes | Yes | Yes* | No | No | Destination, alt content, title, and span are retained in IR; resource resolution is intentionally deferred and emits deterministic E8001. No network or arbitrary filesystem access is added. |
+| Images | Yes | Yes | Yes | Yes | Yes | Inline and reference images retain nested alt content, logical destination, title, and source span. Project-relative local images resolve from the source entry directory through the explicit Typst source context; absolute paths and URI schemes are rejected with E8001, and no network fetching is performed. |
 | Soft line breaks | Yes | Yes | Yes | Yes | Yes | Preserved as an IR break and lowered as a Typst newline; UTF-8 + CRLF is covered end-to-end. |
 | Hard line breaks | Yes | Yes | Yes | Yes | Yes | Backslash/two-space delimiter and UTF-8 + CRLF span remain source-backed; lowered as Typst hard break and PDF-tested. |
 | Escaped punctuation | Yes | Yes | Yes | Yes | Yes | Normalized through Rushdown's public `unescape_puncts` utility and re-escaped for Typst markup. |
@@ -113,12 +113,19 @@ The audit therefore has three policy outcomes:
 
 ## Scope boundary
 
-The successful PDF fixture intentionally contains only features with a
-complete current output path. Images and non-whitelist HTML remain explicit
-compatibility gaps because resource resolution and general HTML normalization
-are outside this bounded slice. This PR does not add network fetching,
-arbitrary filesystem access, a Markdown parser, a Rushdown change, a DOM, CSS,
-JavaScript, or a backend-rendered HTML semantic path.
+The successful PDF fixtures contain only features with a complete current
+output path. Local relative Markdown images are now included in that path:
+their logical destination is resolved from the source document directory
+inside the explicit project root. Parent-relative references remain valid only
+when they stay inside that root; missing files and backend-unsupported formats
+fail through Typst, while absolute paths, URI schemes, and network fetching are
+unsupported. Image alt content and titles remain in AST/IR for future
+accessibility or HTML work, but are not emitted as PDF accessibility metadata
+by the current Typst backend.
+
+The slice still does not add arbitrary filesystem access, a Markdown parser, a
+Rushdown change, a DOM, CSS, JavaScript, or a backend-rendered HTML semantic
+path.
 
 The target product path demonstrated here is:
 

@@ -1952,8 +1952,17 @@ fn link_span(
         return Some(span);
     }
 
+    complete_inline_destination_span(span, link.destination(), link.title().is_some(), source)
+}
+
+fn complete_inline_destination_span(
+    span: ByteSpan,
+    destination: &rushdown::text::Value,
+    has_title: bool,
+    source: &str,
+) -> Option<ByteSpan> {
     let bytes = source.as_bytes();
-    let mut cursor = match link.destination() {
+    let mut cursor = match destination {
         rushdown::text::Value::Index(destination) => {
             let destination = checked_index(*destination, source)?;
             destination.end
@@ -1972,7 +1981,7 @@ fn link_span(
     }
     cursor = skip_link_spaces(bytes, cursor);
 
-    if link.title().is_some() {
+    if has_title {
         let opener = *bytes.get(cursor)?;
         let closer = if opener == b'(' { b')' } else { opener };
         cursor += 1;
@@ -2068,7 +2077,20 @@ fn image_span(
     source: &str,
 ) -> Option<ByteSpan> {
     if let Some(span) = node_span(arena, node, source) {
-        return Some(span);
+        match image.link_kind() {
+            rushdown::ast::LinkKind::Inline => {
+                return complete_inline_destination_span(
+                    span,
+                    image.destination(),
+                    image.title().is_some(),
+                    source,
+                );
+            }
+            rushdown::ast::LinkKind::Reference(_) => {
+                return complete_reference_image_span(span, source);
+            }
+            _ => return Some(span),
+        }
     }
     if arena[node].children(arena).next().is_some() {
         return None;
@@ -2085,6 +2107,34 @@ fn image_span(
         image.title().is_some(),
         source,
     )
+}
+
+fn complete_reference_image_span(span: ByteSpan, source: &str) -> Option<ByteSpan> {
+    let bytes = source.as_bytes();
+    let mut cursor = span.end;
+    if bytes.get(cursor) != Some(&b']') {
+        return Some(span);
+    }
+    cursor += 1;
+    if bytes.get(cursor) != Some(&b'[') {
+        return ByteSpan::new(span.start, cursor)
+            .is_valid_for(source)
+            .then_some(ByteSpan::new(span.start, cursor));
+    }
+    cursor += 1;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\' {
+            cursor = cursor.saturating_add(2);
+            continue;
+        }
+        if bytes[cursor] == b']' {
+            cursor += 1;
+            let span = ByteSpan::new(span.start, cursor);
+            return span.is_valid_for(source).then_some(span);
+        }
+        cursor += 1;
+    }
+    Some(span)
 }
 
 fn empty_inline_destination_cursor(span: ByteSpan, bytes: &[u8]) -> Option<usize> {
