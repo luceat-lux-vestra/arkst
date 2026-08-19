@@ -410,6 +410,39 @@ This design ensures:
 * Native CLI users are protected from accidental or malicious symlink escapes.
 * The `VirtualProject` abstraction remains purely logical, with no OS path leakage.
 
+### Native Typst source context
+
+The native Typst subprocess adapter has a second, explicit filesystem context
+in addition to the in-memory `VirtualProject`:
+
+- `TypstInput.entry_path` is the normalized, project-root-relative logical path
+  of the Scribium source entry. It is not display metadata and is never an OS
+  absolute path.
+- `TypstSourceContext.project_root` is an explicit physical read boundary. The
+  adapter does not use `std::env::current_dir()` as an implicit resource root.
+- With a source context, the adapter creates a unique temporary mirror of the
+  project tree, canonicalizes every source and symlink target, and rejects any
+  final target outside the canonical project root. Symlinks that remain inside
+  the root are copied as regular files/directories into the mirror.
+- Generated Typst is written only to the mirror at the entry's logical
+  directory with a `.typ` filename. If the preferred generated name already
+  exists as a source resource, a reserved collision-free `.typ` name is used so
+  relative imports cannot be shadowed. The PDF remains in the separate
+  temporary build directory and is returned as bytes; neither generated source
+  nor PDF is written into the source tree.
+- The current pinned invocation is equivalent to
+  `typst compile --root <temporary-mirror> <temporary-mirror>/<entry>.typ
+  <temporary-build>/output.pdf`. This makes relative Typst resources resolve
+  from the Scribium logical entry directory while keeping the source tree
+  read-only.
+
+The backend without a `TypstSourceContext` remains a self-contained compilation
+mode. It can compile generated Typst that does not need filesystem resources,
+but its temporary directory is not an implicit source root. The CLI currently
+passes the host-selected logical project root (the existing entry-directory
+fallback); future `scribium.toml` discovery can change that selection without
+changing the backend contract.
+
 ### Synchronous Core, Async Host
 
 The host gathers all required filesystem and explicitly supplied resource input

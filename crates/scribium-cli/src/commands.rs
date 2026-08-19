@@ -6,13 +6,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use scribium_core::virtual_path::VirtualPathBuf;
 use scribium_core::VirtualProjectBuilder;
-use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
+use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput, TypstSourceContext};
 
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {
     project: scribium_core::VirtualProject,
     /// The path as requested by the user (logical path for output naming)
     requested_entry: PathBuf,
+    /// Explicit physical source root passed to the native Typst backend.
+    source_context: TypstSourceContext,
 }
 fn os_relative_path_to_virtual(path: &Path) -> anyhow::Result<VirtualPathBuf> {
     let mut components = Vec::new();
@@ -146,6 +148,7 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     Ok(LoadedProject {
         project,
         requested_entry,
+        source_context: TypstSourceContext::new(canonical_project_root),
     })
 }
 
@@ -256,9 +259,10 @@ pub fn build(
             "pdf" => {
                 let typst_input = TypstInput {
                     source: typst_code.clone(),
-                    entry_path: loaded.requested_entry.to_string_lossy().to_string(),
+                    entry_path: loaded.project.entry().as_str().to_string(),
                 };
-                let backend = SubprocessBackend::new(typst_path);
+                let backend = SubprocessBackend::new(typst_path)
+                    .with_source_context(loaded.source_context.clone());
                 let typst_output = backend
                     .compile(&typst_input)
                     .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?;
@@ -2152,7 +2156,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let script = format!(
-                "#!/bin/sh\nif [ \"$1\" = \"compile\" ]; then\n  printf '%s' '{}' > \"$3\"\n  exit 0\nfi\nprintf '%s\\n' 'typst fake 0.15.1'\n",
+                "#!/bin/sh\nif [ \"$1\" = \"compile\" ]; then\n  if [ \"$2\" = \"--root\" ]; then output=\"$5\"; else output=\"$3\"; fi\n  printf '%s' '{}' > \"$output\"\n  exit 0\nfi\nprintf '%s\\n' 'typst fake 0.15.1'\n",
                 pdf_body
             );
             let path = dir.join("fake_typst");
@@ -2167,7 +2171,8 @@ mod tests {
             let body_path = dir.join("fake_body.bin");
             fs::write(&body_path, pdf_body.as_bytes()).unwrap();
             let script = format!(
-                "@echo off\nif \"%1\"==\"compile\" (\n  copy /B \"{}\" \"%~3\" >nul\n  exit /b 0\n)\necho typst fake 0.15.1\n",
+                "@echo off\nif \"%1\"==\"compile\" (\n  if \"%2\"==\"--root\" (\n    copy /B \"{}\" \"%~5\" >nul\n  ) else (\n    copy /B \"{}\" \"%~3\" >nul\n  )\n  exit /b 0\n)\necho typst fake 0.15.1\n",
+                body_path.display(),
                 body_path.display()
             );
             let path = dir.join("fake_typst.cmd");

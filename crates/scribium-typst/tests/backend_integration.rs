@@ -8,13 +8,16 @@
 //! `SCRIBIUM_REQUIRE_TYPST=1` to turn a missing executable into a hard
 //! failure instead of a skip.
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
 use scribium_core::ir::{IrInline, IrNode, NativeTarget};
 use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+use scribium_typst::backend::TypstSourceContext;
 use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
 use scribium_typst::lowering::{lower_to_typst, lower_to_typst_code};
+use tempfile::tempdir;
 
 /// Locates a Typst executable, in order of preference:
 ///
@@ -84,6 +87,179 @@ fn integration_compile_produces_valid_pdf() {
             pdf.starts_with(b"%PDF-"),
             "pdf must start with %PDF-, began with {:?}",
             &pdf[..pdf.len().min(8)]
+        );
+    });
+}
+
+#[test]
+fn integration_self_contained_mode_does_not_expose_temp_resources() {
+    with_typst("self-contained-resource-boundary", |backend| {
+        let result = backend.compile(&TypstInput {
+            source: "#read(\"./resource.txt\")\n".to_string(),
+            entry_path: "test.qd".to_string(),
+        });
+        assert!(
+            result.is_err(),
+            "resources require an explicit source context"
+        );
+    });
+}
+
+#[test]
+fn integration_relative_image_uses_project_source_context() {
+    with_typst("relative-image", |backend| {
+        let project = tempdir().expect("project temp directory");
+        let docs = project.path().join("docs");
+        let assets = docs.join("assets");
+        fs::create_dir_all(&assets).expect("asset directory");
+        fs::write(docs.join("main.qd"), "original source\n").expect("source fixture");
+        fs::write(
+            assets.join("tiny.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="10pt" height="10pt" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#,
+        )
+        .expect("SVG fixture");
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project.path()))
+            .compile(&TypstInput {
+                source: "#image(\"./assets/tiny.svg\")\n".to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("relative SVG should compile");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+        assert!(!docs.join("main.typ").exists());
+        assert!(!project.path().join("output.pdf").exists());
+        assert_eq!(
+            fs::read_to_string(docs.join("main.qd")).unwrap(),
+            "original source\n"
+        );
+    });
+}
+
+#[test]
+fn integration_relative_read_does_not_depend_on_temp_directory() {
+    with_typst("relative-read", |backend| {
+        let project = tempdir().expect("project temp directory");
+        let docs = project.path().join("docs");
+        let assets = docs.join("assets");
+        fs::create_dir_all(&assets).expect("asset directory");
+        fs::write(assets.join("resource.txt"), "project resource").expect("resource fixture");
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project.path()))
+            .compile(&TypstInput {
+                source: "#read(\"./assets/resource.txt\")\n".to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("project resource should compile without a temp resource");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn integration_relative_import_uses_project_source_context() {
+    with_typst("relative-import", |backend| {
+        let project = tempdir().expect("project temp directory");
+        let docs = project.path().join("docs");
+        let partials = docs.join("partials");
+        fs::create_dir_all(&partials).expect("partial directory");
+        fs::write(
+            partials.join("helper.typ"),
+            "#let greeting = [Imported successfully]\n",
+        )
+        .expect("Typst partial fixture");
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project.path()))
+            .compile(&TypstInput {
+                source: "#import \"./partials/helper.typ\": greeting\n#greeting\n".to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("relative Typst import should compile");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn integration_generated_entry_does_not_shadow_typst_resource() {
+    with_typst("generated-entry-collision", |backend| {
+        let project = tempdir().expect("project temp directory");
+        let docs = project.path().join("docs");
+        fs::create_dir_all(&docs).expect("docs directory");
+        fs::write(
+            docs.join("main.typ"),
+            "#let greeting = [Source helper remains visible]\n",
+        )
+        .expect("source Typst helper fixture");
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project.path()))
+            .compile(&TypstInput {
+                source: "#import \"./main.typ\": greeting\n#greeting\n".to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("source Typst helper should not be shadowed");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn integration_context_handles_spaces_and_unicode_paths() {
+    with_typst("context-paths", |backend| {
+        let parent = tempdir().expect("project parent temp directory");
+        let project = parent.path().join("project with spaces");
+        let docs = project.join("문서");
+        let assets = docs.join("자산");
+        fs::create_dir_all(&assets).expect("unicode asset directory");
+        fs::write(
+            assets.join("logo.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="10pt" height="10pt"><circle cx="5" cy="5" r="5"/></svg>"#,
+        )
+        .expect("unicode SVG fixture");
+
+        let output = backend
+            .with_source_context(TypstSourceContext::new(&project))
+            .compile(&TypstInput {
+                source: "#image(\"./자산/logo.svg\")\n".to_string(),
+                entry_path: "문서/main.qd".to_string(),
+            })
+            .expect("paths with spaces and Unicode should compile");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
+fn integration_outside_root_resource_fails_closed() {
+    with_typst("outside-root", |backend| {
+        let parent = tempdir().expect("project parent temp directory");
+        let project = parent.path().join("project");
+        let outside = parent.path().join("outside");
+        fs::create_dir_all(project.join("docs")).expect("project directory");
+        fs::create_dir_all(&outside).expect("outside directory");
+        fs::write(outside.join("secret.txt"), "secret content").expect("outside fixture");
+
+        let result = backend
+            .with_source_context(TypstSourceContext::new(&project))
+            .compile(&TypstInput {
+                source: "#read(\"../../outside/secret.txt\")\n".to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            });
+        let error = result
+            .expect_err("outside-root access must fail")
+            .to_string();
+        assert!(error.contains("Typst compilation failed"), "error: {error}");
+        assert!(
+            error.contains("project root") || error.contains("project sandbox"),
+            "error must identify the project boundary: {error}"
+        );
+        assert!(
+            !error.contains("secret content"),
+            "error leaked content: {error}"
+        );
+        let parent_path = parent.path().to_string_lossy();
+        assert!(
+            !error.contains(parent_path.as_ref()),
+            "error leaked host path: {error}"
         );
     });
 }
