@@ -246,26 +246,35 @@ unconditional evaluator no-op.
 
 Scribium currently has no public compile/evaluation capability set. That is an
 implementation prerequisite for `.html`; the current pipeline must not grant
-an implicit unsafe escape hatch. The next implementation slice must either
-introduce a narrowly scoped evaluator capability equivalent to
-`NativeContent`, or record an approved equivalent in the host boundary before
-the builtin is enabled. The host/CLI owns grant and denial policy; the
-platform-neutral evaluator receives an explicit capability context.
+an implicit unsafe escape hatch. The compatibility default is nevertheless
+defined: normal/default Quarkdown-compatible Scribium compilation starts with
+`NativeContent` granted, matching Quarkdown v2.5.1's `Permission.DEFAULT_SET`.
+The host/API may explicitly deny `NativeContent`. The next implementation slice
+must introduce a narrowly scoped evaluator capability equivalent to
+`NativeContent` before the builtin is enabled. The host/CLI owns grant and
+denial policy; the platform-neutral evaluator receives an explicit capability
+context.
 
 The initial capability must be closed and scoped to the native-content contract
-under review. It must not automatically authorize `.css`, `.htmloptions`,
-Markdown raw HTML, JavaScript, CSS interpretation, filesystem access, network
-access, or arbitrary backend injection. A denied capability produces a
-structured Scribium diagnostic before semantic node creation. No broad
-permission framework is introduced by this ADR.
+under review. Granting `NativeContent` must not authorize `.css`,
+`.htmloptions`, Markdown raw HTML, JavaScript, CSS interpretation, filesystem
+access, network access, or arbitrary backend injection. A denied capability
+produces a structured Scribium diagnostic before semantic node creation. No
+broad permission framework is introduced by this ADR.
 
 ## Backend lowering ownership
 
-`scribium-html`, when an HTML backend exists, consumes only
-`TargetSpecificContent { target: Html, ... }` and emits the stored content
-verbatim, subject to the explicit capability and host trust boundary. It does
-not need a generic HTML parser or DOM for `.html`; the payload is already the
-evaluated opaque String required by upstream.
+`scribium-html` continues to own only Markdown/foreign-HTML interoperability and
+semantic normalization. Quarkdown `.html` does not pass through
+`scribium-html` and that crate does not consume `TargetSpecificContent`.
+
+A future HTML output backend, with its physical crate/name deliberately not
+frozen by this ADR, consumes only
+`TargetSpecificContent { target: Html, ... }` after backend selection and emits
+the stored content verbatim/unescaped, subject to the explicit capability and
+host trust boundary. It does not need a generic HTML parser or DOM for
+`.html`; the payload is already the evaluated opaque String required by
+upstream.
 
 `scribium-typst` owns the Typst decision for the same backend-neutral node. It
 must not translate HTML to Typst, escape it as visible text, pass it to Typst
@@ -293,13 +302,13 @@ backend can consume the same evaluated document without reevaluating source.
 
 ## Future HTML backend behavior
 
-A future HTML backend is the only backend authorized by this ADR to render the
-`Html` target. It emits the evaluated content verbatim/unescaped in the exact
-block or inline position represented by the carrier. It must expose the
-security/trust boundary of unsanitized native HTML and must not silently
-sanitize it while claiming v2.5.1 compatibility. Sanitization, if offered as
-a separate product mode, requires a separate compatibility and security
-decision.
+A future HTML output backend is the only backend authorized by this ADR to
+consume the `Html` target. Its physical crate/name is not frozen by this ADR.
+It emits the evaluated content verbatim/unescaped in the exact block or inline
+position represented by the carrier. It must expose the security/trust
+boundary of unsanitized native HTML and must not silently sanitize it while
+claiming v2.5.1 compatibility. Sanitization, if offered as a separate product
+mode, requires a separate compatibility and security decision.
 
 No HTML backend, HTML parser, DOM, CSS engine, JavaScript engine, or output
 pipeline is created by this ADR.
@@ -324,20 +333,22 @@ upgrade it.
 The target-specific payload, closed target enum, source span, evaluator
 capability context, and Typst omission are platform-neutral and must remain
 WASM-capable. They require no filesystem, process, network, native path, or
-host-global state. A future HTML renderer may be selected by a host, but the
-core representation must not execute HTML, JavaScript, CSS, or arbitrary
+host-global state. A future HTML output backend may be selected by a host, but
+the core representation must not execute HTML, JavaScript, CSS, or arbitrary
 native code. Host capability grant and renderer/output policy remain outside
 the WASM-safe compiler core.
 
 ## Security implications
 
 Quarkdown explicitly documents `.html` output as unsanitized and potentially
-vulnerable. Scribium must not silently convert that fact into a trusted
-default. The evaluator capability is the authorization point, and the future
-HTML backend is the execution/output sink. Provenance and diagnostics must
-remain attached to the original call so hosts can audit the source that
-requested native content. Typst/PDF omission is not a sanitization mechanism
-and must not be advertised as HTML security filtering.
+vulnerable. The compatibility default grants `NativeContent` for normal
+Quarkdown-compatible compilation, but that grant is not a general trust
+decision and the host/API may explicitly deny it. The evaluator capability is
+the authorization point, and the future HTML output backend is the
+execution/output sink. Provenance and diagnostics must remain attached to the
+original call so hosts can audit the source that requested native content.
+Typst/PDF omission is not a sanitization mechanism and must not be advertised
+as HTML security filtering.
 
 ## Rejected alternatives
 

@@ -593,6 +593,12 @@ boundary, HTML consumption, and intentional Typst/PDF omission are defined by
 ADR-0018; ordinary `<em>x</em>` in `.qd`/`.scrib` remains the source-backed
 `E8001` case in `RAW_HTML_POLICY.md`.
 
+The Quarkdown `.html` payload does not pass through `scribium-html`. A future
+HTML output backend consumes `TargetSpecificContent(Html)` after backend
+selection; its physical crate/name is not frozen by ADR-0018. `scribium-html`
+remains the Markdown/foreign-HTML normalization boundary and is not an output
+renderer. This ADR does not create or rename a crate.
+
 The selected dependency is:
 
 ```text

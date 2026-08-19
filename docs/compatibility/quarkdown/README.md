@@ -117,9 +117,13 @@ fixtures cover parser and evaluator fallback shape only:
 The intended future representation is a closed backend-neutral target-specific
 content payload carrying `NativeTarget::Html`, the evaluated String, and its
 `SourceSpan`, with placement-preserving block and inline carriers. The engine
-will own evaluation and permission checking; a future HTML backend will emit
-the string verbatim; Typst/PDF will intentionally emit no output and no
-warning after evaluation. This is not a generic raw backend/MIME mechanism.
+will own evaluation and permission checking; normal/default
+Quarkdown-compatible compilation will start with `NativeContent` granted, with
+host/API denial available. A future HTML output backend, whose physical
+crate/name is not frozen here, will emit the string verbatim; Typst/PDF will
+intentionally emit no output and no warning after evaluation. `scribium-html`
+continues to normalize Markdown/foreign HTML only and does not consume this
+payload. This is not a generic raw backend/MIME mechanism.
 Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.scrib` remains the
 separate source-language raw-HTML case and continues to fail closed with
 `E8001`. See [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md)

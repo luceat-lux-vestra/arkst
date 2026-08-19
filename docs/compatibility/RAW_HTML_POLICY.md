@@ -66,10 +66,14 @@ discard the call during parsing.
 
 The v2.5.1 CLI grants `native-content` through its default permission set, but
 the capability is checked before node construction and denial raises a typed
-missing-permission error. Scribium has no equivalent compile/evaluation
-permission context today, so it must not silently grant `.html` while it is
-unsupported. `.css` shares the upstream permission but remains outside this
-slice.
+missing-permission error. Scribium's eventual normal/default
+Quarkdown-compatible compilation therefore starts with `NativeContent`
+granted; the host/API may explicitly deny it. Scribium has no equivalent
+compile/evaluation permission context today, so this is a documented future
+contract rather than an implemented permission API. Granting it must not
+authorize CSS, JavaScript, filesystem/network access, Markdown mixed raw HTML,
+Typst injection, or arbitrary native payloads. `.css` shares the upstream
+permission but remains outside this slice.
 
 The intended future Typst/PDF behavior is deliberate silent omission after
 evaluation and capability checking: retain the target-specific HTML semantic
@@ -180,7 +184,8 @@ This divergence is resolved. The compile entry boundary now determines one
 internal source mode and passes it to both frontend parsing and AST-to-IR
 conversion. The whitelist adapter is enabled only for Markdown; `.qd` and
 `.scrib` preserve parser-exposed raw HTML as source-backed nodes and emit
-`E8001`. Block raw HTML remains unsupported in every mode.
+`E8001`. Arbitrary/non-comment block raw HTML remains unsupported; complete
+parser-owned Markdown comment-only blocks are the explicit bounded exception.
 
 The implementation preserves these invariants:
 
