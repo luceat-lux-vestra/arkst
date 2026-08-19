@@ -28,6 +28,38 @@ Typst release is already compatible. The generated-source corpus and compiler
 adapter behavior are the evidence that must advance when the verified version
 changes.
 
+## Source/project context contract
+
+The native subprocess adapter preserves the Scribium source context without
+writing generated files into the source tree. `TypstInput.entry_path` is a
+normalized, project-root-relative logical path such as `docs/main.qd`.
+`TypstSourceContext.project_root` is an explicit physical read boundary; it is
+not inferred from the process current directory.
+
+For a context-backed compile, the adapter mirrors the project into a unique
+temporary directory, writes generated Typst at the mirrored logical entry
+directory as `main.typ`, and invokes the pinned CLI in the following form:
+
+```text
+typst compile --root <temporary-mirror> \
+  <temporary-mirror>/docs/main.typ <temporary-build>/output.pdf
+```
+
+If `docs/main.typ` is already a source resource, the generated entry uses a
+reserved collision-free `.typ` filename in the same directory instead.
+
+Consequently, `#image("./assets/logo.svg")`, `#read("./data.txt")`, and
+relative Typst imports are resolved from `docs/`, not from the OS temporary
+directory. The mirror is a snapshot read context. The original project tree is
+never modified, and the PDF remains an isolated temporary artifact until it is
+returned by the backend.
+
+The mirror canonicalizes source entries and symlink targets before copying.
+Any final target outside the explicit project root is rejected, including file
+and directory symlink escapes. A backend without a source context continues to
+support self-contained generated Typst; it does not make its temporary
+directory an implicit resource root.
+
 ## Target and verified version
 
 - **Tracked backend target:** the latest stable Typst release automatically

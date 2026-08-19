@@ -10,8 +10,8 @@ vulnerabilities (report to Typst GmbH).
 
 | #  | Threat                      | Asset                | Attacker          | Boundary       | Mitigation                          | Residual Risk |
 |----|-----------------------------|----------------------|-------------------|----------------|-------------------------------------|---------------|
-| T1 | Path traversal via include  | Filesystem           | Malicious doc     | Include/read   | VirtualPath (no OS path leaks); canonicalization + root scope   | Low           |
-| T2 | Symlink escape              | Filesystem           | Malicious doc     | Include/read   | VirtualPath (logical paths only); canonicalization check        | Low           |
+| T1 | Path traversal via include  | Filesystem           | Malicious doc     | Include/read   | VirtualPath resolution; Typst `--root`; canonicalized mirror scope | Low        |
+| T2 | Symlink escape              | Filesystem           | Malicious doc     | Include/read   | Final canonical target must remain inside the explicit root; mirror copies no symlinks | Low |
 | T3 | Unrestricted include        | Filesystem           | Malicious doc     | Include/read   | Max depth, root scope               | Low           |
 | T4 | Malicious image or font     | Process              | Malicious doc     | Asset loading  | Typst compiler handles              | Low (inherited) |
 | T5 | Decompression bomb          | Memory               | Malicious doc     | Asset loading  | Max file size, format validation    | Medium        |
@@ -28,6 +28,7 @@ vulnerabilities (report to Typst GmbH).
 | T16 | Generated file overwrite    | Filesystem           | Malicious doc     | CLI / backend  | Atomic output, overwrite protection | Low           |
 | T17 | Terminal escape injection   | Display              | Malicious doc     | Diagnostics    | Diagnostic output sanitization      | Low           |
 | T18 | Generated Typst injection   | Output               | Malicious doc     | Lowering       | Typst escape proper escaping        | Low           |
+| T19 | Generated Typst reads outside root | Filesystem       | Malicious doc     | Typst backend  | Explicit root, temporary mirror, Typst `--root`, fail-closed traversal | Low |
 
 ## Default Security Policy
 
@@ -35,8 +36,8 @@ vulnerabilities (report to Typst GmbH).
 network:          denied
 shell:            denied
 environment:      denied
-filesystem:       project-root scoped, virtual-path embedded
-symlink escape:   denied (VirtualPath never resolves OS symlinks)
+filesystem:       explicit project-root scoped; temporary mirror for Typst reads
+symlink escape:   denied (final canonical target outside root is rejected)
 absolute include: denied by default
 ```
 
@@ -52,6 +53,16 @@ adapter translates VirtualPath → `PathBuf` at the boundary, applying:
 A WASM frontend does not perform this translation at all — there is no
 filesystem to traverse. This eliminates the T1/T2 attack surface entirely
 for browser targets.
+
+For the native Typst subprocess path, the explicit source root is copied into
+an isolated temporary mirror. The generated entry file is created in that
+mirror, while the PDF is written to a separate temporary output location.
+The source tree is therefore a read-only resource context and never a write
+location for generated Typst, PDF, or temporary metadata. Typst is invoked with
+`--root` pointing at the mirror, so parent traversal and absolute host paths
+cannot escape the staged project boundary. A symlink is allowed only when its
+final canonical target remains inside the explicit source root; both file and
+directory symlink escapes are rejected.
 
 ## Configurable Resource Limits
 

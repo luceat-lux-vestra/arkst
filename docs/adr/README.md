@@ -32,5 +32,6 @@ This directory contains Architecture Decision Records (ADRs) for Scribium.
 | 0016 | Full Quarkdown compatibility and upstream evolution | Accepted  |
 | 0017 | Rushdown Markdown substrate                     | Accepted  |
 | 0018 | Quarkdown target-specific native content       | Accepted  |
+| 0019 | Typst source and resource context              | Accepted  |
 
 Template: `0000-template.md`
