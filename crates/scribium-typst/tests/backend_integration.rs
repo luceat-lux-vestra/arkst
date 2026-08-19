@@ -204,6 +204,61 @@ fn integration_markdown_images_compile_from_source_relative_paths_to_pdf() {
 }
 
 #[test]
+fn integration_include_then_markdown_image_compiles_from_nested_source_context() {
+    with_typst("include-markdown-image-e2e", |backend| {
+        let project_root = tempdir().expect("project temp directory");
+        let docs = project_root.path().join("docs");
+        let assets = docs.join("assets");
+        fs::create_dir_all(&assets).expect("asset directory");
+        fs::write(docs.join("main.qd"), ".include {part.md}\n").expect("main fixture");
+        fs::write(
+            docs.join("part.md"),
+            "# Included image\n\n![Square](assets/square.svg)\n",
+        )
+        .expect("included Markdown fixture");
+        fs::write(
+            assets.join("square.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32"/></svg>"#,
+        )
+        .expect("SVG fixture");
+
+        let project = VirtualProjectBuilder::new()
+            .entry("docs/main.qd")
+            .expect("valid entry")
+            .add_source("docs/main.qd", ".include {part.md}\n")
+            .expect("valid main source")
+            .add_source(
+                "docs/part.md",
+                "# Included image\n\n![Square](assets/square.svg)\n",
+            )
+            .expect("valid Markdown source")
+            .add_asset(
+                "docs/assets/square.svg",
+                fs::read(assets.join("square.svg")).expect("read SVG fixture"),
+            )
+            .expect("valid asset")
+            .build()
+            .expect("valid project");
+        let result = compile(&project, &CompileOptions::default());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected compiler diagnostics: {:?}",
+            result.diagnostics
+        );
+        let typst = lower_to_typst_code(&result.ir);
+        assert!(typst.contains("#image(\"assets/square.svg\")"), "{typst}");
+        let output = backend
+            .with_source_context(TypstSourceContext::new(project_root.path()))
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("included Markdown image should compile through Typst");
+        assert!(output.pdf.is_some_and(|pdf| pdf.starts_with(b"%PDF-")));
+    });
+}
+
+#[test]
 fn integration_missing_image_is_a_typst_resource_failure() {
     with_typst("missing-image", |backend| {
         let project_root = tempdir().expect("project temp directory");

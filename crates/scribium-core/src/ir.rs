@@ -31,6 +31,8 @@ pub struct IrMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NativeTarget {
     Html,
+    /// Raw Markdown content, retained for a future Markdown output target.
+    Markdown,
 }
 
 /// Evaluated target-specific content with source provenance.

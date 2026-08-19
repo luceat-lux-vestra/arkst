@@ -82,7 +82,9 @@ fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// Loads a single file as a VirtualProject.
+/// Loads the bounded project tree rooted at the entry's logical directory into
+/// a VirtualProject. Filesystem access stays at this native host boundary;
+/// compiler and evaluator code only see the resulting logical sources/assets.
 fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     validate_input_extension(input)?;
     // Store the user-requested path for output naming
@@ -137,19 +139,96 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
     };
     let virtual_entry = os_relative_path_to_virtual(&requested_relative)?;
 
-    let source = fs::read_to_string(&physical_entry)
-        .with_context(|| format!("cannot read {}", physical_entry.display()))?;
+    let mut files = Vec::new();
+    collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)?;
 
-    let project = VirtualProjectBuilder::new()
-        .entry(virtual_entry.as_str())?
-        .add_source(virtual_entry.as_str(), source)?
-        .build()?;
+    let mut builder = VirtualProjectBuilder::new().entry(virtual_entry.as_str())?;
+    for (path, bytes) in files {
+        let path = os_relative_path_to_virtual(&path)?;
+        let source_extension = path
+            .file_name()
+            .and_then(|name| name.rsplit_once('.'))
+            .map(|(_, extension)| {
+                matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "qd" | "scrib" | "md"
+                )
+            })
+            .unwrap_or(false);
+        if source_extension {
+            let source = String::from_utf8(bytes.clone())
+                .with_context(|| format!("source file is not valid UTF-8: {}", path.as_str()))?;
+            builder = builder.add_source(path.as_str(), source)?;
+        }
+        builder = builder.add_asset(path.as_str(), bytes)?;
+    }
+    let project = builder.build()?;
 
     Ok(LoadedProject {
         project,
         requested_entry,
         source_context: TypstSourceContext::new(canonical_project_root),
     })
+}
+
+fn collect_project_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<(PathBuf, Vec<u8>)>,
+) -> anyhow::Result<()> {
+    let mut entries = fs::read_dir(current)
+        .with_context(|| format!("cannot read project directory {}", current.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| format!("cannot enumerate project directory {}", current.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("cannot inspect project entry {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            let canonical = path
+                .canonicalize()
+                .with_context(|| format!("cannot resolve project symlink {}", path.display()))?;
+            if !canonical.starts_with(root) {
+                // An unrelated output/link entry must not make loading the
+                // logical source project fail. If a document later refers to
+                // this path, it is absent from the VirtualProject and fails
+                // closed as a missing resource; Typst's own mirror boundary
+                // separately rejects symlink escapes.
+                continue;
+            }
+            if canonical.is_dir() {
+                // Do not recurse through aliases: this avoids duplicate
+                // logical trees and symlink cycles while keeping the loader
+                // deterministic.
+                continue;
+            }
+        }
+
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("cannot resolve project entry {}", path.display()))?;
+        if !canonical.starts_with(root) {
+            anyhow::bail!(
+                "project entry '{}' resolves outside project root '{}'",
+                path.display(),
+                root.display()
+            );
+        }
+        if metadata.is_dir() {
+            collect_project_files(root, &path, files)?;
+        } else if metadata.is_file() || metadata.file_type().is_symlink() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| anyhow::anyhow!("project entry is outside root: {}", path.display()))?
+                .to_path_buf();
+            let bytes = fs::read(&path)
+                .with_context(|| format!("cannot read project resource {}", path.display()))?;
+            files.push((relative, bytes));
+        }
+    }
+    Ok(())
 }
 
 /// Compiles a pre-loaded VirtualProject.
@@ -889,6 +968,24 @@ mod tests {
         // Ensure no output file was created
         let unexpected_output = default_typst_output_path(&link_file);
         assert!(!unexpected_output.exists());
+    }
+
+    #[test]
+    fn native_loader_supplies_nested_resource_builtins_to_virtual_project() {
+        let dir = tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        let partials = docs.join("partials");
+        let data = partials.join("data");
+        fs::create_dir_all(&data).unwrap();
+        let input = docs.join("main.qd");
+        fs::write(&input, ".include {partials/a.qd}\n").unwrap();
+        fs::write(partials.join("a.qd"), ".read {data/value.txt}\n").unwrap();
+        fs::write(data.join("value.txt"), "from nested resource\n").unwrap();
+
+        let result = build(&input.to_string_lossy(), &["typst".to_string()], None);
+        assert!(result.is_ok(), "Build failed: {:?}", result);
+        let output = fs::read_to_string(docs.join("main.typ")).unwrap();
+        assert!(output.contains("from nested resource"), "{output}");
     }
 
     #[test]
