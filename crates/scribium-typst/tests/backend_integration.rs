@@ -92,6 +92,49 @@ fn integration_compile_produces_valid_pdf() {
 }
 
 #[test]
+fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
+    let source = ".row alignment:{spacebetween} cross:{stretch} gap:{10px}\n    A\n\n    B\n\n.column alignment:{spacearound} cross:{start} gap:{25%}\n    C\n\n    D\n\n.grid columns:{2} alignment:{spaceevenly} cross:{end} gap:{1cm} vgap:{2cm} hgap:{3cm}\n    E\n\n    F\n\n    G\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("stacked.qd")
+        .expect("valid entry path")
+        .add_source("stacked.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "stacked diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#stack(dir: ltr"), "{typst_code}");
+    assert!(typst_code.contains("#stack(dir: ttb"), "{typst_code}");
+    assert!(typst_code.contains("spacing: 7.5pt"), "{typst_code}");
+    assert!(typst_code.contains("spacing: 25%"), "{typst_code}");
+    assert!(
+        typst_code.contains("columns: (1fr, auto, 1fr, auto, 1fr)"),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("row-gutter: 2cm"), "{typst_code}");
+    assert!(typst_code.contains("column-gutter: 3cm"), "{typst_code}");
+    assert!(typst_code.contains("#block(height: 100%)"), "{typst_code}");
+
+    with_typst("stacked-layouts", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "stacked.qd".to_string(),
+            })
+            .expect("stacked Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_self_contained_mode_does_not_expose_temp_resources() {
     with_typst("self-contained-resource-boundary", |backend| {
         let result = backend.compile(&TypstInput {

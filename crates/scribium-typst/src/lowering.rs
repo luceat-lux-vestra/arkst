@@ -4,8 +4,9 @@
 //! records source map entries as it generates code.
 
 use scribium_core::ir::{
-    IrCallSegment, IrDocument, IrInline, IrNode, IrTableAlignment, IrTableCell, IrTableRow,
-    IrTaskStatus, IrValue, SourceMapEntry,
+    IrCallSegment, IrComponent, IrCrossAxisAlignment, IrDocument, IrInline, IrMainAxisAlignment,
+    IrNode, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrTaskStatus, IrValue, SourceMapEntry,
 };
 use scribium_core::source::{ResourceReference, SourceSpan};
 
@@ -225,6 +226,7 @@ impl LoweringContext {
                 // by a future HTML output backend. Typst/PDF intentionally
                 // omit both forms without creating source-map ranges.
             }
+            IrNode::Component { component } => self.lower_component(component),
             IrNode::FunctionDeclaration { .. } => {
                 // Declarations are consumed by the evaluator and are
                 // intentionally outputless. This arm keeps direct lowering of
@@ -326,6 +328,258 @@ impl LoweringContext {
                 }
             }
         }
+    }
+
+    fn lower_component(&mut self, component: &IrComponent) {
+        match component {
+            IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
+        }
+    }
+
+    fn lower_stacked(&mut self, component: &IrStackedComponent) {
+        let before = self.output.len();
+        match &component.layout {
+            IrStackedLayout::Row => self.lower_stack(
+                component,
+                "ltr",
+                component.row_gap.as_ref().or(component.column_gap.as_ref()),
+            ),
+            IrStackedLayout::Column => self.lower_stack(
+                component,
+                "ttb",
+                component.row_gap.as_ref().or(component.column_gap.as_ref()),
+            ),
+            IrStackedLayout::Grid { columns } => self.lower_grid(component, columns.get()),
+        }
+        if component.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
+    fn lower_stack(
+        &mut self,
+        component: &IrStackedComponent,
+        direction: &str,
+        gap: Option<&IrSize>,
+    ) {
+        let horizontal = direction == "ltr";
+        self.push_str("#stack(dir: ");
+        self.push_str(direction);
+        if let Some(gap) = gap {
+            self.push_str(", spacing: ");
+            self.push_str(&lower_size(gap));
+        }
+        self.push_str(", ");
+        let distribution = component.main_axis_alignment;
+        let child_count = component.children.len();
+        if child_count == 0 {
+            self.push_str("[]");
+        } else {
+            let edge_fraction = match distribution {
+                IrMainAxisAlignment::Center => Some("1fr"),
+                IrMainAxisAlignment::SpaceAround => Some("0.5fr"),
+                IrMainAxisAlignment::SpaceEvenly => Some("1fr"),
+                _ => None,
+            };
+            if let Some(fraction) = edge_fraction {
+                self.push_str(if horizontal { "h" } else { "v" });
+                self.push('(');
+                self.push_str(fraction);
+                self.push_str("), ");
+            }
+            if matches!(distribution, IrMainAxisAlignment::End) {
+                self.push_str(if horizontal { "h" } else { "v" });
+                self.push_str("(1fr), ");
+            }
+            for (index, child) in component.children.iter().enumerate() {
+                self.lower_stacked_child(child, component.cross_axis_alignment, horizontal);
+                if index + 1 < child_count {
+                    match distribution {
+                        IrMainAxisAlignment::SpaceBetween
+                        | IrMainAxisAlignment::SpaceAround
+                        | IrMainAxisAlignment::SpaceEvenly => {
+                            self.push_str(", ");
+                            self.push_str(if horizontal { "h" } else { "v" });
+                            self.push_str("(1fr), ");
+                        }
+                        _ => self.push_str(", "),
+                    }
+                }
+            }
+            if matches!(
+                distribution,
+                IrMainAxisAlignment::Center
+                    | IrMainAxisAlignment::SpaceAround
+                    | IrMainAxisAlignment::SpaceEvenly
+            ) {
+                self.push_str(", ");
+                self.push_str(if horizontal { "h" } else { "v" });
+                self.push('(');
+                self.push_str(
+                    if matches!(distribution, IrMainAxisAlignment::SpaceAround) {
+                        "0.5fr"
+                    } else {
+                        "1fr"
+                    },
+                );
+                self.push(')');
+            }
+            if matches!(distribution, IrMainAxisAlignment::Start) {
+                // The normal stack order already implements start alignment.
+            }
+        }
+        self.push_str(")\n");
+    }
+
+    fn lower_stacked_child(
+        &mut self,
+        child: &IrNode,
+        cross_axis: IrCrossAxisAlignment,
+        horizontal_stack: bool,
+    ) {
+        self.push('[');
+        match (horizontal_stack, cross_axis) {
+            (true, IrCrossAxisAlignment::Start) => self.lower_with_alignment("top", child),
+            (true, IrCrossAxisAlignment::Center) => self.lower_with_alignment("horizon", child),
+            (true, IrCrossAxisAlignment::End) => self.lower_with_alignment("bottom", child),
+            (true, IrCrossAxisAlignment::Stretch) => {
+                self.push_str("#block(height: 100%)[");
+                self.lower_node(child);
+                self.push(']');
+            }
+            (false, IrCrossAxisAlignment::Start) => self.lower_with_alignment("left", child),
+            (false, IrCrossAxisAlignment::Center) => self.lower_with_alignment("center", child),
+            (false, IrCrossAxisAlignment::End) => self.lower_with_alignment("right", child),
+            (false, IrCrossAxisAlignment::Stretch) => {
+                self.push_str("#block(width: 100%)[");
+                self.lower_node(child);
+                self.push(']');
+            }
+        }
+        self.push(']');
+    }
+
+    fn lower_with_alignment(&mut self, alignment: &str, child: &IrNode) {
+        self.push_str("#align(");
+        self.push_str(alignment);
+        self.push(')');
+        self.push('[');
+        self.lower_node(child);
+        self.push(']');
+    }
+
+    fn lower_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+        let main_alignment = match component.main_axis_alignment {
+            IrMainAxisAlignment::Start => "left",
+            IrMainAxisAlignment::Center => "center",
+            IrMainAxisAlignment::End => "right",
+            IrMainAxisAlignment::SpaceBetween
+            | IrMainAxisAlignment::SpaceAround
+            | IrMainAxisAlignment::SpaceEvenly => "left",
+        };
+        let distributed = matches!(
+            component.main_axis_alignment,
+            IrMainAxisAlignment::SpaceBetween
+                | IrMainAxisAlignment::SpaceAround
+                | IrMainAxisAlignment::SpaceEvenly
+        );
+        if distributed && !component.children.is_empty() {
+            self.lower_distributed_grid(component, columns);
+            return;
+        }
+        if main_alignment != "left" {
+            self.push_str("#align(");
+            self.push_str(main_alignment);
+            self.push(')');
+            self.push('[');
+        }
+        self.push_str("#grid(columns: ");
+        self.push_str(&columns.to_string());
+        if let Some(gap) = component.row_gap.as_ref() {
+            self.push_str(", row-gutter: ");
+            self.push_str(&lower_size(gap));
+        }
+        if let Some(gap) = component.column_gap.as_ref() {
+            self.push_str(", column-gutter: ");
+            self.push_str(&lower_size(gap));
+        }
+        if component.children.is_empty() {
+            self.push_str(", []");
+        } else {
+            self.push_str(", ");
+            for (index, child) in component.children.iter().enumerate() {
+                if index > 0 {
+                    self.push_str(", ");
+                }
+                self.lower_stacked_child(child, component.cross_axis_alignment, true);
+            }
+        }
+        self.push(')');
+        if main_alignment != "left" {
+            self.push(']');
+        }
+        self.push('\n');
+    }
+
+    fn lower_distributed_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+        let logical_columns = columns as usize;
+        let around = matches!(
+            component.main_axis_alignment,
+            IrMainAxisAlignment::SpaceAround | IrMainAxisAlignment::SpaceEvenly
+        );
+        let edge_fraction = if component.main_axis_alignment == IrMainAxisAlignment::SpaceAround {
+            "0.5fr"
+        } else {
+            "1fr"
+        };
+        self.push_str("#grid(columns: (");
+        if around {
+            self.push_str(edge_fraction);
+            self.push_str(", ");
+        }
+        for index in 0..logical_columns {
+            if index > 0 {
+                self.push_str(", 1fr, ");
+            }
+            self.push_str("auto");
+        }
+        if around {
+            self.push_str(", ");
+            self.push_str(edge_fraction);
+        }
+        self.push(')');
+        if let Some(gap) = component.row_gap.as_ref() {
+            self.push_str(", row-gutter: ");
+            self.push_str(&lower_size(gap));
+        }
+        if let Some(gap) = component.column_gap.as_ref() {
+            self.push_str(", column-gutter: ");
+            self.push_str(&lower_size(gap));
+        }
+        self.push_str(", ");
+
+        for (row_index, row) in component.children.chunks(logical_columns).enumerate() {
+            if row_index > 0 {
+                self.push_str(", ");
+            }
+            if around {
+                self.push_str("[], ");
+            }
+            for column_index in 0..logical_columns {
+                if column_index > 0 {
+                    self.push_str(", [], ");
+                }
+                if let Some(child) = row.get(column_index) {
+                    self.lower_stacked_child(child, component.cross_axis_alignment, true);
+                } else {
+                    self.push_str("[]");
+                }
+            }
+            if around {
+                self.push_str(", []");
+            }
+        }
+        self.push_str(")\n");
     }
 
     fn lower_inlines(&mut self, inlines: &[IrInline]) {
@@ -739,6 +993,34 @@ impl LoweringContext {
     }
 }
 
+fn lower_size(size: &IrSize) -> String {
+    let (value, unit) = match size.unit {
+        IrSizeUnit::Px => (size.value * 0.75, "pt"),
+        IrSizeUnit::Pt => (size.value, "pt"),
+        IrSizeUnit::Cm => (size.value, "cm"),
+        IrSizeUnit::Mm => (size.value, "mm"),
+        IrSizeUnit::In => (size.value, "in"),
+        IrSizeUnit::Em => (size.value, "em"),
+        IrSizeUnit::Percent => (size.value, "%"),
+    };
+    format!("{}{unit}", format_number(value))
+}
+
+fn format_number(value: f64) -> String {
+    let mut text = format!("{value:.12}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text == "-0" {
+        "0".to_string()
+    } else {
+        text
+    }
+}
+
 fn table_alignment_name(alignment: IrTableAlignment) -> &'static str {
     match alignment {
         IrTableAlignment::Left => "left",
@@ -781,8 +1063,10 @@ fn escape_typst_comment(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use scribium_core::ir::{
-        IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrRange,
-        IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+        IrCallSegment, IrComponent, IrCrossAxisAlignment, IrDocument, IrInline, IrListItem,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
 
@@ -793,6 +1077,34 @@ mod tests {
     fn text(text: &str) -> IrInline {
         IrInline::Text {
             content: text.to_string(),
+            span: empty_span(),
+        }
+    }
+
+    fn stacked_node(
+        layout: IrStackedLayout,
+        main_axis_alignment: IrMainAxisAlignment,
+        cross_axis_alignment: IrCrossAxisAlignment,
+        row_gap: Option<IrSize>,
+        column_gap: Option<IrSize>,
+        children: Vec<IrNode>,
+    ) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::Stacked(IrStackedComponent {
+                layout,
+                main_axis_alignment,
+                cross_axis_alignment,
+                row_gap,
+                column_gap,
+                children,
+                span: empty_span(),
+            }),
+        }
+    }
+
+    fn paragraph(text: &str) -> IrNode {
+        IrNode::Paragraph {
+            content: vec![self::text(text)],
             span: empty_span(),
         }
     }
@@ -826,6 +1138,121 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "= Hello\n\nWorld\n\n");
+    }
+
+    #[test]
+    fn lower_stacked_layouts_keep_typed_alignment_gap_and_nested_structure() {
+        let row = stacked_node(
+            IrStackedLayout::Row,
+            IrMainAxisAlignment::Start,
+            IrCrossAxisAlignment::Center,
+            None,
+            None,
+            vec![paragraph("A")],
+        );
+        let row_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![row],
+            metadata: IrMetadata::default(),
+        });
+        assert!(row_code.contains("#stack(dir: ltr"), "{row_code}");
+        assert!(row_code.contains("#align(horizon)"), "{row_code}");
+
+        let gap = IrSize {
+            value: 10.0,
+            unit: IrSizeUnit::Px,
+        };
+        let row_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::SpaceBetween,
+                IrCrossAxisAlignment::Start,
+                None,
+                Some(gap.clone()),
+                vec![paragraph("A"), paragraph("B")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(row_code.contains("spacing: 7.5pt"), "{row_code}");
+        assert!(row_code.contains("h(1fr)"), "{row_code}");
+        assert!(row_code.contains("#align(top)"), "{row_code}");
+
+        let column_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Column,
+                IrMainAxisAlignment::Center,
+                IrCrossAxisAlignment::Stretch,
+                Some(IrSize {
+                    value: 1.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                None,
+                vec![paragraph("C")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(column_code.contains("#stack(dir: ttb"), "{column_code}");
+        assert!(column_code.contains("#block(width: 100%)"), "{column_code}");
+
+        let grid_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Grid {
+                    columns: std::num::NonZeroU32::new(2).expect("test columns are positive"),
+                },
+                IrMainAxisAlignment::Center,
+                IrCrossAxisAlignment::End,
+                Some(IrSize {
+                    value: 2.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                Some(IrSize {
+                    value: 3.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                vec![paragraph("D"), paragraph("E"), paragraph("F")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(grid_code.contains("#grid(columns: 2"), "{grid_code}");
+        assert!(grid_code.contains("row-gutter: 2cm"), "{grid_code}");
+        assert!(grid_code.contains("column-gutter: 3cm"), "{grid_code}");
+        assert!(grid_code.contains("#align(bottom)"), "{grid_code}");
+    }
+
+    #[test]
+    fn lower_stacked_cross_alignments_and_px_are_explicit_and_deterministic() {
+        for (cross, marker) in [
+            (IrCrossAxisAlignment::Start, "#align(top)"),
+            (IrCrossAxisAlignment::Center, "#align(horizon)"),
+            (IrCrossAxisAlignment::End, "#align(bottom)"),
+            (IrCrossAxisAlignment::Stretch, "#block(height: 100%)"),
+        ] {
+            let code = super::lower_to_typst_code(&IrDocument {
+                nodes: vec![stacked_node(
+                    IrStackedLayout::Row,
+                    IrMainAxisAlignment::Start,
+                    cross,
+                    None,
+                    None,
+                    vec![paragraph("child")],
+                )],
+                metadata: IrMetadata::default(),
+            });
+            assert!(code.contains(marker), "{cross:?}: {code}");
+        }
+        assert_eq!(
+            super::lower_size(&IrSize {
+                value: 200.0,
+                unit: IrSizeUnit::Px
+            }),
+            "150pt"
+        );
+        assert_eq!(
+            super::lower_size(&IrSize {
+                value: 25.0,
+                unit: IrSizeUnit::Percent
+            }),
+            "25%"
+        );
     }
 
     #[test]

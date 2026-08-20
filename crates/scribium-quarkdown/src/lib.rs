@@ -842,7 +842,32 @@ fn parse_scalar(source: &str, span: ByteSpan) -> Option<Value> {
     {
         return Some(Value::Identifier(raw.to_string()));
     }
+    if is_dimension_token(raw) {
+        return Some(Value::Identifier(raw.to_string()));
+    }
     None
+}
+
+fn is_dimension_token(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    let mut index = usize::from(bytes.first() == Some(&b'-'));
+    let digit_start = index;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == digit_start {
+        return false;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+    }
+    index < bytes.len()
+        && raw[index..]
+            .chars()
+            .all(|character| character.is_ascii_alphabetic() || character == '%')
 }
 
 fn parse_range_literal(raw: &str, span: ByteSpan) -> Option<RangeValue> {
