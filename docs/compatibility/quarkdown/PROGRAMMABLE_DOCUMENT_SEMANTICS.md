@@ -6,7 +6,7 @@ implementation plan that changes the current supported surface.
 
 - Tracked upstream: Quarkdown v2.5.1
 - Resolved upstream tag: [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium comparison baseline: `054437ae08c805fcd1d897244ea1dc2aa38f6993`
+- Scribium comparison baseline: `40cfdc6bff5c4beb452370b5d27cb15172bb8830`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
 
 ## Findings
@@ -68,9 +68,15 @@ never Typst names or Typst source.
 `Document.kt` uses read/write dual APIs. No argument reads the current
 `DocumentInfo` field; an argument validates, mutates `MutableContext.documentInfo`,
 and returns void. Scope contexts delegate ordinary document state to their
-parent, while a subdocument has an isolated copy. Scribium will represent this
-as evaluator-owned working document state plus a final immutable state snapshot
-in `IrDocument`; Typst lowering consumes the snapshot and does not replay calls.
+parent, while a subdocument has an isolated copy. Scribium represents the first
+slice as evaluator-owned working document state shared by ordinary callable
+child scopes, plus a final immutable `IrDocument.metadata.document_state`
+snapshot. Typst lowering consumes the snapshot and does not replay calls.
+
+The Document State Foundation slice is implemented. `.docname` and
+`.docdescription` support the read/write dual API; writes return no document
+output, and `.docname` rejects blank values before mutation. The snapshot is
+serializable plain data with an explicit default for older serialized IR.
 
 ### Layout classification
 
@@ -98,7 +104,7 @@ implementation here.
 | Lazy body evaluation | Body is a lazy `DynamicValue`; unreachable conditional/body paths do not execute it | Block bodies are evaluated on the existing callable path after binding; conversion failures precede body execution | Preserve eager inline vs lazy body timing | Bounded implemented | More differential lazy-body fixtures |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue` and `IrValue::Content`; unresolved calls are preserved; no general component carrier yet | Add future `IrValue::Component`; materialize to `IrNode` at output boundary | Architecture decided; implementation deferred | Component value and node materialization |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | Target-specific HTML has a closed semantic node slice; general components are not present | Keep node results backend-neutral and distinguish them from unresolved calls | Partial/closed slice | General component contract |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Limited final `IrMetadata`; no evaluator working document state | Evaluator-owned shared working state plus final `IrDocument` snapshot | Architecture decided; implementation deferred | Metadata builtins and state tests |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes; final `IrMetadata.document_state` snapshot; `.docname` and `.docdescription` are implemented with bounded String conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation implemented; `.docname` and `.docdescription` implemented | Scope/caller overlay compatibility; remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | Not implemented | Future component value, then semantic node; no Typst representation in IR | Not implemented by design | Layout semantic slice |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | Not implemented | Same backend-neutral component boundary | Not implemented by design | Layout semantic slice |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | Not implemented | Validate in evaluator before component construction | Not implemented by design | Grid validation and lowering |
@@ -140,6 +146,7 @@ an evaluator rewrite. No architecture prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
-Recommended implementation order is document state, scope compatibility,
-domain conversion adapters, component/content result construction, semantic
-layout nodes, and finally pure Typst lowering.
+The next implementation order remains scope compatibility, domain conversion
+adapters, component/content result construction, semantic layout nodes, and
+finally pure Typst lowering. `.doctype`, `.docauthor(s)`, `.dockeywords`,
+`.doclang`, and `.theme` remain deferred.

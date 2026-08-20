@@ -24,6 +24,22 @@ pub struct IrMetadata {
     pub author: Option<String>,
     pub date: Option<String>,
     pub raw: Vec<(String, String)>,
+    /// Final evaluator-owned document state, represented as immutable
+    /// backend-neutral data.
+    #[serde(default)]
+    pub document_state: IrDocumentState,
+}
+
+/// Immutable document state snapshot produced after evaluation.
+///
+/// This is deliberately plain serializable data. Evaluator runtime carriers,
+/// such as shared mutable handles, never cross into the IR boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrDocumentState {
+    /// The document's current `.docname`, or an empty string when unset.
+    pub name: String,
+    /// The document's current `.docdescription`, or an empty string when unset.
+    pub description: String,
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -379,8 +395,8 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrDictionary, IrInline, IrNode, IrPair, IrRange, IrValue, NativeTarget,
-        TargetSpecificContent,
+        IrDictionary, IrDocumentState, IrInline, IrMetadata, IrNode, IrPair, IrRange, IrValue,
+        NativeTarget, TargetSpecificContent,
     };
     use crate::source::{SourceId, SourceSpan};
 
@@ -451,6 +467,37 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IrInline>(inline_json).unwrap(),
             inline
+        );
+    }
+
+    #[test]
+    fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
+        let metadata = IrMetadata {
+            document_state: IrDocumentState {
+                name: "Document".to_string(),
+                description: "Description".to_string(),
+            },
+            ..IrMetadata::default()
+        };
+        let first = serde_json::to_string(&metadata).expect("document metadata serializes");
+        let second = serde_json::to_string(&metadata).expect("document metadata serializes");
+        assert_eq!(first, second);
+        assert_eq!(
+            serde_json::from_str::<IrMetadata>(&first).expect("document metadata deserializes"),
+            metadata
+        );
+
+        let old_metadata = serde_json::json!({
+            "title": null,
+            "author": null,
+            "date": null,
+            "raw": []
+        });
+        assert_eq!(
+            serde_json::from_value::<IrMetadata>(old_metadata)
+                .expect("old metadata remains readable")
+                .document_state,
+            IrDocumentState::default()
         );
     }
 }

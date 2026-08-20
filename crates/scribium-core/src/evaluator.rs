@@ -58,8 +58,10 @@ use crate::VirtualProject;
 use crate::{Capabilities, Capability};
 use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 /// A resolved variable value stored in the evaluation environment.
 ///
@@ -259,6 +261,30 @@ enum CallOutcome {
     NoValue,
     Failed,
     Unresolved,
+}
+
+/// Mutable evaluator-only document state. Its final form is copied into the
+/// serializable IR snapshot after evaluation completes.
+#[derive(Debug, Clone, Default)]
+struct DocumentState {
+    name: String,
+    description: String,
+}
+
+impl DocumentState {
+    fn from_snapshot(snapshot: &crate::ir::IrDocumentState) -> Self {
+        Self {
+            name: snapshot.name.clone(),
+            description: snapshot.description.clone(),
+        }
+    }
+
+    fn snapshot(&self) -> crate::ir::IrDocumentState {
+        crate::ir::IrDocumentState {
+            name: self.name.clone(),
+            description: self.description.clone(),
+        }
+    }
 }
 
 /// Accumulates the observable result of a callable body without converting a
@@ -518,6 +544,7 @@ struct EvaluationContext {
     project: Option<VirtualProject>,
     current_source: Option<SourceId>,
     active_sources: Vec<SourceId>,
+    document_state: Rc<RefCell<DocumentState>>,
 }
 
 impl EvaluationContext {
@@ -536,6 +563,7 @@ impl EvaluationContext {
             project: self.project.clone(),
             current_source: self.current_source,
             active_sources: self.active_sources.clone(),
+            document_state: Rc::clone(&self.document_state),
         }
     }
 
@@ -652,6 +680,32 @@ impl EvaluationContext {
         self.lambda_scope = Some(scope);
     }
 
+    fn initialize_document_state(&mut self, snapshot: &crate::ir::IrDocumentState) {
+        self.document_state = Rc::new(RefCell::new(DocumentState::from_snapshot(snapshot)));
+    }
+
+    fn document_state_snapshot(&self) -> crate::ir::IrDocumentState {
+        self.document_state.borrow().snapshot()
+    }
+
+    fn document_state_value(&self, name: &str) -> IrValue {
+        let state = self.document_state.borrow();
+        match name {
+            "docname" => IrValue::String(state.name.clone()),
+            "docdescription" => IrValue::String(state.description.clone()),
+            _ => unreachable!("document state field must be validated by the caller"),
+        }
+    }
+
+    fn set_document_state_value(&self, name: &str, value: String) {
+        let mut state = self.document_state.borrow_mut();
+        match name {
+            "docname" => state.name = value,
+            "docdescription" => state.description = value,
+            _ => unreachable!("document state field must be validated by the caller"),
+        }
+    }
+
     /// Gets a variable value if it exists.
     fn get(&self, name: &str) -> Option<&VariableValue> {
         self.variables
@@ -752,11 +806,15 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> (IrDocument, Vec<Diagnostic>) {
+        context.initialize_document_state(&document.metadata.document_state);
         let nodes = self.evaluate_nodes(&document.nodes, diagnostics, context);
         (
             IrDocument {
                 nodes,
-                metadata: document.metadata.clone(),
+                metadata: crate::ir::IrMetadata {
+                    document_state: context.document_state_snapshot(),
+                    ..document.metadata.clone()
+                },
             },
             std::mem::take(diagnostics),
         )
@@ -1223,6 +1281,19 @@ impl Evaluator {
             };
         }
 
+        if matches!(name, "docname" | "docdescription") {
+            return self.evaluate_document_state_builtin(
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if name == "html" {
             return self.evaluate_html(
                 positional_args,
@@ -1484,6 +1555,82 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Implements the read/write document-state builtins without changing
+    /// the ordinary lexical scope maps. Argument evaluation and bounded
+    /// String conversion complete before the shared state is mutated.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_document_state_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(document_state_call_error(
+                format!("`.{name}` does not accept a block body"),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        if positional_args.is_empty() && named_args.is_empty() {
+            return CallOutcome::Value(context.document_state_value(name));
+        }
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+
+        if evaluated_positional.len() != 1 || !evaluated_named.is_empty() {
+            diagnostics.push(document_state_call_error(
+                format!("`.{name}` accepts exactly one positional String argument when writing"),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let argument = &evaluated_positional[0];
+        let argument_span = positional_args
+            .first()
+            .map(|value| value_source_span(value, span))
+            .unwrap_or(*span);
+        let Some(value) = builtins::scalar_string_argument(argument) else {
+            diagnostics.push(document_state_conversion_error(
+                format!("`.{name}` requires a value that converts to String"),
+                argument_span,
+            ));
+            return CallOutcome::Failed;
+        };
+
+        if name == "docname" && value.trim().is_empty() {
+            diagnostics.push(document_state_conversion_error(
+                "`.docname` cannot be blank".to_string(),
+                argument_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        context.set_document_state_value(name, value);
+        CallOutcome::NoValue
     }
 
     /// Evaluates the closed Quarkdown `.html(content: String)` builtin.
@@ -3005,11 +3152,14 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &EvaluationContext,
     ) -> CallOutcome {
-        let base = callable
+        let mut base = callable
             .capture
             .as_deref()
             .map(EvaluationContext::from_capture)
             .unwrap_or_else(|| caller_context.clone());
+        // Lexical bindings remain captured as before, while document state
+        // follows the ordinary caller evaluation context.
+        base.document_state = Rc::clone(&caller_context.document_state);
         let mut child = base.child();
         match bound {
             BoundLambdaArguments::Explicit(values) => {
@@ -5870,6 +6020,34 @@ fn function_error_at(message: String, span: SourceSpan) -> Diagnostic {
         secondary: Vec::new(),
         hints: vec![
             "Function declarations and calls must satisfy the supported required-parameter contract."
+                .to_string(),
+        ],
+    }
+}
+
+fn document_state_call_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Document-state builtins read without arguments and write one validated String argument."
+                .to_string(),
+        ],
+    }
+}
+
+fn document_state_conversion_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Document-state mutation is committed only after argument conversion and validation succeed."
                 .to_string(),
         ],
     }
