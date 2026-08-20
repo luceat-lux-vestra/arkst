@@ -509,6 +509,9 @@ fn plain_text_argument(value: &IrValue) -> Option<String> {
         | IrValue::Pair(_)
         | IrValue::Dictionary(_)
         | IrValue::Callable(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
         | IrValue::None => None,
     }
 }
@@ -955,7 +958,10 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
         | IrValue::Collection(_)
         | IrValue::Pair(_)
         | IrValue::Dictionary(_)
-        | IrValue::Callable(_) => None,
+        | IrValue::Callable(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_) => None,
         IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
     }
 }
