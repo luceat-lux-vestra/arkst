@@ -269,7 +269,8 @@ pub(crate) fn convert_scalar_with_origin(
             | IrValue::Callable(_)
             | IrValue::Size(_)
             | IrValue::Color(_)
-            | IrValue::Enum(_) => Err(ConversionError::UnsupportedValue {
+            | IrValue::Enum(_)
+            | IrValue::Component(_) => Err(ConversionError::UnsupportedValue {
                 target: target.into(),
             }),
         },
@@ -1599,7 +1600,11 @@ mod tests {
         ConversionError, ConversionTarget, DomainTarget, DomainValue, InvocationValue,
         ScalarTarget, ScalarValue,
     };
-    use crate::ir::{IrColor, IrDocumentType, IrEnumValue, IrRange, IrSize, IrSizeUnit, IrValue};
+    use crate::ir::{
+        IrColor, IrComponent, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
+        IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
+        IrValue,
+    };
     use crate::source::{SourceId, SourceSpan};
 
     fn span() -> SourceSpan {
@@ -1760,6 +1765,54 @@ mod tests {
                 span: span(),
             })
         );
+    }
+
+    #[test]
+    fn component_is_rejected_by_scalar_range_and_domain_converters() {
+        let component = IrValue::Component(IrComponent::Stacked(IrStackedComponent {
+            layout: IrStackedLayout::Row,
+            main_axis_alignment: IrMainAxisAlignment::Start,
+            cross_axis_alignment: IrCrossAxisAlignment::Stretch,
+            row_gap: None,
+            column_gap: None,
+            children: Vec::new(),
+            span: span(),
+        }));
+        let argument = InvocationValue::dynamic_value(component);
+
+        for target in [
+            ScalarTarget::Number,
+            ScalarTarget::Boolean,
+            ScalarTarget::String,
+        ] {
+            assert_eq!(
+                convert_scalar_with_origin(&argument, target),
+                Err(ConversionError::UnsupportedValue {
+                    target: target.into()
+                })
+            );
+        }
+        assert_eq!(
+            convert_range_with_origin(&argument, span()),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Range
+            })
+        );
+        for (target, conversion_target) in [
+            (DomainTarget::Size, ConversionTarget::Size),
+            (DomainTarget::Color, ConversionTarget::Color),
+            (
+                DomainTarget::ClosedEnum(ClosedEnumTarget::DocumentType),
+                ConversionTarget::Enum,
+            ),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(&argument, target),
+                Err(ConversionError::UnsupportedValue {
+                    target: conversion_target
+                })
+            );
+        }
     }
 
     #[test]

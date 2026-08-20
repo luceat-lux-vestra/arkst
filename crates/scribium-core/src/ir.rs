@@ -4,6 +4,7 @@
 //! content fragment ready for code generation. Source spans are preserved throughout.
 
 use crate::source::SourceSpan;
+use std::num::NonZeroU32;
 
 /// A compiled document in intermediate representation.
 ///
@@ -93,6 +94,61 @@ pub struct IrColor {
     pub blue: u8,
     /// Alpha is the upstream 0.0..=1.0 fraction, not a backend byte/string.
     pub alpha: f64,
+}
+
+/// A closed, backend-neutral semantic component family.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum IrComponent {
+    Stacked(IrStackedComponent),
+}
+
+impl IrComponent {
+    /// Returns the source span of the component-producing call.
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::Stacked(component) => component.span,
+        }
+    }
+}
+
+/// The semantic state shared by row, column, and grid components.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrStackedComponent {
+    pub layout: IrStackedLayout,
+    pub main_axis_alignment: IrMainAxisAlignment,
+    pub cross_axis_alignment: IrCrossAxisAlignment,
+    pub row_gap: Option<IrSize>,
+    pub column_gap: Option<IrSize>,
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// The closed layout family of a stacked component.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrStackedLayout {
+    Row,
+    Column,
+    Grid { columns: NonZeroU32 },
+}
+
+/// Main-axis alignment semantics for a stacked component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrMainAxisAlignment {
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+/// Cross-axis alignment semantics for a stacked component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrCrossAxisAlignment {
+    Start,
+    Center,
+    End,
+    Stretch,
 }
 
 /// A closed, domain-preserving enum value.
@@ -444,6 +500,9 @@ pub enum IrValue {
     /// An ordered recursive dictionary whose entries are key/value pairs.
     Dictionary(IrDictionary),
     Content(Vec<IrNode>),
+    /// A completed backend-neutral semantic component. Components remain
+    /// typed values until an output boundary can materialize them losslessly.
+    Component(IrComponent),
     /// The Quarkdown language's explicit absence value.
     ///
     /// This is a semantic value, distinct from an evaluator `NoValue`
@@ -457,10 +516,12 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrMetadata, IrNode, IrPair,
-        IrRange, IrValue, NativeTarget, TargetSpecificContent,
+        IrComponent, IrCrossAxisAlignment, IrDictionary, IrDocumentState, IrDocumentType, IrInline,
+        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, TargetSpecificContent,
     };
     use crate::source::{SourceId, SourceSpan};
+    use std::num::NonZeroU32;
 
     #[test]
     fn none_uses_the_stable_externally_tagged_serde_variant() {
@@ -508,6 +569,116 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IrValue>(encoded).expect("structured values deserialize"),
             value
+        );
+    }
+
+    fn stacked_value(layout: IrStackedLayout) -> IrValue {
+        let child_span = SourceSpan::new(SourceId(7), 12, 19);
+        let (main_axis_alignment, row_gap, column_gap) = match &layout {
+            IrStackedLayout::Row => (
+                IrMainAxisAlignment::Start,
+                None,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),
+            IrStackedLayout::Column => (
+                IrMainAxisAlignment::Start,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                None,
+            ),
+            IrStackedLayout::Grid { .. } => (
+                IrMainAxisAlignment::Center,
+                Some(IrSize {
+                    value: 8.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                Some(IrSize {
+                    value: 12.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),
+        };
+        IrValue::Component(IrComponent::Stacked(IrStackedComponent {
+            layout,
+            main_axis_alignment,
+            cross_axis_alignment: IrCrossAxisAlignment::Center,
+            row_gap,
+            column_gap,
+            children: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: child_span,
+                }],
+                span: child_span,
+            }],
+            span: SourceSpan::new(SourceId(7), 0, 24),
+        }))
+    }
+
+    #[test]
+    fn stacked_components_roundtrip_deterministically_for_row_column_and_grid() {
+        let values = [
+            stacked_value(IrStackedLayout::Row),
+            stacked_value(IrStackedLayout::Column),
+            stacked_value(IrStackedLayout::Grid {
+                columns: NonZeroU32::new(3).expect("test grid columns are non-zero"),
+            }),
+        ];
+
+        for value in values {
+            let first = serde_json::to_string(&value).expect("component serializes");
+            let second = serde_json::to_string(&value).expect("component serializes");
+            assert_eq!(first, second);
+            assert!(!first.contains("typst"));
+            assert!(!first.contains("stack("));
+            assert!(!first.contains("grid("));
+            assert!(!first.contains("#stack"));
+            assert!(!first.contains("#grid"));
+            assert!(!first.contains("gutter"));
+            assert!(!first.contains("align("));
+            assert!(!first.contains("dir:"));
+            assert!(!first.contains("ltr"));
+            assert!(!first.contains("ttb"));
+            assert_eq!(
+                serde_json::from_str::<IrValue>(&first).expect("component deserializes"),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn grid_layout_rejects_zero_columns_during_deserialization() {
+        let result = serde_json::from_value::<IrStackedLayout>(serde_json::json!({
+            "Grid": { "columns": 0 }
+        }));
+        assert!(result.is_err(), "zero grid columns must be rejected");
+    }
+
+    #[test]
+    fn component_roundtrip_preserves_component_and_child_provenance() {
+        let value = stacked_value(IrStackedLayout::Row);
+        let encoded = serde_json::to_value(&value).expect("component serializes");
+        let decoded = serde_json::from_value::<IrValue>(encoded).expect("component deserializes");
+        assert_eq!(decoded, value);
+
+        let IrValue::Component(IrComponent::Stacked(component)) = decoded else {
+            panic!("expected a stacked component");
+        };
+        assert_eq!(component.span, SourceSpan::new(SourceId(7), 0, 24));
+        assert_eq!(
+            component.children[0],
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: SourceSpan::new(SourceId(7), 12, 19),
+                }],
+                span: SourceSpan::new(SourceId(7), 12, 19),
+            }
         );
     }
 

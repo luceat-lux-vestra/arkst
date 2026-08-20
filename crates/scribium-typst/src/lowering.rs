@@ -601,6 +601,18 @@ impl LoweringContext {
                     "panic(\"Scribium domain value reached Typst lowering without a semantic consumer\")",
                 );
             }
+            IrValue::Component(component) => {
+                // Components are evaluator-owned semantic values. They must
+                // fail before reaching this backend until a typed component
+                // node and its lossless lowering contract land together.
+                let before = self.output.len();
+                self.push_str(
+                    "panic(\"Scribium component reached Typst lowering without a semantic consumer\")",
+                );
+                if component.span().source_id != scribium_core::SourceId(0) {
+                    self.record_span(component.span(), self.output.len() - before);
+                }
+            }
         }
     }
 

@@ -256,6 +256,7 @@ impl PartialOrd for SortKey {
 /// `Unresolved` is distinct from an empty content value: an ordinary output
 /// context may preserve it, while a chain must reject it because it cannot
 /// inject a fabricated intermediate value.
+#[derive(Debug, PartialEq)]
 enum CallOutcome {
     Value(IrValue),
     NoValue,
@@ -362,6 +363,10 @@ fn value_into_content_nodes(
         IrValue::Pair(pair) => pair_into_content_nodes(pair, diagnostics),
         IrValue::Dictionary(dictionary) => {
             dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
+        }
+        IrValue::Component(component) => {
+            diagnostics.push(component_materialization_deferred(component.span()));
+            Err(CallOutcome::Failed)
         }
         IrValue::Range(range) => {
             diagnostics.push(iteration_error(
@@ -4366,6 +4371,10 @@ impl Evaluator {
             IrValue::Dictionary(dictionary) => {
                 dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
             }
+            IrValue::Component(component) => {
+                diagnostics.push(component_materialization_deferred(component.span()));
+                Err(CallOutcome::Failed)
+            }
             IrValue::Range(range) => {
                 diagnostics.push(iteration_error(
                     "Direct Range materialization is deferred; consume the typed Range through iteration first"
@@ -4408,6 +4417,10 @@ impl Evaluator {
                 } else {
                     self.materialize_inline_value(values.into_iter().next(), span, diagnostics)
                 }
+            }
+            Some(IrValue::Component(component)) => {
+                diagnostics.push(component_materialization_deferred(component.span()));
+                Vec::new()
             }
             Some(IrValue::Range(range)) => {
                 diagnostics.push(iteration_error(
@@ -6241,6 +6254,7 @@ fn value_source_span(value: &IrValue, fallback: &SourceSpan) -> SourceSpan {
         IrValue::Dictionary(dictionary) => dictionary.span,
         IrValue::Range(range) => range.span,
         IrValue::Callable(callable) => callable.span,
+        IrValue::Component(component) => component.span(),
         IrValue::Content(nodes) => match nodes.as_slice() {
             [IrNode::FunctionCall { span, .. }] | [IrNode::ChainedFunctionCall { span, .. }] => {
                 *span
@@ -6273,6 +6287,19 @@ fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
         hints: vec![
             "Iteration values remain typed; unsupported or invalid iteration is not fabricated as text."
                 .to_string(),
+        ],
+    }
+}
+
+fn component_materialization_deferred(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "Semantic component value is valid, but output materialization is deferred until the typed component node and backend lowering slice are available".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Component children are not flattened or rendered as scalar text while component materialization is deferred.".to_string(),
         ],
     }
 }
@@ -6435,6 +6462,13 @@ fn scalar_to_text(
                 "Domain values cannot be rendered as scalar text without a domain consumer"
                     .to_string(),
                 span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Component(component) => {
+            diagnostics.push(iteration_error(
+                "A semantic component cannot be rendered as scalar text".to_string(),
+                component.span(),
             ));
             Err(CallOutcome::Failed)
         }
@@ -6696,7 +6730,10 @@ impl Evaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::IrListItem;
+    use crate::ir::{
+        IrComponent, IrCrossAxisAlignment, IrListItem, IrMainAxisAlignment, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout,
+    };
     use crate::source::SourceId;
 
     fn span(start: usize, end: usize) -> SourceSpan {
@@ -6896,6 +6933,21 @@ mod tests {
             span: span(50, 60),
             capture: None,
         })
+    }
+
+    fn component_value(component_span: SourceSpan) -> IrValue {
+        IrValue::Component(IrComponent::Stacked(IrStackedComponent {
+            layout: IrStackedLayout::Column,
+            main_axis_alignment: IrMainAxisAlignment::Start,
+            cross_axis_alignment: IrCrossAxisAlignment::Center,
+            row_gap: Some(IrSize {
+                value: 10.0,
+                unit: IrSizeUnit::Px,
+            }),
+            column_gap: None,
+            children: vec![text_paragraph("component child")],
+            span: component_span,
+        }))
     }
 
     fn assert_paragraph_text(nodes: &[IrNode], expected: &str) {
@@ -8989,6 +9041,151 @@ mod tests {
         assert!(matches!(result, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].primary, Some(range_span));
+    }
+
+    #[test]
+    fn component_remains_typed_in_value_context_and_preserves_source_span() {
+        let component_span = span(20, 44);
+        let component = component_value(component_span);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = Evaluator::new().evaluate_value(&component, &mut diagnostics, &mut context);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(outcome, CallOutcome::Value(component.clone()));
+        assert_eq!(value_source_span(&component, &span(0, 1)), component_span);
+    }
+
+    #[test]
+    fn component_survives_variable_and_callable_value_flow() {
+        let component = component_value(span(20, 44));
+        let mut context = EvaluationContext::new();
+        context.set_value("component".to_string(), component.clone());
+        context.set_function_binding(
+            "make".to_string(),
+            LambdaParameters::Implicit,
+            vec![var_ref("component")],
+            span(50, 54),
+            None,
+        );
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+
+        let variable_reference = call_value("component", Vec::new());
+        assert_eq!(
+            evaluator.evaluate_value(&variable_reference, &mut diagnostics, &mut context),
+            CallOutcome::Value(component.clone())
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let outcome = evaluator.evaluate_call_value(
+            "make",
+            &[],
+            &[],
+            None,
+            None,
+            &span(60, 64),
+            &mut diagnostics,
+            &mut context,
+        );
+        assert_eq!(outcome, CallOutcome::Value(component));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn single_callable_component_result_remains_a_value() {
+        let component = component_value(span(20, 44));
+        let mut context = EvaluationContext::new();
+        context.set_value("component".to_string(), component.clone());
+        let mut diagnostics = Vec::new();
+
+        let outcome = Evaluator::new().evaluate_callable_body_value(
+            &[var_ref("component")],
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert_eq!(outcome, CallOutcome::Value(component));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn component_block_materialization_fails_at_component_span_without_flattening() {
+        let component_span = span(20, 44);
+        let component = component_value(component_span);
+        let mut diagnostics = Vec::new();
+        let result =
+            Evaluator::new().materialize_block_value(component, &span(0, 1), &mut diagnostics);
+
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(component_span));
+        assert!(diagnostics[0].message.contains("deferred"));
+        assert!(diagnostics[0].message.contains("component"));
+    }
+
+    #[test]
+    fn component_variable_at_document_output_boundary_is_not_flattened() {
+        let component_span = span(20, 44);
+        let (nodes, diagnostics) = Evaluator::new().evaluate(&doc(vec![
+            var_declaration("component", component_value(component_span)),
+            var_ref("component"),
+        ]));
+
+        assert!(nodes.nodes.is_empty());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(component_span));
+        assert!(diagnostics[0].message.contains("deferred"));
+    }
+
+    #[test]
+    fn component_inline_materialization_fails_with_empty_output() {
+        let component_span = span(20, 44);
+        let component = component_value(component_span);
+        let mut diagnostics = Vec::new();
+        let inlines = Evaluator::new().materialize_inline_value(
+            Some(component),
+            &span(0, 1),
+            &mut diagnostics,
+        );
+
+        assert!(inlines.is_empty());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(component_span));
+        assert!(diagnostics[0].message.contains("deferred"));
+    }
+
+    #[test]
+    fn component_and_second_callable_output_fail_atomically() {
+        let component_span = span(20, 44);
+        let component = component_value(component_span);
+        let mut context = EvaluationContext::new();
+        context.set_value("component".to_string(), component);
+        let mut diagnostics = Vec::new();
+
+        let outcome = Evaluator::new().evaluate_callable_body_value(
+            &[var_ref("component"), text_paragraph("later output")],
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(component_span));
+        assert!(!diagnostics[0].message.contains("later output"));
+    }
+
+    #[test]
+    fn component_is_rejected_by_scalar_text_materialization() {
+        let component_span = span(20, 44);
+        let component = component_value(component_span);
+        let mut diagnostics = Vec::new();
+        let result = scalar_to_text(&component, span(0, 1), &mut diagnostics);
+
+        assert!(matches!(result, Err(CallOutcome::Failed)));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(component_span));
+        assert!(diagnostics[0].message.contains("scalar text"));
     }
 
     #[test]

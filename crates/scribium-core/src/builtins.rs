@@ -512,6 +512,7 @@ fn plain_text_argument(value: &IrValue) -> Option<String> {
         | IrValue::Size(_)
         | IrValue::Color(_)
         | IrValue::Enum(_)
+        | IrValue::Component(_)
         | IrValue::None => None,
     }
 }
@@ -961,7 +962,8 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
         | IrValue::Callable(_)
         | IrValue::Size(_)
         | IrValue::Color(_)
-        | IrValue::Enum(_) => None,
+        | IrValue::Enum(_)
+        | IrValue::Component(_) => None,
         IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
     }
 }
