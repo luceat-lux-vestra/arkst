@@ -51,6 +51,7 @@ use crate::ir::{
     TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
+use crate::value_conversion::{self, ScalarTarget, ScalarValue};
 use crate::VirtualProject;
 use crate::{Capabilities, Capability};
 use scribium_markdown::Mode;
@@ -2712,10 +2713,10 @@ impl Evaluator {
     }
 
     /// Evaluates the bounded callback-based optionality functions from the
-    /// v2.5.1 Optionality module. `.ifpresent` short-circuits a semantic `None`
-    /// before invoking its mapping callback, while `.takeif` always invokes its
-    /// condition, including for `None`. Both reuse the shared callable scope,
-    /// capture, destructuring, and failure-atomicity path.
+    /// v2.5.1 Optionality module. The value is resolved before a callback is
+    /// invoked. `.ifpresent` skips its callback for semantic `None`, while
+    /// `.takeif` still invokes its predicate with `None`, matching the
+    /// distinct upstream callback contracts.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_optionality_callback(
         &self,
@@ -3194,6 +3195,19 @@ impl Evaluator {
                 Ok(values)
             }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
+            value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
+                match value_conversion::convert_range(&value, *span) {
+                    Ok(range) => self.materialize_range(range, span, diagnostics),
+                    Err(_) => {
+                        diagnostics.push(iteration_error(
+                            "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
+                                .to_string(),
+                            *span,
+                        ));
+                        Err(CallOutcome::Failed)
+                    }
+                }
+            }
             IrValue::Content(nodes) => match nodes.as_slice() {
                 [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
                     let mut values = Vec::new();
@@ -5261,16 +5275,18 @@ fn repeat_count(value: &IrValue) -> Result<i32, String> {
 /// boundary. The explicit comparisons avoid relying on Rust's float-to-int
 /// cast behavior as language semantics.
 fn number_to_range_endpoint(value: &IrValue) -> Result<i32, String> {
-    let IrValue::Number(number) = value else {
+    let Ok(ScalarValue::Number(number)) =
+        value_conversion::convert_scalar(value, ScalarTarget::Number)
+    else {
         return Err("`.range` bounds must be numeric".to_string());
     };
     if number.is_nan() {
         return Ok(0);
     }
-    if *number <= f64::from(i32::MIN) {
+    if number <= f64::from(i32::MIN) {
         return Ok(i32::MIN);
     }
-    if *number >= f64::from(i32::MAX) {
+    if number >= f64::from(i32::MAX) {
         return Ok(i32::MAX);
     }
     Ok(number.trunc() as i32)
@@ -5802,7 +5818,6 @@ fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
 /// Resolves a value to a boolean, handling variable references.
 fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option<bool> {
     match value {
-        IrValue::Boolean(v) => Some(*v),
         IrValue::Identifier(name) => match name.to_lowercase().as_str() {
             "true" | "yes" => Some(true),
             "false" | "no" => Some(false),
@@ -5811,10 +5826,11 @@ fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option
                 if let Some(var) = context.get(name) {
                     var.as_boolean()
                 } else {
-                    None
+                    scalar_boolean_value(value)
                 }
             }
         },
+        IrValue::Boolean(_) | IrValue::String(_) => scalar_boolean_value(value),
         IrValue::Content(nodes) => {
             // Check if the content is a single parameterless function call to a known variable
             if let [IrNode::FunctionCall {
@@ -5842,15 +5858,9 @@ fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option
 /// Supports the Quarkdown boolean literals `true`/`yes` and `false`/`no`,
 /// case-insensitive (Quarkdown "Boolean" documentation, badged `v2.5.0`).
 fn scalar_boolean_value(value: &IrValue) -> Option<bool> {
-    match value {
-        IrValue::Boolean(value) => Some(*value),
-        IrValue::Identifier(name) => match name.to_lowercase().as_str() {
-            "true" | "yes" => Some(true),
-            "false" | "no" => Some(false),
-            _ => None,
-        },
-        IrValue::None | IrValue::Pair(_) | IrValue::Dictionary(_) => None,
-        _ => None,
+    match value_conversion::convert_scalar(value, ScalarTarget::Boolean) {
+        Ok(ScalarValue::Boolean(value)) => Some(value),
+        Ok(_) | Err(_) => None,
     }
 }
 
@@ -5972,13 +5982,7 @@ fn scalar_to_text(
 /// crossed the upstream `Float` boundary, while preserving f64-only values
 /// originating elsewhere in the IR.
 fn scalar_number_to_text(number: f64) -> String {
-    if number.is_finite() {
-        let float = number as f32;
-        if f64::from(float) == number {
-            return float.to_string();
-        }
-    }
-    number.to_string()
+    value_conversion::number_to_text(number)
 }
 
 /// Builds the `E3001` diagnostic for an unresolvable condition.
@@ -7257,7 +7261,10 @@ mod tests {
             );
         }
         assert!(number_to_range_endpoint(&IrValue::Boolean(true)).is_err());
-        assert!(number_to_range_endpoint(&IrValue::String("3".to_string())).is_err());
+        assert_eq!(
+            number_to_range_endpoint(&IrValue::String("3".to_string())),
+            Ok(3)
+        );
     }
 
     #[test]

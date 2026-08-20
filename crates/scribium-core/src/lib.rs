@@ -17,6 +17,7 @@ pub mod evaluator;
 pub mod ir;
 pub mod source;
 pub mod source_map;
+mod value_conversion;
 pub mod virtual_project;
 
 pub use diagnostics::*;
@@ -1301,6 +1302,53 @@ mod tests {
             output_text(&result),
             "7\n3.5\n-1\n1\n3.5\n0\n1.4142135\n6\neven\nodd"
         );
+    }
+
+    #[test]
+    fn compile_v251_dynamic_value_scalar_fixture_uses_existing_consumers() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "3.5\nboolean conversion\n2\n3\n4\n2..4"
+        );
+    }
+
+    #[test]
+    fn compile_dynamic_value_conversion_failures_are_atomic_and_source_backed() {
+        for source in [
+            "앞 문장\r\n.sum {.string {not-a-number}} {1}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.if {.string {maybe}}\r\n    숨겨진 내용\r\n뒤 문장\r\n",
+            "앞 문장\r\n.foreach {.string {2 .. 4}}\r\n    .1\r\n뒤 문장\r\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001");
+            assert!(result.diagnostics[0].primary.is_some(), "{result:?}");
+            assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
+            assert!(!output_text(&result).contains("숨겨진 내용"));
+            assert!(!output_text(&result).contains("1\n2\n3\n4"));
+        }
+    }
+
+    #[test]
+    fn compile_takeif_invokes_its_predicate_for_none() {
+        let source = ".takeif {.none} {@lambda value: .sum {.value} {1}}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                source.find(".sum").expect("predicate call"),
+                source.find(".sum").expect("predicate call") + ".sum {.value} {1}".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
     }
 
     #[test]

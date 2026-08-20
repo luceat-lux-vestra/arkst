@@ -1,6 +1,7 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
 use crate::ir::{IrInline, IrNamedArg, IrNode, IrValue};
+use crate::value_conversion::{self, ScalarTarget, ScalarValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
@@ -176,7 +177,7 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
-    let text = adapt_string_argument(&value).ok_or_else(|| {
+    let text = scalar_string_argument(&value).ok_or_else(|| {
         error("`.string` requires a scalar value that can adapt to text".to_string())
     })?;
     Ok(IrValue::String(text))
@@ -210,9 +211,9 @@ fn evaluate_concatenate(
         .map(|value| boolean_argument(&value, "if"))
         .transpose()?
         .unwrap_or(true);
-    let a = adapt_string_argument(&a)
+    let a = scalar_string_argument(&a)
         .ok_or_else(|| error("`.concatenate` argument `a` cannot adapt to text".to_string()))?;
-    let with = adapt_string_argument(&with)
+    let with = scalar_string_argument(&with)
         .ok_or_else(|| error("`.concatenate` argument `with` cannot adapt to text".to_string()))?;
     if condition {
         Ok(IrValue::String(format!("{a}{with}")))
@@ -234,7 +235,7 @@ fn evaluate_empty_check(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
-    let text = adapt_string_argument(&value).ok_or_else(|| {
+    let text = scalar_string_argument(&value).ok_or_else(|| {
         error(format!(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
@@ -275,9 +276,9 @@ fn evaluate_startswith(
         .map(|value| boolean_argument(&value, "ignorecase"))
         .transpose()?
         .unwrap_or(false);
-    let string = adapt_string_argument(&string)
+    let string = scalar_string_argument(&string)
         .ok_or_else(|| error("`.startswith` argument `string` cannot adapt to text".to_string()))?;
-    let prefix = adapt_string_argument(&prefix)
+    let prefix = scalar_string_argument(&prefix)
         .ok_or_else(|| error("`.startswith` argument `prefix` cannot adapt to text".to_string()))?;
     let result = if ignorecase {
         string.to_lowercase().starts_with(&prefix.to_lowercase())
@@ -352,29 +353,16 @@ fn numeric_argument(value: &IrValue, parameter: &str) -> Result<f32, BuiltinErro
 }
 
 fn numeric_argument_value(value: &IrValue, parameter: &str) -> Result<f64, BuiltinError> {
-    match value {
-        IrValue::Number(number) => Ok(*number),
-        IrValue::String(value) | IrValue::Identifier(value) => value
-            .parse::<i32>()
-            .map(f64::from)
-            .ok()
-            .or_else(|| value.parse::<f32>().ok().map(f64::from))
-            .ok_or_else(|| error(format!("`{parameter}` must be numeric"))),
-        _ => Err(error(format!("`{parameter}` must be numeric"))),
+    match value_conversion::convert_scalar(value, ScalarTarget::Number) {
+        Ok(ScalarValue::Number(number)) => Ok(number),
+        Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be numeric"))),
     }
 }
 
 fn boolean_argument(value: &IrValue, parameter: &str) -> Result<bool, BuiltinError> {
-    match value {
-        IrValue::Boolean(value) => Ok(*value),
-        IrValue::String(value) | IrValue::Identifier(value) => {
-            match value.to_ascii_lowercase().as_str() {
-                "true" | "yes" => Ok(true),
-                "false" | "no" => Ok(false),
-                _ => Err(error(format!("`{parameter}` must be boolean"))),
-            }
-        }
-        _ => Err(error(format!("`{parameter}` must be boolean"))),
+    match value_conversion::convert_scalar(value, ScalarTarget::Boolean) {
+        Ok(ScalarValue::Boolean(value)) => Ok(value),
+        Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be boolean"))),
     }
 }
 
@@ -861,7 +849,7 @@ fn evaluate_case(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
-    let text = adapt_string_argument(&value).ok_or_else(|| {
+    let text = scalar_string_argument(&value).ok_or_else(|| {
         error(format!(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
@@ -887,9 +875,40 @@ fn error(message: String) -> BuiltinError {
     BuiltinError { message }
 }
 
-/// Applies the small invocation-boundary text adaptation contract used by the
-/// evidenced string builtins. Plain text content is adapted structurally; rich
-/// content is not rendered or round-tripped through a backend.
+/// Applies the context-free String conversion boundary used by scalar string
+/// builtins. Rich content remains the separate `.plaintext`/native-content
+/// path; it is not silently serialized or reparsed here.
+fn scalar_string_argument(value: &IrValue) -> Option<String> {
+    match value_conversion::convert_scalar(value, ScalarTarget::String) {
+        Ok(ScalarValue::String(value)) => Some(value),
+        Ok(_) => None,
+        Err(_) => match value {
+            IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
+            _ => None,
+        },
+    }
+}
+
+fn plain_scalar_content_argument(nodes: &[IrNode]) -> Option<String> {
+    let mut text = String::new();
+    for node in nodes {
+        let IrNode::Paragraph { content, .. } = node else {
+            return None;
+        };
+        for inline in content {
+            let IrInline::Text { content, .. } = inline else {
+                return None;
+            };
+            text.push_str(content);
+        }
+    }
+    Some(text)
+}
+
+/// Applies the existing structural text boundary used by resource and native
+/// content consumers. Plain paragraph content is adapted structurally; rich
+/// content is not rendered or round-tripped through a backend. Scalar builtin
+/// conversion uses [`scalar_string_argument`] instead.
 pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
@@ -901,21 +920,7 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
         | IrValue::Pair(_)
         | IrValue::Dictionary(_)
         | IrValue::Callable(_) => None,
-        IrValue::Content(nodes) => {
-            let mut text = String::new();
-            for node in nodes {
-                let IrNode::Paragraph { content, .. } = node else {
-                    return None;
-                };
-                for inline in content {
-                    let IrInline::Text { content, .. } = inline else {
-                        return None;
-                    };
-                    text.push_str(content);
-                }
-            }
-            Some(text)
-        }
+        IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
     }
 }
 

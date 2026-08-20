@@ -190,6 +190,50 @@ indentation width. The evidence above covers 2/3/4/8-space bodies, one-space
 rejection, single-tab and mixed indentation, UTF-8/CRLF provenance, nested
 Markdown and Quarkdown, and list/blockquote-relative containers.
 
+## Issue #61 bounded DynamicValue conversion
+
+The v2.5.1 review distinguishes invocation-time conversion from the upstream
+value class hierarchy. `DynamicValueConverter.convertTo()` is consumed at the
+argument-binding boundary (`RegularArgumentsBinder.kt` and `Lambda.kt`), and
+dispatches to `ValueFactory` conversion methods. Scribium therefore keeps the
+conversion policy inside the existing evaluator/value-resolution path instead
+of reproducing the Kotlin class model or introducing a universal conversion
+engine.
+
+The implemented boundary is deliberately consumer-driven:
+
+| Target | Status | Existing Scribium consumer | v2.5.1 evidence |
+|---|---|---|---|
+| `Number` | bounded scalar conversion implemented | arithmetic/numeric arguments and dynamic range endpoints | [`ValueFactory.number`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt) |
+| `Boolean` | bounded scalar conversion implemented | conditions, predicates, and boolean argument flags | [`ValueFactory.boolean`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt) |
+| `Range` | bounded conversion implemented for iterable consumers | `.foreach`, collection access, and dynamic range materialization | [`ValueFactory.range`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt), [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt) |
+| `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
+| `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | context-sensitive conversion deferred | parser/evaluation context is required | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
+| `Size`, `Color`, `Enum`, and layout/document values | component/layout conversion deferred | no current approved semantic consumer | v2.5.1 value families; no Scribium consumer in this slice |
+| collections, callables, and generic document/content stringification | unsupported conversion; existing typed operations remain separate | typed collection/callable paths only | `DynamicValueConverter.kt`, `ValueFactory.kt`, and consumer signatures |
+
+The scalar rules are evidence-backed: Number keeps an already typed value and
+parses text as integer first, then Float, without trimming; Boolean accepts
+only case-insensitive `true`, `yes`, `false`, and `no`; Range accepts the
+reviewed textual `x..y`, `..y`, `x..`, and `..` forms without whitespace or
+signed endpoints; and String handles scalar values and typed Range text. None
+is not converted. `.ifpresent(None)` skips its callback while `.takeif(None)`
+still invokes its predicate; these are separate from conversion failure and
+optional argument omission.
+
+Invalid conversions use the existing source-backed `E3001` path and do not
+publish partial IR, collection, or callback results. Conversion is a pure
+semantic transformation over the resolved value and explicit target; it does
+not access files, processes, the network, a backend, or a hidden parser. In
+particular, String → Markdown reparsing and String → InlineMarkdownContent
+reparsing are deferred. The independently authored
+`fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family` fixture and
+the evaluator/unit tests cover the implemented consumer paths. This is
+**bounded scalar conversion implemented**, not broad DynamicValue
+compatibility or conversion completion. Resource I/O semantics (`.read`,
+`.json`, `.include`, and the deferred data-loading family) are unchanged, and
+component/layout semantics remain outside this slice.
+
 ## Issue #61 structured iterable semantics
 
 The evaluator now represents `Pair` and `Dictionary` as typed recursive
@@ -472,10 +516,10 @@ tests. Successful terminal outputless calls (such as variable reassignment)
 remain legal, but a no-value result in a nested value-required argument or
 non-final chain segment reports source-backed `E3001`; an already-failed child
 propagates its original diagnostic without a duplicate no-value error.
-Value-context type preservation, the small documented scalar adaptation
-surface, lazy conditional bodies, provenance, failure, and Typst/PDF tests
-support this slice only; complete `DynamicValue` and general programmable
-document compatibility are not claimed here.
+Value-context type preservation, the bounded scalar conversion slice, lazy
+conditional bodies, provenance, failure, and Typst/PDF tests support this
+slice only; complete `DynamicValue` and general programmable document
+compatibility are not claimed here.
 
 The public source for this slice is the Quarkdown wiki's [Syntax of a
 function call](https://quarkdown.com/wiki/syntax-of-a-function-call/) page,
@@ -579,9 +623,8 @@ evidenced `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`,
 `.islower`, `.isgreater`, `.equals`, and `.not` chain forms and their documented
 nested-call equivalents are **Semantically supported** with strict
 left-to-right value flow; an unimplemented chain callee reports a source-backed
-`E3001` evaluation error. The string-family and comparison builtins' small
-scalar adaptation contracts are evidenced, not complete DynamicValue
-compatibility.
+`E3001` evaluation error. The string-family, comparison, and bounded scalar
+conversion contracts are evidenced, not complete DynamicValue compatibility.
 **User-defined functions are also semantically supported for the evidenced
 slice**: headerless implicit and required/optional explicit-parameter
 declarations, positional/named binding where applicable, block-last-parameter
@@ -659,10 +702,11 @@ remain `NaN`, and remainder keeps signed floating behavior.
 [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt),
 and [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
 establish the invocation-time numeric and normalization boundaries. Scribium
-reuses its existing narrow scalar adaptation and adds only the local strict
-integer-compatible `decimals` adapter; it does not introduce a general
-DynamicValue conversion framework. All numeric functions use the existing
-argument binder, preserve `IrValue::Number` or `IrValue::Boolean`, and reject
+uses the bounded conversion policy for concrete numeric consumers and keeps
+the local strict integer-compatible `decimals` adapter separate; it does not
+introduce a general DynamicValue conversion framework. All numeric functions
+use the existing argument binder, preserve `IrValue::Number` or
+`IrValue::Boolean`, and reject
 unsupported values, unknown/duplicate bindings, arity errors, and block bodies
 without publishing partial nested output.
 
@@ -704,10 +748,11 @@ The v2.5.1 public [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkd
 surface defines scalar `.string`, `.concatenate`, case transforms,
 emptiness predicates, and `.startswith`. Scribium implements the first eight
 of those functions through one explicit invocation-boundary adapter for
-strings, identifiers, numbers, booleans, and bounded plain-text content. The
-results remain typed `IrValue::String` or `IrValue::Boolean`, so nested calls,
-chains, variable bindings, and lazy conditionals share the ordinary evaluator
-path.
+strings, identifiers, numbers, booleans, typed ranges, and bounded plain-text
+content. The results remain typed `IrValue::String` or `IrValue::Boolean`, so
+nested calls, chains, variable bindings, and lazy conditionals share the
+ordinary evaluator path. This is the bounded `String` conversion surface;
+collections, callables, `None`, and rich document values are not stringified.
 
 Quoted scalar input is classified by the existing Quarkdown grammar, which
 removes only its outer quotes and preserves inner whitespace before the typed

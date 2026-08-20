@@ -9,6 +9,103 @@ mature production compiler/toolchain, even while the project is pre-alpha.
 The current implementation may be incomplete or in migration; incompleteness
 must be represented honestly rather than hidden by a narrow passing test.
 
+## Design philosophy
+
+This section normalizes the design principles already applied by this
+engineering standard. It is a canonical review lens, not a new architecture,
+semantic model, crate boundary, compatibility claim, or runtime requirement.
+
+### Idiomatic Rust compiler design
+
+Scribium implements Quarkdown's public and document-observable semantics; it
+does not translate Quarkdown's implementation class hierarchy into Rust.
+Prefer ownership and borrowing, enums and domain types, explicit context and
+state, traits or generics only where concrete variability exists, typed
+errors, deterministic construction, and narrow public APIs. Avoid
+inheritance-shaped designs, reflection-like semantic lookup, service
+locators, stringly typed semantic state, and speculative public abstractions.
+Upstream implementation classes are behavioral evidence, not Rust design
+templates.
+
+### Functional transformation core, explicit effects
+
+Compiler stages should be understandable as:
+
+```text
+input + explicit context -> deterministic transformation -> output + diagnostics
+```
+
+This applies to parsing, normalization, evaluation, conversion, IR
+transformation, compatibility normalization, and Typst lowering. Filesystem,
+process, network, environment, watch-event, and wall-clock effects belong to
+their accepted host or project boundaries. This is functional semantics, not
+functional ceremony: efficient local mutation is allowed, and unnecessary
+clones or immutable wrappers are not goals by themselves.
+
+### Determinism is a semantic invariant
+
+For the same normalized source, project snapshot, compiler options, and
+compatibility baseline, semantic results, normalized IR, diagnostics, and
+generated backend input must be deterministic. They must not depend on
+registration order or incidental allocation identity. Future caching or
+incremental execution may optimize this pipeline but must not become its
+semantic authority.
+
+### Provenance is part of the data model
+
+Every transformation preserves provenance, transforms it explicitly, or
+honestly records reduced precision. Source identity and reliable spans are
+correctness contracts, not debugging conveniences. Never fabricate a precise
+span for generated text or let a caller span conceal the source of a nested
+failure.
+
+### Backend-neutral semantics before backend convenience
+
+Frontend, evaluator, and IR representations express Scribium language
+semantics before any backend is considered. Typst-specific concepts and
+serialization conveniences stay behind the explicit lowering/backend
+boundary; backend output is a consumer of semantic results, not their type
+system.
+
+### Cost-aware, not allocation-obsessed
+
+Performance is part of architecture quality, but allocation count is not an
+independent design objective. Avoid gratuitous copying, accidental quadratic
+work, uncontrolled recursion or expansion, and resource amplification. Use
+measurement and invariants before trading readability, ownership clarity, or
+safe Rust for an optimization.
+
+### Incremental and reactive behavior belongs at explicit boundaries
+
+The core compiler is not a reactive framework. If watch, LSP, or incremental
+compilation is added later, invalidation, dependency tracking, cancellation,
+stale-result rejection, task ownership, and queue/resource bounds must be
+explicit orchestration concerns. Incremental execution must preserve the
+observable semantics of a clean compilation. This work does not introduce
+that infrastructure.
+
+### Evidence over architectural fashion
+
+Functional, reactive, async, zero-copy, SIMD, arena, lock-free, typestate,
+macro, or newest-language-feature choices require evidence. Adoption must
+serve correctness, semantic clarity, provenance or diagnostics, ergonomics,
+maintainability, or measurable efficiency. Newness alone is not an
+engineering justification.
+
+### Reference-quality compiler engineering
+
+Scribium aims for reference-quality engineering in compiler architecture,
+compatibility work, deterministic semantic pipelines, source provenance,
+backend-neutral IR, host/effect isolation, structured diagnostics, and
+conformance testing. This is an engineering bar for maintainability and
+review, not a marketing claim.
+
+For implementation review, ask whether the design is idiomatic Rust rather
+than an upstream class-model translation; a deterministic transformation with
+explicit effects; honest about provenance; backend-neutral; justified by real
+consumers and measured costs; failure-atomic; and suitable as long-term
+reference code.
+
 ## Authority and implementation state
 
 The authority order for engineering work is:
