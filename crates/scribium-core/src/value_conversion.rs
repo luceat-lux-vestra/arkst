@@ -6,8 +6,75 @@
 //! collection construction, callable conversion, and layout values remain
 //! outside this policy.
 
-use crate::ir::{IrRange, IrValue};
+use crate::ir::{IrNamedArg, IrRange, IrValue};
 use crate::source::SourceSpan;
+use std::ops::Deref;
+
+/// Origin of a value at a Quarkdown invocation boundary.
+///
+/// This is evaluator-internal metadata. It is intentionally not part of
+/// `IrValue`: the final IR contains only typed semantic values. `Dynamic`
+/// corresponds to the upstream `DynamicValue` binder path; `Static` is an
+/// already materialized typed value such as the result of a nested
+/// `.string` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValueOrigin {
+    Static,
+    Dynamic,
+}
+
+/// An evaluated invocation argument together with the origin used by the
+/// target-driven conversion boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InvocationValue {
+    pub value: IrValue,
+    pub origin: ValueOrigin,
+}
+
+impl InvocationValue {
+    pub(crate) fn static_value(value: IrValue) -> Self {
+        Self {
+            value,
+            origin: ValueOrigin::Static,
+        }
+    }
+
+    pub(crate) fn dynamic_value(value: IrValue) -> Self {
+        Self {
+            value,
+            origin: ValueOrigin::Dynamic,
+        }
+    }
+}
+
+impl Deref for InvocationValue {
+    type Target = IrValue;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+/// Named invocation argument carrying the same evaluator-local origin bit.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InvocationNamedArg {
+    pub arg: IrNamedArg,
+    pub origin: ValueOrigin,
+}
+
+impl InvocationNamedArg {
+    pub(crate) fn new(arg: IrNamedArg, origin: ValueOrigin) -> Self {
+        Self { arg, origin }
+    }
+}
+
+impl Deref for InvocationNamedArg {
+    type Target = IrNamedArg;
+
+    fn deref(&self) -> &Self::Target {
+        &self.arg
+    }
+}
 
 /// The scalar targets supported by this bounded conversion policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,29 +127,51 @@ pub(crate) enum ConversionError {
 /// Text parsing intentionally follows the reviewed v2.5.1 `ValueFactory`
 /// order: integer parsing is attempted before floating-point parsing, and no
 /// whitespace normalization or truthiness coercion is added.
+#[cfg(test)]
 pub(crate) fn convert_scalar(
     value: &IrValue,
     target: ScalarTarget,
 ) -> Result<ScalarValue, ConversionError> {
+    convert_scalar_with_origin(&InvocationValue::dynamic_value(value.clone()), target)
+}
+
+/// Converts an invocation argument using upstream's DynamicValue gate.
+///
+/// Text parsing for Number and Boolean is available only for a Dynamic
+/// argument. Static StringValue-shaped values remain String values and do not
+/// acquire unrelated numeric, boolean, or iterable meaning.
+pub(crate) fn convert_scalar_with_origin(
+    argument: &InvocationValue,
+    target: ScalarTarget,
+) -> Result<ScalarValue, ConversionError> {
+    let value = &argument.value;
     match target {
         ScalarTarget::Number => match value {
             IrValue::Number(value) => Ok(ScalarValue::Number(*value)),
-            IrValue::String(value) | IrValue::Identifier(value) => parse_number(value)
-                .map(ScalarValue::Number)
-                .ok_or(ConversionError::InvalidText {
-                    target: target.into(),
-                }),
+            IrValue::String(value) | IrValue::Identifier(value)
+                if argument.origin == ValueOrigin::Dynamic =>
+            {
+                parse_number(value)
+                    .map(ScalarValue::Number)
+                    .ok_or(ConversionError::InvalidText {
+                        target: target.into(),
+                    })
+            }
             _ => Err(ConversionError::UnsupportedValue {
                 target: target.into(),
             }),
         },
         ScalarTarget::Boolean => match value {
             IrValue::Boolean(value) => Ok(ScalarValue::Boolean(*value)),
-            IrValue::String(value) | IrValue::Identifier(value) => parse_boolean(value)
-                .map(ScalarValue::Boolean)
-                .ok_or(ConversionError::InvalidText {
-                    target: target.into(),
-                }),
+            IrValue::String(value) | IrValue::Identifier(value)
+                if argument.origin == ValueOrigin::Dynamic =>
+            {
+                parse_boolean(value)
+                    .map(ScalarValue::Boolean)
+                    .ok_or(ConversionError::InvalidText {
+                        target: target.into(),
+                    })
+            }
             _ => Err(ConversionError::UnsupportedValue {
                 target: target.into(),
             }),
@@ -109,10 +198,15 @@ pub(crate) fn convert_scalar(
 /// Converts an existing or textual range while preserving the source span of
 /// an existing typed range or attaching the caller's reliable argument span
 /// to a newly parsed textual range.
-pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange, ConversionError> {
-    match value {
+pub(crate) fn convert_range_with_origin(
+    argument: &InvocationValue,
+    span: SourceSpan,
+) -> Result<IrRange, ConversionError> {
+    match &argument.value {
         IrValue::Range(range) => Ok(range.clone()),
-        IrValue::String(value) | IrValue::Identifier(value) => {
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
             parse_range(value, span).ok_or(ConversionError::InvalidText {
                 target: ConversionTarget::Range,
             })
@@ -121,6 +215,11 @@ pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange
             target: ConversionTarget::Range,
         }),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn convert_range(value: &IrValue, span: SourceSpan) -> Result<IrRange, ConversionError> {
+    convert_range_with_origin(&InvocationValue::dynamic_value(value.clone()), span)
 }
 
 fn parse_number(value: &str) -> Option<f64> {
@@ -194,7 +293,8 @@ fn range_to_text(range: &IrRange) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        convert_range, convert_scalar, ConversionError, ConversionTarget, ScalarTarget, ScalarValue,
+        convert_range, convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
+        ConversionError, ConversionTarget, InvocationValue, ScalarTarget, ScalarValue,
     };
     use crate::ir::{IrRange, IrValue};
     use crate::source::{SourceId, SourceSpan};
@@ -325,6 +425,37 @@ mod tests {
                 SourceSpan::new(SourceId(9), 0, 1)
             ),
             Ok(original)
+        );
+    }
+
+    #[test]
+    fn conversion_requires_dynamic_origin_for_textual_target_adaptation() {
+        let static_number = InvocationValue::static_value(IrValue::String("-3.5".into()));
+        let dynamic_number = InvocationValue::dynamic_value(IrValue::String("-3.5".into()));
+        assert!(convert_scalar_with_origin(&static_number, ScalarTarget::Number).is_err());
+        assert_eq!(
+            convert_scalar_with_origin(&dynamic_number, ScalarTarget::Number),
+            Ok(ScalarValue::Number(-3.5))
+        );
+
+        let static_boolean = InvocationValue::static_value(IrValue::String("YES".into()));
+        let dynamic_boolean = InvocationValue::dynamic_value(IrValue::String("YES".into()));
+        assert!(convert_scalar_with_origin(&static_boolean, ScalarTarget::Boolean).is_err());
+        assert_eq!(
+            convert_scalar_with_origin(&dynamic_boolean, ScalarTarget::Boolean),
+            Ok(ScalarValue::Boolean(true))
+        );
+
+        let static_range = InvocationValue::static_value(IrValue::String("2..4".into()));
+        let dynamic_range = InvocationValue::dynamic_value(IrValue::String("2..4".into()));
+        assert!(convert_range_with_origin(&static_range, span()).is_err());
+        assert_eq!(
+            convert_range_with_origin(&dynamic_range, span()),
+            Ok(IrRange {
+                start: Some(2),
+                end: Some(4),
+                span: span(),
+            })
         );
     }
 }

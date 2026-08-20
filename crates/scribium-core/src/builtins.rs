@@ -1,7 +1,12 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
-use crate::ir::{IrInline, IrNamedArg, IrNode, IrValue};
-use crate::value_conversion::{self, ScalarTarget, ScalarValue};
+use crate::ir::{IrInline, IrNode, IrValue};
+use crate::value_conversion::{
+    self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
+};
+
+type Arguments<'a> = &'a [InvocationValue];
+type NamedArguments<'a> = &'a [InvocationNamedArg];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
@@ -49,10 +54,34 @@ pub(crate) fn is_supported(name: &str) -> bool {
 }
 
 /// Evaluates one supported builtin without source or backend conversion.
+#[cfg(test)]
 pub(crate) fn evaluate(
     name: &str,
     positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    named_args: &[crate::ir::IrNamedArg],
+    has_body: bool,
+) -> Result<IrValue, BuiltinError> {
+    let positional = positional_args
+        .iter()
+        .cloned()
+        .map(InvocationValue::dynamic_value)
+        .collect::<Vec<_>>();
+    let named = named_args
+        .iter()
+        .cloned()
+        .map(|arg| InvocationNamedArg::new(arg, ValueOrigin::Dynamic))
+        .collect::<Vec<_>>();
+    evaluate_with_origins(name, &positional, &named, has_body)
+}
+
+/// Evaluates a builtin with the invocation-time DynamicValue distinction
+/// preserved by the evaluator. The public-to-the-crate `evaluate` wrapper
+/// above remains useful for focused builtin tests, where raw arguments model
+/// Quarkdown's dynamic argument boundary.
+pub(crate) fn evaluate_with_origins(
+    name: &str,
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     match name {
@@ -90,8 +119,8 @@ pub(crate) fn evaluate(
 
 fn evaluate_ordering(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     let mut arguments = bind_arguments(
@@ -133,8 +162,8 @@ fn evaluate_ordering(
 }
 
 fn evaluate_equals(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -151,8 +180,8 @@ fn evaluate_equals(
 }
 
 fn evaluate_not(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -166,8 +195,8 @@ fn evaluate_not(
 }
 
 fn evaluate_string(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -184,8 +213,8 @@ fn evaluate_string(
 }
 
 fn evaluate_concatenate(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -224,8 +253,8 @@ fn evaluate_concatenate(
 
 fn evaluate_empty_check(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -249,8 +278,8 @@ fn evaluate_empty_check(
 }
 
 fn evaluate_startswith(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -289,8 +318,8 @@ fn evaluate_startswith(
 }
 
 fn evaluate_plaintext(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -313,11 +342,11 @@ fn evaluate_plaintext(
 
 fn bind_arguments(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     parameter_names: &[&str],
     max_arguments: usize,
-) -> Result<Vec<Option<IrValue>>, BuiltinError> {
+) -> Result<Vec<Option<InvocationValue>>, BuiltinError> {
     if positional_args.len() > max_arguments {
         return Err(error(format!(
             "`.{name}` received too many positional arguments"
@@ -343,24 +372,27 @@ fn bind_arguments(
                 argument.name
             )));
         }
-        arguments[index] = Some(argument.value.clone());
+        arguments[index] = Some(InvocationValue {
+            value: argument.value.clone(),
+            origin: argument.origin,
+        });
     }
     Ok(arguments)
 }
 
-fn numeric_argument(value: &IrValue, parameter: &str) -> Result<f32, BuiltinError> {
+fn numeric_argument(value: &InvocationValue, parameter: &str) -> Result<f32, BuiltinError> {
     Ok(numeric_argument_value(value, parameter)? as f32)
 }
 
-fn numeric_argument_value(value: &IrValue, parameter: &str) -> Result<f64, BuiltinError> {
-    match value_conversion::convert_scalar(value, ScalarTarget::Number) {
+fn numeric_argument_value(value: &InvocationValue, parameter: &str) -> Result<f64, BuiltinError> {
+    match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number) {
         Ok(ScalarValue::Number(number)) => Ok(number),
         Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be numeric"))),
     }
 }
 
-fn boolean_argument(value: &IrValue, parameter: &str) -> Result<bool, BuiltinError> {
-    match value_conversion::convert_scalar(value, ScalarTarget::Boolean) {
+fn boolean_argument(value: &InvocationValue, parameter: &str) -> Result<bool, BuiltinError> {
+    match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
         Ok(ScalarValue::Boolean(value)) => Ok(value),
         Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be boolean"))),
     }
@@ -517,8 +549,8 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
 }
 
 fn evaluate_otherwise(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body || !named_args.is_empty() || positional_args.len() != 2 {
@@ -526,16 +558,16 @@ fn evaluate_otherwise(
             "`.otherwise` requires exactly two positional arguments".to_string(),
         ));
     }
-    if matches!(positional_args[0], IrValue::None) {
-        Ok(positional_args[1].clone())
+    if matches!(positional_args[0].value, IrValue::None) {
+        Ok(positional_args[1].value.clone())
     } else {
-        Ok(positional_args[0].clone())
+        Ok(positional_args[0].value.clone())
     }
 }
 
 fn evaluate_none(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body || !named_args.is_empty() || !positional_args.is_empty() {
@@ -547,8 +579,8 @@ fn evaluate_none(
 }
 
 fn evaluate_isnone(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body || !named_args.is_empty() || positional_args.len() != 1 {
@@ -557,15 +589,15 @@ fn evaluate_isnone(
         ));
     }
     Ok(IrValue::Boolean(matches!(
-        positional_args[0],
+        positional_args[0].value,
         IrValue::None
     )))
 }
 
 fn evaluate_numeric(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -606,8 +638,8 @@ fn evaluate_numeric(
 
 fn evaluate_unary_numeric(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -633,8 +665,8 @@ fn evaluate_unary_numeric(
 
 fn evaluate_transcendental(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -650,8 +682,8 @@ fn evaluate_transcendental(
 }
 
 fn evaluate_pi(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -684,8 +716,8 @@ fn deterministic_transcendental(name: &str, value: f32) -> f32 {
 }
 
 fn evaluate_truncate(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -733,8 +765,8 @@ fn evaluate_truncate(
 }
 
 fn evaluate_round(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -800,14 +832,14 @@ fn number_value_is_integral(value: f32) -> bool {
 /// Quarkdown accepts an integral numeric representation such as `2` or `2.0`
 /// after NumberValue normalization, but a fractional NumberValue and quoted
 /// text are not silently converted to an Int.
-fn integer_argument(value: &IrValue, parameter: &str) -> Result<i32, BuiltinError> {
-    let number = match value {
+fn integer_argument(value: &InvocationValue, parameter: &str) -> Result<i32, BuiltinError> {
+    let number = match &value.value {
         IrValue::Number(value) => *value as f32,
-        IrValue::Identifier(value) => value
+        IrValue::Identifier(text) if value.origin == ValueOrigin::Dynamic => text
             .parse::<i32>()
             .map(|value| value as f32)
             .ok()
-            .or_else(|| value.parse::<f32>().ok())
+            .or_else(|| text.parse::<f32>().ok())
             .ok_or_else(|| error(format!("`{parameter}` must be an integer")))?,
         _ => return Err(error(format!("`{parameter}` must be an integer"))),
     };
@@ -838,8 +870,8 @@ fn kotlin_round_to_int(value: f32) -> i32 {
 
 fn evaluate_case(
     name: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: Arguments<'_>,
+    named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     if has_body {
@@ -878,11 +910,11 @@ fn error(message: String) -> BuiltinError {
 /// Applies the context-free String conversion boundary used by scalar string
 /// builtins. Rich content remains the separate `.plaintext`/native-content
 /// path; it is not silently serialized or reparsed here.
-fn scalar_string_argument(value: &IrValue) -> Option<String> {
-    match value_conversion::convert_scalar(value, ScalarTarget::String) {
+fn scalar_string_argument(value: &InvocationValue) -> Option<String> {
+    match value_conversion::convert_scalar_with_origin(value, ScalarTarget::String) {
         Ok(ScalarValue::String(value)) => Some(value),
         Ok(_) => None,
-        Err(_) => match value {
+        Err(_) => match &value.value {
             IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
             _ => None,
         },

@@ -1318,9 +1318,42 @@ mod tests {
     }
 
     #[test]
+    fn compile_dynamic_and_static_string_origins_use_different_conversion_boundaries() {
+        let positive = ".var {number-text} {.string {-3.5}}\n.abs {.number-text}\n\n.var {boolean-text} {.string {YES}}\n.if {.boolean-text}\n    boolean conversion\n\n.var {range-text} {.string {2..4}}\n.foreach {.range-text}\n    .1\n.size {.range-text}\n";
+        let (result, _) = compile_source(positive);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5\nboolean conversion\n2\n3\n4\n3");
+
+        let (result, _) = compile_source(".var {chain-text} {.string {-3.5}}\n.chain-text::abs\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5");
+
+        let (result, _) = compile_source(
+            ".function {numeric-text}\n    .string {-3.5}\n\n.abs {.numeric-text}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5");
+
+        for source in [
+            ".abs {.string {-3.5}}\n",
+            ".if {.string {YES}}\n    should not be emitted\n",
+            ".range from:{.string {2}} to:{4}\n",
+            ".foreach {.string {2..4}}\n    .1\n",
+            ".string {-3.5}::abs\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.diagnostics[0].primary.is_some(), "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+    }
+
+    #[test]
     fn compile_dynamic_value_conversion_failures_are_atomic_and_source_backed() {
         for source in [
-            "앞 문장\r\n.sum {.string {not-a-number}} {1}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.abs {.string {-3.5}}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.range from:{.string {2}} to:{4}\r\n뒤 문장\r\n",
             "앞 문장\r\n.if {.string {maybe}}\r\n    숨겨진 내용\r\n뒤 문장\r\n",
             "앞 문장\r\n.foreach {.string {2 .. 4}}\r\n    .1\r\n뒤 문장\r\n",
         ] {

@@ -35,7 +35,7 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `NumberValue.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt | Integral Float normalization to Int, including the observable finite/non-finite conversion boundary | 2026-08-18 |
 | Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory; null/None returns no converted value and conversion is consumed at argument binding | 2026-08-20 |
 | Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Number integer-first/Float fallback, exact Boolean text forms, textual Range forms, scalar `toString`, and context-sensitive Markdown conversion boundaries | 2026-08-20 |
-| Quarkdown v2.5.1 `RegularArgumentsBinder.kt`  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/RegularArgumentsBinder.kt | Actual invocation consumer for DynamicValue target conversion; target type is selected from the bound parameter | 2026-08-20 |
+| Quarkdown v2.5.1 `RegularArgumentsBinder.kt`  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt | Actual invocation consumer for DynamicValue target conversion; target type is selected from the bound parameter | 2026-08-20 |
 | Quarkdown v2.5.1 `Lambda.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt | Actual callable invocation consumer for argument conversion in a captured/child evaluation context | 2026-08-20 |
 | Quarkdown v2.5.1 `Range.kt`                   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Range endpoint representation and canonical `start..end` string form | 2026-08-20 |
 | Quarkdown v2.5.1 `Optionality.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt | Existing `.ifpresent(None)` skip and `.takeif(None)` predicate behavior kept separate from conversion failure and omission | 2026-08-20 |
@@ -314,24 +314,31 @@ upstream Number-to-Int conversion, and endless open-range rejection.
 
 The v2.5.1 [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
 has two actual consumers in the reviewed core: regular argument binding and
-lambda invocation. Its `null` result for an unwrapped `None` is distinct from
-an invalid conversion and from omission of an optional parameter. The
-conversion candidates were therefore classified by target and current
-consumer rather than by copying the upstream object hierarchy.
+lambda invocation. [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt)
+invokes it only when the bound value is actually `DynamicValue`; a static
+`StringValue` does not convert to `Number`, `Boolean`, or `Iterable` and only
+adapts through its own String/`InlineMarkdownContent` boundary. Its `null`
+result for an unwrapped `None` is distinct from an invalid conversion and from
+omission of an optional parameter. The conversion candidates were therefore
+classified by invocation origin, target, and current consumer rather than by
+copying the upstream object hierarchy.
 
 The reviewed `ValueFactory.kt` rules and Scribium boundaries are:
 
-- `Number`: an existing numeric value is identity-equivalent; text is parsed
-  as `Int` first and then `Float`, with no whitespace normalization. Invalid
-  text, overflow outside both parse paths, and unsupported structured values
-  fail through the existing source-backed diagnostic path.
-- `Boolean`: an existing Boolean is identity-equivalent; text accepts only
-  case-insensitive `true`, `yes`, `false`, or `no`. Non-empty text and numeric
-  truthiness are not added.
-- `Range`: text matches only the unsigned decimal `x..y`, `..y`, `x..`, or
-  `..` forms. The conversion does not call the source parser; endpoint
-  overflow follows the reviewed `toIntOrNull()` open-end behavior, while
-  standard iterable consumption still rejects endless ranges.
+- `Number`: an existing numeric value is identity-equivalent; DynamicValue
+  text is parsed as `Int` first and then `Float`, with no whitespace
+  normalization. A static StringValue is not parsed. Invalid text, overflow
+  outside both parse paths, and unsupported structured values fail through the
+  existing source-backed diagnostic path.
+- `Boolean`: an existing Boolean is identity-equivalent; DynamicValue text
+  accepts only case-insensitive `true`, `yes`, `false`, or `no`. A static
+  StringValue is not truthiness-coerced. Non-empty text and numeric truthiness
+  are not added.
+- `Range`: DynamicValue text matches only the unsigned decimal `x..y`, `..y`,
+  `x..`, or `..` forms. A static StringValue is not parsed as an iterable. The
+  conversion does not call the source parser; endpoint overflow follows the
+  reviewed `toIntOrNull()` open-end behavior, while standard iterable
+  consumption still rejects endless ranges.
 - `String`: scalar String/Identifier, Number, Boolean, and typed Range values
   have a bounded textual boundary. `None`, collections, callables, and rich
   document/content values are not blindly stringified.

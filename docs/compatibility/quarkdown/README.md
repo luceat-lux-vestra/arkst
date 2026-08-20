@@ -200,6 +200,15 @@ conversion policy inside the existing evaluator/value-resolution path instead
 of reproducing the Kotlin class model or introducing a universal conversion
 engine.
 
+The gate is the argument's origin, not the final `IrValue` shape. Only a value
+that reaches the call as a DynamicValue-origin argument receives the textual
+Number, Boolean, or Range/Iterable conversion below. A statically materialized
+`StringValue`—for example the direct result of nested `.string`—remains a
+String and does not acquire those target types. Variable and custom-function
+references retain the dynamic invocation boundary when they are passed to a
+consumer. This distinction is evaluator-internal and is not emitted into the
+backend-neutral IR.
+
 The implemented boundary is deliberately consumer-driven:
 
 | Target | Status | Existing Scribium consumer | v2.5.1 evidence |
@@ -207,26 +216,29 @@ The implemented boundary is deliberately consumer-driven:
 | `Number` | bounded scalar conversion implemented | arithmetic/numeric arguments and dynamic range endpoints | [`ValueFactory.number`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt) |
 | `Boolean` | bounded scalar conversion implemented | conditions, predicates, and boolean argument flags | [`ValueFactory.boolean`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt) |
 | `Range` | bounded conversion implemented for iterable consumers | `.foreach`, collection access, and dynamic range materialization | [`ValueFactory.range`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt), [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt) |
-| `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
+| `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary; static StringValue remains String | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`StringValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/StringValue.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
 | `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | context-sensitive conversion deferred | parser/evaluation context is required | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
 | `Size`, `Color`, `Enum`, and layout/document values | component/layout conversion deferred | no current approved semantic consumer | v2.5.1 value families; no Scribium consumer in this slice |
 | collections, callables, and generic document/content stringification | unsupported conversion; existing typed operations remain separate | typed collection/callable paths only | `DynamicValueConverter.kt`, `ValueFactory.kt`, and consumer signatures |
 
 The scalar rules are evidence-backed: Number keeps an already typed value and
-parses text as integer first, then Float, without trimming; Boolean accepts
-only case-insensitive `true`, `yes`, `false`, and `no`; Range accepts the
-reviewed textual `x..y`, `..y`, `x..`, and `..` forms without whitespace or
-signed endpoints; and String handles scalar values and typed Range text. None
-is not converted. `.ifpresent(None)` skips its callback while `.takeif(None)`
+parses **DynamicValue-origin** text as integer first, then Float, without
+trimming; Boolean accepts only case-insensitive `true`, `yes`, `false`, and
+`no` from that same dynamic boundary; Range accepts the reviewed textual
+`x..y`, `..y`, `x..`, and `..` forms without whitespace or signed endpoints
+only for a dynamic iterable consumer; and String handles its own typed value,
+scalar values, and typed Range text. A static StringValue does not become a
+Number, Boolean, or Iterable merely because its text happens to parse. None is
+not converted. `.ifpresent(None)` skips its callback while `.takeif(None)`
 still invokes its predicate; these are separate from conversion failure and
 optional argument omission.
 
 Invalid conversions use the existing source-backed `E3001` path and do not
 publish partial IR, collection, or callback results. Conversion is a pure
-semantic transformation over the resolved value and explicit target; it does
-not access files, processes, the network, a backend, or a hidden parser. In
-particular, String → Markdown reparsing and String → InlineMarkdownContent
-reparsing are deferred. The independently authored
+semantic transformation over the invocation value, its dynamic-origin bit,
+and explicit target; it does not access files, processes, the network, a
+backend, or a hidden parser. In particular, String → Markdown reparsing and
+String → InlineMarkdownContent reparsing are deferred. The independently authored
 `fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family` fixture and
 the evaluator/unit tests cover the implemented consumer paths. This is
 **bounded scalar conversion implemented**, not broad DynamicValue
