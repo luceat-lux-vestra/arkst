@@ -97,14 +97,14 @@ implementation here.
 
 | Feature | Quarkdown v2.5.1 behavior | Scribium current behavior | Architecture decision | Implementation status | Deferred work |
 |---|---|---|---|---|---|
-| Custom functions | `.function` defines a callable with a signature, lexical definition context, caller propagation, dynamic result, and separate output conversion | Bounded user functions with immutable capture, typed values, and isolated child maps; caller-overlay behavior is not complete | Keep `IrCallable` as evaluator value; separate invocation result from document node | Partial, existing slice | Differential scope compatibility and caller propagation |
+| Custom functions | `.function` defines a callable with a signature, lexical definition context, caller propagation, dynamic result, and separate output conversion | Bounded user functions with immutable definition capture, a lookup-only caller overlay, typed values, and isolated invocation child maps | Keep `IrCallable` as evaluator value; compose definition and caller layers without replacing capture | Partial, caller overlay implemented | Broader stdlib/component call surface and owner-mutation parity |
 | Lambda explicit parameters | Parameters bind by signature and shadow outer implicit parameters | Explicit lambda parameters and shadowing are supported in the bounded evaluator slice | Parameter installation is last in child scope | Bounded implemented | Broader upstream scope fixtures |
-| Lambda implicit parameters | Headerless parameters are `.1`, `.2`, …; explicit parameters mask them | Headerless implicit scope exists for the current callable/callback slice | Preserve implicit scope as evaluator state, never backend state | Bounded implemented | Caller/definition overlay parity |
-| Lexical/calling scope | Definition context is retained; mutable calling context can be propagated; nested lookup is nearest-first | Captures are immutable snapshots; captured calls do not yet overlay caller variables; child ordinary writes are local | Adopt hybrid target model; record current difference as a gap | Architecture decided; compatibility partial | Follow-up scope implementation |
+| Lambda implicit parameters | Headerless parameters are `.1`, `.2`, …; explicit parameters mask them | Headerless invocation scope is nearest-first; a missing local implicit slot can resolve a propagated caller slot, while explicit scope remains a hard mask | Preserve implicit scope as evaluator state, never backend state | Bounded implemented | Broader upstream scope fixtures |
+| Lexical/calling scope | Definition context is retained; mutable calling context can be propagated; nested lookup is nearest-first | Definition capture remains immutable; caller-visible variables/functions and the visible caller lambda scope are overlaid only for one invocation; local writes remain isolated | Adopt hybrid target model with explicit definition, caller-overlay, and invocation layers | Bounded compatibility implemented | Parent-owner reassignment and broader mutable-scope parity |
 | Lazy body evaluation | Body is a lazy `DynamicValue`; unreachable conditional/body paths do not execute it | Block bodies are evaluated on the existing callable path after binding; conversion failures precede body execution | Preserve eager inline vs lazy body timing | Bounded implemented | More differential lazy-body fixtures |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue` and `IrValue::Content`; unresolved calls are preserved; no general component carrier yet | Add future `IrValue::Component`; materialize to `IrNode` at output boundary | Architecture decided; implementation deferred | Component value and node materialization |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | Target-specific HTML has a closed semantic node slice; general components are not present | Keep node results backend-neutral and distinguish them from unresolved calls | Partial/closed slice | General component contract |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes; final `IrMetadata.document_state` snapshot; `.docname` and `.docdescription` are implemented with bounded String conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation implemented; `.docname` and `.docdescription` implemented | Scope/caller overlay compatibility; remaining document fields |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname` and `.docdescription` are implemented with bounded String conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname` and `.docdescription` implemented | Remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | Not implemented | Future component value, then semantic node; no Typst representation in IR | Not implemented by design | Layout semantic slice |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | Not implemented | Same backend-neutral component boundary | Not implemented by design | Layout semantic slice |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | Not implemented | Validate in evaluator before component construction | Not implemented by design | Grid validation and lowering |
@@ -117,9 +117,32 @@ implementation here.
 ## Normative evaluator rules
 
 The observable order is: callee resolution; inline argument evaluation in
-source order; named/positional binding; origin-aware conversion; child-scope
+source order; named/positional binding; origin-aware conversion; definition
+capture restoration; caller-visible lookup overlay; invocation child-scope
 creation; parameter installation; lazy body decision; call execution; typed
 result construction; document-state commit; result materialization.
+
+The bounded scope implementation keeps these layers explicit:
+
+    definition capture
+            ↓ fallback
+    caller-visible variables/functions and lambda scope
+            ↓ fallback
+    invocation child scope
+            ↓ highest precedence
+    invocation parameters
+
+The caller overlay is a lookup-only invocation layer. It does not replace or
+mutate IrCallableCapture, copy project/source/diagnostic runtime state, or turn
+child variable writes into parent-owner mutation. Document state remains the
+explicit shared runtime handle established by the Document State Foundation.
+Parent-owner reassignment and broader mutable-scope parity remain
+partial/deferred.
+
+For this slice, definition capture, caller lookup overlay, invocation
+parameter precedence, and implicit-parameter precedence are implemented.
+Parent-owner reassignment mutation and other mutable scope parity remain
+partial/deferred.
 
 `InvocationValue` and `ValueOrigin` from PR #105 remain mandatory. Dynamic
 textual values may use bounded target adapters; static `StringValue` does not

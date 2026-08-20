@@ -1873,6 +1873,107 @@ mod tests {
     }
 
     #[test]
+    fn compile_captured_callable_uses_definition_fallback_and_caller_shadowing() {
+        let source = r#".var {value} {definition}
+.function {captured}
+    .value
+
+.captured
+.var {value} {caller}
+.captured
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "definition\ncaller");
+    }
+
+    #[test]
+    fn compile_invocation_parameters_shadow_caller_and_definition_bindings() {
+        let source = r#".var {value} {definition}
+.function {show}
+    value:
+    .value
+
+.var {value} {caller}
+.show {parameter}
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "parameter");
+    }
+
+    #[test]
+    fn compile_captured_callable_sees_caller_defined_function() {
+        let source = r#".function {outer}
+    .helper
+
+.function {helper}
+    caller helper
+
+.outer
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "caller helper");
+    }
+
+    #[test]
+    fn compile_nested_callable_propagates_caller_overlay_without_leaking_it() {
+        let source = r#".function {inner}
+    .value
+
+.function {outer}
+    .inner
+
+.var {value} {caller}
+.outer
+.var {value} {next caller}
+.outer
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "caller\nnext caller");
+    }
+
+    #[test]
+    fn compile_nested_implicit_parameters_use_the_nearest_available_binding() {
+        let source = r#".function {inner}
+    .1
+
+.function {outer}
+    .inner
+
+.let {caller}
+    .outer {outer}
+
+.function {nested}
+    .1
+
+.function {invoker}
+    .nested {nested}
+
+.let {caller}
+    .invoker {outer}
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "outer\nnested");
+    }
+
+    #[test]
+    fn compile_explicit_lambda_parameters_mask_outer_implicit_parameters() {
+        let source = r#".let {outer}
+    .let {inner}
+        value:
+        .1
+"#;
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
     fn compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic() {
         let no_value = ".function {noop}\n    .var {temporary} {value}\n\n.sum {.noop} {1}\n";
         let (result, _) = compile_source(no_value);

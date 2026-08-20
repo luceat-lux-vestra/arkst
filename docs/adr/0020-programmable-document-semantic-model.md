@@ -244,6 +244,26 @@ compatibility gap. This ADR does not silently change it or introduce a parallel
 evaluator; a later bounded scope-compatibility PR must add differential tests
 and update this decision if the gap is closed.
 
+### Scope compatibility addendum (2026-08-21)
+
+The bounded follow-up from baseline `c77f3466ca2917266922bb989d7271f880af48e`
+closes the caller-lookup portion of that gap. Invocation now composes:
+
+    definition capture → caller-visible lookup overlay → invocation parameters
+
+The overlay contains only caller-visible evaluator bindings: variables, user
+functions, and the visible caller lambda-parameter scope. It is a fresh,
+invocation-scoped lookup layer whose parent remains the definition capture.
+Invocation parameters are installed in the child scope after the overlay and
+therefore have highest precedence. Nested callables receive the current
+invocation's visible overlay through the same shared path.
+
+The overlay does not replace or mutate `IrCallableCapture`, copy project/source
+or diagnostic runtime state, or provide parent-owner variable mutation.
+Document state remains the explicit shared runtime handle from the Document
+State Foundation. Parent-owner reassignment and broader mutable-scope parity
+remain partial/deferred.
+
 ## Document-state model
 
 Document metadata and document-level mutable state are evaluator-owned. The
