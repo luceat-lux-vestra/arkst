@@ -5,8 +5,8 @@
 - **Tracked target:** Quarkdown `v2.5.1`
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
-- **Review date:** 2026-08-19
-- **Scribium comparison head:** `9fd877f2a3b4440f2b944bf919d2d7ac693359e4`
+- **Review date:** 2026-08-20
+- **Scribium comparison head:** `054437ae08c805fcd1d897244ea1dc2aa38f6993`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
