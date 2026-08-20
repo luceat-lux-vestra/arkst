@@ -656,6 +656,33 @@ impl EvaluationContext {
         context
     }
 
+    /// Composes a callable's definition environment with the bindings visible
+    /// at its call site. The definition context remains the parent layer, so
+    /// caller-visible variables/functions supplement it without replacing the
+    /// lexical capture or becoming part of that capture.
+    fn with_caller_overlay(definition_context: Self, caller_context: &Self) -> Self {
+        let mut variables = BTreeMap::new();
+        let mut functions = BTreeMap::new();
+        caller_context.collect_bindings(&mut variables, &mut functions);
+
+        Self {
+            parent: Some(Box::new(definition_context)),
+            variables: variables
+                .into_iter()
+                .map(|(name, value)| (name, VariableValue::from_evaluated_value(value)))
+                .collect(),
+            functions,
+            lambda_scope: caller_context.visible_lambda_scope(),
+            // Runtime/compiler state is intentionally not copied into this
+            // lookup-only layer. Document state is the one explicit shared
+            // exception required by the document-state contract.
+            project: None,
+            current_source: None,
+            active_sources: Vec::new(),
+            document_state: Rc::clone(&caller_context.document_state),
+        }
+    }
+
     #[cfg(test)]
     fn set_function(&mut self, name: String, parameters: Vec<String>) {
         let parameters = parameters
@@ -738,18 +765,37 @@ impl EvaluationContext {
         let index = implicit_parameter_index(name)?;
         match self.lambda_scope.as_ref() {
             Some(LambdaScope::Explicit) => Some(Err(ImplicitParameterError::Missing)),
-            Some(LambdaScope::Implicit(arguments)) => Some(match index {
-                ImplicitParameterIndex::Valid(index) => arguments
-                    .get(index.saturating_sub(1))
-                    .cloned()
-                    .ok_or(ImplicitParameterError::Missing),
-                ImplicitParameterIndex::Overflow => Err(ImplicitParameterError::Overflow),
-            }),
+            Some(LambdaScope::Implicit(arguments)) => match index {
+                ImplicitParameterIndex::Valid(index) => {
+                    let resolved = arguments
+                        .get(index.saturating_sub(1))
+                        .cloned()
+                        .map(Ok)
+                        .or_else(|| {
+                            self.parent
+                                .as_deref()
+                                .and_then(|parent| parent.get_implicit_parameter(name))
+                        });
+                    Some(resolved.unwrap_or(Err(ImplicitParameterError::Missing)))
+                }
+                ImplicitParameterIndex::Overflow => Some(Err(ImplicitParameterError::Overflow)),
+            },
             None => self
                 .parent
                 .as_deref()
                 .and_then(|parent| parent.get_implicit_parameter(name)),
         }
+    }
+
+    /// Returns the nearest lambda scope that is visible from this context.
+    /// The caller overlay copies this one scope as lookup state; it does not
+    /// retain a reference to the mutable caller context.
+    fn visible_lambda_scope(&self) -> Option<LambdaScope> {
+        self.lambda_scope.clone().or_else(|| {
+            self.parent
+                .as_deref()
+                .and_then(|parent| parent.visible_lambda_scope())
+        })
     }
 }
 
@@ -3152,15 +3198,18 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &EvaluationContext,
     ) -> CallOutcome {
-        let mut base = callable
+        let definition_context = callable
             .capture
             .as_deref()
             .map(EvaluationContext::from_capture)
-            .unwrap_or_else(|| caller_context.clone());
-        // Lexical bindings remain captured as before, while document state
-        // follows the ordinary caller evaluation context.
-        base.document_state = Rc::clone(&caller_context.document_state);
-        let mut child = base.child();
+            .unwrap_or_default();
+        // Preserve the definition snapshot as the lexical base, then add only
+        // caller-visible lookup bindings. Invocation parameters are installed
+        // in the child below, after both layers, so they have highest
+        // precedence. Document state is shared separately by the overlay.
+        let invocation_base =
+            EvaluationContext::with_caller_overlay(definition_context, caller_context);
+        let mut child = invocation_base.child();
         match bound {
             BoundLambdaArguments::Explicit(values) => {
                 child.set_lambda_scope(LambdaScope::Explicit);
@@ -7332,7 +7381,7 @@ mod tests {
     }
 
     #[test]
-    fn first_class_callable_captures_definition_values_and_checks_arity() {
+    fn first_class_callable_captures_definition_values_and_applies_caller_overlay() {
         let evaluator = Evaluator::new();
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
@@ -7407,7 +7456,7 @@ mod tests {
         assert!(matches!(
             result,
             CallOutcome::Value(IrValue::Collection(values))
-                if values == vec![IrValue::Number(11.0)]
+                if values == vec![IrValue::Number(21.0)]
         ));
 
         let wrong_arity = evaluator.evaluate_call_value(
@@ -10728,5 +10777,52 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E3002");
         assert!(diagnostics[0].message.contains("Invalid variable name"));
+    }
+
+    #[test]
+    fn caller_overlay_failure_does_not_mutate_capture_or_caller_context() {
+        let capture = IrCallableCapture {
+            variables: vec![IrCapturedVariable {
+                name: "value".to_string(),
+                value: IrValue::String("definition".to_string()),
+            }],
+            functions: Vec::new(),
+        };
+        let callable = IrCallable {
+            parameters: None,
+            body: vec![IrNode::FunctionCall {
+                name: "multiply".to_string(),
+                positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+                named_args: Vec::new(),
+                lambda_parameters: None,
+                body: None,
+                span: span(10, 20),
+            }],
+            span: span(0, 20),
+            capture: Some(Box::new(capture)),
+        };
+        let original_capture = callable.capture.clone();
+        let mut caller_context = EvaluationContext::new();
+        caller_context.set_value("value".to_string(), IrValue::String("caller".to_string()));
+        let mut diagnostics = Vec::new();
+
+        let outcome = Evaluator::new().invoke_callable(
+            &callable,
+            Vec::new(),
+            IterationOptions {
+                span: span(0, 20),
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &caller_context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(callable.capture, original_capture);
+        assert_eq!(
+            caller_context.get("value").map(VariableValue::to_value),
+            Some(IrValue::String("caller".to_string()))
+        );
     }
 }
