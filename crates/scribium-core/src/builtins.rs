@@ -830,17 +830,21 @@ fn number_value_is_integral(value: f32) -> bool {
 /// Strictly adapts the narrow `decimals: Int` parameter boundary.
 ///
 /// Quarkdown accepts an integral numeric representation such as `2` or `2.0`
-/// after NumberValue normalization, but a fractional NumberValue and quoted
-/// text are not silently converted to an Int.
+/// after the DynamicValue Number conversion and NumberValue normalization.
+/// Static StringValue text and fractional NumberValue results are not silently
+/// converted to an Int.
 fn integer_argument(value: &InvocationValue, parameter: &str) -> Result<i32, BuiltinError> {
     let number = match &value.value {
         IrValue::Number(value) => *value as f32,
-        IrValue::Identifier(text) if value.origin == ValueOrigin::Dynamic => text
-            .parse::<i32>()
-            .map(|value| value as f32)
-            .ok()
-            .or_else(|| text.parse::<f32>().ok())
-            .ok_or_else(|| error(format!("`{parameter}` must be an integer")))?,
+        IrValue::String(text) | IrValue::Identifier(text)
+            if value.origin == ValueOrigin::Dynamic =>
+        {
+            text.parse::<i32>()
+                .map(|value| value as f32)
+                .ok()
+                .or_else(|| text.parse::<f32>().ok())
+                .ok_or_else(|| error(format!("`{parameter}` must be an integer")))?
+        }
         _ => return Err(error(format!("`{parameter}` must be an integer"))),
     };
     if !number_value_is_integral(number) {
@@ -958,9 +962,10 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{deterministic_transcendental, evaluate, is_supported};
+    use super::{deterministic_transcendental, evaluate, evaluate_with_origins, is_supported};
     use crate::ir::{IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrValue};
     use crate::source::{SourceId, SourceSpan};
+    use crate::value_conversion::InvocationValue;
 
     fn number(value: f64) -> IrValue {
         IrValue::Number(value)
@@ -1115,24 +1120,40 @@ mod tests {
             false,
         )
         .is_err());
-        assert!(evaluate(
-            "truncate",
-            &[number(1.0)],
-            &[named_arg("decimals", IrValue::String("2".into()))],
-            false,
-        )
-        .is_err());
-        assert!(evaluate(
-            "truncate",
-            &[number(1.0)],
-            &[named_arg("decimals", IrValue::String("2.0".into()))],
-            false,
-        )
-        .is_err());
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[number(1.0)],
+                &[named_arg("decimals", IrValue::String("2".into()))],
+                false,
+            )
+            .expect("dynamic String decimals should use Number conversion"),
+            number(1.0)
+        );
+        assert_eq!(
+            evaluate(
+                "truncate",
+                &[number(1.0)],
+                &[named_arg("decimals", IrValue::String("2.0".into()))],
+                false,
+            )
+            .expect("integral dynamic Float text should normalize to Int"),
+            number(1.0)
+        );
         assert!(evaluate(
             "truncate",
             &[number(1.0)],
             &[named_arg("decimals", IrValue::String("1.5".into()))],
+            false,
+        )
+        .is_err());
+        assert!(evaluate_with_origins(
+            "truncate",
+            &[
+                InvocationValue::dynamic_value(number(1.0)),
+                InvocationValue::static_value(IrValue::String("2".into())),
+            ],
+            &[],
             false,
         )
         .is_err());

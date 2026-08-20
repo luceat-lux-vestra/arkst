@@ -1419,6 +1419,25 @@ mod tests {
     }
 
     #[test]
+    fn compile_truncate_accepts_only_integral_dynamic_number_text() {
+        let source = ".var {two-text} {.string {\"2\"}}\n.truncate {12.345} decimals:{.two-text}\n.var {two-point-zero-text} {.string {\"2.0\"}}\n.truncate {12.345} decimals:{.two-point-zero-text}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "12.34\n12.34");
+
+        for source in [
+            "앞 문장\r\n.var {fraction-text} {.string {\"1.5\"}}\r\n.truncate {12.345} decimals:{.fraction-text}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.truncate {12.345} decimals:{.string {\"2\"}}\r\n뒤 문장\r\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.diagnostics[0].primary.is_some(), "{source:?}");
+            assert_eq!(output_text(&result), "앞 문장\n뒤 문장", "{source:?}");
+        }
+    }
+
+    #[test]
     fn compile_numeric_nested_failure_is_atomic_and_source_backed() {
         let source = "앞 문장\r\n.sum {.divide {10} by:{true}} {20}\r\n뒤 문장\r\n";
         let (result, source_id) = compile_source(source);

@@ -59,7 +59,7 @@ subsequent bounded slices; it replaces an opaque remaining-M2 list.
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
-| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, strict `decimals: Int` adaptation, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
+| Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, DynamicValue Number conversion for textual `decimals` followed by Int-only normalization, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
 | String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; Dynamic String → InlineMarkdownContent conversion remains unsupported | Implemented (bounded v2.5.1 slice) |
 | Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
@@ -704,6 +704,11 @@ the following observable boundaries:
 - `NumberValue` normalizes integral Float values, including clamped
   non-finite conversions, to Int. This is why the final NaN/Infinity behavior
   must be checked after rounding or conversion, not from `round()` alone.
+- The `decimals: Int` binder uses the same invocation-time DynamicValue Number
+  conversion as other numeric targets: it parses dynamic text as Int first,
+  then Float, and succeeds only when NumberValue normalization produces an
+  integral Int. Dynamic `2` and `2.0` therefore succeed, dynamic `1.5` fails,
+  and static StringValue `2` remains rejected.
 
 The existing arithmetic path retains the v2.5.1 `toFloat()` boundary;
 `.pow` and `.iseven` apply `Number.toInt()`, division-by-zero results clamp to
@@ -714,9 +719,10 @@ remain `NaN`, and remainder keeps signed floating behavior.
 [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt),
 and [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
 establish the invocation-time numeric and normalization boundaries. Scribium
-uses the bounded conversion policy for concrete numeric consumers and keeps
-the local strict integer-compatible `decimals` adapter separate; it does not
-introduce a general DynamicValue conversion framework. All numeric functions
+uses the bounded conversion policy for concrete numeric consumers, including
+the same DynamicValue Number conversion for `decimals` before its Int-only
+NumberValue normalization check; it does not introduce a general DynamicValue
+conversion framework. All numeric functions
 use the existing argument binder, preserve `IrValue::Number` or
 `IrValue::Boolean`, and reject
 unsupported values, unknown/duplicate bindings, arity errors, and block bodies

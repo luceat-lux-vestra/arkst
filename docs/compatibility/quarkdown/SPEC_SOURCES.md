@@ -193,9 +193,11 @@ normalizes integral Float values to Int before the builtin result is exposed.
 [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
 and [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt)
 were reviewed to distinguish an integral numeric representation from a
-fractional NumberValue. The decimal slice therefore accepts `2`/`2.0` as an
-integral numeric `Int` boundary, rejects `1.5`, quoted numeric text, and NaN
-for `decimals`, and preserves the negative-Int runtime failure. The existing
+fractional NumberValue. Because `Int` is a `Number` subtype, the decimal
+slice uses the same DynamicValue Number conversion: dynamic text is parsed as
+Int first, then Float, and only an integral normalized NumberValue reaches the
+`Int` boundary. Dynamic `2`/`2.0` therefore succeed, dynamic `1.5` and NaN
+fail, and static StringValue text such as `2` remains rejected. The existing
 Scribium scalar numeric path remains the adaptation boundary for `x` and does
 not introduce a general DynamicValue converter.
 
@@ -206,8 +208,9 @@ behavior is not determined by `round()` alone. It confirmed `2.5 -> 2`,
 `3.5 -> 4`, `-2.5 -> -2`, `-3.5 -> -4`, NaN -> `0`, positive/negative
 infinity -> `Int.MAX_VALUE`/`Int.MIN_VALUE`, large finite rounding clamps, and
 integral `decimals` values above ordinary decimal precision do not hit an
-arbitrary upstream limit. Quoted numeric strings for the `Int` parameter fail
-type conversion.
+arbitrary upstream limit. Dynamic numeric strings for the `Int` parameter use
+the Number conversion described above; static StringValue text fails type
+conversion.
 
 Scribium covers this evidence through the shared `bind_arguments` path,
 `integer_argument`, `kotlin_float_to_int`, typed `IrValue::Number` results,
@@ -241,8 +244,9 @@ The standard representative outputs `.logn {2}` → `0.6931472`,
 `.sin {1}` → `0.84147096`, `.cos {1}` → `0.5403023`, and `.tan {1}` →
 `1.5574077` are also retained in the conformance/unit corpus. The reviewed
 `ValueFactory.number` conversion accepts textual numeric input with integer
-parsing before Float fallback; the separate `decimals: Int` parameter remains
-strict and does not inherit that textual conversion.
+parsing before Float fallback, and `decimals: Int` inherits that same
+DynamicValue conversion before requiring NumberValue-compatible integral
+normalization.
 
 Kotlin/JVM bytecode for the Float overload expands to `f2d`,
 `java.lang.Math.*(double)`, then `d2f`. Scribium reproduces that observable

@@ -109,11 +109,12 @@ are fixed in unit tests; the helper preserves signed zero and IEEE non-finite
 classes before the existing NumberValue-style evaluator normalization.
 
 The earlier decimal family remains implemented under the same boundary:
-`decimals` has a narrow strict integer-compatible adapter, integral
-NumberValue representations are accepted, fractional values and quoted text
-are rejected, and negative accepted Int values fail at runtime. The evaluator
-preserves `IrValue::Number` and materializes only through the existing normal
-IR-to-Typst path.
+`decimals` uses the same invocation-time DynamicValue Number conversion as
+other numeric targets, then accepts only integral NumberValue-compatible
+results. Dynamic text `2` and `2.0` are accepted, dynamic `1.5` and static
+StringValue text are rejected, and negative accepted Int values fail at
+runtime. The evaluator preserves `IrValue::Number` and materializes only
+through the existing normal IR-to-Typst path.
 
 The current `.plaintext` slice is a separate bounded builtin adaptation. It
 consumes already-parsed inline content directly from `IrValue::Content` after
