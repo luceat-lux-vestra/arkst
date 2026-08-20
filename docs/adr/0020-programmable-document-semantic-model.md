@@ -159,9 +159,9 @@ rewrite the evaluator in this gate.
 
 Scribium adopts a value-first, typed semantic component boundary:
 
-1. A future `IrValue::Component` carries an `IrComponent` whose layout kind,
-   validated properties, semantic children, and source provenance are all
-   backend-neutral.
+1. The component value foundation provides `IrValue::Component`, carrying an
+   `IrComponent` whose layout kind, validated properties, semantic children,
+   and source provenance are all backend-neutral.
 2. The evaluator constructs and validates the component. It never stores
    Typst function names, Typst source, or backend escape strings in the value.
 3. A completed component is materialized into a typed `IrNode` at the same
@@ -181,7 +181,7 @@ materialization boundary rather than a component-specific node-only variant.
 
 The existing `CallOutcome` is retained as the evaluator result envelope:
 
-- `Value(IrValue)` — completed typed language value, including future component;
+- `Value(IrValue)` — completed typed language value, including a typed component;
 - `NoValue` — successful mutation/declaration with no document output;
 - `Failed` — source-backed diagnostic and no published result;
 - `Unresolved` — unsupported call preserved structurally for compatibility
@@ -450,7 +450,7 @@ Follow-up slices should be independently scoped and tested:
 1. document working-state snapshot and the read/write metadata builtins;
 2. scope/caller-overlay compatibility fixtures and any bounded evaluator fix;
 3. domain conversion adapters for `Size`, `Color`, and closed enums;
-4. content/component value construction with exact child provenance;
+4. source component construction with exact child provenance;
 5. semantic row/column/grid nodes and validation;
 6. pure Typst lowering for the approved semantic layout nodes.
 
@@ -476,3 +476,27 @@ decision above without changing ownership or introducing a second semantic IR:
 with a defaulted `Plain` document type. Older serialized snapshots default to
 `Plain`. This is an implementation status addendum, not a change to the
 architecture decision or its deferred component/layout sequencing.
+
+## Addendum: component value foundation (2026-08-21)
+
+The semantic component value foundation now realizes the value-side portion of
+this decision without changing the value-first boundary:
+
+- `IrValue::Component` carries the closed, backend-neutral `IrComponent`;
+- the first family is `IrComponent::Stacked`, with typed row/column/grid
+  layout, alignment, `IrSize` gaps, evaluated `Vec<IrNode>` children, and the
+  component-producing source span;
+- grid columns use a non-zero typed representation, so a completed semantic
+  grid cannot contain zero columns;
+- value-context, variable, and callable flow preserve the component as a
+  typed value, while scalar/domain conversion and scalar text helpers reject
+  it without stringification; and
+- block and inline output boundaries fail closed with the component's source
+  span until typed component materialization is available.
+
+This slice deliberately does not add `IrNode::Component` or any Typst
+lowering. Do not introduce a semantic node that the current backend contract
+cannot lower without loss. Source construction, node materialization, and
+backend lowering land together in the first component consumer slice so that
+the public IR never contains a component node that cannot be rendered
+correctly.
