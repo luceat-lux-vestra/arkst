@@ -557,9 +557,12 @@ backend lowering
 ```
 
 An `IrDocument` may therefore be at an earlier or later stage of semantic
-normalization; IR values are not inherently all already evaluated. The target
-architecture does not introduce HIR/MIR or separate evaluated and unevaluated
-IR crates.
+normalization; IR values are not inherently all already evaluated. In
+particular, a resolved call may materialize a semantic value while an
+unsupported call may remain as an explicitly unresolved structural call. The
+target architecture does not introduce HIR/MIR or separate evaluated and
+unevaluated IR crates. The component/value and unresolved-call boundary is
+defined by [ADR-0020](adr/0020-programmable-document-semantic-model.md).
 
 `scribium-ir` owns the backend-neutral IR model, including the architectural
 equivalents of `IrDocument`, `IrMetadata`, `IrNode`, `IrInline`, `IrListItem`,
@@ -588,10 +591,14 @@ IrDocument
     └── IrValue
 ```
 
-A semantic function/component-call node represents a Scribium/Quarkdown
-semantic operation, not pre-generated Typst source. The Typst backend may lower
-that semantic node into an appropriate Typst construct; retaining the semantic
-operation does not make the IR Typst-specific.
+A semantic function/component result is constructed by the evaluator as a
+backend-neutral value and is materialized into a document node only at the
+document output boundary. `IrValue::Content` remains structured content, while
+an unresolved `FunctionCall` remains structural unresolved syntax. A future
+component value may contain semantic layout properties and children, but never
+Typst names or Typst source. The Typst backend may lower the materialized
+semantic node into an appropriate Typst construct; this does not make the IR
+Typst-specific.
 
 IR nodes preserve their original `SourceSpan`, but generated-output source-map
 entries are not stored in `IrDocument` or `IrNode`:

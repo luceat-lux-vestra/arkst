@@ -42,6 +42,14 @@ The remaining public-language surface is tracked in the
 status, semantic gaps, conformance evidence, and recommended order for
 subsequent bounded slices; it replaces an opaque remaining-M2 list.
 
+The function/lambda/component/document architecture gate is recorded in
+[`PROGRAMMABLE_DOCUMENT_SEMANTICS.md`](PROGRAMMABLE_DOCUMENT_SEMANTICS.md),
+with the normative representation and evaluator/backend boundary in
+[`ADR-0020`](../../adr/0020-programmable-document-semantic-model.md). That
+record is an architecture decision and compatibility gap analysis; it does
+not claim that row, column, grid, or general document components are
+implemented.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
