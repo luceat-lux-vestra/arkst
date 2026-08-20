@@ -914,7 +914,7 @@ fn error(message: String) -> BuiltinError {
 /// Applies the context-free String conversion boundary used by scalar string
 /// builtins. Rich content remains the separate `.plaintext`/native-content
 /// path; it is not silently serialized or reparsed here.
-fn scalar_string_argument(value: &InvocationValue) -> Option<String> {
+pub(crate) fn scalar_string_argument(value: &InvocationValue) -> Option<String> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::String) {
         Ok(ScalarValue::String(value)) => Some(value),
         Ok(_) => None,

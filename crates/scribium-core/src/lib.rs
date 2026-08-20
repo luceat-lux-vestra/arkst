@@ -1247,6 +1247,66 @@ mod tests {
     }
 
     #[test]
+    fn document_state_reads_empty_values_when_unset() {
+        let (result, _) = compile_source(".docname\n.docdescription\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "\n");
+        assert_eq!(result.ir.metadata.document_state.name, "");
+        assert_eq!(result.ir.metadata.document_state.description, "");
+    }
+
+    #[test]
+    fn document_state_writes_return_no_value_and_reads_observe_commits() {
+        let (writes, _) = compile_source(".docname {My document}\n.docdescription {A document}\n");
+        assert!(writes.diagnostics.is_empty(), "{writes:?}");
+        assert!(writes.ir.nodes.is_empty(), "{writes:?}");
+        assert_eq!(writes.ir.metadata.document_state.name, "My document");
+        assert_eq!(writes.ir.metadata.document_state.description, "A document");
+
+        let (reads, _) = compile_source(
+            ".docname {My document}\n.docdescription {A document}\n.docname\n.docdescription\n",
+        );
+        assert!(reads.diagnostics.is_empty(), "{reads:?}");
+        assert_eq!(output_text(&reads), "My document\nA document");
+    }
+
+    #[test]
+    fn document_state_is_shared_by_callable_child_scopes() {
+        let source = ".function {rename}\n    .docname {inside}\n\n.rename\n.docname\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "inside");
+        assert_eq!(result.ir.metadata.document_state.name, "inside");
+    }
+
+    #[test]
+    fn blank_docname_fails_without_mutating_previous_state_or_losing_provenance() {
+        let source = ".docname {valid}\n.docname {   }\n.docname\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let second_call = source.find(".docname {   }").expect("blank docname call");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                second_call,
+                second_call + ".docname {   }".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "valid");
+        assert_eq!(result.ir.metadata.document_state.name, "valid");
+    }
+
+    #[test]
+    fn document_state_snapshot_is_preserved_after_later_failure() {
+        let source = ".docname {valid}\n.docdescription {description}\n.abs {invalid}\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.ir.metadata.document_state.name, "valid");
+        assert_eq!(result.ir.metadata.document_state.description, "description");
+    }
+
+    #[test]
     fn compile_v251_plaintext_fixture_projects_evaluated_inline_content() {
         let source =
             include_str!("../../../fixtures/quarkdown-conformance/cases/plaintext-family/input.qd");

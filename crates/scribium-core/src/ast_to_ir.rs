@@ -86,6 +86,7 @@ pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
                 author,
                 date,
                 raw,
+                document_state: Default::default(),
             },
         },
         diagnostics,
