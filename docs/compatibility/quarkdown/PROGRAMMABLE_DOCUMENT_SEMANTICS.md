@@ -89,7 +89,10 @@ number plus one of exactly `px`, `pt`, `cm`, `mm`, `in`, `em`, or `%`; omitted
 units mean `px`, unit spelling is case-insensitive, and the decimal grammar is
 not trimmed or widened to scientific notation. `Color` decodes the reviewed
 Hex, RGB, RGBA, HSV/HSL, and CSS3 named-color families into numeric RGBA
-channels. Closed enums use explicit allowed-value tables and Quarkdown's
+channels. Hex accepts exactly `#RGB`, `#RGBA`, `#RRGGBB`, and `#RRGGBBAA`;
+the alpha syntax is validated for compatibility, then discarded by the
+v2.5.1 adaptation path so the semantic alpha remains `1.0`. Closed enums use
+explicit allowed-value tables and Quarkdown's
 lowercase/underscore-removed declaration naming rule; input underscores are
 not removed. Typed domain values use identity conversion, dynamic textual
 values use only their bounded parser, and static `StringValue` results do not

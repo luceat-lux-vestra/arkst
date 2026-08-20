@@ -441,12 +441,36 @@ fn parse_hex_color(value: &str) -> Option<IrColor> {
                 alpha: 1.0,
             })
         }
+        4 => {
+            let red = hex_pair(digits.get(0..1)?, digits.get(0..1)?)?;
+            let green = hex_pair(digits.get(1..2)?, digits.get(1..2)?)?;
+            let blue = hex_pair(digits.get(2..3)?, digits.get(2..3)?)?;
+            hex_digit(digits.as_bytes().get(3)?.to_ascii_lowercase())?;
+            Some(IrColor {
+                red,
+                green,
+                blue,
+                alpha: 1.0,
+            })
+        }
         6 => Some(IrColor {
             red: hex_byte(digits.get(0..2)?)?,
             green: hex_byte(digits.get(2..4)?)?,
             blue: hex_byte(digits.get(4..6)?)?,
             alpha: 1.0,
         }),
+        8 => {
+            let red = hex_byte(digits.get(0..2)?)?;
+            let green = hex_byte(digits.get(2..4)?)?;
+            let blue = hex_byte(digits.get(4..6)?)?;
+            hex_byte(digits.get(6..8)?)?;
+            Some(IrColor {
+                red,
+                green,
+                blue,
+                alpha: 1.0,
+            })
+        }
         _ => None,
     }
 }
@@ -1835,6 +1859,78 @@ mod tests {
                 },
             ),
             (
+                "#369f",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#336699",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#33669980",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#aBcD",
+                IrColor {
+                    red: 170,
+                    green: 187,
+                    blue: 204,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#aAbBcCdD",
+                IrColor {
+                    red: 170,
+                    green: 187,
+                    blue: 204,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#33669900",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#3690",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                "#336699ff",
+                IrColor {
+                    red: 51,
+                    green: 102,
+                    blue: 153,
+                    alpha: 1.0,
+                },
+            ),
+            (
                 "rgb(145, 168, 50)",
                 IrColor {
                     red: 145,
@@ -1892,7 +1988,14 @@ mod tests {
 
         for text in [
             "#hello",
-            "#1234",
+            "#12",
+            "#12345",
+            "#1234567",
+            "#123456789",
+            "#GGG",
+            "#369x",
+            "#33669Z",
+            "#336699ZZ",
             "rgb(300, 0, 0)",
             "rgba(100, 200, 200, 1.5)",
             "rgba(100, 200, 200, -0.5)",
