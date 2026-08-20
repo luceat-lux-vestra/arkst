@@ -592,6 +592,15 @@ impl LoweringContext {
                     self.record_span(callable.span, self.output.len() - before);
                 }
             }
+            IrValue::Size(_) | IrValue::Color(_) | IrValue::Enum(_) => {
+                // Domain values are evaluator-owned semantic inputs. This is
+                // a defensive invalid-IR marker only; Size/Color/enum
+                // lowering is intentionally deferred until a real consumer
+                // establishes its backend-neutral output contract.
+                self.push_str(
+                    "panic(\"Scribium domain value reached Typst lowering without a semantic consumer\")",
+                );
+            }
         }
     }
 

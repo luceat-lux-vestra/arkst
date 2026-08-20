@@ -1253,6 +1253,57 @@ mod tests {
         assert_eq!(output_text(&result), "\n");
         assert_eq!(result.ir.metadata.document_state.name, "");
         assert_eq!(result.ir.metadata.document_state.description, "");
+        assert_eq!(
+            result.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Plain
+        );
+    }
+
+    #[test]
+    fn doctype_defaults_to_plain_and_writes_return_no_value() {
+        let (default, _) = compile_source(".doctype\n");
+        assert!(default.diagnostics.is_empty(), "{default:?}");
+        assert_eq!(output_text(&default), "plain");
+        assert_eq!(
+            default.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Plain
+        );
+
+        let (written, _) = compile_source(".doctype {paged}\n.doctype\n");
+        assert!(written.diagnostics.is_empty(), "{written:?}");
+        assert_eq!(output_text(&written), "paged");
+        assert_eq!(
+            written.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Paged
+        );
+
+        let (named, _) = compile_source(".doctype type:{SLIDES}\n.doctype\n");
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        assert_eq!(output_text(&named), "slides");
+        assert_eq!(
+            named.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Slides
+        );
+    }
+
+    #[test]
+    fn invalid_doctype_is_atomic_and_static_string_does_not_gain_enum_meaning() {
+        let source = ".doctype {paged}\n.doctype {book}\n.doctype\n";
+        let (invalid, _) = compile_source(source);
+        assert_eq!(invalid.diagnostics.len(), 1, "{invalid:?}");
+        assert_eq!(output_text(&invalid), "paged");
+        assert_eq!(
+            invalid.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Paged
+        );
+
+        let (static_string, _) = compile_source(".doctype {.string {paged}}\n.doctype\n");
+        assert_eq!(static_string.diagnostics.len(), 1, "{static_string:?}");
+        assert_eq!(output_text(&static_string), "plain");
+        assert_eq!(
+            static_string.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Plain
+        );
     }
 
     #[test]

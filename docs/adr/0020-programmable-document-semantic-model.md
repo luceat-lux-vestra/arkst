@@ -456,3 +456,23 @@ Follow-up slices should be independently scoped and tested:
 
 This ADR intentionally does not implement any of those features. In
 particular, row, column, and grid remain unimplemented.
+
+## Addendum: bounded domain adapter implementation (2026-08-21)
+
+The first implementation slice following this architecture gate preserves the
+decision above without changing ownership or introducing a second semantic IR:
+
+- `InvocationValue` and `ValueOrigin` remain the mandatory conversion gate;
+- scalar targets remain separate from production `Size`, `Color`, and closed
+  enum domain adapters;
+- `IrSize`, `IrColor`, and the domain-preserving enum carrier contain semantic
+  channels/units/variants rather than backend source strings;
+- the closed enum adapter uses explicit allowed-value tables and is consumed
+  by `.doctype` for `plain`, `paged`, `slides`, and `docs`; and
+- Size/Color consumers, layout alignment enums, components, row/column/grid,
+  and all Typst lowering remain deferred.
+
+`.doctype` extends the evaluator-owned document state and immutable IR snapshot
+with a defaulted `Plain` document type. Older serialized snapshots default to
+`Plain`. This is an implementation status addendum, not a change to the
+architecture decision or its deferred component/layout sequencing.

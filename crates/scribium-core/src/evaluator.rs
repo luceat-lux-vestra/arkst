@@ -269,6 +269,7 @@ enum CallOutcome {
 struct DocumentState {
     name: String,
     description: String,
+    document_type: crate::ir::IrDocumentType,
 }
 
 impl DocumentState {
@@ -276,6 +277,7 @@ impl DocumentState {
         Self {
             name: snapshot.name.clone(),
             description: snapshot.description.clone(),
+            document_type: snapshot.document_type,
         }
     }
 
@@ -283,6 +285,7 @@ impl DocumentState {
         crate::ir::IrDocumentState {
             name: self.name.clone(),
             description: self.description.clone(),
+            document_type: self.document_type,
         }
     }
 }
@@ -720,6 +723,7 @@ impl EvaluationContext {
         match name {
             "docname" => IrValue::String(state.name.clone()),
             "docdescription" => IrValue::String(state.description.clone()),
+            "doctype" => IrValue::String(state.document_type.quarkdown_name().to_string()),
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
@@ -731,6 +735,10 @@ impl EvaluationContext {
             "docdescription" => state.description = value,
             _ => unreachable!("document state field must be validated by the caller"),
         }
+    }
+
+    fn set_document_type(&self, value: crate::ir::IrDocumentType) {
+        self.document_state.borrow_mut().document_type = value;
     }
 
     /// Gets a variable value if it exists.
@@ -1327,7 +1335,7 @@ impl Evaluator {
             };
         }
 
-        if matches!(name, "docname" | "docdescription") {
+        if matches!(name, "docname" | "docdescription" | "doctype") {
             return self.evaluate_document_state_builtin(
                 name,
                 positional_args,
@@ -1645,6 +1653,74 @@ impl Evaluator {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
+
+        if name == "doctype" {
+            let argument_span = if evaluated_positional.len() == 1 && evaluated_named.is_empty() {
+                positional_args
+                    .first()
+                    .map(|value| value_source_span(value, span))
+                    .unwrap_or(*span)
+            } else if evaluated_positional.is_empty()
+                && evaluated_named.len() == 1
+                && evaluated_named[0].name == "type"
+            {
+                named_args
+                    .first()
+                    .map(|argument| argument.span)
+                    .unwrap_or(*span)
+            } else {
+                diagnostics.push(document_state_call_error(
+                    "`.doctype` accepts exactly one positional or `type` argument".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            };
+
+            let argument = if evaluated_positional.len() == 1 && evaluated_named.is_empty() {
+                let mut values = evaluated_positional.into_iter();
+                let Some(argument) = values.next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.doctype` requires a document type argument".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                argument
+            } else {
+                let Some(argument) = evaluated_named.first() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.doctype` requires a document type argument".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                InvocationValue {
+                    value: argument.value.clone(),
+                    origin: argument.origin,
+                }
+            };
+
+            let document_type = match value_conversion::convert_domain_with_origin(
+                &argument,
+                value_conversion::DomainTarget::ClosedEnum(
+                    value_conversion::ClosedEnumTarget::DocumentType,
+                ),
+            ) {
+                Ok(value_conversion::DomainValue::Enum(crate::ir::IrEnumValue::DocumentType(
+                    value,
+                ))) => value,
+                Ok(_) | Err(_) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.doctype` requires one of `plain`, `paged`, `slides`, or `docs` from a dynamic argument"
+                            .to_string(),
+                        argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            context.set_document_type(document_type);
+            return CallOutcome::NoValue;
+        }
 
         if evaluated_positional.len() != 1 || !evaluated_named.is_empty() {
             diagnostics.push(document_state_call_error(
@@ -6350,6 +6426,14 @@ fn scalar_to_text(
         IrValue::Collection(_) | IrValue::Pair(_) | IrValue::Dictionary(_) => {
             diagnostics.push(iteration_error(
                 "Collection, Pair, or Dictionary cannot be rendered as scalar text".to_string(),
+                span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        IrValue::Size(_) | IrValue::Color(_) | IrValue::Enum(_) => {
+            diagnostics.push(iteration_error(
+                "Domain values cannot be rendered as scalar text without a domain consumer"
+                    .to_string(),
                 span,
             ));
             Err(CallOutcome::Failed)

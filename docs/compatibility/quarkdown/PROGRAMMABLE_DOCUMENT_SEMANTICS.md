@@ -73,10 +73,31 @@ slice as evaluator-owned working document state shared by ordinary callable
 child scopes, plus a final immutable `IrDocument.metadata.document_state`
 snapshot. Typst lowering consumes the snapshot and does not replay calls.
 
-The Document State Foundation slice is implemented. `.docname` and
-`.docdescription` support the read/write dual API; writes return no document
-output, and `.docname` rejects blank values before mutation. The snapshot is
-serializable plain data with an explicit default for older serialized IR.
+The Document State Foundation slice is implemented. `.docname`,
+`.docdescription`, and `.doctype` support the read/write dual API; writes
+return no document output, `.docname` rejects blank values before mutation,
+and `.doctype` validates a closed `plain`/`paged`/`slides`/`docs` enum before
+mutation. The snapshot is serializable plain data with explicit defaults for
+older serialized IR; the document type defaults to `plain`.
+
+### Domain conversion adapters
+
+The v2.5.1 `ValueFactory` domain targets are implemented as production
+branches of the evaluator-owned `InvocationValue`/`ValueOrigin` conversion
+dispatcher. Scalar targets remain separate. `Size` stores a backend-neutral
+number plus one of exactly `px`, `pt`, `cm`, `mm`, `in`, `em`, or `%`; omitted
+units mean `px`, unit spelling is case-insensitive, and the decimal grammar is
+not trimmed or widened to scientific notation. `Color` decodes the reviewed
+Hex, RGB, RGBA, HSV/HSL, and CSS3 named-color families into numeric RGBA
+channels. Closed enums use explicit allowed-value tables and Quarkdown's
+lowercase/underscore-removed declaration naming rule; input underscores are
+not removed. Typed domain values use identity conversion, dynamic textual
+values use only their bounded parser, and static `StringValue` results do not
+gain domain meaning.
+
+These adapters intentionally have no layout, style, component, or Typst
+consumer yet. The live `.doctype` consumer uses the closed enum adapter;
+Size/Color consumers and layout alignment enums remain deferred.
 
 ### Layout classification
 
@@ -104,13 +125,13 @@ implementation here.
 | Lazy body evaluation | Body is a lazy `DynamicValue`; unreachable conditional/body paths do not execute it | Block bodies are evaluated on the existing callable path after binding; conversion failures precede body execution | Preserve eager inline vs lazy body timing | Bounded implemented | More differential lazy-body fixtures |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue` and `IrValue::Content`; unresolved calls are preserved; no general component carrier yet | Add future `IrValue::Component`; materialize to `IrNode` at output boundary | Architecture decided; implementation deferred | Component value and node materialization |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | Target-specific HTML has a closed semantic node slice; general components are not present | Keep node results backend-neutral and distinguish them from unresolved calls | Partial/closed slice | General component contract |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname` and `.docdescription` are implemented with bounded String conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname` and `.docdescription` implemented | Remaining document fields |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, and `.doctype` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, and `.doctype` implemented | Remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | Not implemented | Future component value, then semantic node; no Typst representation in IR | Not implemented by design | Layout semantic slice |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | Not implemented | Same backend-neutral component boundary | Not implemented by design | Layout semantic slice |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | Not implemented | Validate in evaluator before component construction | Not implemented by design | Grid validation and lowering |
-| `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | No general Size target | Domain-specific origin-aware conversion adapter | Deferred | Size contract and tests |
-| `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | No general Color target | Domain-specific origin-aware conversion adapter | Deferred | Color contract and tests |
-| Enum conversion | Closed enum values are matched through the allowed value set and public names | No general enum target | Closed domain adapter; no reflective generic coercion | Deferred | Alignment/layout enum adapters |
+| `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is implemented for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented | Size consumers and layout semantics |
+| `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
+| Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter is implemented; `.doctype` consumes `DocumentType` with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` | Alignment/layout enum consumers |
 | Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` is supported; String → Markdown reparsing is not | Content remains structured; raw String conversion requires a future explicit frontend/provenance contract | Partial | Content conversion boundary |
 | Component conversion | Dynamic result can become a node/layout value through typed output visitors | No general component conversion | Future `IrValue::Component`, origin-gated construction, typed output materialization | Deferred | Component property/child conversion |
 
@@ -163,13 +184,13 @@ source-map entries are generated during lowering from those original spans.
 ## Intentionally deferred
 
 This gate does not implement row, column, grid, any layout renderer or Typst
-layout lowering, full Size/Color/enum conversion, String → Markdown or String
-→ component conversion, a parallel evaluator, filesystem/network features, or
-an evaluator rewrite. No architecture prototype or feature snapshot was
+layout lowering, Size/Color consumers or layout enum consumers, String →
+Markdown or String → component conversion, a parallel evaluator,
+filesystem/network features, or an evaluator rewrite. No architecture
+prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
-The next implementation order remains scope compatibility, domain conversion
-adapters, component/content result construction, semantic layout nodes, and
-finally pure Typst lowering. `.doctype`, `.docauthor(s)`, `.dockeywords`,
-`.doclang`, and `.theme` remain deferred.
+The next implementation order is component/content result construction,
+semantic layout nodes, and finally pure Typst lowering. `.docauthor(s)`,
+`.dockeywords`, `.doclang`, and `.theme` remain deferred.

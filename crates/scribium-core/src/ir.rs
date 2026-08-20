@@ -40,6 +40,65 @@ pub struct IrDocumentState {
     pub name: String,
     /// The document's current `.docdescription`, or an empty string when unset.
     pub description: String,
+    /// The document's current `.doctype`, defaulting to `plain`.
+    #[serde(default)]
+    pub document_type: IrDocumentType,
+}
+
+/// The closed document-type enum exposed by Quarkdown's `.doctype` builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrDocumentType {
+    #[default]
+    Plain,
+    Paged,
+    Slides,
+    Docs,
+}
+
+impl IrDocumentType {
+    pub fn quarkdown_name(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Paged => "paged",
+            Self::Slides => "slides",
+            Self::Docs => "docs",
+        }
+    }
+}
+
+/// A backend-neutral numeric size with a closed public unit set.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrSize {
+    pub value: f64,
+    pub unit: IrSizeUnit,
+}
+
+/// Units accepted by Quarkdown v2.5.1 size conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrSizeUnit {
+    Px,
+    Pt,
+    Cm,
+    Mm,
+    In,
+    Em,
+    Percent,
+}
+
+/// A backend-neutral RGBA color.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrColor {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    /// Alpha is the upstream 0.0..=1.0 fraction, not a backend byte/string.
+    pub alpha: f64,
+}
+
+/// A closed, domain-preserving enum value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrEnumValue {
+    DocumentType(IrDocumentType),
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -372,6 +431,9 @@ pub enum IrValue {
     Number(f64),
     Boolean(bool),
     Identifier(String),
+    Size(IrSize),
+    Color(IrColor),
+    Enum(IrEnumValue),
     /// A typed Quarkdown integer range. Open endpoints remain explicit until
     /// an iterable consumer chooses whether it can handle them.
     Range(IrRange),
@@ -395,8 +457,8 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrDictionary, IrDocumentState, IrInline, IrMetadata, IrNode, IrPair, IrRange, IrValue,
-        NativeTarget, TargetSpecificContent,
+        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrMetadata, IrNode, IrPair,
+        IrRange, IrValue, NativeTarget, TargetSpecificContent,
     };
     use crate::source::{SourceId, SourceSpan};
 
@@ -476,6 +538,7 @@ mod tests {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
                 description: "Description".to_string(),
+                document_type: IrDocumentType::Paged,
             },
             ..IrMetadata::default()
         };
@@ -498,6 +561,17 @@ mod tests {
                 .expect("old metadata remains readable")
                 .document_state,
             IrDocumentState::default()
+        );
+
+        let old_state = serde_json::json!({
+            "name": "Document",
+            "description": "Description"
+        });
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(old_state)
+                .expect("old document state remains readable")
+                .document_type,
+            IrDocumentType::Plain
         );
     }
 }
