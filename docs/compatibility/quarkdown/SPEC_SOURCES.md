@@ -33,8 +33,12 @@ Quarkdown-compatible feature implementation.
 | Quarkdown v2.5.1 `MathFunctionsTest.kt`       | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-test/src/test/kotlin/com/quarkdown/test/MathFunctionsTest.kt | Public integration examples for arithmetic chains, nested calls, `.pi::truncate {2}`, zero trigonometry, `.cos {.pi}`, `.pi::multiply {2}::cos`, negative-decimal runtime failure, and fractional-decimal type failure | 2026-08-18 |
 | Quarkdown wiki — "Math"                       | https://quarkdown.com/wiki/math/ | Public math-family scope and nested/chained arithmetic examples | 2026-08-18 |
 | Quarkdown v2.5.1 `NumberValue.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt | Integral Float normalization to Int, including the observable finite/non-finite conversion boundary | 2026-08-18 |
-| Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory | 2026-08-18 |
-| Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | String-to-number and string-to-boolean conversion behavior, plus the upstream Dynamic String → inline lexer/parser path retained as an explicit Scribium compatibility gap | 2026-08-18 |
+| Quarkdown v2.5.1 `DynamicValueConverter.kt`   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt | Invocation-time typed conversion boundary reviewed for the gap inventory; null/None returns no converted value and conversion is consumed at argument binding | 2026-08-20 |
+| Quarkdown v2.5.1 `ValueFactory.kt`            | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt | Number integer-first/Float fallback, exact Boolean text forms, textual Range forms, scalar `toString`, and context-sensitive Markdown conversion boundaries | 2026-08-20 |
+| Quarkdown v2.5.1 `RegularArgumentsBinder.kt`  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt | Actual invocation consumer for DynamicValue target conversion; target type is selected from the bound parameter | 2026-08-20 |
+| Quarkdown v2.5.1 `Lambda.kt`                  | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt | Actual callable invocation consumer for argument conversion in a captured/child evaluation context | 2026-08-20 |
+| Quarkdown v2.5.1 `Range.kt`                   | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt | Range endpoint representation and canonical `start..end` string form | 2026-08-20 |
+| Quarkdown v2.5.1 `Optionality.kt`             | https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt | Existing `.ifpresent(None)` skip and `.takeif(None)` predicate behavior kept separate from conversion failure and omission | 2026-08-20 |
 | Rust `libm` 0.2.16                         | https://docs.rs/libm/0.2.16/ | Pure-Rust `log`, `sin`, `cos`, and `tan` software implementation selected with default features disabled for native/WASM reproducibility; compared against 0.2.14 and 0.2.15 on the representative corpus | 2026-08-18 |
 | Quarkdown wiki — "Syntax of a function call"   | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Documented-but-deferred v2.5.0 constructs: line continuation, `::` chaining, tight/brace-wrapped calls, multi-line arguments | 2026-08-08 |
 | Quarkdown wiki — "Syntax of a function call" (v2.5.1 syntax review) | https://quarkdown.com/wiki/syntax-of-a-function-call/ | Behavior specification for the #60 multiline-argument, continuation, chaining, tight-call, and block/inline boundary fixtures | 2026-08-14 |
@@ -189,9 +193,11 @@ normalizes integral Float values to Int before the builtin result is exposed.
 [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
 and [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt)
 were reviewed to distinguish an integral numeric representation from a
-fractional NumberValue. The decimal slice therefore accepts `2`/`2.0` as an
-integral numeric `Int` boundary, rejects `1.5`, quoted numeric text, and NaN
-for `decimals`, and preserves the negative-Int runtime failure. The existing
+fractional NumberValue. Because `Int` is a `Number` subtype, the decimal
+slice uses the same DynamicValue Number conversion: dynamic text is parsed as
+Int first, then Float, and only an integral normalized NumberValue reaches the
+`Int` boundary. Dynamic `2`/`2.0` therefore succeed, dynamic `1.5` and NaN
+fail, and static StringValue text such as `2` remains rejected. The existing
 Scribium scalar numeric path remains the adaptation boundary for `x` and does
 not introduce a general DynamicValue converter.
 
@@ -202,8 +208,9 @@ behavior is not determined by `round()` alone. It confirmed `2.5 -> 2`,
 `3.5 -> 4`, `-2.5 -> -2`, `-3.5 -> -4`, NaN -> `0`, positive/negative
 infinity -> `Int.MAX_VALUE`/`Int.MIN_VALUE`, large finite rounding clamps, and
 integral `decimals` values above ordinary decimal precision do not hit an
-arbitrary upstream limit. Quoted numeric strings for the `Int` parameter fail
-type conversion.
+arbitrary upstream limit. Dynamic numeric strings for the `Int` parameter use
+the Number conversion described above; static StringValue text fails type
+conversion.
 
 Scribium covers this evidence through the shared `bind_arguments` path,
 `integer_argument`, `kotlin_float_to_int`, typed `IrValue::Number` results,
@@ -235,10 +242,11 @@ Float results to Int: the runtime therefore renders `.logn {0}` as
 integral-Number normalization, and zero trigonometric results as `0`/`1`.
 The standard representative outputs `.logn {2}` → `0.6931472`,
 `.sin {1}` → `0.84147096`, `.cos {1}` → `0.5403023`, and `.tan {1}` →
-`1.5574077` are also retained in the conformance/unit corpus. Quoted
-`"2"` is rejected by the upstream Number conversion; Scribium's existing
-numeric scalar adaptation remains the explicitly bounded compatibility path
-for accepted textual/adapted values.
+`1.5574077` are also retained in the conformance/unit corpus. The reviewed
+`ValueFactory.number` conversion accepts textual numeric input with integer
+parsing before Float fallback, and `decimals: Int` inherits that same
+DynamicValue conversion before requiring NumberValue-compatible integral
+normalization.
 
 Kotlin/JVM bytecode for the Float overload expands to `f2d`,
 `java.lang.Math.*(double)`, then `d2f`. Scribium reproduces that observable
@@ -303,8 +311,57 @@ negative indices, large indices, fractional indices, `orelse`, and scalar
 operands, plus dynamic Range numeric boundaries and literal endpoint limits.
 The probes confirmed one-based access, `None` for ordinary misses, typed
 fallback values, empty descending Ranges, fractional-index rejection,
-non-iterable String behavior, upstream Number-to-Int conversion, and endless
-open-range rejection.
+ordinary non-range String behavior, bounded textual Range conversion,
+upstream Number-to-Int conversion, and endless open-range rejection.
+
+## Bounded scalar conversion evidence record
+
+The v2.5.1 [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
+has two actual consumers in the reviewed core: regular argument binding and
+lambda invocation. [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt)
+invokes it only when the bound value is actually `DynamicValue`; a static
+`StringValue` does not convert to `Number`, `Boolean`, or `Iterable` and only
+adapts through its own String/`InlineMarkdownContent` boundary. Its `null`
+result for an unwrapped `None` is distinct from an invalid conversion and from
+omission of an optional parameter. The conversion candidates were therefore
+classified by invocation origin, target, and current consumer rather than by
+copying the upstream object hierarchy.
+
+The reviewed `ValueFactory.kt` rules and Scribium boundaries are:
+
+- `Number`: an existing numeric value is identity-equivalent; DynamicValue
+  text is parsed as `Int` first and then `Float`, with no whitespace
+  normalization. A static StringValue is not parsed. Invalid text, overflow
+  outside both parse paths, and unsupported structured values fail through the
+  existing source-backed diagnostic path.
+- `Boolean`: an existing Boolean is identity-equivalent; DynamicValue text
+  accepts only case-insensitive `true`, `yes`, `false`, or `no`. A static
+  StringValue is not truthiness-coerced. Non-empty text and numeric truthiness
+  are not added.
+- `Range`: DynamicValue text matches only the unsigned decimal `x..y`, `..y`,
+  `x..`, or `..` forms. A static StringValue is not parsed as an iterable. The
+  conversion does not call the source parser; endpoint overflow follows the
+  reviewed `toIntOrNull()` open-end behavior, while standard iterable
+  consumption still rejects endless ranges.
+- `String`: scalar String/Identifier, Number, Boolean, and typed Range values
+  have a bounded textual boundary. `None`, collections, callables, and rich
+  document/content values are not blindly stringified.
+- `EvaluableString`, `MarkdownContent`, and `InlineMarkdownContent` require
+  evaluation context and parser/lexer participation. String → Markdown and
+  String → InlineMarkdownContent reparsing is **context-sensitive conversion
+  deferred**.
+- `Size`, `Sizes`, `Color`, enums, and layout/document values are
+  **component/layout conversion deferred** because no current approved
+  Scribium consumer requires them. Generic collection/callable conversion is
+  **unsupported conversion** in this slice; unreviewed target families remain
+  **currently unverified conversion** rather than compatibility claims.
+
+The independently authored fixture at
+`fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family/` connects
+the Number, Boolean, Range, and String boundaries to existing evaluator
+consumers. Unit and compile-level tests cover typed identity, malformed input,
+None, callback scope, source-backed failure, and atomic publication. No
+Quarkdown source, test, or fixture was copied or translated.
 
 ## Generic callable and collection-transform evidence record
 

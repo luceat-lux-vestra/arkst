@@ -17,6 +17,7 @@ pub mod evaluator;
 pub mod ir;
 pub mod source;
 pub mod source_map;
+mod value_conversion;
 pub mod virtual_project;
 
 pub use diagnostics::*;
@@ -1304,6 +1305,86 @@ mod tests {
     }
 
     #[test]
+    fn compile_v251_dynamic_value_scalar_fixture_uses_existing_consumers() {
+        let source = include_str!(
+            "../../../fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family/input.qd"
+        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            output_text(&result),
+            "3.5\nboolean conversion\n2\n3\n4\n2..4"
+        );
+    }
+
+    #[test]
+    fn compile_dynamic_and_static_string_origins_use_different_conversion_boundaries() {
+        let positive = ".var {number-text} {.string {-3.5}}\n.abs {.number-text}\n\n.var {boolean-text} {.string {YES}}\n.if {.boolean-text}\n    boolean conversion\n\n.var {range-text} {.string {2..4}}\n.foreach {.range-text}\n    .1\n.size {.range-text}\n";
+        let (result, _) = compile_source(positive);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5\nboolean conversion\n2\n3\n4\n3");
+
+        let (result, _) = compile_source(".var {chain-text} {.string {-3.5}}\n.chain-text::abs\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5");
+
+        let (result, _) = compile_source(
+            ".function {numeric-text}\n    .string {-3.5}\n\n.abs {.numeric-text}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3.5");
+
+        for source in [
+            ".abs {.string {-3.5}}\n",
+            ".if {.string {YES}}\n    should not be emitted\n",
+            ".range from:{.string {2}} to:{4}\n",
+            ".foreach {.string {2..4}}\n    .1\n",
+            ".string {-3.5}::abs\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.diagnostics[0].primary.is_some(), "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn compile_dynamic_value_conversion_failures_are_atomic_and_source_backed() {
+        for source in [
+            "앞 문장\r\n.abs {.string {-3.5}}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.range from:{.string {2}} to:{4}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.if {.string {maybe}}\r\n    숨겨진 내용\r\n뒤 문장\r\n",
+            "앞 문장\r\n.foreach {.string {2 .. 4}}\r\n    .1\r\n뒤 문장\r\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001");
+            assert!(result.diagnostics[0].primary.is_some(), "{result:?}");
+            assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
+            assert!(!output_text(&result).contains("숨겨진 내용"));
+            assert!(!output_text(&result).contains("1\n2\n3\n4"));
+        }
+    }
+
+    #[test]
+    fn compile_takeif_invokes_its_predicate_for_none() {
+        let source = ".takeif {.none} {@lambda value: .sum {.value} {1}}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(crate::source::SourceSpan::new(
+                source_id,
+                source.find(".sum").expect("predicate call"),
+                source.find(".sum").expect("predicate call") + ".sum {.value} {1}".len()
+            ))
+        );
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
     fn compile_v251_numeric_decimal_fixture_preserves_typed_value_flow() {
         let source = include_str!(
             "../../../fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd"
@@ -1335,6 +1416,25 @@ mod tests {
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "201.06\n201.06\n4\n2");
+    }
+
+    #[test]
+    fn compile_truncate_accepts_only_integral_dynamic_number_text() {
+        let source = ".var {two-text} {.string {\"2\"}}\n.truncate {12.345} decimals:{.two-text}\n.var {two-point-zero-text} {.string {\"2.0\"}}\n.truncate {12.345} decimals:{.two-point-zero-text}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "12.34\n12.34");
+
+        for source in [
+            "앞 문장\r\n.var {fraction-text} {.string {\"1.5\"}}\r\n.truncate {12.345} decimals:{.fraction-text}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.truncate {12.345} decimals:{.string {\"2\"}}\r\n뒤 문장\r\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.diagnostics[0].primary.is_some(), "{source:?}");
+            assert_eq!(output_text(&result), "앞 문장\n뒤 문장", "{source:?}");
+        }
     }
 
     #[test]

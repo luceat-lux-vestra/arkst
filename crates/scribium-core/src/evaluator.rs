@@ -51,6 +51,9 @@ use crate::ir::{
     TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
+use crate::value_conversion::{
+    self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
+};
 use crate::VirtualProject;
 use crate::{Capabilities, Capability};
 use scribium_markdown::Mode;
@@ -84,16 +87,6 @@ impl VariableValue {
         match self {
             VariableValue::Scalar(value) => value.clone(),
             VariableValue::Content(nodes) => IrValue::Content(nodes.clone()),
-        }
-    }
-}
-
-impl VariableValue {
-    /// Returns the boolean value if this variable can be interpreted as a boolean.
-    fn as_boolean(&self) -> Option<bool> {
-        match self {
-            VariableValue::Scalar(value) => scalar_boolean_value(value),
-            VariableValue::Content(_) => None,
         }
     }
 }
@@ -1167,6 +1160,32 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
+        self.evaluate_call_value_with_first_origin(
+            name,
+            positional_args,
+            named_args,
+            body,
+            lambda_parameters,
+            span,
+            diagnostics,
+            context,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_call_value_with_first_origin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
         if let Some(result) = context.get_implicit_parameter(name) {
             return match result {
                 Ok(value) => CallOutcome::Value(value),
@@ -1185,6 +1204,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                first_origin,
             ) {
                 Ok(condition) => condition,
                 Err(outcome) => return outcome,
@@ -1268,6 +1288,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                first_origin,
             );
         }
 
@@ -1306,6 +1327,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                first_origin,
             );
         }
 
@@ -1360,6 +1382,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                first_origin,
             );
         }
 
@@ -1393,16 +1416,21 @@ impl Evaluator {
                 ));
                 return CallOutcome::Failed;
             }
-            let evaluated_positional =
-                match self.evaluate_values(positional_args, span, diagnostics, context) {
-                    Ok(values) => values,
-                    Err(outcome) => return outcome,
-                };
-            let evaluated_named = match self.evaluate_named(named_args, span, diagnostics, context)
-            {
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
             return self.evaluate_collection_access(
                 name,
                 &evaluated_positional,
@@ -1413,11 +1441,17 @@ impl Evaluator {
         }
 
         if builtins::is_supported(name) {
-            let mut evaluated_positional =
-                match self.evaluate_values(positional_args, span, diagnostics, context) {
-                    Ok(values) => values,
-                    Err(outcome) => return outcome,
-                };
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+            let mut evaluated_positional = evaluated_positional;
             let has_body = body.is_some();
             if name == "plaintext" {
                 if let Some(body) = body {
@@ -1425,15 +1459,15 @@ impl Evaluator {
                         CallOutcome::Value(value) => value,
                         outcome => return outcome,
                     };
-                    evaluated_positional.push(body);
+                    evaluated_positional.push(InvocationValue::static_value(body));
                 }
             }
-            let evaluated_named = match self.evaluate_named(named_args, span, diagnostics, context)
-            {
-                Ok(values) => values,
-                Err(outcome) => return outcome,
-            };
-            return match builtins::evaluate(
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+            return match builtins::evaluate_with_origins(
                 name,
                 &evaluated_positional,
                 &evaluated_named,
@@ -1984,8 +2018,8 @@ impl Evaluator {
     fn evaluate_collection_access(
         &self,
         name: &str,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
+        positional_args: &[InvocationValue],
+        named_args: &[InvocationNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> CallOutcome {
@@ -2399,6 +2433,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if positional_args.len() != 1 {
             diagnostics.push(iteration_error(
@@ -2438,22 +2473,18 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
 
-        let value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
-            CallOutcome::Value(value) => value,
-            CallOutcome::Unresolved => {
-                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
-                    Ok(value) => value,
-                    Err(outcome) => return outcome,
-                }
-            }
-            CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(
-                    &positional_args[0],
-                    span,
-                )));
-                return CallOutcome::Failed;
-            }
-            CallOutcome::Failed => return CallOutcome::Failed,
+        let value = match self
+            .evaluate_invocation_values(
+                std::slice::from_ref(&positional_args[0]),
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            )
+            .and_then(|mut values| values.pop().ok_or(CallOutcome::Failed))
+        {
+            Ok(value) => value,
+            Err(outcome) => return outcome,
         };
         let elements = match self.coerce_iterable(value, span, diagnostics) {
             Ok(elements) => elements,
@@ -2588,6 +2619,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let (raw_collection, raw_callback) = match transform_operands(
             name,
@@ -2600,19 +2632,18 @@ impl Evaluator {
             Ok(operands) => operands,
             Err(outcome) => return outcome,
         };
-        let collection = match self.evaluate_value(&raw_collection, diagnostics, context) {
-            CallOutcome::Value(value) => value,
-            CallOutcome::Unresolved => {
-                match self.preserve_value_expression(&raw_collection, diagnostics, context) {
-                    Ok(value) => value,
-                    Err(outcome) => return outcome,
-                }
-            }
-            CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(&raw_collection, span)));
-                return CallOutcome::Failed;
-            }
-            CallOutcome::Failed => return CallOutcome::Failed,
+        let collection = match self
+            .evaluate_invocation_values(
+                std::slice::from_ref(&raw_collection),
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            )
+            .and_then(|mut values| values.pop().ok_or(CallOutcome::Failed))
+        {
+            Ok(value) => value,
+            Err(outcome) => return outcome,
         };
         let elements = match self.coerce_iterable(collection, span, diagnostics) {
             Ok(elements) => elements,
@@ -2712,10 +2743,10 @@ impl Evaluator {
     }
 
     /// Evaluates the bounded callback-based optionality functions from the
-    /// v2.5.1 Optionality module. `.ifpresent` short-circuits a semantic `None`
-    /// before invoking its mapping callback, while `.takeif` always invokes its
-    /// condition, including for `None`. Both reuse the shared callable scope,
-    /// capture, destructuring, and failure-atomicity path.
+    /// v2.5.1 Optionality module. The value is resolved before a callback is
+    /// invoked. `.ifpresent` skips its callback for semantic `None`, while
+    /// `.takeif` still invokes its predicate with `None`, matching the
+    /// distinct upstream callback contracts.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_optionality_callback(
         &self,
@@ -2851,6 +2882,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if body.is_some() {
             diagnostics.push(iteration_error(
@@ -2864,17 +2896,22 @@ impl Evaluator {
             Err(outcome) => return outcome,
         };
         let start = match start {
-            Some(value) => match self.evaluate_range_endpoint(&value, span, diagnostics, context) {
-                Ok(value) => Some(value),
-                Err(outcome) => return outcome,
-            },
+            Some(value) => {
+                match self.evaluate_range_endpoint(&value, span, diagnostics, context, first_origin)
+                {
+                    Ok(value) => Some(value),
+                    Err(outcome) => return outcome,
+                }
+            }
             None => None,
         };
         let end = match end {
-            Some(value) => match self.evaluate_range_endpoint(&value, span, diagnostics, context) {
-                Ok(value) => Some(value),
-                Err(outcome) => return outcome,
-            },
+            Some(value) => {
+                match self.evaluate_range_endpoint(&value, span, diagnostics, context, None) {
+                    Ok(value) => Some(value),
+                    Err(outcome) => return outcome,
+                }
+            }
             None => None,
         };
         CallOutcome::Value(IrValue::Range(IrRange {
@@ -2890,18 +2927,19 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
+        origin: Option<ValueOrigin>,
     ) -> Result<i32, CallOutcome> {
-        let evaluated = match self.evaluate_value(value, diagnostics, context) {
-            CallOutcome::Value(value) => value,
-            CallOutcome::Unresolved => {
-                self.preserve_value_expression(value, diagnostics, context)?
-            }
-            CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(value, span)));
-                return Err(CallOutcome::Failed);
-            }
-            CallOutcome::Failed => return Err(CallOutcome::Failed),
-        };
+        let evaluated = self
+            .evaluate_invocation_values(
+                std::slice::from_ref(value),
+                span,
+                diagnostics,
+                context,
+                origin,
+            )?
+            .into_iter()
+            .next()
+            .ok_or(CallOutcome::Failed)?;
         number_to_range_endpoint(&evaluated).map_err(|message| {
             diagnostics.push(iteration_error(message, value_source_span(value, span)));
             CallOutcome::Failed
@@ -3162,10 +3200,11 @@ impl Evaluator {
 
     fn coerce_iterable(
         &self,
-        value: IrValue,
+        value: InvocationValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
+        let InvocationValue { value, origin } = value;
         match value {
             IrValue::Collection(values) => Ok(values),
             IrValue::Pair(pair) => {
@@ -3194,6 +3233,20 @@ impl Evaluator {
                 Ok(values)
             }
             IrValue::Range(range) => self.materialize_range(range, span, diagnostics),
+            value @ (IrValue::String(_) | IrValue::Identifier(_)) => {
+                let argument = InvocationValue { value, origin };
+                match value_conversion::convert_range_with_origin(&argument, *span) {
+                    Ok(range) => self.materialize_range(range, span, diagnostics),
+                    Err(_) => {
+                        diagnostics.push(iteration_error(
+                            "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
+                                .to_string(),
+                            *span,
+                        ));
+                        Err(CallOutcome::Failed)
+                    }
+                }
+            }
             IrValue::Content(nodes) => match nodes.as_slice() {
                 [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => {
                     let mut values = Vec::new();
@@ -3237,7 +3290,11 @@ impl Evaluator {
     ) -> Result<IrValue, CallOutcome> {
         match item.nodes.as_slice() {
             [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
-                .coerce_iterable(IrValue::Content(item.nodes.clone()), span, diagnostics)
+                .coerce_iterable(
+                    InvocationValue::static_value(IrValue::Content(item.nodes.clone())),
+                    span,
+                    diagnostics,
+                )
                 .map(IrValue::Collection),
             [IrNode::Paragraph { content, .. }] => match content.as_slice() {
                 [IrInline::Text { content, .. }] => Ok(IrValue::String(content.clone())),
@@ -3601,6 +3658,7 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> CallOutcome {
+        let mut value_origin = call_result_origin(&head.name, context);
         let mut value = match self.chain_outcome(
             self.evaluate_call_value(
                 &head.name,
@@ -3630,7 +3688,7 @@ impl Evaluator {
             positional_args.extend(source_segment.positional_args.iter().cloned());
             let final_body = (index + 1 == chain.len()).then_some(body).flatten();
             let outcome = self.chain_outcome(
-                self.evaluate_call_value(
+                self.evaluate_call_value_with_first_origin(
                     &source_segment.name,
                     &positional_args,
                     &source_segment.named_args,
@@ -3639,6 +3697,7 @@ impl Evaluator {
                     &source_segment.span,
                     diagnostics,
                     context,
+                    Some(value_origin),
                 ),
                 source_segment,
                 index + 1 < chain.len(),
@@ -3646,7 +3705,10 @@ impl Evaluator {
                 context,
             );
             match outcome {
-                CallOutcome::Value(next_value) => value = next_value,
+                CallOutcome::Value(next_value) => {
+                    value = next_value;
+                    value_origin = call_result_origin(&source_segment.name, context);
+                }
                 outcome => return outcome,
             }
         }
@@ -3722,6 +3784,7 @@ impl Evaluator {
 
     /// Resolves only a conditional's condition. Body and content arguments
     /// remain lazy until the branch is known.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_call_condition(
         &self,
         name: &str,
@@ -3730,28 +3793,43 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
     ) -> Result<bool, CallOutcome> {
-        let raw_condition = named_args
+        let Some((raw_condition, condition_origin)) = named_args
             .iter()
             .find(|arg| arg.name == "condition")
-            .map(|arg| &arg.value)
-            .or_else(|| positional_args.first());
-        let Some(raw_condition) = raw_condition else {
+            .map(|arg| (&arg.value, None))
+            .or_else(|| positional_args.first().map(|value| (value, first_origin)))
+        else {
             diagnostics.push(unresolvable_condition(name, span));
             return Err(CallOutcome::Failed);
         };
-        let condition = match self.evaluate_value(raw_condition, diagnostics, context) {
-            CallOutcome::Value(condition) => condition,
-            CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(raw_condition, span)));
+        let condition = if let IrValue::Identifier(name) = raw_condition {
+            context
+                .get(name)
+                .map(|value| InvocationValue::dynamic_value(value.to_value()))
+                .unwrap_or_else(|| InvocationValue {
+                    value: raw_condition.clone(),
+                    origin: first_origin.unwrap_or(ValueOrigin::Dynamic),
+                })
+        } else {
+            let Some(condition) = self
+                .evaluate_invocation_values(
+                    std::slice::from_ref(raw_condition),
+                    span,
+                    diagnostics,
+                    context,
+                    condition_origin,
+                )?
+                .into_iter()
+                .next()
+            else {
+                diagnostics.push(unresolvable_condition(name, span));
                 return Err(CallOutcome::Failed);
-            }
-            CallOutcome::Failed => return Err(CallOutcome::Failed),
-            CallOutcome::Unresolved => {
-                self.preserve_value_expression(raw_condition, diagnostics, context)?
-            }
+            };
+            condition
         };
-        match resolve_boolean_value(&condition, context) {
+        match resolve_boolean_value(&condition) {
             Some(value) => Ok(value),
             None => {
                 diagnostics.push(unresolvable_condition(name, span));
@@ -4207,6 +4285,92 @@ impl Evaluator {
                 }
                 CallOutcome::Failed => return Err(CallOutcome::Failed),
             }
+        }
+        Ok(evaluated)
+    }
+
+    /// Evaluates arguments while preserving the invocation-time distinction
+    /// used by Quarkdown's `RegularArgumentsBinder`. A raw scalar or a
+    /// variable/custom-function reference is dynamic; a nested builtin result
+    /// such as `.string` is already a static semantic value.
+    fn evaluate_invocation_values(
+        &self,
+        values: &[IrValue],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> Result<Vec<InvocationValue>, CallOutcome> {
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(values.len()) {
+            diagnostics.push(iteration_error(
+                format!("call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for (index, value) in values.iter().enumerate() {
+            let origin = if index == 0 {
+                first_origin.unwrap_or_else(|| invocation_origin(value, context))
+            } else {
+                invocation_origin(value, context)
+            };
+            let evaluated_value = match self.evaluate_value(value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    self.preserve_value_expression(value, diagnostics, context)?
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            };
+            evaluated.push(InvocationValue {
+                value: evaluated_value,
+                origin,
+            });
+        }
+        Ok(evaluated)
+    }
+
+    fn evaluate_invocation_named(
+        &self,
+        named: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> Result<Vec<InvocationNamedArg>, CallOutcome> {
+        let mut evaluated = Vec::new();
+        if let Err(error) = evaluated.try_reserve(named.len()) {
+            diagnostics.push(iteration_error(
+                format!("named call arguments cannot be allocated: {error}"),
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for argument in named {
+            let origin = invocation_origin(&argument.value, context);
+            let value = match self.evaluate_value(&argument.value, diagnostics, context) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::Unresolved => {
+                    self.preserve_value_expression(&argument.value, diagnostics, context)?
+                }
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(value_source_span(&argument.value, span)));
+                    return Err(CallOutcome::Failed);
+                }
+                CallOutcome::Failed => return Err(CallOutcome::Failed),
+            };
+            evaluated.push(InvocationNamedArg::new(
+                IrNamedArg {
+                    name: argument.name.clone(),
+                    name_span: argument.name_span,
+                    value,
+                    span: argument.span,
+                },
+                origin,
+            ));
         }
         Ok(evaluated)
     }
@@ -4717,11 +4881,11 @@ fn optionality_operands(
 fn collection_access_operand(
     name: &str,
     named_parameter: &str,
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: &[InvocationValue],
+    named_args: &[InvocationNamedArg],
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<IrValue, CallOutcome> {
+) -> Result<InvocationValue, CallOutcome> {
     if positional_args.len() > 1 {
         diagnostics.push(iteration_error(
             format!(
@@ -4759,7 +4923,10 @@ fn collection_access_operand(
             Err(CallOutcome::Failed)
         }
         (Some(value), None) => Ok(value.clone()),
-        (None, Some(argument)) => Ok(argument.value.clone()),
+        (None, Some(argument)) => Ok(InvocationValue {
+            value: argument.value.clone(),
+            origin: argument.origin,
+        }),
         (None, None) => {
             diagnostics.push(iteration_error(
                 format!("`.{name}` requires exactly one iterable argument"),
@@ -4814,11 +4981,11 @@ fn range_arguments(
 }
 
 fn getat_operands(
-    positional_args: &[IrValue],
-    named_args: &[IrNamedArg],
+    positional_args: &[InvocationValue],
+    named_args: &[InvocationNamedArg],
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(IrValue, IrValue, IrValue), CallOutcome> {
+) -> Result<(InvocationValue, InvocationValue, IrValue), CallOutcome> {
     if positional_args.len() > 2 {
         diagnostics.push(iteration_error(
             format!(
@@ -4843,7 +5010,10 @@ fn getat_operands(
                     ));
                     return Err(CallOutcome::Failed);
                 }
-                collection = Some(argument.value.clone());
+                collection = Some(InvocationValue {
+                    value: argument.value.clone(),
+                    origin: argument.origin,
+                });
             }
             "index" => {
                 if index.is_some() {
@@ -4853,7 +5023,10 @@ fn getat_operands(
                     ));
                     return Err(CallOutcome::Failed);
                 }
-                index = Some(argument.value.clone());
+                index = Some(InvocationValue {
+                    value: argument.value.clone(),
+                    origin: argument.origin,
+                });
             }
             "orelse" => {
                 if fallback.is_some() {
@@ -5260,17 +5433,19 @@ fn repeat_count(value: &IrValue) -> Result<i32, String> {
 /// clamps finite or infinite values outside Int's domain to the nearest Int
 /// boundary. The explicit comparisons avoid relying on Rust's float-to-int
 /// cast behavior as language semantics.
-fn number_to_range_endpoint(value: &IrValue) -> Result<i32, String> {
-    let IrValue::Number(number) = value else {
+fn number_to_range_endpoint(value: &InvocationValue) -> Result<i32, String> {
+    let Ok(ScalarValue::Number(number)) =
+        value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number)
+    else {
         return Err("`.range` bounds must be numeric".to_string());
     };
     if number.is_nan() {
         return Ok(0);
     }
-    if *number <= f64::from(i32::MIN) {
+    if number <= f64::from(i32::MIN) {
         return Ok(i32::MIN);
     }
-    if *number >= f64::from(i32::MAX) {
+    if number >= f64::from(i32::MAX) {
         return Ok(i32::MAX);
     }
     Ok(number.trunc() as i32)
@@ -5800,41 +5975,10 @@ fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
 }
 
 /// Resolves a value to a boolean, handling variable references.
-fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option<bool> {
-    match value {
-        IrValue::Boolean(v) => Some(*v),
-        IrValue::Identifier(name) => match name.to_lowercase().as_str() {
-            "true" | "yes" => Some(true),
-            "false" | "no" => Some(false),
-            _ => {
-                // Check if it's a variable reference
-                if let Some(var) = context.get(name) {
-                    var.as_boolean()
-                } else {
-                    None
-                }
-            }
-        },
-        IrValue::Content(nodes) => {
-            // Check if the content is a single parameterless function call to a known variable
-            if let [IrNode::FunctionCall {
-                name,
-                positional_args,
-                named_args,
-                body,
-                ..
-            }] = nodes.as_slice()
-            {
-                if positional_args.is_empty() && named_args.is_empty() && body.is_none() {
-                    if let Some(var) = context.get(name) {
-                        return var.as_boolean();
-                    }
-                }
-            }
-            None
-        }
-        IrValue::None | IrValue::Pair(_) | IrValue::Dictionary(_) => None,
-        _ => None,
+fn resolve_boolean_value(value: &InvocationValue) -> Option<bool> {
+    match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
+        Ok(ScalarValue::Boolean(value)) => Some(value),
+        Ok(_) | Err(_) => None,
     }
 }
 
@@ -5844,13 +5988,38 @@ fn resolve_boolean_value(value: &IrValue, context: &EvaluationContext) -> Option
 fn scalar_boolean_value(value: &IrValue) -> Option<bool> {
     match value {
         IrValue::Boolean(value) => Some(*value),
-        IrValue::Identifier(name) => match name.to_lowercase().as_str() {
-            "true" | "yes" => Some(true),
-            "false" | "no" => Some(false),
-            _ => None,
-        },
-        IrValue::None | IrValue::Pair(_) | IrValue::Dictionary(_) => None,
         _ => None,
+    }
+}
+
+/// Classifies the value expression at the Quarkdown invocation boundary.
+///
+/// Raw scalar arguments and references to variables or user functions enter
+/// the upstream DynamicValue binder path. A nested builtin such as
+/// `.string`, a typed range, or a resource result is already a materialized
+/// semantic value and must not be reinterpreted by unrelated target types.
+fn invocation_origin(value: &IrValue, context: &EvaluationContext) -> ValueOrigin {
+    match value {
+        IrValue::String(_) | IrValue::Identifier(_) => ValueOrigin::Dynamic,
+        IrValue::Content(nodes) => match nodes.as_slice() {
+            [IrNode::FunctionCall { name, .. }]
+            | [IrNode::ChainedFunctionCall {
+                head: IrCallSegment { name, .. },
+                ..
+            }] if context.contains(name) || context.get_function(name).is_some() => {
+                ValueOrigin::Dynamic
+            }
+            _ => ValueOrigin::Static,
+        },
+        _ => ValueOrigin::Static,
+    }
+}
+
+fn call_result_origin(name: &str, context: &EvaluationContext) -> ValueOrigin {
+    if context.contains(name) || context.get_function(name).is_some() {
+        ValueOrigin::Dynamic
+    } else {
+        ValueOrigin::Static
     }
 }
 
@@ -5972,13 +6141,7 @@ fn scalar_to_text(
 /// crossed the upstream `Float` boundary, while preserving f64-only values
 /// originating elsewhere in the IR.
 fn scalar_number_to_text(number: f64) -> String {
-    if number.is_finite() {
-        let float = number as f32;
-        if f64::from(float) == number {
-            return float.to_string();
-        }
-    }
-    number.to_string()
+    value_conversion::number_to_text(number)
 }
 
 /// Builds the `E3001` diagnostic for an unresolvable condition.
@@ -7252,12 +7415,20 @@ mod tests {
             (f64::from(i32::MAX), i32::MAX),
         ] {
             assert_eq!(
-                number_to_range_endpoint(&IrValue::Number(number)),
+                number_to_range_endpoint(&InvocationValue::static_value(IrValue::Number(number))),
                 Ok(expected)
             );
         }
-        assert!(number_to_range_endpoint(&IrValue::Boolean(true)).is_err());
-        assert!(number_to_range_endpoint(&IrValue::String("3".to_string())).is_err());
+        assert!(
+            number_to_range_endpoint(&InvocationValue::static_value(IrValue::Boolean(true)))
+                .is_err()
+        );
+        assert_eq!(
+            number_to_range_endpoint(&InvocationValue::dynamic_value(IrValue::String(
+                "3".to_string()
+            ))),
+            Ok(3)
+        );
     }
 
     #[test]
@@ -7290,9 +7461,11 @@ mod tests {
             ),
         ] {
             let mut diagnostics = Vec::new();
-            let Ok(elements) =
-                evaluator.coerce_iterable(IrValue::Range(range), &span(0, 10), &mut diagnostics)
-            else {
+            let Ok(elements) = evaluator.coerce_iterable(
+                InvocationValue::static_value(IrValue::Range(range)),
+                &span(0, 10),
+                &mut diagnostics,
+            ) else {
                 panic!("finite ranges materialize");
             };
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -7323,9 +7496,11 @@ mod tests {
             },
         ] {
             let mut diagnostics = Vec::new();
-            let Ok(elements) =
-                evaluator.coerce_iterable(IrValue::Range(range), &span(0, 10), &mut diagnostics)
-            else {
+            let Ok(elements) = evaluator.coerce_iterable(
+                InvocationValue::static_value(IrValue::Range(range)),
+                &span(0, 10),
+                &mut diagnostics,
+            ) else {
                 panic!("descending or below-default ranges are empty");
             };
             assert!(elements.is_empty());
@@ -7334,11 +7509,11 @@ mod tests {
 
         let mut diagnostics = Vec::new();
         let result = evaluator.coerce_iterable(
-            IrValue::Range(IrRange {
+            InvocationValue::static_value(IrValue::Range(IrRange {
                 start: Some(3),
                 end: None,
                 span: span(10, 13),
-            }),
+            })),
             &span(0, 20),
             &mut diagnostics,
         );

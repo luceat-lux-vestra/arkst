@@ -1,0 +1,12 @@
+.var {number-text} {.string {-3.5}}
+.abs {.number-text}
+
+.var {boolean-text} {.string {YES}}
+.if {.boolean-text}
+    boolean conversion
+
+.var {range-text} {.string {2..4}}
+.foreach {.range-text}
+    .1
+
+.string {2..4}

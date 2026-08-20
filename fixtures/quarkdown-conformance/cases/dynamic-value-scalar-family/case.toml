@@ -1,0 +1,5 @@
+id = "dynamic-value-scalar-family"
+feature = "bounded-dynamic-value-conversion"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-dynamic-value-converter"
+description = "Context-free Number, Boolean, Range, and String conversion through existing evaluator consumers"
