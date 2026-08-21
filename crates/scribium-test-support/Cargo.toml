@@ -10,6 +10,7 @@ description = "Scribium test utilities — fixture loading, golden tests, temp p
 
 [dependencies]
 scribium-core.workspace = true
+scribium-typst.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = "1.1"

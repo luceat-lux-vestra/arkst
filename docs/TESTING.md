@@ -126,12 +126,26 @@ Those values must remain distinguishable. A public feature documented upstream
 but not yet implemented is compatibility debt, not evidence of support and not
 a permanent exclusion.
 
-Compatibility levels:
-- `Unsupported` — produces explicit diagnostic
-- `Parsed` — syntactically accepted
-- `Semantically supported` — semantics match spec
-- `Output-equivalent` — Typst output matches reference
-- `Known divergence` — deliberate behavioral difference
+Compatibility levels are executable policies enforced by
+`scribium_test_support::ConformanceCase::verify()` for every corpus case:
+
+- `Unsupported` — compares `expected/diagnostics.json` by diagnostic code,
+  severity, primary span, and secondary spans, and requires a deliberate
+  non-parser error.
+- `Parsed` — requires only parser acceptance (no `E2xxx` diagnostic); evaluator
+  and lowering diagnostics remain allowed.
+- `Semantically supported` — requires no diagnostics and exact
+  `expected/ir.json` equality with the compiled `IrDocument`.
+- `Output-equivalent` — adds exact pure Typst lowering equality against
+  `expected/typst.typ`; it does not invoke a Typst subprocess.
+- `Known divergence` — requires a non-empty `known_divergence` explanation and
+  an explicit expected IR assertion for Scribium's deliberate behavior.
+
+Fixture loading fails closed for unknown levels, directory/metadata ID mismatch,
+duplicate metadata IDs, and missing level-specific artifacts. The generic
+`quarkdown_conformance_corpus_obeys_declared_levels` test runs the complete corpus
+through the existing workspace test gate. Semantic goldens preserve IR node
+structure and source spans; no automatic golden-update mode is provided.
 
 ## CI Checks
 
