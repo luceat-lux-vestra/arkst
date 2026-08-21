@@ -6,7 +6,7 @@ implementation plan that changes the current supported surface.
 
 - Tracked upstream: Quarkdown v2.5.1
 - Resolved upstream tag: [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium comparison baseline: `40cfdc6bff5c4beb452370b5d27cb15172bb8830`
+- Scribium comparison baseline: `93e8e160a987229a7f5b37ff250dcb4f74fad714`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
 
 ## Findings
@@ -261,6 +261,31 @@ This slice does not add a generalized inline component/value hierarchy,
 universal `NodeValue`, or String-to-Markdown conversion. Those broader
 composition boundaries remain deferred.
 
+### `.br` inline hard-break consumer slice (2026-08-21)
+
+The v2.5.1 public function is argumentless: `.br` accepts no positional or
+named arguments, no block body, and no lambda body, and returns the inline
+`LineBreak` node wrapped as a value. The pinned v2.5.1 `Text.kt` and the
+current upstream `main` implementation are unchanged for this function.
+
+Scribium resolves native `.br` calls only after the existing source-defined
+callable lookup, preserving user-function precedence. After signature
+validation, it returns one `IrValue::Content` carrier containing a paragraph
+with the existing backend-neutral `IrInline::HardBreak { span }`, where the
+span is the original `.br` call span. The normal inline/block materializers
+place that hard break without a second evaluator or a new IR/value variant.
+
+Validation is fail-closed and precedes evaluation of invalid argument or body
+contents. Invalid positional, named, multiple-argument, block-body, and
+lambda-body forms publish no hard-break output. The existing Typst
+`IrInline::HardBreak` lowering is the only backend path involved.
+
+The v2.5.1 `NodeUtils.toPlainText()` projection omits `LineBreak`; Scribium's
+existing `IrInline::HardBreak` plaintext projection is therefore reused
+without a `.br`-specific `.plaintext` branch. This bounded slice does not
+implement or imply generalized inline components, `.text`, `.codespan`,
+`.clip`, `.float`, or `.fullspan`.
+
 ## Compatibility matrix
 
 | Feature | Quarkdown v2.5.1 behavior | Scribium current behavior | Architecture decision | Implementation status | Deferred work |
@@ -277,6 +302,7 @@ composition boundaries remain deferred.
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `.whitespace` | Inline `Whitespace` node with optional `width: Size?` and `height: Size?`; positional order is width then height; no dimensions emit NBSP, while a supplied dimension creates a fixed-size empty rectangle | `IrInline::Whitespace` preserves the inline semantic, source span, surrounding order, typed Size conversion, zero for an omitted axis, and the existing standalone output bridge | Keep Whitespace inline and backend-neutral; reuse `InvocationValue`/`ValueOrigin` and materialize only through existing output boundaries | Implemented for the bounded argument, inline, block-output, provenance, and Typst slice | General inline node/value composition and other inline layout features |
+| `.br` | Argumentless inline `LineBreak` producer; no positional/named arguments or block/lambda body; `toPlainText()` omits the line break | Existing evaluator/native-call path materializes exactly one `IrInline::HardBreak` with the call span, preserves inline order and source-defined `br` precedence, validates before body evaluation, and reuses existing plaintext/Typst paths | Reuse `IrInline::HardBreak`; do not add `IrInline::Br`, `IrValue::LineBreak`, or a generic inline component | Implemented for the bounded v2.5.1 slice | `.text`, `.codespan`, `.clip`, `.float`, `.fullspan`, and generalized inline component/value conversion |
 | `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
@@ -342,3 +368,6 @@ to select the representation at the document level.
 The remaining direct `.container` style parameters and related layout families
 remain deferred. `.docauthor(s)`, `.dockeywords`, `.doclang`, and `.theme` also
 remain deferred.
+
+The `.br` slice does not promote the broader text/layout family: `.text`,
+`.codespan`, `.clip`, `.float`, and `.fullspan` remain separate deferred work.

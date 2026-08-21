@@ -366,6 +366,49 @@ fn integration_whitespace_lowers_to_lossless_typst_and_pdf() {
 }
 
 #[test]
+fn integration_br_uses_existing_hard_break_lowering_and_pdf() {
+    let source = "before .br after\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("br.qd")
+        .expect("valid entry path")
+        .add_source("br.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "br diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let (typst_code, source_map) = lower_to_typst(&result.ir);
+    assert!(typst_code.contains("before "), "{typst_code}");
+    assert!(typst_code.contains("\\\n"), "{typst_code}");
+    assert!(!typst_code.contains("#br"), "{typst_code}");
+    let call_start = source.find(".br").expect("call span");
+    assert!(
+        source_map
+            .iter()
+            .any(|entry| entry.original.start == call_start),
+        "br lowering lost call provenance: {source_map:?}"
+    );
+
+    with_typst("br-line-break", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "br.qd".to_string(),
+            })
+            .expect("br Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_self_contained_mode_does_not_expose_temp_resources() {
     with_typst("self-contained-resource-boundary", |backend| {
         let result = backend.compile(&TypstInput {
