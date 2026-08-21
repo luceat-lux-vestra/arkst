@@ -1200,7 +1200,7 @@ impl Evaluator {
             diagnostics.push(stacked_inline_materialization_error(*span));
             return Vec::new();
         }
-        if is_center(name) {
+        if is_center(name) && context.get_function(name).is_none() {
             diagnostics.push(center_inline_materialization_error(*span));
             return Vec::new();
         }
@@ -4779,7 +4779,7 @@ impl Evaluator {
                 }
             }
             Some(IrValue::Component(component)) => {
-                diagnostics.push(stacked_inline_materialization_error(component.span()));
+                diagnostics.push(component_inline_materialization_error(component.span()));
                 Vec::new()
             }
             Some(IrValue::Range(range)) => {
@@ -6849,6 +6849,17 @@ fn stacked_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         hints: vec![
             "Use `.row`, `.column`, or `.grid` as a block call with a Markdown body.".to_string(),
         ],
+    }
+}
+
+fn component_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "Semantic component is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use the component as a block call with a Markdown body.".to_string()],
     }
 }
 

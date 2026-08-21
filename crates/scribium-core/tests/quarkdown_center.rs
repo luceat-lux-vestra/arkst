@@ -228,3 +228,45 @@ fn inline_center_fails_closed_without_fabricated_output() {
         .all(|inline| matches!(inline, scribium_core::ir::IrInline::Text { .. })));
     assert!(!format!("{content:?}").contains("center"));
 }
+
+#[test]
+fn inline_custom_center_shadows_native_center() {
+    let result = compile_source(".function {center}\n    custom\n\nprefix .center suffix\n");
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected surrounding paragraph, got {:?}", result.ir.nodes);
+    };
+    let text: String = content
+        .iter()
+        .filter_map(|inline| match inline {
+            scribium_core::ir::IrInline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "prefix custom suffix");
+}
+
+#[test]
+fn inline_callable_container_fails_closed_without_flattening() {
+    let result =
+        compile_source(".function {wrapper}\n    .center\n        A\n\nprefix .wrapper suffix\n");
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.diagnostics[0]
+        .message
+        .contains("Semantic component is block-only"));
+    assert!(!result.diagnostics[0].message.contains("Stacked layout"));
+    let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected surrounding paragraph, got {:?}", result.ir.nodes);
+    };
+    let text: String = content
+        .iter()
+        .filter_map(|inline| match inline {
+            scribium_core::ir::IrInline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(text.contains("prefix"));
+    assert!(text.contains("suffix"));
+    assert!(!text.contains('A'));
+    assert!(!text.contains("wrapper"));
+}
