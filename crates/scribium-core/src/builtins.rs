@@ -478,12 +478,8 @@ fn append_row_plain_text(row: &crate::ir::IrTableRow, output: &mut String) -> Op
 fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()> {
     match inline {
         IrInline::Text { content, .. } | IrInline::Code { content, .. } => output.push_str(content),
-        IrInline::Whitespace {
-            width: None,
-            height: None,
-            ..
-        } => output.push('\u{a0}'),
-        IrInline::Whitespace { .. } => return None,
+        // v2.5.1 `NodeUtils.toPlainText()` omits both forms of whitespace.
+        IrInline::Whitespace { .. } => {}
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -547,13 +543,7 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             | IrInline::Link { content, .. } => plain_text_from_inlines(content, output)?,
             IrInline::SoftBreak { .. } => output.push('\n'),
             // v2.5.1 `NodeUtils.toPlainText()` does not emit hard-break text.
-            IrInline::HardBreak { .. } | IrInline::Image { .. } => {}
-            IrInline::Whitespace {
-                width: None,
-                height: None,
-                ..
-            } => output.push('\u{a0}'),
-            IrInline::Whitespace { .. } => return None,
+            IrInline::HardBreak { .. } | IrInline::Image { .. } | IrInline::Whitespace { .. } => {}
             IrInline::DirectiveCall { .. }
             | IrInline::ChainedDirectiveCall { .. }
             | IrInline::RawHtml { .. }
@@ -984,7 +974,9 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{deterministic_transcendental, evaluate, evaluate_with_origins, is_supported};
-    use crate::ir::{IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrValue};
+    use crate::ir::{
+        IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrValue,
+    };
     use crate::source::{SourceId, SourceSpan};
     use crate::value_conversion::InvocationValue;
 
@@ -1707,6 +1699,101 @@ mod tests {
             evaluate("plaintext", &[IrValue::Boolean(true)], &[], false)
                 .expect("boolean scalar is supported"),
             IrValue::String("true".into())
+        );
+    }
+
+    #[test]
+    fn plaintext_omits_dimensionless_and_dimensioned_whitespace() {
+        let span = SourceSpan::new(SourceId(0), 0, 1);
+        let dimensionless = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![
+                IrInline::Text {
+                    content: "A".into(),
+                    span,
+                },
+                IrInline::Whitespace {
+                    width: None,
+                    height: None,
+                    span,
+                },
+                IrInline::Text {
+                    content: "B".into(),
+                    span,
+                },
+            ],
+            span,
+        }]);
+        let dimensioned = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![
+                IrInline::Text {
+                    content: "A".into(),
+                    span,
+                },
+                IrInline::Whitespace {
+                    width: Some(IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    height: Some(IrSize {
+                        value: 1.0,
+                        unit: IrSizeUnit::Pt,
+                    }),
+                    span,
+                },
+                IrInline::Text {
+                    content: "B".into(),
+                    span,
+                },
+            ],
+            span,
+        }]);
+
+        assert_eq!(
+            evaluate("plaintext", &[dimensionless], &[], false)
+                .expect("dimensionless whitespace should be omitted"),
+            IrValue::String("AB".into())
+        );
+        assert_eq!(
+            evaluate("plaintext", &[dimensioned], &[], false)
+                .expect("dimensioned whitespace should be omitted"),
+            IrValue::String("AB".into())
+        );
+    }
+
+    #[test]
+    fn plain_text_fallback_omits_whitespace_without_rejecting_dimensioned_form() {
+        let span = SourceSpan::new(SourceId(0), 0, 1);
+        let content = IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![
+                IrInline::Text {
+                    content: "A".into(),
+                    span,
+                },
+                IrInline::Whitespace {
+                    width: Some(IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    height: None,
+                    span,
+                },
+                IrInline::Text {
+                    content: "B".into(),
+                    span,
+                },
+            ],
+            span,
+        }]);
+
+        assert_eq!(
+            evaluate(
+                "equals",
+                &[content, IrValue::String("AB".into())],
+                &[],
+                false
+            )
+            .expect("dimensioned whitespace should not reject plain-text fallback"),
+            IrValue::Boolean(true)
         );
     }
 
