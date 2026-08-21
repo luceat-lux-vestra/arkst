@@ -1309,6 +1309,30 @@ mod tests {
     }
 
     #[test]
+    fn container_component_preserves_logical_alignment_names() {
+        for (alignment, name) in [
+            (IrContainerAlignment::Start, "start"),
+            (IrContainerAlignment::Center, "center"),
+            (IrContainerAlignment::End, "end"),
+        ] {
+            let code = super::lower_to_typst_code(&IrDocument {
+                nodes: vec![IrNode::Component {
+                    component: IrComponent::Container(IrContainerComponent {
+                        full_width: true,
+                        alignment,
+                        children: vec![paragraph("A")],
+                        span: empty_span(),
+                    }),
+                }],
+                metadata: IrMetadata::default(),
+            });
+            assert!(code.contains(&format!("#align({name})[")), "{code}");
+            assert!(!code.contains("left"), "{code}");
+            assert!(!code.contains("right"), "{code}");
+        }
+    }
+
+    #[test]
     fn center_component_preserves_child_order() {
         let code = super::lower_to_typst_code(&IrDocument {
             nodes: vec![container_node(vec![paragraph("A"), paragraph("B")])],

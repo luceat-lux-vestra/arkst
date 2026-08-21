@@ -113,7 +113,7 @@ impl IrComponent {
     }
 }
 
-/// The bounded full-width container state consumed by `.center`.
+/// The bounded full-width container state consumed by `.center` and `.align`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrContainerComponent {
     pub full_width: bool,
@@ -122,8 +122,8 @@ pub struct IrContainerComponent {
     pub span: SourceSpan,
 }
 
-/// Logical container alignment. The evaluator currently produces only
-/// `Center`; `Start` and `End` keep the semantic shape closed for `.align`.
+/// Logical container alignment used by the bounded `.center` and `.align`
+/// consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrContainerAlignment {
     Start,
@@ -177,6 +177,7 @@ pub enum IrEnumValue {
     DocumentType(IrDocumentType),
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
+    ContainerAlignment(IrContainerAlignment),
 }
 
 /// A closed target discriminator for native content that remains opaque until

@@ -205,6 +205,12 @@ struct BoundStackedArguments {
     values: Vec<Option<StackedArgument>>,
 }
 
+#[derive(Clone)]
+struct AlignArgument {
+    value: InvocationValue,
+    span: SourceSpan,
+}
+
 impl BoundStackedArguments {
     fn take(&mut self, index: usize) -> Option<StackedArgument> {
         self.values.get_mut(index).and_then(Option::take)
@@ -1204,6 +1210,10 @@ impl Evaluator {
             diagnostics.push(center_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_align(name) && context.get_function(name).is_none() {
+            diagnostics.push(align_inline_materialization_error(*span));
+            return Vec::new();
+        }
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -1540,6 +1550,19 @@ impl Evaluator {
             );
         }
 
+        if is_align(name) {
+            return self.evaluate_align(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if is_stacked_layout(name) {
             return self.evaluate_stacked_layout(
                 name,
@@ -1724,6 +1747,91 @@ impl Evaluator {
             IrContainerComponent {
                 full_width: true,
                 alignment: IrContainerAlignment::Center,
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_align(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let positional_values = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let named_values =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let positional = positional_values
+            .into_iter()
+            .zip(positional_args.iter())
+            .map(|(value, source)| AlignArgument {
+                value,
+                span: value_source_span(source, span),
+            })
+            .collect();
+        let alignment = match bind_align_argument(positional, named_values, span, diagnostics) {
+            Ok(argument) => argument,
+            Err(outcome) => return outcome,
+        };
+        let alignment = match convert_align_alignment(&alignment.value) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(align_conversion_error(alignment.span, error));
+                return CallOutcome::Failed;
+            }
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(align_argument_error(
+                "`.align` body is a Markdown block, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(align_argument_error("`.align` is block-only", *span));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(align_argument_error(
+                    "`.align` requires a Markdown block body",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Container(
+            IrContainerComponent {
+                full_width: true,
+                alignment,
                 children,
                 span: *span,
             },
@@ -5129,6 +5237,80 @@ fn is_center(name: &str) -> bool {
     name == "center"
 }
 
+fn is_align(name: &str) -> bool {
+    name == "align"
+}
+
+fn bind_align_argument(
+    positional: Vec<AlignArgument>,
+    named: Vec<InvocationNamedArg>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<AlignArgument, CallOutcome> {
+    let mut alignment = match positional.as_slice() {
+        [] => None,
+        [argument] => Some(argument.clone()),
+        _ => {
+            diagnostics.push(align_argument_error(
+                "`.align` accepts exactly one `alignment` argument",
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+    };
+    for argument in named {
+        if argument.arg.name != "alignment" {
+            diagnostics.push(align_argument_error_at(
+                format!("Unknown named argument `{}`", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        if alignment.is_some() {
+            diagnostics.push(align_argument_error_at(
+                "Argument `alignment` was bound more than once".to_string(),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        alignment = Some(AlignArgument {
+            value: InvocationValue {
+                value: argument.arg.value,
+                origin: argument.origin,
+            },
+            span: argument.arg.span,
+        });
+    }
+    alignment.ok_or_else(|| {
+        diagnostics.push(align_argument_error(
+            "`.align` requires the `alignment` argument",
+            *span,
+        ));
+        CallOutcome::Failed
+    })
+}
+
+fn convert_align_alignment(
+    argument: &InvocationValue,
+) -> Result<IrContainerAlignment, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::ContainerAlignment,
+        ),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::ContainerAlignment(value)) => Ok(value),
+        value_conversion::DomainValue::Enum(_) => {
+            Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Enum,
+            })
+        }
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
+}
+
 fn bind_stacked_arguments(
     name: &str,
     positional: Vec<StackedArgument>,
@@ -6885,6 +7067,52 @@ fn center_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["Use `.center` as a block call with a Markdown body.".to_string()],
+    }
+}
+
+fn align_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    align_argument_error_at(message.to_string(), span)
+}
+
+fn align_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.align` accepts one required alignment argument and one Markdown block body."
+                .to_string(),
+        ],
+    }
+}
+
+fn align_conversion_error(
+    span: SourceSpan,
+    error: value_conversion::ConversionError,
+) -> Diagnostic {
+    align_argument_error(
+        match error {
+            value_conversion::ConversionError::InvalidText { .. } => {
+                "`.align` alignment value is invalid"
+            }
+            value_conversion::ConversionError::UnsupportedValue { .. } => {
+                "`.align` alignment value has the wrong typed domain or origin"
+            }
+        },
+        span,
+    )
+}
+
+fn align_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.align` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.align` as a block call with a Markdown body.".to_string()],
     }
 }
 

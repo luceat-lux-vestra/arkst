@@ -98,19 +98,21 @@ not removed. Typed domain values use identity conversion, dynamic textual
 values use only their bounded parser, and static `StringValue` results do not
 gain domain meaning.
 
-These adapters now feed the reviewed Stacked layout consumer. The live
-`.doctype` consumer remains a separate closed enum domain; Stacked main-axis
-and cross-axis enums retain their own typed identity, and layout gaps reuse the
-existing `Size` adapter. Color/style consumers remain deferred.
+These adapters now feed the reviewed Stacked and Container layout consumers.
+The live `.doctype` consumer remains a separate closed enum domain; Stacked
+main-axis, Stacked cross-axis, and Container alignment enums retain their own
+typed identity, and layout gaps reuse the existing `Size` adapter. Color/style
+consumers remain deferred.
 
 ### Layout classification
 
 The v2.5.1 `Layout.kt` contract is recorded here for future compatibility work.
 The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
-conversion, and lazy body evaluation. `.center` constructs the bounded typed
-Container component after lazy Markdown block-body evaluation. Typst lowering
-remains backend-owned and does not add Typst constructs to the core IR.
+conversion, and lazy body evaluation. `.center` and `.align` construct the
+bounded typed Container component after their alignment validation and lazy
+Markdown block-body evaluation. Typst lowering remains backend-owned and does
+not add Typst constructs to the core IR.
 
 | Function | v2.5.1 observable inputs | Validation/result |
 |---|---|---|
@@ -118,10 +120,11 @@ remains backend-owned and does not add Typst constructs to the core IR.
 | `column` | column layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
+| `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
 
-The future surface requires `Size`, alignment enums, validated integers,
-structured content, and component/node conversion. It does not authorize their
-implementation here.
+The remaining future surface includes broader style/layout properties and
+component families; it does not expand this bounded Container consumer into
+`.container` or a generic layout engine.
 
 ### Stacked layout consumer slice (2026-08-21)
 
@@ -144,7 +147,7 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
-### Center component consumer slice (2026-08-21)
+### Container component consumer slices (2026-08-21)
 
 `.center` is implemented as a bounded Container component consumer:
 
@@ -158,9 +161,20 @@ Implemented in this slice:
 - Typst lowering emits a full-width block with logical `center` alignment and
   retains child source-map provenance.
 
-Deferred from this slice:
+`.align` is implemented in the same Container semantic family:
 
-- `.align` argument binding and alignment conversion;
+- `IrEnumValue::ContainerAlignment` and `ClosedEnumTarget::ContainerAlignment`
+  preserve a closed `start`/`center`/`end` domain with typed identity,
+  case-insensitive dynamic names, and no static String coercion;
+- exactly one `alignment` argument is accepted positionally or by name, with
+  duplicate, unknown, missing, and excess bindings rejected;
+- alignment binding/conversion completes before the required lazy Markdown
+  block body is evaluated, and failures publish no partial Container; and
+- nested, Stacked, callable, and source-provenance composition remains typed;
+  native inline `.align` is block-only and fails closed.
+
+Deferred from these slices:
+
 - direct `.container`, `StyleOptions`, and `.float`;
 - `.fullspan`, general String → Markdown body conversion, and inline Container
   insertion.
@@ -169,7 +183,7 @@ Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only);
-- `.container`, `.align`, `.float`, `.box`, `.clip`, `.whitespace`,
+- `.container`, `.float`, `.box`, `.clip`, `.whitespace`,
   `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
 
@@ -246,13 +260,13 @@ source-map entries are generated during lowering from those original spans.
 ## Intentionally deferred
 
 This slice does not implement String → Markdown or String → component
-conversion, inline Stacked/Container insertion, `.align` argument binding,
-direct `.container`, `StyleOptions`, `.float`, `.fullspan`, a generic layout
+conversion, inline Stacked/Container insertion, direct `.container`,
+`StyleOptions`, `.float`, `.fullspan`, a generic layout
 engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
-The next selected candidate is the direct `container` / `align` family after
-the remaining #61 semantic gap inventory is re-reviewed. `.docauthor(s)`,
+The next selected candidate is direct `container` and related layout families
+after the remaining #61 semantic gap inventory is re-reviewed. `.docauthor(s)`,
 `.dockeywords`, `.doclang`, and `.theme` remain deferred.

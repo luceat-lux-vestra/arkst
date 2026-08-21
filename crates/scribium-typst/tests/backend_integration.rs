@@ -174,6 +174,43 @@ fn integration_center_layout_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_align_layout_lowers_to_valid_typst_and_pdf() {
+    let source = ".align {end}\n    Hello\n\n    .row\n        A\n\n        B\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("align.qd")
+        .expect("valid entry path")
+        .add_source("align.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "align diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#block(width: 100%)"), "{typst_code}");
+    assert!(typst_code.contains("#align(end)"), "{typst_code}");
+    assert!(typst_code.contains("#stack(dir: ltr"), "{typst_code}");
+    assert!(typst_code.find("Hello").unwrap() < typst_code.find('A').unwrap());
+    assert!(typst_code.find('A').unwrap() < typst_code.find('B').unwrap());
+
+    with_typst("align-layout", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "align.qd".to_string(),
+            })
+            .expect("align Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_self_contained_mode_does_not_expose_temp_resources() {
     with_typst("self-contained-resource-boundary", |backend| {
         let result = backend.compile(&TypstInput {
