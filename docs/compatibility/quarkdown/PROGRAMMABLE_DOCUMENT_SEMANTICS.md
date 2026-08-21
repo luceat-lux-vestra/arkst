@@ -109,10 +109,10 @@ consumers remain deferred.
 The v2.5.1 `Layout.kt` contract is recorded here for future compatibility work.
 The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
-conversion, and lazy body evaluation. `.center` and `.align` construct the
-bounded typed Container component after their alignment validation and lazy
-Markdown block-body evaluation. Typst lowering remains backend-owned and does
-not add Typst constructs to the core IR.
+conversion, and lazy body evaluation. `.center`, `.align`, and the bounded
+`.container` sizing slice construct the typed Container component after their
+argument validation and lazy Markdown block-body evaluation. Typst lowering
+remains backend-owned and does not add Typst constructs to the core IR.
 
 | Function | v2.5.1 observable inputs | Validation/result |
 |---|---|---|
@@ -121,10 +121,11 @@ not add Typst constructs to the core IR.
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
+| `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, and lazy validation are supported |
 
 The remaining future surface includes broader style/layout properties and
-component families; it does not expand this bounded Container consumer into
-`.container` or a generic layout engine.
+component families; the direct `.container` consumer remains limited to this
+sizing subset and does not become a generic layout engine.
 
 ### Stacked layout consumer slice (2026-08-21)
 
@@ -151,8 +152,9 @@ Implemented in this slice:
 
 `.center` is implemented as a bounded Container component consumer:
 
-- `IrComponent::Container` carries only `full_width`, logical alignment,
-  structured `Vec<IrNode>` children, and the producing call span;
+- `IrComponent::Container` carries optional `width`/`height`, `full_width`,
+  optional logical alignment, structured `Vec<IrNode>` children, and the
+  producing call span;
 - `.center` accepts exactly one required Markdown block body, evaluates it
   lazily through the existing callable/body path, and rejects positional,
   named, inline, and lambda-body forms;
@@ -173,17 +175,35 @@ Implemented in this slice:
 - nested, Stacked, callable, and source-provenance composition remains typed;
   native inline `.align` is block-only and fails closed.
 
+The direct `.container` consumer is implemented only for the bounded sizing
+slice:
+
+- an empty or optional Markdown block body constructs an unaligned Container;
+- positional and named `width`, `height`, and `fullwidth` arguments use the
+  existing invocation-origin infrastructure and typed `IrSize`/Boolean
+  conversion; duplicate, unknown, and deferred-known parameters fail with a
+  source-backed diagnostic;
+- argument binding, conversion, and validation complete before the body is
+  evaluated, so invalid sizing never executes a failing body or publishes a
+  partial component; and
+- Typst lowering emits `#block` sizing in deterministic `width`, `height`
+  order, with explicit width taking precedence over `fullwidth`, and emits no
+  `#align` wrapper when alignment is `None`.
+
 Deferred from these slices:
 
-- direct `.container`, `StyleOptions`, and `.float`;
+- `StyleOptions` and `.float`;
 - `.fullspan`, general String → Markdown body conversion, and inline Container
-  insertion.
+  insertion;
+- direct `.container` style parameters including `float`, `fullspan`,
+  `classname`, alignment/text alignment, colors, borders, margin/padding,
+  radius, and font/text-style properties.
 
 Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only);
-- `.container`, `.float`, `.box`, `.clip`, `.whitespace`,
+- `.box`, `.clip`, `.whitespace`,
   `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
 
@@ -260,13 +280,13 @@ source-map entries are generated during lowering from those original spans.
 ## Intentionally deferred
 
 This slice does not implement String → Markdown or String → component
-conversion, inline Stacked/Container insertion, direct `.container`,
-`StyleOptions`, `.float`, `.fullspan`, a generic layout
+conversion, inline Stacked/Container insertion, the deferred direct
+`.container` style parameters, `StyleOptions`, `.float`, `.fullspan`, a generic layout
 engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
-The next selected candidate is direct `container` and related layout families
-after the remaining #61 semantic gap inventory is re-reviewed. `.docauthor(s)`,
-`.dockeywords`, `.doclang`, and `.theme` remain deferred.
+The remaining direct `.container` style parameters and related layout families
+remain deferred. `.docauthor(s)`, `.dockeywords`, `.doclang`, and `.theme` also
+remain deferred.

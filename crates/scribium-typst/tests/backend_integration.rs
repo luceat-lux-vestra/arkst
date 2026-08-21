@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use scribium_core::ir::{IrInline, IrNode, NativeTarget};
+use scribium_core::ir::{IrComponent, IrInline, IrNode, NativeTarget};
 use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
 use scribium_typst::backend::TypstSourceContext;
 use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
@@ -203,6 +203,54 @@ fn integration_align_layout_lowers_to_valid_typst_and_pdf() {
                 entry_path: "align.qd".to_string(),
             })
             .expect("align Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_container_sizing_lowers_to_valid_typst_and_pdf() {
+    let source = ".row\n    .container width:{4cm}\n        ## Left\n        Text\n\n    .container fullwidth:{yes}\n        Right\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("container.qd")
+        .expect("valid entry path")
+        .add_source("container.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "container diagnostics: {:?}",
+        result.diagnostics
+    );
+    let [IrNode::Component {
+        component: IrComponent::Stacked(row),
+    }] = result.ir.nodes.as_slice()
+    else {
+        panic!("expected typed row, got {:?}", result.ir.nodes);
+    };
+    assert_eq!(row.children.len(), 2);
+    assert!(row.children.iter().all(|child| matches!(
+        child,
+        IrNode::Component {
+            component: IrComponent::Container(_)
+        }
+    )));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(typst_code.contains("#block(width: 4cm)"), "{typst_code}");
+    assert!(typst_code.contains("#block(width: 100%)"), "{typst_code}");
+
+    with_typst("container-sizing", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "container.qd".to_string(),
+            })
+            .expect("container Typst must compile");
         assert!(output
             .pdf
             .expect("PDF output must be present")

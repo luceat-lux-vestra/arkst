@@ -40,7 +40,7 @@ Classification index:
 | Compatible at the evidenced bounded boundary | Mathematics/numeric operations |
 | Unsupported | Layout/document functions outside the reviewed Stacked slice; unimplemented data-loading families such as `.csv`, `.listfiles`, and `.filename` |
 | Scribium extension | `.map` and `.filter` collection transforms; they are tested Scribium behavior but are not v2.5.1 upstream features |
-| Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, direct container/style layout families, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
+| Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, remaining container style/layout families, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
 
 ## v2.5.1 stdlib surface classification
 
@@ -54,8 +54,9 @@ to complete compatibility.
 | Classification | v2.5.1 functions | Boundary / reason |
 |---|---|---|
 | Implemented (bounded) | `.abs`, `.align`, `.average`, `.capitalize`, `.center`, `.concatenate`, `.cos`, `.dictionary`, `.distinct`, `.divide`, `.docdescription`, `.docname`, `.doctype`, `.equals`, `.first`, `.foreach`, `.function`, `.getat`, `.groupvalues`, `.html`, `.if`, `.ifnot`, `.ifpresent`, `.include`, `.isempty`, `.isgreater`, `.iseven`, `.isnone`, `.islower`, `.isnotempty`, `.json`, `.last`, `.lowercase`, `.let`, `.markdown`, `.multiply`, `.negate`, `.none`, `.not`, `.otherwise`, `.pair`, `.pi`, `.plaintext`, `.range`, `.read`, `.repeat`, `.rem`, `.reversed`, `.round`, `.second`, `.sin`, `.size`, `.sorted`, `.sqrt`, `.startswith`, `.string`, `.subtract`, `.sum`, `.sumall`, `.takeif`, `.tan`, `.third`, `.truncate`, `.uppercase`, `.var` | Typed evaluator results, shared callable/iterable paths, bounded native-content/resource boundaries, or existing structural document semantics. `.center` and `.align` are bounded full-width Container block-body consumers; `.align` uses positional/named origin-aware closed alignment conversion. `.docname`, `.docdescription`, and `.doctype` use evaluator-owned document state and a final serializable snapshot; `.doctype` is the first closed-enum consumer. `.sorted` is natural-order or `by` selector sorting, not a two-value comparator API. |
+| Partially implemented (bounded) | `.container` | Empty/body-only containers plus `width`, `height`, and `fullwidth` sizing use the typed Container component and Typst block lowering; deferred style/layout parameters remain explicitly unsupported. |
 | Partially implemented | `.autopagebreak`, `.captionposition`, `.currentpage`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.font`, `.footer`, `.formatpagenumber`, `.lastheading`, `.marker`, `.navigation`, `.noautopagebreak`, `.nonumbering`, `.numbering`, `.pageformat`, `.pagemargin`, `.paragraphstyle`, `.resetpagenumber`, `.tableofcontents`, `.texmacro`, `.theme`, `.totalpages` | Project/front-matter or IR metadata provides only a different, partial boundary; remaining function-driven document context and observable layout state are not implemented. |
-| Unsupported | `.allemojis`, `.bibliography`, `.box`, `.br`, `.cite`, `.clip`, `.code`, `.codespan`, `.collapse`, `.container`, `.debug`, `.emoji`, `.error`, `.extend`, `.figure`, `.filetree`, `.float`, `.fragment`, `.fullspan`, `.functionexists`, `.get`, `.heading`, `.icon`, `.image`, `.keybinding`, `.landscape`, `.libraries`, `.libexists`, `.libfunctions`, `.libraryexists`, `.link`, `.localization`, `.localize`, `.log`, `.loremipsum`, `.math`, `.match`, `.mermaid`, `.numbered`, `.pagebreak`, `.paragraph`, `.ref`, `.slides`, `.speakernote`, `.subdocumentgraph`, `.table`, `.tablebyrows`, `.tablecolumn`, `.tablecolumns`, `.tablecompute`, `.tablefilter`, `.tablesort`, `.text`, `.textcollapse`, `.todo`, `.whitespace`, `.xychart` | The call may be preserved or parsed, but no approved evaluator/backend-neutral semantic implementation exists. `.row`, `.column`, and `.grid` are listed in the reviewed Stacked layout row below; `.center` and bounded `.align` are listed in the bounded implemented row above. |
+| Unsupported | `.allemojis`, `.bibliography`, `.box`, `.br`, `.cite`, `.clip`, `.code`, `.codespan`, `.collapse`, `.debug`, `.emoji`, `.error`, `.extend`, `.figure`, `.filetree`, `.float`, `.fragment`, `.fullspan`, `.functionexists`, `.get`, `.heading`, `.icon`, `.image`, `.keybinding`, `.landscape`, `.libraries`, `.libexists`, `.libfunctions`, `.libraryexists`, `.link`, `.localization`, `.localize`, `.log`, `.loremipsum`, `.math`, `.match`, `.mermaid`, `.numbered`, `.pagebreak`, `.paragraph`, `.ref`, `.slides`, `.speakernote`, `.subdocumentgraph`, `.table`, `.tablebyrows`, `.tablecolumn`, `.tablecolumns`, `.tablecompute`, `.tablefilter`, `.tablesort`, `.text`, `.textcollapse`, `.todo`, `.whitespace`, `.xychart` | The call may be preserved or parsed, but no approved evaluator/backend-neutral semantic implementation exists. `.row`, `.column`, and `.grid` are listed in the reviewed Stacked layout row below; `.center`, bounded `.align`, and bounded `.container` sizing are listed in the partial layout row below. |
 | Intentionally deferred | `.csv`, `.css`, `.cssproperties`, `.env`, `.filename`, `.htmloptions`, `.includeall`, `.listfiles`, `.llmstxt`, `.pathtoroot`, `.subdocument` | Resource families, target-specific options, and process/environment access are explicitly outside this slice or require a separate host/security decision. `.llmstxt` remains deferred per task scope. |
 | Scribium extension | `.map`, `.filter` | Existing typed collection transforms have no corresponding public v2.5.1 `Collection.kt` declarations and are excluded from upstream compatibility counts. |
 
@@ -64,6 +65,11 @@ partially implemented family claims. In particular, `.ifpresent` and
 `.takeif` use first-class `@lambda` values or headerless indented callback
 bodies through the existing callable path; ordinary content is not reparsed or
 silently reclassified as a lambda.
+
+The `.container` entry is a partial bounded consumer rather than complete
+upstream support: empty/body-only containers, `width`, `height`, `fullwidth`,
+structured grouping, and the existing origin-aware Size/Boolean conversion
+boundary are implemented. The remaining style/layout parameters are deferred.
 
 ## Inventory
 
@@ -83,7 +89,7 @@ silently reclassified as a lambda.
 | Logical and comparison operations | `.islower {a} than:{b} orequals:{bool}`, `.isgreater`, `.equals {a} to:{b}`, and `.not {value}`. Evidence: [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt), [`Comparison.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/internal/Comparison.kt), conditional examples/tests. | **Compatible for the bounded slice implemented here.** Numeric ordering uses upstream `toFloat` comparison and accepts the reviewed numeric scalar text forms; equality preserves typed values with the documented plain-text fallback; negation requires a boolean. Unsupported conversion inputs fail with one source-backed `E3001` and no partial branch output. | `builtins::tests::logical_*`; `compile_logical_comparisons_*`; frontend structural/span test; CLI verification below. | M2 completed bounded logical/comparison slice; future logical expansion remains separately evidenced. |
 | Include, read, and data loading | `.include`, `.includeall`, `.read`, `.json`, `.csv`, `.listfiles`, `.filename`, and context sandbox modes. Evidence: [including other files](https://quarkdown.com/wiki/including-other-quarkdown-files/), [`Ecosystem.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Ecosystem.kt), [`Data.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Data.kt). | **Partially compatible.** `.read`, `.json`, and `.include` are implemented over `VirtualProject` only. Paths resolve relative to the current logical source, nested includes change that base to the included source, active include stacks detect cycles, and repeated includes remain valid. Local paths that leave the project, absolute paths, URI schemes, missing resources, and invalid UTF-8 produce structured diagnostics; the evaluator has no host filesystem or network capability. `.includeall`, `.csv`, `.listfiles`, and `.filename` remain deferred. | `crates/scribium-core/tests/quarkdown_resource_builtins.rs` covers local/parent-relative reads, UTF-8 and JSON failures, nested source context, cycles, repeated includes, and in-memory projects. CLI loading is the native filesystem boundary. | M2 bounded resource-backed slice; additional data families require separate upstream evidence and semantic tests. |
 | Metadata and document setup | `.doctype`, `.docname`, `.docdescription`, `.docauthor(s)`, `.dockeywords`, `.doclang`, `.theme`, page/paragraph metadata, numbering, and related document state. Evidence: [document metadata](https://quarkdown.com/wiki/document-metadata/), [`Document.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Document.kt). | **Partially compatible with an implemented bounded foundation.** `.docname`, `.docdescription`, and `.doctype` implement read/write semantics through evaluator-owned shared state and a final immutable IR snapshot. `.doctype` uses the closed `DocumentType` pool (`plain`, `paged`, `slides`, `docs`), returns lowercase names on read, returns no value on write, and leaves state unchanged on invalid or static-text conversion. `.docname` rejects blank writes and the name/description fields use the existing bounded invocation String boundary. `.docauthor(s)`, `.dockeywords`, `.doclang`, `.theme`, and observable layout metadata remain deferred. | `crates/scribium-core/src/lib.rs::tests::document_state_*`; `.doctype` atomicity/case/origin tests; `crates/scribium-core/src/ir.rs::tests::document_state_roundtrips_deterministically_and_defaults_for_old_ir`; blank-write provenance and atomicity regression. | DocumentState foundation: implemented; `.docname`, `.docdescription`, and `.doctype`: implemented. Remaining document fields are deferred. |
-| Layout and document functions | `.row`, `.column`, `.grid`, `.center`, `.container`, `.align`, `.box`, `.figure`, page breaks, tables, and related layout primitives. Evidence: [`Layout.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Layout.kt), [`Primitives.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Primitives.kt). | **Implemented for the reviewed block-body Stacked slice and bounded `.center`/`.align` Container consumers.** `.row`, `.column`, and `.grid` bind typed arguments; `.center` accepts no non-body arguments; `.align` accepts exactly one positional or named `alignment` argument from the closed logical `start`/`center`/`end` domain. All validate before lazy body evaluation, preserve structured children, materialize as typed block nodes, and lower through the Typst backend. Direct `container`, `StyleOptions`, `float`, `fullspan`, and other layout primitives remain deferred. | `crates/scribium-core/tests/quarkdown_stacked_layout.rs`; `crates/scribium-core/tests/quarkdown_center.rs`; `crates/scribium-core/tests/quarkdown_align.rs`; `crates/scribium-typst/tests/backend_integration.rs`; `examples/stacked/main.qd`; `examples/center/main.qd`; `examples/align/main.qd`. | Stacked layout family and bounded `.center`/`.align` consumers are implemented for the reviewed block-body boundary; general String → Markdown conversion, inline Container insertion, direct `.container`, `StyleOptions`, `.float`, and `.fullspan` remain deferred. |
+| Layout and document functions | `.row`, `.column`, `.grid`, `.center`, `.container`, `.align`, `.box`, `.figure`, page breaks, tables, and related layout primitives. Evidence: [`Layout.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Layout.kt), [`Primitives.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Primitives.kt). | **Partially compatible for bounded block-body consumers.** `.row`, `.column`, and `.grid` bind typed arguments; `.center` and `.align` preserve their existing bounded Container behavior; `.container` now supports an optional body, `width`, `height`, and `fullwidth`, with structured grouping and origin-aware Size/Boolean conversion. All implemented consumers validate before lazy body evaluation, materialize typed nodes, and lower through the Typst backend. The remaining Container style/layout parameters remain deferred. | `crates/scribium-core/tests/quarkdown_stacked_layout.rs`; `crates/scribium-core/tests/quarkdown_center.rs`; `crates/scribium-core/tests/quarkdown_align.rs`; `crates/scribium-core/tests/quarkdown_container.rs`; `crates/scribium-typst/tests/backend_integration.rs`; `examples/stacked/main.qd`; `examples/center/main.qd`; `examples/align/main.qd`; `examples/container/main.qd`. | Stacked layout and bounded Container sizing/alignment are implemented only for the reviewed block-body boundary. Deferred: `float`, `fullspan`, `classname`, `StyleOptions`, `alignment`/`textalignment` on `.container`, colors, borders, margin/padding/radius, font and text-style properties, general String → Markdown conversion, inline Container insertion, and other layout primitives. |
 | Error and absence behavior | `none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif`, invalid argument/type errors, and lazy failure behavior. Evidence: [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [conditional statements](https://quarkdown.com/wiki/conditional-statements/). | **Partially compatible; optionality callbacks are implemented at a bounded boundary.** `None`, `.isnone`, `.otherwise`, the `.ifpresent` absence short-circuit, Boolean-only `.takeif` callback execution, source-backed evaluator errors, nested diagnostic de-duplication, and atomic results are covered. The complete upstream error taxonomy and unmarked explicit inline-lambda classification remain outside this slice. | `compile_optionality_*`, `compile_isnone_returns_a_semantic_boolean_for_optional_values`, and `fixtures/quarkdown-conformance/cases/optionality-callback-family/input.qd`. | M2 optionality callback slice; retain the family as partial until the remaining error and conversion surfaces are evidenced. |
 
 ## Stacked layout and Container consumers
@@ -105,33 +111,46 @@ Implemented for this selected slice:
 - pure Typst lowering with alignment/gap structure, source maps, and actual
   Typst/PDF integration coverage.
 
+The bounded direct `.container` consumer adds:
+
+- optional `width` and `height` `IrSize` properties, `full_width`, optional
+  logical alignment, and structured children in the existing
+  `IrContainerComponent`;
+- empty or body-only construction, with body evaluation after argument
+  binding, conversion, and validation;
+- positional `width`, `height`, `fullwidth` binding plus named equivalents,
+  duplicate/unknown/deferred-parameter diagnostics, and origin-aware Size and
+  Boolean conversion; and
+- deterministic Typst `#block` sizing with explicit width taking precedence
+  over `fullwidth`, while `alignment: None` emits no `#align` wrapper.
+
 The bounded `.center` consumer adds a full-width Container with logical
 `Center` alignment. The bounded `.align` consumer reuses that Container family
 with `start`/`center`/`end` alignment, a dedicated origin-aware closed-enum
 carrier/converter, exact positional/named binding, required lazy Markdown block
 body evaluation, typed nested composition, and source-backed failure atomicity.
-Neither consumer adds direct `.container`, `StyleOptions`, `.float`,
-`.fullspan`, general String → Markdown conversion, or inline Container
-insertion.
+These consumers do not add `StyleOptions`, `.float`, `.fullspan`, general
+String → Markdown conversion, or inline Container insertion.
 
 Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only); and
-- direct `.container` and the remaining layout/component families.
+- the remaining layout/component families and deferred `.container` style
+  parameters.
 
 ## Selection record
 
 The selected slices are the Stacked layout family (`.row`, `.column`, and
-`.grid`) and the bounded `.center`/`.align` Container consumers, integrated with the existing typed
+`.grid`) and the bounded `.center`/`.align`/`.container` Container consumers, integrated with the existing typed
 component value foundation and evaluator-owned value/materialization boundary.
 
 This is a bounded public semantic family with direct v2.5.1 source/test
 evidence. It fits the existing evaluator/value-flow boundary and needs no new
-parser, filesystem capability, IR tier, or backend escape hatch. The next
-deferred candidate is direct `.container` and related style/layout families
-after the remaining #61 semantic gap inventory is re-reviewed. `StyleOptions`,
-`.float`, and `.fullspan` remain deferred.
+parser, filesystem capability, IR tier, or backend escape hatch. Direct
+`.container` support is intentionally limited to the sizing subset;
+`StyleOptions`, `.float`, `.fullspan`, and the remaining style/layout families
+remain deferred.
 The earlier decimal family remains implemented under the same boundary:
 `decimals` uses the same invocation-time DynamicValue Number conversion as
 other numeric targets, then accepts only integral NumberValue-compatible
