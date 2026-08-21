@@ -101,6 +101,7 @@ pub struct IrColor {
 pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
+    Landscape(IrLandscapeComponent),
 }
 
 impl IrComponent {
@@ -109,8 +110,19 @@ impl IrComponent {
         match self {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
+            Self::Landscape(component) => component.span,
         }
     }
+}
+
+/// The backend-neutral semantic state produced by `.landscape`.
+///
+/// The 90-degree counter-clockwise transformation is a consumer semantic;
+/// angle, page, and backend-specific rendering details stay out of the IR.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrLandscapeComponent {
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
 }
 
 /// The backend-neutral container state consumed by `.container`, `.center`,
@@ -551,9 +563,9 @@ pub enum IrValue {
 mod tests {
     use super::{
         IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrMainAxisAlignment, IrMetadata,
-        IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
-        NativeTarget, TargetSpecificContent,
+        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrLandscapeComponent,
+        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, TargetSpecificContent,
     };
     use crate::source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
@@ -670,6 +682,20 @@ mod tests {
                 span: child_span,
             }],
             span: SourceSpan::new(SourceId(8), 0, 28),
+        }))
+    }
+
+    fn landscape_value() -> IrValue {
+        let child_span = SourceSpan::new(SourceId(10), 12, 17);
+        IrValue::Component(IrComponent::Landscape(IrLandscapeComponent {
+            children: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: child_span,
+                }],
+                span: child_span,
+            }],
+            span: SourceSpan::new(SourceId(10), 0, 20),
         }))
     }
 
@@ -825,6 +851,39 @@ mod tests {
                 }],
                 span: SourceSpan::new(SourceId(8), 14, 19),
             }
+        );
+    }
+
+    #[test]
+    fn landscape_component_serde_roundtrips_deterministically() {
+        let value = landscape_value();
+        let first = serde_json::to_string(&value).expect("landscape serializes");
+        let second = serde_json::to_string(&value).expect("landscape serializes");
+        assert_eq!(first, second);
+        assert!(!first.contains("typst"));
+        assert!(!first.contains("rotate"));
+        assert_eq!(serde_json::from_str::<IrValue>(&first).unwrap(), value);
+    }
+
+    #[test]
+    fn landscape_component_preserves_child_and_call_spans() {
+        let IrValue::Component(IrComponent::Landscape(component)) = landscape_value() else {
+            panic!("expected landscape component");
+        };
+        assert_eq!(component.span, SourceSpan::new(SourceId(10), 0, 20));
+        assert_eq!(
+            component.children[0],
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: SourceSpan::new(SourceId(10), 12, 17),
+                }],
+                span: SourceSpan::new(SourceId(10), 12, 17),
+            }
+        );
+        assert_eq!(
+            IrComponent::Landscape(component).span(),
+            SourceSpan::new(SourceId(10), 0, 20)
         );
     }
 

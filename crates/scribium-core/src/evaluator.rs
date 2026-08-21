@@ -47,9 +47,9 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
-    IrDocument, IrEnumValue, IrInline, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair,
-    IrParameter, IrRange, IrSize, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrDocument, IrEnumValue, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
+    IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
 use crate::value_conversion::{
@@ -1230,6 +1230,10 @@ impl Evaluator {
             diagnostics.push(container_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_landscape(name) && context.get_function(name).is_none() {
+            diagnostics.push(landscape_inline_materialization_error(*span));
+            return Vec::new();
+        }
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -1592,6 +1596,18 @@ impl Evaluator {
             );
         }
 
+        if is_landscape(name) {
+            return self.evaluate_landscape(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if is_stacked_layout(name) {
             return self.evaluate_stacked_layout(
                 name,
@@ -1778,6 +1794,71 @@ impl Evaluator {
                 height: None,
                 full_width: true,
                 alignment: Some(IrContainerAlignment::Center),
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_landscape(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if let Some(argument) = positional_args.first() {
+            diagnostics.push(landscape_argument_error(
+                "`.landscape` does not accept positional arguments",
+                value_source_span(argument, span),
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(landscape_argument_error(
+                "`.landscape` does not accept named arguments",
+                argument.span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(landscape_argument_error(
+                "`.landscape` body is a Markdown block, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(landscape_argument_error(
+                    "`.landscape` is block-only",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(landscape_argument_error(
+                    "`.landscape` requires a Markdown block body",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Landscape(
+            IrLandscapeComponent {
                 children,
                 span: *span,
             },
@@ -5393,6 +5474,10 @@ fn is_container(name: &str) -> bool {
     name == "container"
 }
 
+fn is_landscape(name: &str) -> bool {
+    name == "landscape"
+}
+
 fn bind_container_arguments(
     positional: Vec<ContainerArgument>,
     named: Vec<InvocationNamedArg>,
@@ -7439,6 +7524,31 @@ fn container_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["Use `.container` as a block call with an optional Markdown body.".to_string()],
+    }
+}
+
+fn landscape_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.landscape` accepts exactly one required Markdown block body and no arguments."
+                .to_string(),
+        ],
+    }
+}
+
+fn landscape_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.landscape` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.landscape` as a block call with a Markdown body.".to_string()],
     }
 }
 

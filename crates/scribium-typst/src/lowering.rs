@@ -5,9 +5,9 @@
 
 use scribium_core::ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrInline, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
-    SourceMapEntry,
+    IrDocument, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrValue, SourceMapEntry,
 };
 use scribium_core::source::{ResourceReference, SourceSpan};
 
@@ -335,6 +335,19 @@ impl LoweringContext {
         match component {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
+            IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+        }
+    }
+
+    fn lower_landscape(&mut self, component: &IrLandscapeComponent) {
+        let before = self.output.len();
+        self.push_str("#rotate(-90deg, reflow: true)[\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n");
+        if component.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
         }
     }
 
@@ -1150,9 +1163,10 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use scribium_core::ir::{
         IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDocument, IrInline, IrListItem, IrMainAxisAlignment, IrMetadata,
-        IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
-        IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+        IrCrossAxisAlignment, IrDocument, IrInline, IrLandscapeComponent, IrListItem,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
 
@@ -1202,6 +1216,15 @@ mod tests {
                 height: None,
                 full_width: true,
                 alignment: Some(IrContainerAlignment::Center),
+                children,
+                span: empty_span(),
+            }),
+        }
+    }
+
+    fn landscape_node(children: Vec<IrNode>) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::Landscape(IrLandscapeComponent {
                 children,
                 span: empty_span(),
             }),
@@ -1495,6 +1518,75 @@ mod tests {
             .find(|entry| entry.original == child_span)
             .expect("child span is mapped");
         assert!(code[wrapper.generated_start..wrapper.generated_end].contains("#block"));
+        assert!(wrapper.generated_start <= child.generated_start);
+        assert!(wrapper.generated_end >= child.generated_end);
+    }
+
+    #[test]
+    fn landscape_lowers_to_counter_clockwise_rotation_with_reflow() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![landscape_node(vec![paragraph("Wide")])],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("#rotate(-90deg, reflow: true)"), "{code}");
+        assert!(!code.contains("page(flipped: true)"), "{code}");
+    }
+
+    #[test]
+    fn landscape_preserves_child_order_and_nested_component_lowering() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![landscape_node(vec![
+                paragraph("A"),
+                landscape_node(vec![paragraph("B")]),
+                stacked_node(
+                    IrStackedLayout::Row,
+                    IrMainAxisAlignment::Start,
+                    IrCrossAxisAlignment::Center,
+                    None,
+                    None,
+                    vec![paragraph("C")],
+                ),
+            ])],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(
+            code.matches("#rotate(-90deg, reflow: true)").count(),
+            2,
+            "{code}"
+        );
+        assert!(code.contains("#stack(dir: ltr"), "{code}");
+        assert!(code.find('A').unwrap() < code.find('B').unwrap(), "{code}");
+        assert!(code.find('B').unwrap() < code.find('C').unwrap(), "{code}");
+    }
+
+    #[test]
+    fn landscape_source_map_contains_wrapper_and_children() {
+        let call_span = SourceSpan::new(scribium_core::SourceId(1), 0, 10);
+        let child_span = SourceSpan::new(scribium_core::SourceId(1), 14, 18);
+        let (code, map) = super::lower_to_typst(&IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Landscape(IrLandscapeComponent {
+                    children: vec![IrNode::Paragraph {
+                        content: vec![IrInline::Text {
+                            content: "Wide".to_string(),
+                            span: child_span,
+                        }],
+                        span: child_span,
+                    }],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        });
+        let wrapper = map
+            .iter()
+            .find(|entry| entry.original == call_span)
+            .expect("landscape call span is mapped");
+        let child = map
+            .iter()
+            .find(|entry| entry.original == child_span)
+            .expect("landscape child span is mapped");
+        assert!(code[wrapper.generated_start..wrapper.generated_end].contains("#rotate"));
         assert!(wrapper.generated_start <= child.generated_start);
         assert!(wrapper.generated_end >= child.generated_end);
     }
