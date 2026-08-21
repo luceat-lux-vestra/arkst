@@ -46,10 +46,10 @@ use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
-    IrComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrEnumValue, IrInline, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
+    IrDocument, IrEnumValue, IrInline, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair,
+    IrParameter, IrRange, IrSize, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
 use crate::value_conversion::{
@@ -1200,6 +1200,10 @@ impl Evaluator {
             diagnostics.push(stacked_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_center(name) {
+            diagnostics.push(center_inline_materialization_error(*span));
+            return Vec::new();
+        }
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -1524,6 +1528,18 @@ impl Evaluator {
             );
         }
 
+        if is_center(name) {
+            return self.evaluate_center(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
         if is_stacked_layout(name) {
             return self.evaluate_stacked_layout(
                 name,
@@ -1648,6 +1664,70 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_center(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+    ) -> CallOutcome {
+        if !positional_args.is_empty() {
+            diagnostics.push(center_argument_error(
+                "`.center` does not accept positional arguments",
+                value_source_span(&positional_args[0], span),
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(center_argument_error(
+                "`.center` does not accept named arguments",
+                argument.span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(center_argument_error(
+                "`.center` body is a Markdown block, not a lambda",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(center_argument_error("`.center` is block-only", *span));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(center_argument_error(
+                    "`.center` requires a Markdown block body",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Container(
+            IrContainerComponent {
+                full_width: true,
+                alignment: IrContainerAlignment::Center,
+                children,
+                span: *span,
+            },
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5045,6 +5125,10 @@ fn is_stacked_layout(name: &str) -> bool {
     matches!(name, "row" | "column" | "grid")
 }
 
+fn is_center(name: &str) -> bool {
+    name == "center"
+}
+
 fn bind_stacked_arguments(
     name: &str,
     positional: Vec<StackedArgument>,
@@ -6765,6 +6849,31 @@ fn stacked_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         hints: vec![
             "Use `.row`, `.column`, or `.grid` as a block call with a Markdown body.".to_string(),
         ],
+    }
+}
+
+fn center_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.center` accepts exactly one required Markdown block body and no arguments."
+                .to_string(),
+        ],
+    }
+}
+
+fn center_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.center` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.center` as a block call with a Markdown body.".to_string()],
     }
 }
 

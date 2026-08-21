@@ -4,9 +4,10 @@
 //! records source map entries as it generates code.
 
 use scribium_core::ir::{
-    IrCallSegment, IrComponent, IrCrossAxisAlignment, IrDocument, IrInline, IrMainAxisAlignment,
-    IrNode, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus, IrValue, SourceMapEntry,
+    IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
+    IrDocument, IrInline, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    SourceMapEntry,
 };
 use scribium_core::source::{ResourceReference, SourceSpan};
 
@@ -333,6 +334,31 @@ impl LoweringContext {
     fn lower_component(&mut self, component: &IrComponent) {
         match component {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
+            IrComponent::Container(container) => self.lower_container(container),
+        }
+    }
+
+    fn lower_container(&mut self, component: &IrContainerComponent) {
+        let before = self.output.len();
+        self.push_str("#block");
+        if component.full_width {
+            self.push_str("(width: 100%)");
+        }
+        self.push_str("[\n");
+        self.push_str("#align(");
+        self.push_str(match component.alignment {
+            IrContainerAlignment::Start => "start",
+            IrContainerAlignment::Center => "center",
+            IrContainerAlignment::End => "end",
+        });
+        self.push_str(")[\n");
+        for child in &component.children {
+            self.lower_node(child);
+        }
+        self.push_str("]\n]");
+        self.push('\n');
+        if component.span.source_id != scribium_core::SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
         }
     }
 
@@ -1100,10 +1126,10 @@ fn escape_typst_comment(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use scribium_core::ir::{
-        IrCallSegment, IrComponent, IrCrossAxisAlignment, IrDocument, IrInline, IrListItem,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-        IrTaskStatus, IrValue,
+        IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
+        IrCrossAxisAlignment, IrDocument, IrInline, IrListItem, IrMainAxisAlignment, IrMetadata,
+        IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
+        IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
     };
     use scribium_core::source::SourceSpan;
 
@@ -1143,6 +1169,17 @@ mod tests {
         IrNode::Paragraph {
             content: vec![self::text(text)],
             span: empty_span(),
+        }
+    }
+
+    fn container_node(children: Vec<IrNode>) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::Container(IrContainerComponent {
+                full_width: true,
+                alignment: IrContainerAlignment::Center,
+                children,
+                span: empty_span(),
+            }),
         }
     }
 
@@ -1256,6 +1293,92 @@ mod tests {
         assert!(grid_code.contains("row-gutter: 2cm"), "{grid_code}");
         assert!(grid_code.contains("column-gutter: 3cm"), "{grid_code}");
         assert!(grid_code.contains("#align(bottom)"), "{grid_code}");
+    }
+
+    #[test]
+    fn center_component_lowers_to_full_width_centered_block() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![container_node(vec![paragraph("Hello")])],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("#block(width: 100%)["), "{code}");
+        assert!(code.contains("#align(center)["), "{code}");
+        assert!(code.contains("Hello"), "{code}");
+        assert!(!code.contains("left"), "{code}");
+        assert!(!code.contains("right"), "{code}");
+    }
+
+    #[test]
+    fn center_component_preserves_child_order() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![container_node(vec![paragraph("A"), paragraph("B")])],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.find('A').unwrap() < code.find('B').unwrap(), "{code}");
+    }
+
+    #[test]
+    fn center_component_source_map_uses_call_and_child_spans() {
+        let call_span = SourceSpan::new(scribium_core::SourceId(1), 0, 7);
+        let child_span = SourceSpan::new(scribium_core::SourceId(1), 12, 17);
+        let (code, map) = super::lower_to_typst(&IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(IrContainerComponent {
+                    full_width: true,
+                    alignment: IrContainerAlignment::Center,
+                    children: vec![IrNode::Paragraph {
+                        content: vec![IrInline::Text {
+                            content: "Hello".to_string(),
+                            span: child_span,
+                        }],
+                        span: child_span,
+                    }],
+                    span: call_span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        });
+        let wrapper = map
+            .iter()
+            .find(|entry| entry.original == call_span)
+            .expect("container call span is mapped");
+        let child = map
+            .iter()
+            .find(|entry| entry.original == child_span)
+            .expect("child span is mapped");
+        assert!(code[wrapper.generated_start..wrapper.generated_end].contains("#block"));
+        assert!(wrapper.generated_start <= child.generated_start);
+        assert!(wrapper.generated_end >= child.generated_end);
+    }
+
+    #[test]
+    fn nested_center_lowers_structurally() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![container_node(vec![container_node(vec![paragraph("A")])])],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(code.matches("#block(width: 100%)[").count(), 2, "{code}");
+        assert_eq!(code.matches("#align(center)[").count(), 2, "{code}");
+        assert_eq!(code.matches("A").count(), 1, "{code}");
+    }
+
+    #[test]
+    fn center_and_stacked_interoperate_in_lowering() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![container_node(vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::Start,
+                IrCrossAxisAlignment::Center,
+                None,
+                None,
+                vec![paragraph("A"), paragraph("B")],
+            )])],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("#block(width: 100%)["), "{code}");
+        assert!(code.contains("#align(center)["), "{code}");
+        assert!(code.contains("#stack(dir: ltr"), "{code}");
+        assert!(code.find('A').unwrap() < code.find('B').unwrap(), "{code}");
     }
 
     #[test]
