@@ -365,70 +365,94 @@ impl LoweringContext {
         let horizontal = direction == "ltr";
         self.push_str("#stack(dir: ");
         self.push_str(direction);
-        if let Some(gap) = gap {
-            self.push_str(", spacing: ");
-            self.push_str(&lower_size(gap));
-        }
         self.push_str(", ");
         let distribution = component.main_axis_alignment;
         let child_count = component.children.len();
-        if child_count == 0 {
+        if matches!(
+            distribution,
+            IrMainAxisAlignment::SpaceBetween
+                | IrMainAxisAlignment::SpaceAround
+                | IrMainAxisAlignment::SpaceEvenly
+        ) {
+            self.lower_distributed_stack(component, horizontal, gap, child_count, distribution);
+        } else if child_count == 0 {
             self.push_str("[]");
         } else {
-            let edge_fraction = match distribution {
-                IrMainAxisAlignment::Center => Some("1fr"),
-                IrMainAxisAlignment::SpaceAround => Some("0.5fr"),
-                IrMainAxisAlignment::SpaceEvenly => Some("1fr"),
-                _ => None,
-            };
-            if let Some(fraction) = edge_fraction {
-                self.push_str(if horizontal { "h" } else { "v" });
-                self.push('(');
-                self.push_str(fraction);
-                self.push_str("), ");
-            }
-            if matches!(distribution, IrMainAxisAlignment::End) {
-                self.push_str(if horizontal { "h" } else { "v" });
-                self.push_str("(1fr), ");
+            if matches!(
+                distribution,
+                IrMainAxisAlignment::Center | IrMainAxisAlignment::End
+            ) {
+                self.lower_fraction(horizontal, "1fr");
+                self.push_str(", ");
             }
             for (index, child) in component.children.iter().enumerate() {
                 self.lower_stacked_child(child, component.cross_axis_alignment, horizontal);
                 if index + 1 < child_count {
-                    match distribution {
-                        IrMainAxisAlignment::SpaceBetween
-                        | IrMainAxisAlignment::SpaceAround
-                        | IrMainAxisAlignment::SpaceEvenly => {
-                            self.push_str(", ");
-                            self.push_str(if horizontal { "h" } else { "v" });
-                            self.push_str("(1fr), ");
-                        }
-                        _ => self.push_str(", "),
+                    self.push_str(", ");
+                    if let Some(gap) = gap {
+                        self.lower_fixed_gap(horizontal, gap);
+                        self.push_str(", ");
                     }
                 }
             }
-            if matches!(
-                distribution,
-                IrMainAxisAlignment::Center
-                    | IrMainAxisAlignment::SpaceAround
-                    | IrMainAxisAlignment::SpaceEvenly
-            ) {
+            if matches!(distribution, IrMainAxisAlignment::Center) {
                 self.push_str(", ");
-                self.push_str(if horizontal { "h" } else { "v" });
-                self.push('(');
-                self.push_str(
-                    if matches!(distribution, IrMainAxisAlignment::SpaceAround) {
-                        "0.5fr"
-                    } else {
-                        "1fr"
-                    },
-                );
-                self.push(')');
-            }
-            if matches!(distribution, IrMainAxisAlignment::Start) {
-                // The normal stack order already implements start alignment.
+                self.lower_fraction(horizontal, "1fr");
             }
         }
         self.push_str(")\n");
+    }
+
+    fn lower_distributed_stack(
+        &mut self,
+        component: &IrStackedComponent,
+        horizontal: bool,
+        gap: Option<&IrSize>,
+        child_count: usize,
+        distribution: IrMainAxisAlignment,
+    ) {
+        if child_count == 0 {
+            self.push_str("[]");
+            return;
+        }
+        let edge_fraction = match distribution {
+            IrMainAxisAlignment::SpaceAround => Some("0.5fr"),
+            IrMainAxisAlignment::SpaceEvenly => Some("1fr"),
+            IrMainAxisAlignment::SpaceBetween => None,
+            _ => None,
+        };
+        if let Some(fraction) = edge_fraction {
+            self.lower_fraction(horizontal, fraction);
+            self.push_str(", ");
+        }
+        for (index, child) in component.children.iter().enumerate() {
+            self.lower_stacked_child(child, component.cross_axis_alignment, horizontal);
+            if index + 1 < child_count {
+                self.push_str(", ");
+                if let Some(gap) = gap {
+                    self.lower_fixed_gap(horizontal, gap);
+                    self.push_str(", ");
+                }
+                self.lower_fraction(horizontal, "1fr");
+                self.push_str(", ");
+            }
+        }
+        if let Some(fraction) = edge_fraction {
+            self.push_str(", ");
+            self.lower_fraction(horizontal, fraction);
+        }
+    }
+
+    fn lower_fixed_gap(&mut self, horizontal: bool, gap: &IrSize) {
+        self.push_str(if horizontal { "h(" } else { "v(" });
+        self.push_str(&lower_size(gap));
+        self.push(')');
+    }
+
+    fn lower_fraction(&mut self, horizontal: bool, fraction: &str) {
+        self.push_str(if horizontal { "h(" } else { "v(" });
+        self.push_str(fraction);
+        self.push(')');
     }
 
     fn lower_stacked_child(
@@ -483,7 +507,7 @@ impl LoweringContext {
                 | IrMainAxisAlignment::SpaceAround
                 | IrMainAxisAlignment::SpaceEvenly
         );
-        if distributed && !component.children.is_empty() {
+        if distributed {
             self.lower_distributed_grid(component, columns);
             return;
         }
@@ -523,37 +547,46 @@ impl LoweringContext {
 
     fn lower_distributed_grid(&mut self, component: &IrStackedComponent, columns: u32) {
         let logical_columns = columns as usize;
-        let around = matches!(
-            component.main_axis_alignment,
-            IrMainAxisAlignment::SpaceAround | IrMainAxisAlignment::SpaceEvenly
-        );
-        let edge_fraction = if component.main_axis_alignment == IrMainAxisAlignment::SpaceAround {
-            "0.5fr"
-        } else {
-            "1fr"
+        let edge_fraction = match component.main_axis_alignment {
+            IrMainAxisAlignment::SpaceAround => Some("0.5fr"),
+            IrMainAxisAlignment::SpaceEvenly => Some("1fr"),
+            IrMainAxisAlignment::SpaceBetween => None,
+            _ => None,
         };
+        if component.children.is_empty() {
+            self.push_str("#grid(columns: ");
+            self.push_str(&columns.to_string());
+            if let Some(gap) = component.row_gap.as_ref() {
+                self.push_str(", row-gutter: ");
+                self.push_str(&lower_size(gap));
+            }
+            self.push_str(", [])\n");
+            return;
+        }
+        let fixed_gap = component.column_gap.as_ref().map(lower_size);
         self.push_str("#grid(columns: (");
-        if around {
-            self.push_str(edge_fraction);
+        if let Some(fraction) = edge_fraction {
+            self.push_str(fraction);
             self.push_str(", ");
         }
         for index in 0..logical_columns {
             if index > 0 {
-                self.push_str(", 1fr, ");
+                self.push_str(", ");
+                if let Some(gap) = fixed_gap.as_deref() {
+                    self.push_str(gap);
+                    self.push_str(", ");
+                }
+                self.push_str("1fr, ");
             }
             self.push_str("auto");
         }
-        if around {
+        if let Some(fraction) = edge_fraction {
             self.push_str(", ");
-            self.push_str(edge_fraction);
+            self.push_str(fraction);
         }
         self.push(')');
         if let Some(gap) = component.row_gap.as_ref() {
             self.push_str(", row-gutter: ");
-            self.push_str(&lower_size(gap));
-        }
-        if let Some(gap) = component.column_gap.as_ref() {
-            self.push_str(", column-gutter: ");
             self.push_str(&lower_size(gap));
         }
         self.push_str(", ");
@@ -562,12 +595,16 @@ impl LoweringContext {
             if row_index > 0 {
                 self.push_str(", ");
             }
-            if around {
+            if edge_fraction.is_some() {
                 self.push_str("[], ");
             }
             for column_index in 0..logical_columns {
                 if column_index > 0 {
-                    self.push_str(", [], ");
+                    self.push_str(", ");
+                    if fixed_gap.is_some() {
+                        self.push_str("[], ");
+                    }
+                    self.push_str("[], ");
                 }
                 if let Some(child) = row.get(column_index) {
                     self.lower_stacked_child(child, component.cross_axis_alignment, true);
@@ -575,7 +612,7 @@ impl LoweringContext {
                     self.push_str("[]");
                 }
             }
-            if around {
+            if edge_fraction.is_some() {
                 self.push_str(", []");
             }
         }
@@ -1172,8 +1209,9 @@ mod tests {
             )],
             metadata: IrMetadata::default(),
         });
-        assert!(row_code.contains("spacing: 7.5pt"), "{row_code}");
+        assert!(row_code.contains("h(7.5pt)"), "{row_code}");
         assert!(row_code.contains("h(1fr)"), "{row_code}");
+        assert!(!row_code.contains("spacing:"), "{row_code}");
         assert!(row_code.contains("#align(top)"), "{row_code}");
 
         let column_code = super::lower_to_typst_code(&IrDocument {
@@ -1186,12 +1224,14 @@ mod tests {
                     unit: IrSizeUnit::Cm,
                 }),
                 None,
-                vec![paragraph("C")],
+                vec![paragraph("C"), paragraph("D")],
             )],
             metadata: IrMetadata::default(),
         });
         assert!(column_code.contains("#stack(dir: ttb"), "{column_code}");
         assert!(column_code.contains("#block(width: 100%)"), "{column_code}");
+        assert!(column_code.contains("v(1cm)"), "{column_code}");
+        assert!(!column_code.contains("spacing:"), "{column_code}");
 
         let grid_code = super::lower_to_typst_code(&IrDocument {
             nodes: vec![stacked_node(
@@ -1253,6 +1293,230 @@ mod tests {
             }),
             "25%"
         );
+    }
+
+    fn occurrences(code: &str, needle: &str) -> usize {
+        code.matches(needle).count()
+    }
+
+    #[test]
+    fn distributed_row_gap_is_explicit_once() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::SpaceBetween,
+                IrCrossAxisAlignment::Center,
+                None,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                vec![paragraph("A"), paragraph("B"), paragraph("C")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(occurrences(&code, "h(7.5pt)"), 2, "{code}");
+        assert_eq!(occurrences(&code, "h(1fr)"), 2, "{code}");
+        assert!(!code.contains("spacing:"), "{code}");
+        assert!(code.find('A').unwrap() < code.find('B').unwrap(), "{code}");
+        assert!(code.find('B').unwrap() < code.find('C').unwrap(), "{code}");
+
+        for (alignment, edge) in [
+            (IrMainAxisAlignment::SpaceAround, "h(0.5fr)"),
+            (IrMainAxisAlignment::SpaceEvenly, "h(1fr)"),
+        ] {
+            let code = super::lower_to_typst_code(&IrDocument {
+                nodes: vec![stacked_node(
+                    IrStackedLayout::Row,
+                    alignment,
+                    IrCrossAxisAlignment::Center,
+                    None,
+                    Some(IrSize {
+                        value: 10.0,
+                        unit: IrSizeUnit::Px,
+                    }),
+                    vec![paragraph("A"), paragraph("B")],
+                )],
+                metadata: IrMetadata::default(),
+            });
+            assert_eq!(occurrences(&code, "h(7.5pt)"), 1, "{code}");
+            assert_eq!(
+                occurrences(&code, edge),
+                if edge == "h(1fr)" { 3 } else { 2 },
+                "{code}"
+            );
+            if edge == "h(0.5fr)" {
+                assert_eq!(occurrences(&code, "h(1fr)"), 1, "{code}");
+            }
+            assert!(!code.contains("spacing:"), "{code}");
+        }
+    }
+
+    #[test]
+    fn distributed_column_gap_is_explicit_once() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Column,
+                IrMainAxisAlignment::SpaceBetween,
+                IrCrossAxisAlignment::Center,
+                Some(IrSize {
+                    value: 1.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                None,
+                vec![paragraph("A"), paragraph("B")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("v(1cm)"), "{code}");
+        assert!(code.contains("v(1fr)"), "{code}");
+        assert!(!code.contains("spacing:"), "{code}");
+    }
+
+    #[test]
+    fn distributed_grid_does_not_use_column_gutter() {
+        for (alignment, tracks) in [
+            (
+                IrMainAxisAlignment::SpaceBetween,
+                "columns: (auto, 3cm, 1fr, auto)",
+            ),
+            (
+                IrMainAxisAlignment::SpaceAround,
+                "columns: (0.5fr, auto, 3cm, 1fr, auto, 0.5fr)",
+            ),
+            (
+                IrMainAxisAlignment::SpaceEvenly,
+                "columns: (1fr, auto, 3cm, 1fr, auto, 1fr)",
+            ),
+        ] {
+            let code = super::lower_to_typst_code(&IrDocument {
+                nodes: vec![stacked_node(
+                    IrStackedLayout::Grid {
+                        columns: std::num::NonZeroU32::new(2).expect("test columns are positive"),
+                    },
+                    alignment,
+                    IrCrossAxisAlignment::Center,
+                    Some(IrSize {
+                        value: 2.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    Some(IrSize {
+                        value: 3.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    vec![paragraph("A"), paragraph("B")],
+                )],
+                metadata: IrMetadata::default(),
+            });
+            assert!(code.contains(tracks), "{code}");
+            assert!(code.contains("row-gutter: 2cm"), "{code}");
+            assert!(!code.contains("column-gutter:"), "{code}");
+        }
+    }
+
+    #[test]
+    fn distributed_grid_preserves_logical_child_order() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Grid {
+                    columns: std::num::NonZeroU32::new(2).expect("test columns are positive"),
+                },
+                IrMainAxisAlignment::SpaceBetween,
+                IrCrossAxisAlignment::Center,
+                None,
+                Some(IrSize {
+                    value: 3.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                vec![paragraph("A"), paragraph("B"), paragraph("C")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("columns: (auto, 3cm, 1fr, auto)"), "{code}");
+        assert!(code.find('A').unwrap() < code.find('B').unwrap(), "{code}");
+        assert!(code.find('B').unwrap() < code.find('C').unwrap(), "{code}");
+        assert!(code.contains("C\n]], [], [], []"), "{code}");
+    }
+
+    #[test]
+    fn distributed_single_child_edges_are_valid() {
+        let between = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::SpaceBetween,
+                IrCrossAxisAlignment::Center,
+                None,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                vec![paragraph("A")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(!between.contains("h(7.5pt)"), "{between}");
+        assert!(!between.contains("h(1fr)"), "{between}");
+
+        let around = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::SpaceAround,
+                IrCrossAxisAlignment::Center,
+                None,
+                None,
+                vec![paragraph("A")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(occurrences(&around, "h(0.5fr)"), 2, "{around}");
+
+        let evenly = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![stacked_node(
+                IrStackedLayout::Row,
+                IrMainAxisAlignment::SpaceEvenly,
+                IrCrossAxisAlignment::Center,
+                None,
+                None,
+                vec![paragraph("A")],
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert_eq!(occurrences(&evenly, "h(1fr)"), 2, "{evenly}");
+    }
+
+    #[test]
+    fn distributed_single_column_grid_is_valid() {
+        for (alignment, tracks) in [
+            (IrMainAxisAlignment::SpaceBetween, "columns: (auto)"),
+            (
+                IrMainAxisAlignment::SpaceAround,
+                "columns: (0.5fr, auto, 0.5fr)",
+            ),
+            (
+                IrMainAxisAlignment::SpaceEvenly,
+                "columns: (1fr, auto, 1fr)",
+            ),
+        ] {
+            let code = super::lower_to_typst_code(&IrDocument {
+                nodes: vec![stacked_node(
+                    IrStackedLayout::Grid {
+                        columns: std::num::NonZeroU32::new(1).expect("test columns are positive"),
+                    },
+                    alignment,
+                    IrCrossAxisAlignment::Center,
+                    None,
+                    Some(IrSize {
+                        value: 3.0,
+                        unit: IrSizeUnit::Cm,
+                    }),
+                    vec![paragraph("A")],
+                )],
+                metadata: IrMetadata::default(),
+            });
+            assert!(code.contains(tracks), "{code}");
+            assert!(!code.contains("3cm"), "{code}");
+            assert!(!code.contains("column-gutter:"), "{code}");
+        }
     }
 
     #[test]

@@ -110,14 +110,16 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(typst_code.contains("#stack(dir: ltr"), "{typst_code}");
     assert!(typst_code.contains("#stack(dir: ttb"), "{typst_code}");
-    assert!(typst_code.contains("spacing: 7.5pt"), "{typst_code}");
-    assert!(typst_code.contains("spacing: 25%"), "{typst_code}");
+    assert!(typst_code.contains("h(7.5pt)"), "{typst_code}");
+    assert!(typst_code.contains("v(25%)"), "{typst_code}");
+    assert!(!typst_code.contains("spacing: 7.5pt"), "{typst_code}");
+    assert!(!typst_code.contains("spacing: 25%"), "{typst_code}");
     assert!(
-        typst_code.contains("columns: (1fr, auto, 1fr, auto, 1fr)"),
+        typst_code.contains("columns: (1fr, auto, 3cm, 1fr, auto, 1fr)"),
         "{typst_code}"
     );
     assert!(typst_code.contains("row-gutter: 2cm"), "{typst_code}");
-    assert!(typst_code.contains("column-gutter: 3cm"), "{typst_code}");
+    assert!(!typst_code.contains("column-gutter:"), "{typst_code}");
     assert!(typst_code.contains("#block(height: 100%)"), "{typst_code}");
 
     with_typst("stacked-layouts", |backend| {
