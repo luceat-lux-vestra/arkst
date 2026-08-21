@@ -98,11 +98,11 @@ not removed. Typed domain values use identity conversion, dynamic textual
 values use only their bounded parser, and static `StringValue` results do not
 gain domain meaning.
 
-These adapters now feed the reviewed Stacked and Container layout consumers.
-The live `.doctype` consumer remains a separate closed enum domain; Stacked
-main-axis, Stacked cross-axis, and Container alignment enums retain their own
-typed identity, and layout gaps reuse the existing `Size` adapter. Color/style
-consumers remain deferred.
+These adapters now feed the reviewed Stacked and Container layout consumers
+and the bounded `.whitespace` inline consumer. The live `.doctype` consumer
+remains a separate closed enum domain; Stacked main-axis, Stacked cross-axis,
+and Container alignment enums retain their own typed identity, and layout gaps
+reuse the existing `Size` adapter. Color/style consumers remain deferred.
 
 ### Layout classification
 
@@ -206,8 +206,7 @@ Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only);
-- `.box`, `.clip`, `.whitespace`,
-  `.figure`, and other layout families; and
+- `.box`, `.clip`, `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
 
 The component remains backend-neutral in value context and may pass through
@@ -234,6 +233,34 @@ because Quarkdown's subsequent-content wrapping is not equivalent to Typst's
 multi-column full-column span is not equivalent to a parent-scoped floating
 placement. Neither is inferred from this component.
 
+### Whitespace inline consumer slice (2026-08-21)
+
+The v2.5.1 upstream node category is the inline `Whitespace` node, not a
+layout component. Its public signature is `.whitespace width?: Size?
+height?: Size?`; the two parameters accept positional or named binding in
+`width`, then `height` order, with no body.
+
+Scribium implements this bounded contract as a backend-neutral
+`IrInline::Whitespace` semantic value:
+
+- with neither dimension supplied, it represents one non-breaking whitespace
+  character, equivalent to Quarkdown's `&nbsp;` behavior;
+- with one or both dimensions supplied, it represents an empty fixed-size
+  rectangle; a missing axis is normalized to semantic size zero;
+- conversion reuses the existing `InvocationValue`/`ValueOrigin`-aware `Size`
+  adapter, including typed `IrSize` identity, dynamic textual Size parsing,
+  and static String non-coercion;
+- evaluated inline calls preserve surrounding content order and the call's
+  source span, while standalone calls use the existing scalar/inline output
+  materialization boundary; and
+- Typst lowering emits the NBSP character for the dimensionless form and a
+  deterministic empty `#box` with explicit zero dimensions otherwise, using
+  the existing `IrSize` formatter.
+
+This slice does not add a generalized inline component/value hierarchy,
+universal `NodeValue`, or String-to-Markdown conversion. Those broader
+composition boundaries remain deferred.
+
 ## Compatibility matrix
 
 | Feature | Quarkdown v2.5.1 behavior | Scribium current behavior | Architecture decision | Implementation status | Deferred work |
@@ -249,7 +276,8 @@ placement. Neither is inferred from this component.
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
-| `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps | Other Size consumers |
+| `.whitespace` | Inline `Whitespace` node with optional `width: Size?` and `height: Size?`; positional order is width then height; no dimensions emit NBSP, while a supplied dimension creates a fixed-size empty rectangle | `IrInline::Whitespace` preserves the inline semantic, source span, surrounding order, typed Size conversion, zero for an omitted axis, and the existing standalone output bridge | Keep Whitespace inline and backend-neutral; reuse `InvocationValue`/`ValueOrigin` and materialize only through existing output boundaries | Implemented for the bounded argument, inline, block-output, provenance, and Typst slice | General inline node/value composition and other inline layout features |
+| `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
 | Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` is supported; String → Markdown reparsing is not | Content remains structured; raw String conversion requires a future explicit frontend/provenance contract | Partial | Content conversion boundary |

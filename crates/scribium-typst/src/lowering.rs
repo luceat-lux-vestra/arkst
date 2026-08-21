@@ -696,6 +696,29 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::Whitespace {
+                width,
+                height,
+                span,
+            } => {
+                let before = self.output.len();
+                if width.is_none() && height.is_none() {
+                    self.push('\u{a0}');
+                } else {
+                    let zero = IrSize {
+                        value: 0.0,
+                        unit: IrSizeUnit::Pt,
+                    };
+                    self.push_str("#box(width: ");
+                    self.push_str(&lower_size(width.as_ref().unwrap_or(&zero)));
+                    self.push_str(", height: ");
+                    self.push_str(&lower_size(height.as_ref().unwrap_or(&zero)));
+                    self.push_str(")[]");
+                }
+                if span.source_id != scribium_core::SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrInline::RawHtml { .. } | IrInline::TargetSpecificContent { .. } => {
                 // Target-specific HTML and parser-owned raw HTML never become
                 // Typst source or visible placeholder text.

@@ -478,6 +478,12 @@ fn append_row_plain_text(row: &crate::ir::IrTableRow, output: &mut String) -> Op
 fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()> {
     match inline {
         IrInline::Text { content, .. } | IrInline::Code { content, .. } => output.push_str(content),
+        IrInline::Whitespace {
+            width: None,
+            height: None,
+            ..
+        } => output.push('\u{a0}'),
+        IrInline::Whitespace { .. } => return None,
         IrInline::Emphasis { content, .. }
         | IrInline::Strong { content, .. }
         | IrInline::Strikethrough { content, .. }
@@ -542,6 +548,12 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::SoftBreak { .. } => output.push('\n'),
             // v2.5.1 `NodeUtils.toPlainText()` does not emit hard-break text.
             IrInline::HardBreak { .. } | IrInline::Image { .. } => {}
+            IrInline::Whitespace {
+                width: None,
+                height: None,
+                ..
+            } => output.push('\u{a0}'),
+            IrInline::Whitespace { .. } => return None,
             IrInline::DirectiveCall { .. }
             | IrInline::ChainedDirectiveCall { .. }
             | IrInline::RawHtml { .. }
