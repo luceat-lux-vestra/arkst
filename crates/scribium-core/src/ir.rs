@@ -100,6 +100,7 @@ pub struct IrColor {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrComponent {
     Stacked(IrStackedComponent),
+    Container(IrContainerComponent),
 }
 
 impl IrComponent {
@@ -107,8 +108,27 @@ impl IrComponent {
     pub fn span(&self) -> SourceSpan {
         match self {
             Self::Stacked(component) => component.span,
+            Self::Container(component) => component.span,
         }
     }
+}
+
+/// The bounded full-width container state consumed by `.center`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrContainerComponent {
+    pub full_width: bool,
+    pub alignment: IrContainerAlignment,
+    pub children: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
+/// Logical container alignment. The evaluator currently produces only
+/// `Center`; `Start` and `End` keep the semantic shape closed for `.align`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrContainerAlignment {
+    Start,
+    Center,
+    End,
 }
 
 /// The semantic state shared by row, column, and grid components.
@@ -520,9 +540,10 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrComponent, IrCrossAxisAlignment, IrDictionary, IrDocumentState, IrDocumentType, IrInline,
-        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, TargetSpecificContent,
+        IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
+        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrMainAxisAlignment, IrMetadata,
+        IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
+        NativeTarget, TargetSpecificContent,
     };
     use crate::source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
@@ -624,6 +645,22 @@ mod tests {
         }))
     }
 
+    fn container_value() -> IrValue {
+        let child_span = SourceSpan::new(SourceId(8), 14, 19);
+        IrValue::Component(IrComponent::Container(IrContainerComponent {
+            full_width: true,
+            alignment: IrContainerAlignment::Center,
+            children: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: child_span,
+                }],
+                span: child_span,
+            }],
+            span: SourceSpan::new(SourceId(8), 0, 28),
+        }))
+    }
+
     #[test]
     fn stacked_components_roundtrip_deterministically_for_row_column_and_grid() {
         let values = [
@@ -682,6 +719,41 @@ mod tests {
                     span: SourceSpan::new(SourceId(7), 12, 19),
                 }],
                 span: SourceSpan::new(SourceId(7), 12, 19),
+            }
+        );
+    }
+
+    #[test]
+    fn container_component_serde_roundtrip() {
+        let value = container_value();
+        let first = serde_json::to_string(&value).expect("container serializes");
+        let second = serde_json::to_string(&value).expect("container serializes");
+        assert_eq!(first, second);
+        assert!(!first.contains("typst"));
+        assert!(!first.contains("#block"));
+        assert!(!first.contains("#align"));
+        assert!(!first.contains("width: 100%"));
+        assert!(!first.contains("center("));
+        assert_eq!(
+            serde_json::from_str::<IrValue>(&first).expect("container deserializes"),
+            value
+        );
+    }
+
+    #[test]
+    fn container_component_preserves_child_and_call_spans() {
+        let IrValue::Component(IrComponent::Container(component)) = container_value() else {
+            panic!("expected a container component");
+        };
+        assert_eq!(component.span, SourceSpan::new(SourceId(8), 0, 28));
+        assert_eq!(
+            component.children[0],
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "child".to_string(),
+                    span: SourceSpan::new(SourceId(8), 14, 19),
+                }],
+                span: SourceSpan::new(SourceId(8), 14, 19),
             }
         );
     }

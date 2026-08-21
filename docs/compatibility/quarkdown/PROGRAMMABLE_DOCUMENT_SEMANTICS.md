@@ -108,14 +108,16 @@ existing `Size` adapter. Color/style consumers remain deferred.
 The v2.5.1 `Layout.kt` contract is recorded here for future compatibility work.
 The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
-conversion, and lazy body evaluation. Typst lowering remains backend-owned and
-does not add Typst constructs to the core IR.
+conversion, and lazy body evaluation. `.center` constructs the bounded typed
+Container component after lazy Markdown block-body evaluation. Typst lowering
+remains backend-owned and does not add Typst constructs to the core IR.
 
 | Function | v2.5.1 observable inputs | Validation/result |
 |---|---|---|
 | `row` | row layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `column` | column layout, main-axis alignment, cross-axis alignment, optional gap, Markdown body | stacked semantic node |
 | `grid` | positive integer columns, both alignments, general gap, vertical gap, horizontal gap, Markdown body | stacked semantic node; non-positive columns fail |
+| `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 
 The future surface requires `Size`, alignment enums, validated integers,
 structured content, and component/node conversion. It does not authorize their
@@ -142,11 +144,32 @@ Implemented in this slice:
   size conversion, alignment structure, source maps, and real Typst/PDF
   integration coverage.
 
+### Center component consumer slice (2026-08-21)
+
+`.center` is implemented as a bounded Container component consumer:
+
+- `IrComponent::Container` carries only `full_width`, logical alignment,
+  structured `Vec<IrNode>` children, and the producing call span;
+- `.center` accepts exactly one required Markdown block body, evaluates it
+  lazily through the existing callable/body path, and rejects positional,
+  named, inline, and lambda-body forms;
+- typed component values remain intact through callable results, nested
+  composition, Stacked interoperation, and failure-atomic materialization; and
+- Typst lowering emits a full-width block with logical `center` alignment and
+  retains child source-map provenance.
+
+Deferred from this slice:
+
+- `.align` argument binding and alignment conversion;
+- direct `.container`, `StyleOptions`, and `.float`;
+- `.fullspan`, general String → Markdown body conversion, and inline Container
+  insertion.
+
 Deferred from this slice:
 
 - general DynamicValue String → Markdown body conversion;
 - inline Stacked insertion (Stacked is block-only);
-- `.container`, `.align`, `.center`, `.float`, `.box`, `.clip`, `.whitespace`,
+- `.container`, `.align`, `.float`, `.box`, `.clip`, `.whitespace`,
   `.figure`, and other layout families; and
 - pixel-identical reproduction of upstream HTML/CSS rendering.
 
@@ -163,7 +186,7 @@ variables and callable results before the typed block output boundary.
 | Lexical/calling scope | Definition context is retained; mutable calling context can be propagated; nested lookup is nearest-first | Definition capture remains immutable; caller-visible variables/functions and the visible caller lambda scope are overlaid only for one invocation; local writes remain isolated | Adopt hybrid target model with explicit definition, caller-overlay, and invocation layers | Bounded compatibility implemented | Parent-owner reassignment and broader mutable-scope parity |
 | Lazy body evaluation | Body is a lazy `DynamicValue`; unreachable conditional/body paths do not execute it | Block bodies are evaluated on the existing callable path after binding; conversion failures precede body execution | Preserve eager inline vs lazy body timing | Bounded implemented | More differential lazy-body fixtures |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
-| Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` produce `IrValue::Component(IrComponent::Stacked)` and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed block-body Stacked slice implemented | Inline Stacked insertion and other component families |
+| Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
 | Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, and `.doctype` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, and `.doctype` implemented | Remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -172,7 +195,7 @@ variables and callable results before the typed block output boundary.
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
 | Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` is supported; String → Markdown reparsing is not | Content remains structured; raw String conversion requires a future explicit frontend/provenance contract | Partial | Content conversion boundary |
-| Component conversion | Dynamic result can become a node/layout value through typed output visitors | Closed typed `IrValue::Component`/`IrComponent::Stacked` is constructed by the reviewed source calls and materialized as one typed block node | Backend-neutral component value, origin-gated construction, typed output materialization | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and inline insertion |
+| Component conversion | Dynamic result can become a node/layout value through typed output visitors | Closed typed `IrValue::Component`/`IrComponent` is constructed by the reviewed source calls and materialized as one typed block node | Backend-neutral component value, origin-gated construction, typed output materialization | Implemented for reviewed block-body Stacked slice and bounded `.center` | General String → Markdown body conversion and inline insertion |
 
 ## Normative evaluator rules
 
@@ -223,12 +246,13 @@ source-map entries are generated during lowering from those original spans.
 ## Intentionally deferred
 
 This slice does not implement String → Markdown or String → component
-conversion, inline Stacked insertion, a generic layout engine, a parallel evaluator,
-filesystem/network features, or an evaluator rewrite. No architecture
+conversion, inline Stacked/Container insertion, `.align` argument binding,
+direct `.container`, `StyleOptions`, `.float`, `.fullspan`, a generic layout
+engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was
 necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
-The next selected candidate is the `container` / `align` family after the
-remaining #61 semantic gap inventory is re-reviewed. `.docauthor(s)`,
+The next selected candidate is the direct `container` / `align` family after
+the remaining #61 semantic gap inventory is re-reviewed. `.docauthor(s)`,
 `.dockeywords`, `.doclang`, and `.theme` remain deferred.
