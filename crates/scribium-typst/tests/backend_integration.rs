@@ -313,6 +313,59 @@ fn integration_container_sizing_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_whitespace_lowers_to_lossless_typst_and_pdf() {
+    let source = "A .whitespace B\n\n.whitespace width:{2cm}\n\n.whitespace height:{2cm}\n\n.whitespace width:{2cm} height:{1cm}\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("whitespace.qd")
+        .expect("valid entry path")
+        .add_source("whitespace.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "whitespace diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let (typst_code, source_map) = lower_to_typst(&result.ir);
+    assert!(typst_code.contains('\u{a0}'), "{typst_code:?}");
+    assert!(
+        typst_code.contains("#box(width: 2cm, height: 0pt)[]"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("#box(width: 0pt, height: 2cm)[]"),
+        "{typst_code}"
+    );
+    assert!(
+        typst_code.contains("#box(width: 2cm, height: 1cm)[]"),
+        "{typst_code}"
+    );
+    assert!(
+        source
+            .match_indices(".whitespace")
+            .map(|(start, _)| start)
+            .all(|start| source_map.iter().any(|entry| entry.original.start == start)),
+        "whitespace lowering lost source provenance: {source_map:?}"
+    );
+
+    with_typst("whitespace", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "whitespace.qd".to_string(),
+            })
+            .expect("whitespace Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_self_contained_mode_does_not_expose_temp_resources() {
     with_typst("self-contained-resource-boundary", |backend| {
         let result = backend.compile(&TypstInput {

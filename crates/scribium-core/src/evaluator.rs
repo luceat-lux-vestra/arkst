@@ -48,8 +48,9 @@ use crate::ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
     IrDocument, IrEnumValue, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
-    IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
 use crate::value_conversion::{
@@ -217,10 +218,21 @@ struct ContainerArgument {
     span: SourceSpan,
 }
 
+#[derive(Clone)]
+struct WhitespaceArgument {
+    value: InvocationValue,
+    span: SourceSpan,
+}
+
 struct BoundContainerArguments {
     width: Option<ContainerArgument>,
     height: Option<ContainerArgument>,
     full_width: Option<ContainerArgument>,
+}
+
+struct BoundWhitespaceArguments {
+    width: Option<WhitespaceArgument>,
+    height: Option<WhitespaceArgument>,
 }
 
 impl BoundStackedArguments {
@@ -1608,6 +1620,19 @@ impl Evaluator {
             );
         }
 
+        if is_whitespace(name) {
+            return self.evaluate_whitespace(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if is_stacked_layout(name) {
             return self.evaluate_stacked_layout(
                 name,
@@ -1863,6 +1888,100 @@ impl Evaluator {
                 span: *span,
             },
         )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_whitespace(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let positional_values = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let named_values =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let positional = positional_values
+            .into_iter()
+            .zip(positional_args.iter())
+            .map(|(value, source)| WhitespaceArgument {
+                value,
+                span: value_source_span(source, span),
+            })
+            .collect();
+        let bound = match bind_whitespace_arguments(positional, named_values, span, diagnostics) {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
+        };
+
+        let width = match bound.width.as_ref() {
+            Some(argument) => match convert_whitespace_size(&argument.value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(whitespace_conversion_error("width", argument.span, error));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
+        let height = match bound.height.as_ref() {
+            Some(argument) => match convert_whitespace_size(&argument.value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(whitespace_conversion_error("height", argument.span, error));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(whitespace_argument_error(
+                "`.whitespace` does not accept a lambda body",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() {
+            diagnostics.push(whitespace_argument_error(
+                "`.whitespace` does not accept a body",
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let (width, height) = match (width, height) {
+            (None, None) => (None, None),
+            (width, height) => (
+                Some(width.unwrap_or_else(zero_whitespace_size)),
+                Some(height.unwrap_or_else(zero_whitespace_size)),
+            ),
+        };
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Whitespace {
+                width,
+                height,
+                span: *span,
+            }],
+            span: *span,
+        }]))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5478,6 +5597,95 @@ fn is_landscape(name: &str) -> bool {
     name == "landscape"
 }
 
+fn is_whitespace(name: &str) -> bool {
+    name == "whitespace"
+}
+
+fn bind_whitespace_arguments(
+    positional: Vec<WhitespaceArgument>,
+    named: Vec<InvocationNamedArg>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<BoundWhitespaceArguments, CallOutcome> {
+    let mut values: [Option<WhitespaceArgument>; 2] = [None, None];
+    for (index, argument) in positional.into_iter().enumerate() {
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(whitespace_argument_error(
+                "`.whitespace` accepts at most two positional arguments",
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        *slot = Some(argument);
+    }
+
+    for argument in named {
+        let Some(index) = ["width", "height"]
+            .iter()
+            .position(|parameter| *parameter == argument.arg.name)
+        else {
+            diagnostics.push(whitespace_argument_error_at(
+                format!("Unknown named argument `{}`", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(whitespace_argument_error_at(
+                format!(
+                    "Named argument `{}` is outside the `.whitespace` signature",
+                    argument.arg.name
+                ),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        if slot.is_some() {
+            diagnostics.push(whitespace_argument_error_at(
+                format!("Argument `{}` was bound more than once", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(WhitespaceArgument {
+            value: InvocationValue {
+                value: argument.arg.value,
+                origin: argument.origin,
+            },
+            span: argument.arg.span,
+        });
+    }
+
+    Ok(BoundWhitespaceArguments {
+        width: values[0].take(),
+        height: values[1].take(),
+    })
+}
+
+fn convert_whitespace_size(
+    argument: &InvocationValue,
+) -> Result<Option<IrSize>, value_conversion::ConversionError> {
+    if matches!(&argument.value, IrValue::None) {
+        return Ok(None);
+    }
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Size,
+    )? {
+        value_conversion::DomainValue::Size(value) => Ok(Some(value)),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn zero_whitespace_size() -> IrSize {
+    IrSize {
+        value: 0.0,
+        unit: IrSizeUnit::Px,
+    }
+}
+
 fn bind_container_arguments(
     positional: Vec<ContainerArgument>,
     named: Vec<InvocationNamedArg>,
@@ -6021,6 +6229,7 @@ fn dictionary_inline_value(inlines: Vec<IrInline>, span: SourceSpan) -> IrValue 
 fn inline_source_span(inline: &IrInline) -> SourceSpan {
     match inline {
         IrInline::Text { span, .. }
+        | IrInline::Whitespace { span, .. }
         | IrInline::Emphasis { span, .. }
         | IrInline::Strong { span, .. }
         | IrInline::Strikethrough { span, .. }
@@ -6101,6 +6310,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::Link { .. }
         | IrInline::Image { .. }
         | IrInline::Code { .. }
+        | IrInline::Whitespace { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
     }
     Some(())
@@ -7550,6 +7760,43 @@ fn landscape_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         secondary: Vec::new(),
         hints: vec!["Use `.landscape` as a block call with a Markdown body.".to_string()],
     }
+}
+
+fn whitespace_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    whitespace_argument_error_at(message.to_string(), span)
+}
+
+fn whitespace_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "`.whitespace` accepts optional `width` and `height` Size arguments and no body."
+                .to_string(),
+        ],
+    }
+}
+
+fn whitespace_conversion_error(
+    parameter: &str,
+    span: SourceSpan,
+    error: value_conversion::ConversionError,
+) -> Diagnostic {
+    let detail = match error {
+        value_conversion::ConversionError::InvalidText { .. } => {
+            "value is invalid for the existing Size adapter"
+        }
+        value_conversion::ConversionError::UnsupportedValue { .. } => {
+            "value has the wrong typed domain or origin"
+        }
+    };
+    whitespace_argument_error_at(
+        format!("`.whitespace` parameter `{parameter}`: {detail}"),
+        span,
+    )
 }
 
 /// Resolves a value to a boolean, handling variable references.

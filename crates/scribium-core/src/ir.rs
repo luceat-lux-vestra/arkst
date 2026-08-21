@@ -326,6 +326,16 @@ pub enum IrNode {
 pub enum IrInline {
     /// Plain text content.
     Text { content: String, span: SourceSpan },
+    /// Quarkdown `.whitespace` with an optional fixed inline extent.
+    ///
+    /// `None` for both dimensions is the non-breaking whitespace form. When
+    /// either dimension is present, both dimensions are normalized by the
+    /// evaluator and a missing axis is represented by a zero `IrSize`.
+    Whitespace {
+        width: Option<IrSize>,
+        height: Option<IrSize>,
+        span: SourceSpan,
+    },
     /// Emphasized (italic) inline fragment.
     Emphasis {
         content: Vec<IrInline>,
