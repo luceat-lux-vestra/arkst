@@ -77,10 +77,11 @@ implemented.
 | Collection access              | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat` | Typed access over `Collection`, `Pair`, ordered `Dictionary` entries, finite closed or left-open `Range`, and Markdown list values; one-based access with upstream absence/fallback behavior | Implemented (evidenced slice) |
 | Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, nested first-seen groups, and stable `by` selector sorting | Implemented (evidenced v2.5.1 slice; table operations remain deferred) |
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
-| Functions/components            | —                                | Complete public component/layout semantics remain unimplemented; current pure callbacks are tracked separately | Planned          |
+| Functions/components            | —                                | Complete public component/layout semantics remain unimplemented; bounded typed Stacked and Container consumers are tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
 | Metadata                       | —                                | —                        | Planned          |
 | Row/column/grid                | —                                | —                        | Planned          |
+| Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Implemented (evidenced slice) |
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Implemented      |
@@ -100,6 +101,28 @@ D2 correction evidence additionally covers empty and whitespace-empty inline
 destinations, exact angle/title/multiline-link spans, and link-kind isolation:
 inline destinations receive the tested escape normalization while Auto,
 Reference, and Image destination representations remain unchanged.
+
+### Bounded `.container` sizing contract
+
+The direct `.container` consumer is **partial/bounded**, not complete upstream
+Container support. The implemented subset is:
+
+- an empty or optional Markdown block body with structured `Vec<IrNode>`
+  children;
+- `width: Size?`, `height: Size?`, and `fullwidth: Boolean` through the
+  existing origin-aware invocation conversion boundary;
+- positional prefix binding in `width`, `height`, `fullwidth` order and named
+  equivalents, with duplicate, unknown, and deferred-known parameters
+  rejected by source-backed diagnostics; and
+- backend-neutral `IrComponent::Container` materialization and Typst
+  `#block` sizing, where explicit width overrides `fullwidth` and an
+  unaligned container emits no `#align` wrapper.
+
+The deferred surface includes `float`, `fullspan`, `classname`, StyleOptions,
+container alignment/text alignment, colors, borders, margin/padding/radius,
+font/text-style properties, and inline Container insertion. Evidence is in
+`crates/scribium-core/tests/quarkdown_container.rs`, the IR/lowering unit
+tests, and `crates/scribium-typst/tests/backend_integration.rs`.
 
 ### Target-specific `.html` contract
 
@@ -226,7 +249,8 @@ The implemented boundary is deliberately consumer-driven:
 | `Range` | bounded conversion implemented for iterable consumers | `.foreach`, collection access, and dynamic range materialization | [`ValueFactory.range`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt), [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt) |
 | `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary; static StringValue remains String | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`StringValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/StringValue.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
 | `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | context-sensitive conversion deferred | parser/evaluation context is required | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
-| `Size`, `Color`, `Enum`, and layout/document values | component/layout conversion deferred | no current approved semantic consumer | v2.5.1 value families; no Scribium consumer in this slice |
+| `Size` | bounded domain conversion implemented for reviewed consumers | `.container` width/height and Stacked gaps; typed Size identity and DynamicValue-origin text | v2.5.1 `Size` value family and existing evaluator conversion tests |
+| `Color`, `Enum`, and remaining layout/document values | component/layout conversion remains partial or deferred | closed enum alignment consumers are implemented; colors, styles, and remaining layout fields are deferred | v2.5.1 value families; bounded consumers only |
 | collections, callables, and generic document/content stringification | unsupported conversion; existing typed operations remain separate | typed collection/callable paths only | `DynamicValueConverter.kt`, `ValueFactory.kt`, and consumer signatures |
 
 The scalar rules are evidence-backed: Number keeps an already typed value and

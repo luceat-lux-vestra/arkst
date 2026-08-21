@@ -341,21 +341,44 @@ impl LoweringContext {
     fn lower_container(&mut self, component: &IrContainerComponent) {
         let before = self.output.len();
         self.push_str("#block");
-        if component.full_width {
-            self.push_str("(width: 100%)");
+        let width = component.width.as_ref();
+        if width.is_some() || component.full_width || component.height.is_some() {
+            self.push('(');
+            let mut first = true;
+            if let Some(width) = width {
+                self.push_str("width: ");
+                self.push_str(&lower_size(width));
+                first = false;
+            } else if component.full_width {
+                self.push_str("width: 100%");
+                first = false;
+            }
+            if let Some(height) = component.height.as_ref() {
+                if !first {
+                    self.push_str(", ");
+                }
+                self.push_str("height: ");
+                self.push_str(&lower_size(height));
+            }
+            self.push(')');
         }
         self.push_str("[\n");
-        self.push_str("#align(");
-        self.push_str(match component.alignment {
-            IrContainerAlignment::Start => "start",
-            IrContainerAlignment::Center => "center",
-            IrContainerAlignment::End => "end",
-        });
-        self.push_str(")[\n");
+        if let Some(alignment) = component.alignment {
+            self.push_str("#align(");
+            self.push_str(match alignment {
+                IrContainerAlignment::Start => "start",
+                IrContainerAlignment::Center => "center",
+                IrContainerAlignment::End => "end",
+            });
+            self.push_str(")[\n");
+        }
         for child in &component.children {
             self.lower_node(child);
         }
-        self.push_str("]\n]");
+        if component.alignment.is_some() {
+            self.push_str("]\n");
+        }
+        self.push(']');
         self.push('\n');
         if component.span.source_id != scribium_core::SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
@@ -1175,9 +1198,29 @@ mod tests {
     fn container_node(children: Vec<IrNode>) -> IrNode {
         IrNode::Component {
             component: IrComponent::Container(IrContainerComponent {
+                width: None,
+                height: None,
                 full_width: true,
-                alignment: IrContainerAlignment::Center,
+                alignment: Some(IrContainerAlignment::Center),
                 children,
+                span: empty_span(),
+            }),
+        }
+    }
+
+    fn sized_container_node(
+        width: Option<IrSize>,
+        height: Option<IrSize>,
+        full_width: bool,
+        alignment: Option<IrContainerAlignment>,
+    ) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::Container(IrContainerComponent {
+                width,
+                height,
+                full_width,
+                alignment,
+                children: vec![paragraph("A")],
                 span: empty_span(),
             }),
         }
@@ -1309,6 +1352,83 @@ mod tests {
     }
 
     #[test]
+    fn plain_container_lowers_without_align_wrapper() {
+        let code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(None, None, false, None)],
+            metadata: IrMetadata::default(),
+        });
+        assert!(code.contains("#block["), "{code}");
+        assert!(!code.contains("#align("), "{code}");
+    }
+
+    #[test]
+    fn container_sizing_lowers_in_deterministic_block_argument_order() {
+        let width = IrSize {
+            value: 4.0,
+            unit: IrSizeUnit::Cm,
+        };
+        let height = IrSize {
+            value: 2.0,
+            unit: IrSizeUnit::Cm,
+        };
+        let width_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(Some(width.clone()), None, false, None)],
+            metadata: IrMetadata::default(),
+        });
+        assert!(width_code.contains("#block(width: 4cm)["), "{width_code}");
+
+        let height_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(
+                None,
+                Some(height.clone()),
+                false,
+                None,
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(
+            height_code.contains("#block(height: 2cm)["),
+            "{height_code}"
+        );
+
+        let both_code = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(Some(width), Some(height), false, None)],
+            metadata: IrMetadata::default(),
+        });
+        assert!(
+            both_code.contains("#block(width: 4cm, height: 2cm)["),
+            "{both_code}"
+        );
+    }
+
+    #[test]
+    fn container_fullwidth_lowers_to_100_percent_and_explicit_width_wins() {
+        let full_width = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(None, None, true, None)],
+            metadata: IrMetadata::default(),
+        });
+        assert!(full_width.contains("#block(width: 100%)["), "{full_width}");
+
+        let explicit_width = super::lower_to_typst_code(&IrDocument {
+            nodes: vec![sized_container_node(
+                Some(IrSize {
+                    value: 4.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                None,
+                true,
+                None,
+            )],
+            metadata: IrMetadata::default(),
+        });
+        assert!(
+            explicit_width.contains("#block(width: 4cm)["),
+            "{explicit_width}"
+        );
+        assert!(!explicit_width.contains("100%"), "{explicit_width}");
+    }
+
+    #[test]
     fn container_component_preserves_logical_alignment_names() {
         for (alignment, name) in [
             (IrContainerAlignment::Start, "start"),
@@ -1318,8 +1438,10 @@ mod tests {
             let code = super::lower_to_typst_code(&IrDocument {
                 nodes: vec![IrNode::Component {
                     component: IrComponent::Container(IrContainerComponent {
+                        width: None,
+                        height: None,
                         full_width: true,
-                        alignment,
+                        alignment: Some(alignment),
                         children: vec![paragraph("A")],
                         span: empty_span(),
                     }),
@@ -1348,8 +1470,10 @@ mod tests {
         let (code, map) = super::lower_to_typst(&IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Container(IrContainerComponent {
+                    width: None,
+                    height: None,
                     full_width: true,
-                    alignment: IrContainerAlignment::Center,
+                    alignment: Some(IrContainerAlignment::Center),
                     children: vec![IrNode::Paragraph {
                         content: vec![IrInline::Text {
                             content: "Hello".to_string(),

@@ -1,0 +1,8 @@
+.row gap:{1cm}
+    .container width:{4cm}
+        ## Left
+        Natural document flow.
+
+    .container width:{4cm}
+        ## Right
+        Natural document flow.

@@ -211,6 +211,18 @@ struct AlignArgument {
     span: SourceSpan,
 }
 
+#[derive(Clone)]
+struct ContainerArgument {
+    value: InvocationValue,
+    span: SourceSpan,
+}
+
+struct BoundContainerArguments {
+    width: Option<ContainerArgument>,
+    height: Option<ContainerArgument>,
+    full_width: Option<ContainerArgument>,
+}
+
 impl BoundStackedArguments {
     fn take(&mut self, index: usize) -> Option<StackedArgument> {
         self.values.get_mut(index).and_then(Option::take)
@@ -1214,6 +1226,10 @@ impl Evaluator {
             diagnostics.push(align_inline_materialization_error(*span));
             return Vec::new();
         }
+        if is_container(name) && context.get_function(name).is_none() {
+            diagnostics.push(container_inline_materialization_error(*span));
+            return Vec::new();
+        }
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -1563,6 +1579,19 @@ impl Evaluator {
             );
         }
 
+        if is_container(name) {
+            return self.evaluate_container(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if is_stacked_layout(name) {
             return self.evaluate_stacked_layout(
                 name,
@@ -1745,8 +1774,10 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::Container(
             IrContainerComponent {
+                width: None,
+                height: None,
                 full_width: true,
-                alignment: IrContainerAlignment::Center,
+                alignment: Some(IrContainerAlignment::Center),
                 children,
                 span: *span,
             },
@@ -1830,8 +1861,125 @@ impl Evaluator {
 
         CallOutcome::Value(IrValue::Component(IrComponent::Container(
             IrContainerComponent {
+                width: None,
+                height: None,
                 full_width: true,
-                alignment,
+                alignment: Some(alignment),
+                children,
+                span: *span,
+            },
+        )))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_container(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let positional_values = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let named_values =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let positional = positional_values
+            .into_iter()
+            .zip(positional_args.iter())
+            .map(|(value, source)| ContainerArgument {
+                value,
+                span: value_source_span(source, span),
+            })
+            .collect();
+        let bound = match bind_container_arguments(positional, named_values, span, diagnostics) {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
+        };
+
+        let width = match bound.width.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_size(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error("width", argument.span, error));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
+        let height = match bound.height.as_ref() {
+            Some(argument) if matches!(&argument.value.value, IrValue::None) => None,
+            Some(argument) => match convert_container_size(&argument.value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    diagnostics.push(container_conversion_error("height", argument.span, error));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        };
+        let full_width = match bound.full_width.as_ref() {
+            Some(argument) => match convert_container_boolean(&argument.value) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(container_conversion_error(
+                        "fullwidth",
+                        argument.span,
+                        error,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            None => false,
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(container_argument_error_at(
+                "`.container` body is a Markdown block, not a lambda".to_string(),
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(container_argument_error(
+                    "`.container` is block-only",
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => Vec::new(),
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Container(
+            IrContainerComponent {
+                width,
+                height,
+                full_width,
+                alignment: None,
                 children,
                 span: *span,
             },
@@ -5241,6 +5389,173 @@ fn is_align(name: &str) -> bool {
     name == "align"
 }
 
+fn is_container(name: &str) -> bool {
+    name == "container"
+}
+
+fn bind_container_arguments(
+    positional: Vec<ContainerArgument>,
+    named: Vec<InvocationNamedArg>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<BoundContainerArguments, CallOutcome> {
+    let mut values: Vec<Option<ContainerArgument>> = vec![None, None, None];
+    for (index, argument) in positional.into_iter().enumerate() {
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(container_argument_error(
+                "`.container` accepts at most three positional arguments",
+                *span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        *slot = Some(argument);
+    }
+
+    for argument in named {
+        if is_deferred_container_parameter(&argument.arg.name) {
+            diagnostics.push(container_argument_error_at(
+                format!(
+                    "`.container` parameter `{}` is not supported by the bounded container sizing slice",
+                    argument.arg.name
+                ),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        let Some(index) = ["width", "height", "fullwidth"]
+            .iter()
+            .position(|parameter| *parameter == argument.arg.name)
+        else {
+            diagnostics.push(container_argument_error_at(
+                format!("Unknown named argument `{}`", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(container_argument_error_at(
+                format!(
+                    "Named argument `{}` is outside the bounded container signature",
+                    argument.arg.name
+                ),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        if slot.is_some() {
+            diagnostics.push(container_argument_error_at(
+                format!("Argument `{}` was bound more than once", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(ContainerArgument {
+            value: InvocationValue {
+                value: argument.arg.value,
+                origin: argument.origin,
+            },
+            span: argument.arg.span,
+        });
+    }
+
+    Ok(BoundContainerArguments {
+        width: values[0].take(),
+        height: values[1].take(),
+        full_width: values[2].take(),
+    })
+}
+
+fn is_deferred_container_parameter(name: &str) -> bool {
+    matches!(
+        name,
+        "float"
+            | "fullspan"
+            | "classname"
+            | "foreground"
+            | "background"
+            | "border"
+            | "borderwidth"
+            | "borderstyle"
+            | "alignment"
+            | "textalignment"
+            | "margin"
+            | "padding"
+            | "radius"
+            | "fontsize"
+            | "fontweight"
+            | "fontstyle"
+            | "fontvariant"
+            | "textdecoration"
+            | "textcase"
+    )
+}
+
+fn convert_container_size(
+    argument: &InvocationValue,
+) -> Result<IrSize, value_conversion::ConversionError> {
+    if matches!(&argument.value, IrValue::None) {
+        return Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        });
+    }
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Size,
+    )? {
+        value_conversion::DomainValue::Size(value) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn convert_container_boolean(
+    argument: &InvocationValue,
+) -> Result<bool, value_conversion::ConversionError> {
+    match value_conversion::convert_scalar_with_origin(argument, ScalarTarget::Boolean)? {
+        ScalarValue::Boolean(value) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Boolean,
+        }),
+    }
+}
+
+fn container_conversion_error(
+    parameter: &str,
+    span: SourceSpan,
+    error: value_conversion::ConversionError,
+) -> Diagnostic {
+    let detail = match error {
+        value_conversion::ConversionError::InvalidText { .. } => {
+            "value is invalid for the typed parameter"
+        }
+        value_conversion::ConversionError::UnsupportedValue { .. } => {
+            "value has the wrong typed domain or origin"
+        }
+    };
+    container_argument_error_at(
+        format!("`.container` parameter `{parameter}`: {detail}"),
+        span,
+    )
+}
+
+fn container_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    container_argument_error_at(message.to_string(), span)
+}
+
+fn container_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Container arguments are validated before the Markdown body is evaluated.".to_string(),
+        ],
+    }
+}
+
 fn bind_align_argument(
     positional: Vec<AlignArgument>,
     named: Vec<InvocationNamedArg>,
@@ -7113,6 +7428,17 @@ fn align_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["Use `.align` as a block call with a Markdown body.".to_string()],
+    }
+}
+
+fn container_inline_materialization_error(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: "`.container` is block-only".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["Use `.container` as a block call with an optional Markdown body.".to_string()],
     }
 }
 

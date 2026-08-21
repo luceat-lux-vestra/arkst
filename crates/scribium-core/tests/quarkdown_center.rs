@@ -42,8 +42,10 @@ fn center_constructs_typed_container() {
     let result = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let component = center(&result);
+    assert_eq!(component.width, None);
+    assert_eq!(component.height, None);
     assert!(component.full_width);
-    assert_eq!(component.alignment, IrContainerAlignment::Center);
+    assert_eq!(component.alignment, Some(IrContainerAlignment::Center));
     assert_eq!(component.children.len(), 2);
     assert_eq!(paragraph_text(&component.children[0]), "Hello");
     assert!(matches!(component.children[1], IrNode::Heading { .. }));
@@ -152,7 +154,7 @@ fn center_nested_component_is_structured() {
     else {
         panic!("expected nested container, got {:?}", outer.children[0]);
     };
-    assert_eq!(inner.alignment, IrContainerAlignment::Center);
+    assert_eq!(inner.alignment, Some(IrContainerAlignment::Center));
     assert_eq!(paragraph_text(&inner.children[0]), "A");
     assert_eq!(paragraph_text(&outer.children[1]), "B");
 }

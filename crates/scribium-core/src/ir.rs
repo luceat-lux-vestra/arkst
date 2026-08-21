@@ -113,11 +113,20 @@ impl IrComponent {
     }
 }
 
-/// The bounded full-width container state consumed by `.center` and `.align`.
+/// The backend-neutral container state consumed by `.container`, `.center`,
+/// and `.align`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrContainerComponent {
+    /// An explicit width constraint, if one was supplied.
+    #[serde(default)]
+    pub width: Option<IrSize>,
+    /// An explicit height constraint, if one was supplied.
+    #[serde(default)]
+    pub height: Option<IrSize>,
     pub full_width: bool,
-    pub alignment: IrContainerAlignment,
+    /// `None` represents an unaligned ordinary container.
+    #[serde(default)]
+    pub alignment: Option<IrContainerAlignment>,
     pub children: Vec<IrNode>,
     pub span: SourceSpan,
 }
@@ -649,8 +658,10 @@ mod tests {
     fn container_value() -> IrValue {
         let child_span = SourceSpan::new(SourceId(8), 14, 19);
         IrValue::Component(IrComponent::Container(IrContainerComponent {
+            width: None,
+            height: None,
             full_width: true,
-            alignment: IrContainerAlignment::Center,
+            alignment: Some(IrContainerAlignment::Center),
             children: vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
                     content: "child".to_string(),
@@ -739,6 +750,64 @@ mod tests {
             serde_json::from_str::<IrValue>(&first).expect("container deserializes"),
             value
         );
+    }
+
+    #[test]
+    fn plain_and_sized_container_serde_roundtrip_deterministically() {
+        let span = SourceSpan::new(SourceId(9), 0, 12);
+        let values = [
+            IrValue::Component(IrComponent::Container(IrContainerComponent {
+                width: None,
+                height: None,
+                full_width: false,
+                alignment: None,
+                children: Vec::new(),
+                span,
+            })),
+            IrValue::Component(IrComponent::Container(IrContainerComponent {
+                width: Some(IrSize {
+                    value: 4.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                height: Some(IrSize {
+                    value: 2.0,
+                    unit: IrSizeUnit::Cm,
+                }),
+                full_width: true,
+                alignment: None,
+                children: Vec::new(),
+                span,
+            })),
+        ];
+
+        for value in values {
+            let first = serde_json::to_string(&value).expect("container serializes");
+            let second = serde_json::to_string(&value).expect("container serializes");
+            assert_eq!(first, second);
+            assert_eq!(serde_json::from_str::<IrValue>(&first).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn pre_sizing_container_serde_defaults_new_fields_and_preserves_alignment() {
+        let value = container_value();
+        let mut old = serde_json::to_value(&value).expect("container serializes");
+        let container = old
+            .get_mut("Component")
+            .and_then(|component| component.get_mut("Container"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("externally tagged container object");
+        container.remove("width");
+        container.remove("height");
+
+        let decoded = serde_json::from_value::<IrValue>(old).expect("old container deserializes");
+        assert_eq!(decoded, value);
+        let IrValue::Component(IrComponent::Container(component)) = decoded else {
+            panic!("expected container component");
+        };
+        assert_eq!(component.width, None);
+        assert_eq!(component.height, None);
+        assert_eq!(component.alignment, Some(IrContainerAlignment::Center));
     }
 
     #[test]

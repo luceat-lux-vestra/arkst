@@ -47,7 +47,7 @@ fn align_start_center_and_end_construct_typed_containers() {
         assert!(result.diagnostics.is_empty(), "{name}: {result:?}");
         let component = align(&result);
         assert!(component.full_width);
-        assert_eq!(component.alignment, expected);
+        assert_eq!(component.alignment, Some(expected));
         assert_eq!(paragraph_text(&component.children[0]), "A");
     }
 }
@@ -56,7 +56,7 @@ fn align_start_center_and_end_construct_typed_containers() {
 fn align_accepts_named_alignment() {
     let result = compile_source(".align alignment:{end}\n    A\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert_eq!(align(&result).alignment, IrContainerAlignment::End);
+    assert_eq!(align(&result).alignment, Some(IrContainerAlignment::End));
 }
 
 #[test]
@@ -155,14 +155,14 @@ fn align_composes_with_nested_and_stacked_components() {
     let nested = compile_source(".align {end}\n    .align {start}\n        A\n");
     assert!(nested.diagnostics.is_empty(), "{nested:?}");
     let outer = align(&nested);
-    assert_eq!(outer.alignment, IrContainerAlignment::End);
+    assert_eq!(outer.alignment, Some(IrContainerAlignment::End));
     let [IrNode::Component {
         component: IrComponent::Container(inner),
     }] = outer.children.as_slice()
     else {
         panic!("expected nested align, got {:?}", outer.children);
     };
-    assert_eq!(inner.alignment, IrContainerAlignment::Start);
+    assert_eq!(inner.alignment, Some(IrContainerAlignment::Start));
 
     let align_row = compile_source(".align {center}\n    .row\n        A\n\n        B\n");
     assert!(align_row.diagnostics.is_empty(), "{align_row:?}");
@@ -202,8 +202,8 @@ fn center_and_align_share_container_semantics() {
     else {
         panic!("expected nested center, got {:?}", outer.children);
     };
-    assert_eq!(outer.alignment, IrContainerAlignment::Center);
-    assert_eq!(inner.alignment, IrContainerAlignment::Center);
+    assert_eq!(outer.alignment, Some(IrContainerAlignment::Center));
+    assert_eq!(inner.alignment, Some(IrContainerAlignment::Center));
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn align_callable_result_preserves_component_value() {
     let result = compile_source(".function {wrapper}\n    .align {end}\n        A\n\n.wrapper\n");
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let component = align(&result);
-    assert_eq!(component.alignment, IrContainerAlignment::End);
+    assert_eq!(component.alignment, Some(IrContainerAlignment::End));
     assert_eq!(paragraph_text(&component.children[0]), "A");
 }
 
