@@ -8,8 +8,8 @@
 //! policy.
 
 use crate::ir::{
-    IrColor, IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrMainAxisAlignment, IrNamedArg,
-    IrRange, IrSize, IrSizeUnit, IrValue,
+    IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
+    IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
 };
 use crate::source::SourceSpan;
 use std::ops::Deref;
@@ -126,6 +126,7 @@ pub(crate) enum ClosedEnumTarget {
     DocumentType,
     StackedMainAxisAlignment,
     StackedCrossAxisAlignment,
+    ContainerAlignment,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -240,6 +241,23 @@ static STACKED_CROSS_AXIS_SPEC: ClosedEnumSpec<'static, IrCrossAxisAlignment> = 
         ClosedEnumVariant {
             declaration_name: "STRETCH",
             value: IrCrossAxisAlignment::Stretch,
+        },
+    ],
+};
+
+static CONTAINER_ALIGNMENT_SPEC: ClosedEnumSpec<'static, IrContainerAlignment> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "START",
+            value: IrContainerAlignment::Start,
+        },
+        ClosedEnumVariant {
+            declaration_name: "CENTER",
+            value: IrContainerAlignment::Center,
+        },
+        ClosedEnumVariant {
+            declaration_name: "END",
+            value: IrContainerAlignment::End,
         },
     ],
 };
@@ -456,6 +474,24 @@ pub(crate) fn convert_domain_with_origin(
                         .map(|value| {
                             DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value))
                         })
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::ContainerAlignment => match &argument.value {
+                IrValue::Enum(IrEnumValue::ContainerAlignment(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CONTAINER_ALIGNMENT_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::ContainerAlignment(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
@@ -1727,9 +1763,9 @@ mod tests {
         DomainValue, InvocationValue, ScalarTarget, ScalarValue,
     };
     use crate::ir::{
-        IrColor, IrComponent, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
-        IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
-        IrValue,
+        IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType,
+        IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
+        IrStackedLayout, IrValue,
     };
     use crate::source::{SourceId, SourceSpan};
 
@@ -2301,6 +2337,61 @@ mod tests {
             ))),
             Err(ConversionError::UnsupportedValue {
                 target: ConversionTarget::Integer
+            })
+        ));
+    }
+
+    #[test]
+    fn container_alignment_enum_is_closed_typed_and_origin_aware() {
+        for (text, expected) in [
+            ("start", IrContainerAlignment::Start),
+            ("CENTER", IrContainerAlignment::Center),
+            ("End", IrContainerAlignment::End),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::ContainerAlignment(expected)))
+            );
+        }
+
+        let typed = IrEnumValue::ContainerAlignment(IrContainerAlignment::Center);
+        assert_eq!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::Enum(typed)),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+            ),
+            Ok(DomainValue::Enum(typed))
+        );
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::String("center".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum
+            })
+        ));
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("middle".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+            ),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum
+            })
+        ));
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::Enum(
+                    IrEnumValue::StackedMainAxisAlignment(IrMainAxisAlignment::Center)
+                )),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::ContainerAlignment),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum
             })
         ));
     }
