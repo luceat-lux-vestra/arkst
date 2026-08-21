@@ -1,0 +1,76 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "before ",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 7
+              }
+            }
+          },
+          {
+            "HardBreak": {
+              "span": {
+                "source_id": 1,
+                "start": 7,
+                "end": 10
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " after",
+              "span": {
+                "source_id": 1,
+                "start": 10,
+                "end": 16
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 16
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "before  after",
+              "span": {
+                "source_id": 1,
+                "start": 18,
+                "end": 49
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 18,
+          "end": 49
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain"
+    }
+  }
+}

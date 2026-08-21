@@ -1,7 +1,9 @@
 # Quarkdown Conformance Corpus
 
-This directory contains independently authored conformance test cases for Scribium's
-Quarkdown compatibility implementation.
+This directory contains independently authored conformance cases for Scribium's
+Quarkdown compatibility implementation. The corpus is an executable compatibility
+claim: `scribium-test-support` loads every case from the workspace test suite and
+enforces the declared `compatibility_level`.
 
 ## Structure
 
@@ -12,9 +14,10 @@ fixtures/quarkdown-conformance/
 │   ├── <case-id>/
 │   │   ├── case.toml      # Case metadata
 │   │   ├── input.qd       # Independently authored Quarkdown input
-│   │   └── expected/      # Expected outputs (added incrementally)
-│   │       ├── ast.json   # Expected AST (when implemented)
-│   │       └── typst.typ  # Expected Typst output (when implemented)
+│   │   └── expected/
+│   │       ├── ir.json          # Required for semantic/output/divergence levels
+│   │       ├── typst.typ        # Required for Output-equivalent
+│   │       └── diagnostics.json # Required for Unsupported
 ```
 
 ## Case Metadata Schema (`case.toml`)
@@ -37,10 +40,44 @@ description = "Basic positional argument call"
 |-------|-------------|
 | `id` | Unique identifier (kebab-case), used for test naming |
 | `feature` | Feature name from the compatibility matrix (e.g., `dot-prefixed-call`, `positional-arguments`, `named-arguments`, `indented-body`, `conditionals`, `variables`) |
-| `compatibility_level` | One of: `Unsupported`, `Parsed`, `Semantically supported`, `Output-equivalent`, `Known divergence` |
+| `compatibility_level` | Exactly one of: `Unsupported`, `Parsed`, `Semantically supported`, `Output-equivalent`, `Known divergence` |
 | `specification_source` | Short key referencing the specification source in `SPEC_SOURCES.md` |
 | `description` | Human-readable description of what this case tests (required) |
 | `known_divergence` | Omitted if none, or a description of a documented divergence |
+
+Unknown compatibility levels fail during fixture loading. The case directory name
+must equal `id`, and metadata IDs must be unique across the corpus.
+
+## Executable level policy
+
+`ConformanceCase::verify()` is the single public verification entry point:
+
+| Level | Enforced contract | Required artifact |
+|-------|-------------------|-------------------|
+| `Parsed` | No parser `E2xxx` diagnostic. Evaluation and lowering diagnostics are allowed. | None |
+| `Semantically supported` | No parser, evaluation, or lowering diagnostic; exact `IrDocument` equality against independently authored `expected/ir.json`. | `ir.json` |
+| `Output-equivalent` | The semantic contract plus exact pure Typst lowering equality. No Typst subprocess runs. | `ir.json`, `typst.typ` |
+| `Unsupported` | Exact diagnostic projection (code, severity, primary span, secondary spans), including a deliberate non-parser error. | `diagnostics.json` |
+| `Known divergence` | A non-empty `known_divergence` explanation and exact Scribium behavior assertion. It is not a verification bypass. | `ir.json` |
+
+Semantic IR goldens preserve node kinds, inline structure, and source spans. They
+must not be replaced with flattened text, and there is no automatic golden-update
+mode. For example, `br-line-break-family` retains the ordinary `.br` as an
+`IrInline::HardBreak` while the `.plaintext` projection omits it.
+
+`Unsupported` diagnostic goldens use this stable projection and intentionally omit
+the brittle message text:
+
+```json
+[
+  {
+    "code": "E8001",
+    "severity": "error",
+    "primary": { "start": 10, "end": 20 },
+    "secondary": []
+  }
+]
+```
 
 ## Adding New Cases
 
@@ -48,7 +85,8 @@ description = "Basic positional argument call"
 2. Write `case.toml` with the metadata
 3. Write `input.qd` with an independently authored Quarkdown input
 4. **Do not** copy inputs from Quarkdown test suites or documentation examples
-5. Run the conformance harness to verify the case executes
+5. Add the required expected artifact for the declared level
+6. Run `cargo test -p scribium-test-support` to verify the case executes
 
 ## Clean-Room Policy
 

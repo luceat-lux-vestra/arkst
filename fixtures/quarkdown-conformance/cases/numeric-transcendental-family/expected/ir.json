@@ -1,0 +1,225 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "3.141592653589793",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 3
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 3
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "3.14",
+              "span": {
+                "source_id": 1,
+                "start": 4,
+                "end": 21
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 4,
+          "end": 21
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 22,
+                "end": 31
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 22,
+          "end": 31
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 32,
+                "end": 40
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 32,
+          "end": 40
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "1",
+              "span": {
+                "source_id": 1,
+                "start": 41,
+                "end": 49
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 41,
+          "end": 49
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 50,
+                "end": 58
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 50,
+          "end": 58
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "-1",
+              "span": {
+                "source_id": 1,
+                "start": 59,
+                "end": 69
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 59,
+          "end": 69
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "1",
+              "span": {
+                "source_id": 1,
+                "start": 70,
+                "end": 92
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 70,
+          "end": 92
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "1",
+              "span": {
+                "source_id": 1,
+                "start": 93,
+                "end": 119
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 93,
+          "end": 119
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0.6931472",
+              "span": {
+                "source_id": 1,
+                "start": 120,
+                "end": 138
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 120,
+          "end": 138
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain"
+    }
+  }
+}

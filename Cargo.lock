@@ -639,6 +639,7 @@ version = "0.0.1"
 dependencies = [
  "regex",
  "scribium-core",
+ "scribium-typst",
  "serde",
  "serde_json",
  "tempfile",

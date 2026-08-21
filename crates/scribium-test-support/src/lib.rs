@@ -8,6 +8,7 @@
 //! - Quarkdown conformance corpus harness
 
 use scribium_core as core;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {
@@ -39,16 +40,46 @@ pub fn assert_golden(actual: &str, expected_path: &str) {
     assert_eq!(actual, expected, "golden mismatch for {}", expected_path);
 }
 
+/// The executable policy declared by a Quarkdown conformance case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CompatibilityLevel {
+    #[serde(rename = "Unsupported")]
+    Unsupported,
+    #[serde(rename = "Parsed")]
+    Parsed,
+    #[serde(rename = "Semantically supported")]
+    SemanticallySupported,
+    #[serde(rename = "Output-equivalent")]
+    OutputEquivalent,
+    #[serde(rename = "Known divergence")]
+    KnownDivergence,
+}
+
 /// Quarkdown conformance case metadata.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ConformanceCaseMeta {
     pub id: String,
     pub feature: String,
-    pub compatibility_level: String,
+    pub compatibility_level: CompatibilityLevel,
     pub specification_source: String,
     pub description: String,
     #[serde(default)]
     pub known_divergence: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct ExpectedSpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct ExpectedDiagnostic {
+    code: String,
+    severity: String,
+    primary: Option<ExpectedSpan>,
+    #[serde(default)]
+    secondary: Vec<ExpectedSpan>,
 }
 
 /// A conformance test case from the corpus.
@@ -63,22 +94,86 @@ impl ConformanceCase {
     /// Load a conformance case by ID from the corpus.
     pub fn load(case_id: &str) -> Self {
         let cases_dir = fixtures_dir().join("quarkdown-conformance/cases");
-        let case_dir = cases_dir.join(case_id);
+        Self::load_from_dir(cases_dir.join(case_id))
+    }
+
+    fn load_from_dir(case_dir: PathBuf) -> Self {
         let meta_path = case_dir.join("case.toml");
         let input_path = case_dir.join("input.qd");
+
+        let directory_id = case_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| {
+                panic!("conformance case directory has no valid id: {:?}", case_dir)
+            });
 
         let meta_content = std::fs::read_to_string(&meta_path)
             .unwrap_or_else(|e| panic!("cannot read case metadata {:?}: {}", meta_path, e));
         let meta: ConformanceCaseMeta = toml::from_str(&meta_content)
             .unwrap_or_else(|e| panic!("cannot parse case metadata {:?}: {}", meta_path, e));
 
+        assert_eq!(
+            directory_id, meta.id,
+            "conformance case directory id must match metadata id"
+        );
+
         let input = std::fs::read_to_string(&input_path)
             .unwrap_or_else(|e| panic!("cannot read case input {:?}: {}", input_path, e));
 
-        Self {
+        let case = Self {
             meta,
             input,
             case_dir,
+        };
+        case.validate_expected_artifacts();
+        case
+    }
+
+    fn validate_expected_artifacts(&self) {
+        let expected_dir = self.case_dir.join("expected");
+        let require = |name: &str| {
+            let path = expected_dir.join(name);
+            assert!(
+                path.is_file(),
+                "case '{}' at level {:?} requires expected artifact {:?}",
+                self.meta.id,
+                self.meta.compatibility_level,
+                path
+            );
+        };
+
+        match self.meta.compatibility_level {
+            CompatibilityLevel::Parsed => {}
+            CompatibilityLevel::SemanticallySupported => require("ir.json"),
+            CompatibilityLevel::OutputEquivalent => {
+                require("ir.json");
+                require("typst.typ");
+            }
+            CompatibilityLevel::Unsupported => require("diagnostics.json"),
+            CompatibilityLevel::KnownDivergence => {
+                assert!(
+                    self.meta
+                        .known_divergence
+                        .as_deref()
+                        .is_some_and(|description| !description.trim().is_empty()),
+                    "Known divergence case '{}' must declare a non-empty known_divergence",
+                    self.meta.id
+                );
+                require("ir.json");
+            }
+        }
+
+        if !matches!(
+            self.meta.compatibility_level,
+            CompatibilityLevel::KnownDivergence
+        ) && self
+            .meta
+            .known_divergence
+            .as_deref()
+            .is_some_and(|description| description.trim().is_empty())
+        {
+            panic!("case '{}' declares an empty known_divergence", self.meta.id);
         }
     }
 
@@ -99,6 +194,36 @@ impl ConformanceCase {
         ids
     }
 
+    fn validate_corpus_metadata(cases_dir: &Path) {
+        let mut metadata_ids = HashSet::new();
+        let mut case_ids = Vec::new();
+        let entries = std::fs::read_dir(cases_dir).unwrap_or_else(|e| {
+            panic!(
+                "cannot read conformance cases directory {:?}: {}",
+                cases_dir, e
+            )
+        });
+
+        for entry in entries {
+            let entry =
+                entry.unwrap_or_else(|e| panic!("cannot read conformance case entry: {}", e));
+            if !entry.file_type().is_ok_and(|file_type| file_type.is_dir())
+                || !entry.path().join("case.toml").is_file()
+            {
+                continue;
+            }
+            let case = Self::load_from_dir(entry.path());
+            assert!(
+                metadata_ids.insert(case.meta.id.clone()),
+                "duplicate conformance case metadata id '{}'",
+                case.meta.id
+            );
+            case_ids.push(case.meta.id);
+        }
+
+        assert!(!case_ids.is_empty(), "conformance corpus contains no cases");
+    }
+
     /// Compile the case input using Scribium core and return the result.
     pub fn compile(&self) -> core::CompileResult {
         let project = core::VirtualProjectBuilder::new()
@@ -111,34 +236,135 @@ impl ConformanceCase {
         core::compile(&project, &core::CompileOptions::default())
     }
 
-    /// Verify the case compiles without unexpected diagnostics.
-    /// Returns the compile result for further assertions.
-    pub fn verify_parses(&self) -> core::CompileResult {
+    /// Verify the case according to its declared compatibility policy.
+    pub fn verify(&self) -> core::CompileResult {
         let result = self.compile();
-        // For "Parsed" level and above, we expect no parser errors (E2xxx)
-        // but may have evaluation diagnostics (E3xxx) for unresolved variables
-        let parser_errors: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|d| d.code.starts_with("E2"))
-            .collect();
-        assert!(
-            parser_errors.is_empty(),
-            "Case '{}' produced parser errors: {:?}",
-            self.meta.id,
-            parser_errors
-        );
+
+        match self.meta.compatibility_level {
+            CompatibilityLevel::Parsed => assert_parser_diagnostics_absent(self, &result),
+            CompatibilityLevel::SemanticallySupported => {
+                assert_parser_diagnostics_absent(self, &result);
+                assert_no_diagnostics(self, &result);
+                assert_ir_matches(self, &result);
+            }
+            CompatibilityLevel::OutputEquivalent => {
+                assert_parser_diagnostics_absent(self, &result);
+                assert_no_diagnostics(self, &result);
+                assert_ir_matches(self, &result);
+                let expected = read_expected_text(self, "typst.typ");
+                let actual = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+                assert_eq!(
+                    actual, expected,
+                    "Typst golden mismatch for case '{}'",
+                    self.meta.id
+                );
+            }
+            CompatibilityLevel::Unsupported => {
+                let expected =
+                    read_expected_json::<Vec<ExpectedDiagnostic>>(self, "diagnostics.json");
+                assert!(
+                    !expected.is_empty(),
+                    "Unsupported case '{}' must expect a diagnostic",
+                    self.meta.id
+                );
+                let actual: Vec<_> = result.diagnostics.iter().map(project_diagnostic).collect();
+                assert_eq!(
+                    actual, expected,
+                    "diagnostic golden mismatch for case '{}'",
+                    self.meta.id
+                );
+                assert!(
+                    result.diagnostics.iter().any(|diagnostic| {
+                        matches!(diagnostic.severity, core::Severity::Error)
+                            && !diagnostic.code.starts_with("E2")
+                    }),
+                    "Unsupported case '{}' must produce a deliberate error diagnostic",
+                    self.meta.id
+                );
+            }
+            CompatibilityLevel::KnownDivergence => {
+                assert_parser_diagnostics_absent(self, &result);
+                assert_no_diagnostics(self, &result);
+                assert_ir_matches(self, &result);
+            }
+        }
+
         result
+    }
+}
+
+fn assert_parser_diagnostics_absent(case: &ConformanceCase, result: &core::CompileResult) {
+    let parser_errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code.starts_with("E2"))
+        .collect();
+    assert!(
+        parser_errors.is_empty(),
+        "Case '{}' produced parser errors: {:?}",
+        case.meta.id,
+        parser_errors
+    );
+}
+
+fn read_expected_text(case: &ConformanceCase, name: &str) -> String {
+    let path = case.case_dir.join("expected").join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read expected artifact {:?}: {}", path, e))
+}
+
+fn read_expected_json<T: serde::de::DeserializeOwned>(case: &ConformanceCase, name: &str) -> T {
+    let path = case.case_dir.join("expected").join(name);
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read expected artifact {:?}: {}", path, e));
+    serde_json::from_str(&content)
+        .unwrap_or_else(|e| panic!("cannot parse expected artifact {:?}: {}", path, e))
+}
+
+fn assert_no_diagnostics(case: &ConformanceCase, result: &core::CompileResult) {
+    assert!(
+        result.diagnostics.is_empty(),
+        "Case '{}' produced evaluation/lowering diagnostics: {:?}",
+        case.meta.id,
+        result.diagnostics
+    );
+}
+
+fn assert_ir_matches(case: &ConformanceCase, result: &core::CompileResult) {
+    let expected = read_expected_json::<core::ir::IrDocument>(case, "ir.json");
+    assert_eq!(
+        result.ir, expected,
+        "semantic IR golden mismatch for case '{}'",
+        case.meta.id
+    );
+}
+
+fn project_diagnostic(diagnostic: &core::Diagnostic) -> ExpectedDiagnostic {
+    let span = |span: core::SourceSpan| ExpectedSpan {
+        start: span.start,
+        end: span.end,
+    };
+    let severity = match diagnostic.severity {
+        core::Severity::Error => "error",
+        core::Severity::Warning => "warning",
+        core::Severity::Hint => "hint",
+    };
+    ExpectedDiagnostic {
+        code: diagnostic.code.clone(),
+        severity: severity.to_string(),
+        primary: diagnostic.primary.map(span),
+        secondary: diagnostic.secondary.iter().copied().map(span).collect(),
     }
 }
 
 /// Run all conformance cases in the corpus.
 pub fn run_all_conformance_cases() {
+    let cases_dir = fixtures_dir().join("quarkdown-conformance/cases");
+    ConformanceCase::validate_corpus_metadata(&cases_dir);
     for case_id in ConformanceCase::list_all() {
         let case = ConformanceCase::load(&case_id);
-        let _result = case.verify_parses();
+        let _result = case.verify();
         println!("✓ {} ({})", case.meta.id, case.meta.feature);
-        // TODO: Add more detailed verification based on compatibility_level
     }
 }
 
@@ -161,7 +387,7 @@ mod tests {
         let case = ConformanceCase::load("call-dot-prefixed-basic");
         assert_eq!(case.meta.id, "call-dot-prefixed-basic");
         assert_eq!(case.meta.feature, "dot-prefixed-call");
-        assert_eq!(case.meta.compatibility_level, "Parsed");
+        assert_eq!(case.meta.compatibility_level, CompatibilityLevel::Parsed);
         assert!(!case.input.is_empty());
     }
 
@@ -170,7 +396,7 @@ mod tests {
         let case = ConformanceCase::load("call-positional-basic");
         assert_eq!(case.meta.id, "call-positional-basic");
         assert_eq!(case.meta.feature, "positional-arguments");
-        assert_eq!(case.meta.compatibility_level, "Parsed");
+        assert_eq!(case.meta.compatibility_level, CompatibilityLevel::Parsed);
         assert!(!case.input.is_empty());
     }
 
@@ -179,85 +405,182 @@ mod tests {
         let case = ConformanceCase::load("call-indented-body-basic");
         assert_eq!(case.meta.id, "call-indented-body-basic");
         assert_eq!(case.meta.feature, "indented-body");
-        assert_eq!(case.meta.compatibility_level, "Parsed");
+        assert_eq!(case.meta.compatibility_level, CompatibilityLevel::Parsed);
         assert!(!case.input.is_empty());
     }
 
     #[test]
-    fn test_verify_dot_prefixed_parses() {
-        let case = ConformanceCase::load("call-dot-prefixed-basic");
-        let result = case.verify_parses();
-        assert!(!result.ir.nodes.is_empty());
+    fn quarkdown_conformance_corpus_obeys_declared_levels() {
+        run_all_conformance_cases();
     }
 
     #[test]
-    fn test_verify_positional_parses() {
-        let case = ConformanceCase::load("call-positional-basic");
-        let result = case.verify_parses();
-        assert!(!result.ir.nodes.is_empty());
+    fn compatibility_level_deserializes_only_the_fixture_vocabulary() {
+        let cases = [
+            ("Unsupported", CompatibilityLevel::Unsupported),
+            ("Parsed", CompatibilityLevel::Parsed),
+            (
+                "Semantically supported",
+                CompatibilityLevel::SemanticallySupported,
+            ),
+            ("Output-equivalent", CompatibilityLevel::OutputEquivalent),
+            ("Known divergence", CompatibilityLevel::KnownDivergence),
+        ];
+        for (value, expected) in cases {
+            let parsed: CompatibilityLevel = serde_json::from_str(&format!("\"{value}\""))
+                .expect("declared fixture level should deserialize");
+            assert_eq!(parsed, expected);
+        }
     }
 
     #[test]
-    fn test_verify_indented_body_parses() {
-        let case = ConformanceCase::load("call-indented-body-basic");
-        let result = case.verify_parses();
-        assert!(!result.ir.nodes.is_empty());
+    fn unknown_compatibility_level_fails_during_load() {
+        let (root, case_dir) = temporary_case(
+            "case-id",
+            "Semantically Supported by accident",
+            "hello",
+            &[],
+        );
+        assert_load_fails(case_dir);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_string_scalar_family_is_semantically_supported() {
-        let case = ConformanceCase::load("string-scalar-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn parsed_level_only_requires_parser_acceptance() {
+        let (root, case_dir) = temporary_case("case-id", "Parsed", ".abs {invalid}", &[]);
+        let case = ConformanceCase::load_from_dir(case_dir);
+        let result = case.verify();
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3001"));
+        drop(root);
     }
 
     #[test]
-    fn test_verify_plaintext_family_is_semantically_supported() {
-        let case = ConformanceCase::load("plaintext-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn semantic_level_requires_ir_artifact() {
+        let (root, case_dir) = temporary_case("case-id", "Semantically supported", "hello", &[]);
+        assert_load_fails(case_dir);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_br_line_break_family_is_semantically_supported() {
-        let case = ConformanceCase::load("br-line-break-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn semantic_level_rejects_an_intentionally_wrong_ir() {
+        let (root, case_dir) = temporary_case(
+            "case-id",
+            "Semantically supported",
+            "hello",
+            &[("expected/ir.json", EMPTY_IR)],
+        );
+        let case = ConformanceCase::load_from_dir(case_dir);
+        assert_verify_fails(case);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_numeric_arithmetic_family_is_semantically_supported() {
-        let case = ConformanceCase::load("numeric-arithmetic-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn output_equivalent_requires_typst_artifact() {
+        let (root, case_dir) = temporary_case(
+            "case-id",
+            "Output-equivalent",
+            "hello",
+            &[("expected/ir.json", EMPTY_IR)],
+        );
+        assert_load_fails(case_dir);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_dynamic_value_scalar_family_is_semantically_supported() {
-        let case = ConformanceCase::load("dynamic-value-scalar-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn unsupported_requires_diagnostic_expectation() {
+        let (root, case_dir) = temporary_case("case-id", "Unsupported", ".unknown", &[]);
+        assert_load_fails(case_dir);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_numeric_decimal_family_is_semantically_supported() {
-        let case = ConformanceCase::load("numeric-decimal-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn known_divergence_requires_explanation() {
+        let (root, case_dir) = temporary_case(
+            "case-id",
+            "Known divergence",
+            "hello",
+            &[("expected/ir.json", EMPTY_IR)],
+        );
+        assert_load_fails(case_dir);
+        drop(root);
     }
 
     #[test]
-    fn test_verify_numeric_transcendental_family_is_semantically_supported() {
-        let case = ConformanceCase::load("numeric-transcendental-family");
-        let result = case.verify_parses();
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert!(!result.ir.nodes.is_empty());
+    fn directory_name_must_match_metadata_id() {
+        let (root, case_dir) =
+            temporary_case_with_directory("directory-id", "metadata-id", "Parsed", "hello", &[]);
+        assert_load_fails(case_dir);
+        drop(root);
+    }
+
+    #[test]
+    fn duplicate_metadata_ids_fail_corpus_validation() {
+        let root = tempfile::tempdir().expect("temporary corpus");
+        for directory in ["first", "second"] {
+            let case_dir = root.path().join(directory);
+            std::fs::create_dir_all(&case_dir).expect("case directory");
+            std::fs::write(
+                case_dir.join("case.toml"),
+                "id = \"duplicate\"\nfeature = \"test\"\ncompatibility_level = \"Parsed\"\nspecification_source = \"test\"\ndescription = \"test\"\n",
+            )
+            .expect("metadata");
+            std::fs::write(case_dir.join("input.qd"), "hello").expect("input");
+        }
+        let result =
+            std::panic::catch_unwind(|| ConformanceCase::validate_corpus_metadata(root.path()));
+        assert!(result.is_err());
+    }
+
+    const EMPTY_IR: &str = r#"{"nodes":[],"metadata":{"title":null,"author":null,"date":null,"raw":[],"document_state":{"name":"","description":"","document_type":"Plain"}}}"#;
+
+    fn temporary_case(
+        directory_id: &str,
+        level: &str,
+        input: &str,
+        artifacts: &[(&str, &str)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        temporary_case_with_directory(directory_id, directory_id, level, input, artifacts)
+    }
+
+    fn temporary_case_with_directory(
+        directory_id: &str,
+        metadata_id: &str,
+        level: &str,
+        input: &str,
+        artifacts: &[(&str, &str)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let root = tempfile::tempdir().expect("temporary corpus");
+        let case_dir = root.path().join(directory_id);
+        std::fs::create_dir_all(&case_dir).expect("case directory");
+        std::fs::write(
+            case_dir.join("case.toml"),
+            format!(
+                "id = \"{metadata_id}\"\nfeature = \"test\"\ncompatibility_level = \"{level}\"\nspecification_source = \"test\"\ndescription = \"test\"\n"
+            ),
+        )
+        .expect("metadata");
+        std::fs::write(case_dir.join("input.qd"), input).expect("input");
+        for (relative_path, content) in artifacts {
+            let path = case_dir.join(relative_path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("artifact directory");
+            }
+            std::fs::write(path, content).expect("artifact");
+        }
+        (root, case_dir)
+    }
+
+    fn assert_load_fails(case_dir: std::path::PathBuf) {
+        let result = std::panic::catch_unwind(|| ConformanceCase::load_from_dir(case_dir));
+        assert!(result.is_err());
+    }
+
+    fn assert_verify_fails(case: ConformanceCase) {
+        let result = std::panic::catch_unwind(|| case.verify());
+        assert!(result.is_err());
     }
 
     #[test]
