@@ -8,7 +8,8 @@
 //! policy.
 
 use crate::ir::{
-    IrColor, IrDocumentType, IrEnumValue, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
+    IrColor, IrCrossAxisAlignment, IrDocumentType, IrEnumValue, IrMainAxisAlignment, IrNamedArg,
+    IrRange, IrSize, IrSizeUnit, IrValue,
 };
 use crate::source::SourceSpan;
 use std::ops::Deref;
@@ -92,6 +93,7 @@ pub(crate) enum ScalarTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConversionTarget {
     Number,
+    Integer,
     Boolean,
     String,
     Range,
@@ -122,6 +124,8 @@ pub(crate) enum ScalarValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClosedEnumTarget {
     DocumentType,
+    StackedMainAxisAlignment,
+    StackedCrossAxisAlignment,
 }
 
 /// Domain-specific conversion targets kept separate from scalar conversion.
@@ -186,6 +190,56 @@ static DOCUMENT_TYPE_SPEC: ClosedEnumSpec<'static, IrDocumentType> = ClosedEnumS
         ClosedEnumVariant {
             declaration_name: "DOCS",
             value: IrDocumentType::Docs,
+        },
+    ],
+};
+
+static STACKED_MAIN_AXIS_SPEC: ClosedEnumSpec<'static, IrMainAxisAlignment> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "START",
+            value: IrMainAxisAlignment::Start,
+        },
+        ClosedEnumVariant {
+            declaration_name: "CENTER",
+            value: IrMainAxisAlignment::Center,
+        },
+        ClosedEnumVariant {
+            declaration_name: "END",
+            value: IrMainAxisAlignment::End,
+        },
+        ClosedEnumVariant {
+            declaration_name: "SPACE_BETWEEN",
+            value: IrMainAxisAlignment::SpaceBetween,
+        },
+        ClosedEnumVariant {
+            declaration_name: "SPACE_AROUND",
+            value: IrMainAxisAlignment::SpaceAround,
+        },
+        ClosedEnumVariant {
+            declaration_name: "SPACE_EVENLY",
+            value: IrMainAxisAlignment::SpaceEvenly,
+        },
+    ],
+};
+
+static STACKED_CROSS_AXIS_SPEC: ClosedEnumSpec<'static, IrCrossAxisAlignment> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "START",
+            value: IrCrossAxisAlignment::Start,
+        },
+        ClosedEnumVariant {
+            declaration_name: "CENTER",
+            value: IrCrossAxisAlignment::Center,
+        },
+        ClosedEnumVariant {
+            declaration_name: "END",
+            value: IrCrossAxisAlignment::End,
+        },
+        ClosedEnumVariant {
+            declaration_name: "STRETCH",
+            value: IrCrossAxisAlignment::Stretch,
         },
     ],
 };
@@ -370,8 +424,80 @@ pub(crate) fn convert_domain_with_origin(
                     target: ConversionTarget::Enum,
                 }),
             },
+            ClosedEnumTarget::StackedMainAxisAlignment => match &argument.value {
+                IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => Ok(
+                    DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(*value)),
+                ),
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    STACKED_MAIN_AXIS_SPEC
+                        .value_for(value)
+                        .map(|value| {
+                            DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value))
+                        })
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::StackedCrossAxisAlignment => match &argument.value {
+                IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => Ok(
+                    DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(*value)),
+                ),
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    STACKED_CROSS_AXIS_SPEC
+                        .value_for(value)
+                        .map(|value| {
+                            DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value))
+                        })
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
         },
     }
+}
+
+/// Converts a Quarkdown `Int` boundary without truncating fractional values.
+/// Dynamic text follows the reviewed NumberValue parsing order, while static
+/// strings remain strings and cannot acquire integer meaning.
+pub(crate) fn convert_integer_with_origin(
+    argument: &InvocationValue,
+) -> Result<i32, ConversionError> {
+    let number = match &argument.value {
+        IrValue::Number(value) => Some(*value),
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            parse_number(value)
+        }
+        _ => None,
+    };
+    let Some(number) = number else {
+        return Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Integer,
+        });
+    };
+    if !number.is_finite()
+        || number.fract() != 0.0
+        || number < f64::from(i32::MIN)
+        || number > f64::from(i32::MAX)
+    {
+        return Err(ConversionError::InvalidText {
+            target: ConversionTarget::Integer,
+        });
+    }
+    Ok(number as i32)
 }
 
 fn parse_size(value: &str) -> Option<IrSize> {
@@ -1595,10 +1721,10 @@ fn range_to_text(range: &IrRange) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        convert_domain_with_origin, convert_range, convert_range_with_origin, convert_scalar,
-        convert_scalar_with_origin, ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant,
-        ConversionError, ConversionTarget, DomainTarget, DomainValue, InvocationValue,
-        ScalarTarget, ScalarValue,
+        convert_domain_with_origin, convert_integer_with_origin, convert_range,
+        convert_range_with_origin, convert_scalar, convert_scalar_with_origin, ClosedEnumSpec,
+        ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget,
+        DomainValue, InvocationValue, ScalarTarget, ScalarValue,
     };
     use crate::ir::{
         IrColor, IrComponent, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
@@ -2117,5 +2243,65 @@ mod tests {
             assert_eq!(spec.value_for(text), Some(Alignment::SpaceBetween));
         }
         assert_eq!(spec.value_for("space_between"), None);
+    }
+
+    #[test]
+    fn stacked_enum_domains_and_integer_boundary_remain_typed_and_origin_aware() {
+        for text in ["start", "CENTER", "spacebetween", "SpaceEvenly"] {
+            assert!(matches!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::StackedMainAxisAlignment),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(_)))
+            ));
+        }
+        for text in ["start", "center", "end", "stretch"] {
+            assert!(matches!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::String(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(_)))
+            ));
+        }
+        assert!(convert_domain_with_origin(
+            &InvocationValue::dynamic_value(IrValue::String("spacebetween".into())),
+            DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
+        )
+        .is_err());
+        assert!(convert_domain_with_origin(
+            &InvocationValue::static_value(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                IrMainAxisAlignment::Center
+            ),)),
+            DomainTarget::ClosedEnum(ClosedEnumTarget::StackedCrossAxisAlignment),
+        )
+        .is_err());
+
+        for value in [
+            InvocationValue::dynamic_value(IrValue::Number(2.0)),
+            InvocationValue::dynamic_value(IrValue::String("2".into())),
+            InvocationValue::dynamic_value(IrValue::String("2.0".into())),
+        ] {
+            assert_eq!(convert_integer_with_origin(&value), Ok(2));
+        }
+        assert_eq!(
+            convert_integer_with_origin(&InvocationValue::dynamic_value(IrValue::Number(-1.0))),
+            Ok(-1)
+        );
+        assert!(matches!(
+            convert_integer_with_origin(&InvocationValue::dynamic_value(IrValue::Number(2.5))),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Integer
+            })
+        ));
+        assert!(matches!(
+            convert_integer_with_origin(&InvocationValue::static_value(IrValue::String(
+                "2".into()
+            ))),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Integer
+            })
+        ));
     }
 }

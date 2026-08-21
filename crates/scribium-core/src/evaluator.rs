@@ -46,9 +46,10 @@ use crate::builtins;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
-    IrDictionary, IrDocument, IrInline, IrListItem, IrNamedArg, IrNode, IrPair, IrParameter,
-    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrEnumValue, IrInline, IrListItem,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
+    NativeTarget, TargetSpecificContent,
 };
 use crate::source::{ResourceAccessError, SourceId, SourceSpan};
 use crate::value_conversion::{
@@ -61,6 +62,7 @@ use scribium_quarkdown::is_valid_normal_call_name;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::rc::Rc;
 
 /// A resolved variable value stored in the evaluation environment.
@@ -191,6 +193,22 @@ enum ImplicitParameterError {
 enum CallBody<'a> {
     Block(&'a [IrNode]),
     Inline(&'a [IrInline]),
+}
+
+#[derive(Clone)]
+struct StackedArgument {
+    value: InvocationValue,
+    span: SourceSpan,
+}
+
+struct BoundStackedArguments {
+    values: Vec<Option<StackedArgument>>,
+}
+
+impl BoundStackedArguments {
+    fn take(&mut self, index: usize) -> Option<StackedArgument> {
+        self.values.get_mut(index).and_then(Option::take)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -364,10 +382,7 @@ fn value_into_content_nodes(
         IrValue::Dictionary(dictionary) => {
             dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
         }
-        IrValue::Component(component) => {
-            diagnostics.push(component_materialization_deferred(component.span()));
-            Err(CallOutcome::Failed)
-        }
+        IrValue::Component(component) => Ok(vec![IrNode::Component { component }]),
         IrValue::Range(range) => {
             diagnostics.push(iteration_error(
                 "Direct Range materialization is deferred; consume the typed Range through iteration first"
@@ -533,6 +548,7 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::ThematicBreak { span }
         | IrNode::Math { span, .. } => *span,
         IrNode::TargetSpecificContent { content } => content.span,
+        IrNode::Component { component } => component.span(),
     }
 }
 
@@ -1180,6 +1196,10 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext,
     ) -> Vec<IrInline> {
+        if is_stacked_layout(name) {
+            diagnostics.push(stacked_inline_materialization_error(*span));
+            return Vec::new();
+        }
         match self.evaluate_call_value(
             name,
             positional_args,
@@ -1504,6 +1524,20 @@ impl Evaluator {
             );
         }
 
+        if is_stacked_layout(name) {
+            return self.evaluate_stacked_layout(
+                name,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if is_range(name) {
             return self.evaluate_range(
                 positional_args,
@@ -1614,6 +1648,255 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_stacked_layout(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let positional_values = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let named_values =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let positional = positional_values
+            .into_iter()
+            .zip(positional_args.iter())
+            .map(|(value, source)| StackedArgument {
+                value,
+                span: value_source_span(source, span),
+            })
+            .collect();
+        let bound = match bind_stacked_arguments(name, positional, named_values, span, diagnostics)
+        {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
+        };
+        let mut bound = bound;
+        let default = |value| StackedArgument {
+            value: InvocationValue::static_value(value),
+            span: *span,
+        };
+
+        let (layout, main_axis, cross_axis, row_gap, column_gap) = match name {
+            "row" | "column" => {
+                let alignment = bound.take(0).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                        IrMainAxisAlignment::Start,
+                    )))
+                });
+                let cross = bound.take(1).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(
+                        IrCrossAxisAlignment::Center,
+                    )))
+                });
+                let gap = bound.take(2).unwrap_or_else(|| default(IrValue::None));
+                let main_axis = match convert_stacked_main_axis(&alignment.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "alignment",
+                            alignment.span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let cross_axis = match convert_stacked_cross_axis(&cross.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics
+                            .push(stacked_conversion_error(name, "cross", cross.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let gap = match convert_optional_stacked_size(&gap.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(name, "gap", gap.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let (layout, row_gap, column_gap) = if name == "row" {
+                    (IrStackedLayout::Row, None, gap)
+                } else {
+                    (IrStackedLayout::Column, gap, None)
+                };
+                (layout, main_axis, cross_axis, row_gap, column_gap)
+            }
+            "grid" => {
+                let Some(columns) = bound.take(0) else {
+                    diagnostics.push(stacked_argument_error(
+                        name,
+                        "columns",
+                        *span,
+                        "required argument is missing",
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let alignment = bound.take(1).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                        IrMainAxisAlignment::Center,
+                    )))
+                });
+                let cross = bound.take(2).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(
+                        IrCrossAxisAlignment::Center,
+                    )))
+                });
+                let gap = bound.take(3).unwrap_or_else(|| default(IrValue::None));
+                let vgap = bound.take(4).unwrap_or_else(|| default(IrValue::None));
+                let hgap = bound.take(5).unwrap_or_else(|| default(IrValue::None));
+                let columns = match value_conversion::convert_integer_with_origin(&columns.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "columns",
+                            columns.span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                if columns <= 0 {
+                    diagnostics.push(stacked_argument_error(
+                        name,
+                        "columns",
+                        *span,
+                        "Column count must be at least 1",
+                    ));
+                    return CallOutcome::Failed;
+                }
+                let Some(columns) = NonZeroU32::new(columns as u32) else {
+                    diagnostics.push(stacked_argument_error(
+                        name,
+                        "columns",
+                        *span,
+                        "Column count must be at least 1",
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let main_axis = match convert_stacked_main_axis(&alignment.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "alignment",
+                            alignment.span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let cross_axis = match convert_stacked_cross_axis(&cross.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics
+                            .push(stacked_conversion_error(name, "cross", cross.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let gap = match convert_optional_stacked_size(&gap.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(name, "gap", gap.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let vgap = match convert_optional_stacked_size(&vgap.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(name, "vgap", vgap.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let hgap = match convert_optional_stacked_size(&hgap.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(name, "hgap", hgap.span, error));
+                        return CallOutcome::Failed;
+                    }
+                };
+                (
+                    IrStackedLayout::Grid { columns },
+                    main_axis,
+                    cross_axis,
+                    vgap.or_else(|| gap.clone()),
+                    hgap.or(gap),
+                )
+            }
+            _ => return CallOutcome::Unresolved,
+        };
+
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(stacked_argument_error(
+                name,
+                "body",
+                diagnostic_span,
+                "Stacked layout bodies are Markdown blocks, not lambda parameters",
+            ));
+            return CallOutcome::Failed;
+        }
+        let children = match body {
+            Some(CallBody::Block(nodes)) => {
+                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                    CallOutcome::Value(IrValue::Content(nodes)) => nodes,
+                    outcome => return outcome,
+                }
+            }
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(stacked_argument_error(
+                    name,
+                    "body",
+                    *span,
+                    "Stacked layout is block-only",
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                diagnostics.push(stacked_argument_error(
+                    name,
+                    "body",
+                    *span,
+                    "A Markdown block body is required",
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Component(IrComponent::Stacked(
+            IrStackedComponent {
+                layout,
+                main_axis_alignment: main_axis,
+                cross_axis_alignment: cross_axis,
+                row_gap,
+                column_gap,
+                children,
+                span: *span,
+            },
+        )))
     }
 
     /// Implements the read/write document-state builtins without changing
@@ -4371,10 +4654,7 @@ impl Evaluator {
             IrValue::Dictionary(dictionary) => {
                 dictionary_into_table(dictionary, diagnostics).map(|table| vec![table])
             }
-            IrValue::Component(component) => {
-                diagnostics.push(component_materialization_deferred(component.span()));
-                Err(CallOutcome::Failed)
-            }
+            IrValue::Component(component) => Ok(vec![IrNode::Component { component }]),
             IrValue::Range(range) => {
                 diagnostics.push(iteration_error(
                     "Direct Range materialization is deferred; consume the typed Range through iteration first"
@@ -4419,7 +4699,7 @@ impl Evaluator {
                 }
             }
             Some(IrValue::Component(component)) => {
-                diagnostics.push(component_materialization_deferred(component.span()));
+                diagnostics.push(stacked_inline_materialization_error(component.span()));
                 Vec::new()
             }
             Some(IrValue::Range(range)) => {
@@ -4758,6 +5038,190 @@ impl Evaluator {
             });
         }
         Ok(evaluated)
+    }
+}
+
+fn is_stacked_layout(name: &str) -> bool {
+    matches!(name, "row" | "column" | "grid")
+}
+
+fn bind_stacked_arguments(
+    name: &str,
+    positional: Vec<StackedArgument>,
+    named: Vec<InvocationNamedArg>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<BoundStackedArguments, CallOutcome> {
+    let parameter_names: &[&str] = match name {
+        "row" | "column" => &["alignment", "cross", "gap"],
+        "grid" => &["columns", "alignment", "cross", "gap", "vgap", "hgap"],
+        _ => return Err(CallOutcome::Unresolved),
+    };
+    let mut values = vec![None; parameter_names.len()];
+    for (index, argument) in positional.into_iter().enumerate() {
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(stacked_argument_error(
+                name,
+                "positional",
+                *span,
+                "too many positional arguments",
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        *slot = Some(argument);
+    }
+    for argument in named {
+        let Some(index) = parameter_names
+            .iter()
+            .position(|parameter| *parameter == argument.arg.name)
+        else {
+            diagnostics.push(stacked_argument_error_at(
+                format!("Unknown named argument `{}`", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        let Some(slot) = values.get_mut(index) else {
+            diagnostics.push(stacked_argument_error(
+                name,
+                "named",
+                argument.arg.name_span,
+                "named argument binding is outside the layout signature",
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        if slot.is_some() {
+            diagnostics.push(stacked_argument_error_at(
+                format!("Argument `{}` was bound more than once", argument.arg.name),
+                argument.arg.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(StackedArgument {
+            value: InvocationValue {
+                value: argument.arg.value,
+                origin: argument.origin,
+            },
+            span: argument.arg.span,
+        });
+    }
+    Ok(BoundStackedArguments { values })
+}
+
+fn convert_stacked_main_axis(
+    argument: &InvocationValue,
+) -> Result<IrMainAxisAlignment, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::StackedMainAxisAlignment,
+        ),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::StackedMainAxisAlignment(value)) => {
+            Ok(value)
+        }
+        value_conversion::DomainValue::Enum(_) => {
+            Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Enum,
+            })
+        }
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
+}
+
+fn convert_stacked_cross_axis(
+    argument: &InvocationValue,
+) -> Result<IrCrossAxisAlignment, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::ClosedEnum(
+            value_conversion::ClosedEnumTarget::StackedCrossAxisAlignment,
+        ),
+    )? {
+        value_conversion::DomainValue::Enum(IrEnumValue::StackedCrossAxisAlignment(value)) => {
+            Ok(value)
+        }
+        value_conversion::DomainValue::Enum(_) => {
+            Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Enum,
+            })
+        }
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Enum,
+        }),
+    }
+}
+
+fn convert_stacked_size(
+    argument: &InvocationValue,
+) -> Result<IrSize, value_conversion::ConversionError> {
+    match value_conversion::convert_domain_with_origin(
+        argument,
+        value_conversion::DomainTarget::Size,
+    )? {
+        value_conversion::DomainValue::Size(value) => Ok(value),
+        _ => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Size,
+        }),
+    }
+}
+
+fn convert_optional_stacked_size(
+    argument: &InvocationValue,
+) -> Result<Option<IrSize>, value_conversion::ConversionError> {
+    if matches!(argument.value, IrValue::None) {
+        Ok(None)
+    } else {
+        convert_stacked_size(argument).map(Some)
+    }
+}
+
+fn stacked_conversion_error(
+    name: &str,
+    parameter: &str,
+    span: SourceSpan,
+    error: value_conversion::ConversionError,
+) -> Diagnostic {
+    stacked_argument_error(
+        name,
+        parameter,
+        span,
+        match error {
+            value_conversion::ConversionError::InvalidText { .. } => {
+                "value is invalid for the typed parameter"
+            }
+            value_conversion::ConversionError::UnsupportedValue { .. } => {
+                "value has the wrong typed domain or origin"
+            }
+        },
+    )
+}
+
+fn stacked_argument_error(
+    name: &str,
+    parameter: &str,
+    span: SourceSpan,
+    message: &str,
+) -> Diagnostic {
+    stacked_argument_error_at(
+        format!("`.{name}` parameter `{parameter}`: {message}"),
+        span,
+    )
+}
+
+fn stacked_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Stacked layout arguments are validated before the Markdown body is evaluated."
+                .to_string(),
+        ],
     }
 }
 
@@ -6291,15 +6755,15 @@ fn iteration_error_at(message: String, span: SourceSpan) -> Diagnostic {
     }
 }
 
-fn component_materialization_deferred(span: SourceSpan) -> Diagnostic {
+fn stacked_inline_materialization_error(span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3001".to_string(),
         severity: Severity::Error,
-        message: "Semantic component value is valid, but output materialization is deferred until the typed component node and backend lowering slice are available".to_string(),
+        message: "Stacked layout is block-only".to_string(),
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "Component children are not flattened or rendered as scalar text while component materialization is deferred.".to_string(),
+            "Use `.row`, `.column`, or `.grid` as a block call with a Markdown body.".to_string(),
         ],
     }
 }
@@ -9110,32 +9574,33 @@ mod tests {
     }
 
     #[test]
-    fn component_block_materialization_fails_at_component_span_without_flattening() {
+    fn component_block_materialization_publishes_one_typed_node() {
         let component_span = span(20, 44);
         let component = component_value(component_span);
         let mut diagnostics = Vec::new();
         let result =
             Evaluator::new().materialize_block_value(component, &span(0, 1), &mut diagnostics);
 
-        assert!(matches!(result, Err(CallOutcome::Failed)));
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(diagnostics[0].primary, Some(component_span));
-        assert!(diagnostics[0].message.contains("deferred"));
-        assert!(diagnostics[0].message.contains("component"));
+        let Ok([IrNode::Component { component }]) = result.as_deref() else {
+            panic!("expected one typed component node, got {result:?}");
+        };
+        assert_eq!(component.span(), component_span);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
-    fn component_variable_at_document_output_boundary_is_not_flattened() {
+    fn component_variable_at_document_output_boundary_materializes_as_a_node() {
         let component_span = span(20, 44);
         let (nodes, diagnostics) = Evaluator::new().evaluate(&doc(vec![
             var_declaration("component", component_value(component_span)),
             var_ref("component"),
         ]));
 
-        assert!(nodes.nodes.is_empty());
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(diagnostics[0].primary, Some(component_span));
-        assert!(diagnostics[0].message.contains("deferred"));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let [IrNode::Component { component }] = nodes.nodes.as_slice() else {
+            panic!("expected one component node, got {:?}", nodes.nodes);
+        };
+        assert_eq!(component.span(), component_span);
     }
 
     #[test]
@@ -9152,11 +9617,11 @@ mod tests {
         assert!(inlines.is_empty());
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].primary, Some(component_span));
-        assert!(diagnostics[0].message.contains("deferred"));
+        assert!(diagnostics[0].message.contains("block-only"));
     }
 
     #[test]
-    fn component_and_second_callable_output_fail_atomically() {
+    fn component_and_second_callable_output_preserve_both_nodes() {
         let component_span = span(20, 44);
         let component = component_value(component_span);
         let mut context = EvaluationContext::new();
@@ -9169,10 +9634,13 @@ mod tests {
             &mut context,
         );
 
-        assert!(matches!(outcome, CallOutcome::Failed));
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(diagnostics[0].primary, Some(component_span));
-        assert!(!diagnostics[0].message.contains("later output"));
+        let CallOutcome::Value(IrValue::Content(nodes)) = outcome else {
+            panic!("expected composed content");
+        };
+        assert_eq!(nodes.len(), 2);
+        assert!(matches!(nodes[0], IrNode::Component { .. }));
+        assert!(matches!(nodes[1], IrNode::Paragraph { .. }));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

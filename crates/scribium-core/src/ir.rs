@@ -155,6 +155,8 @@ pub enum IrCrossAxisAlignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrEnumValue {
     DocumentType(IrDocumentType),
+    StackedMainAxisAlignment(IrMainAxisAlignment),
+    StackedCrossAxisAlignment(IrCrossAxisAlignment),
 }
 
 /// A closed target discriminator for native content that remains opaque until
@@ -230,6 +232,8 @@ pub enum IrNode {
     RawHtml { source: String, span: SourceSpan },
     /// Target-specific content retained until backend selection.
     TargetSpecificContent { content: TargetSpecificContent },
+    /// A completed backend-neutral semantic component.
+    Component { component: IrComponent },
     /// A function/component call that was resolved during evaluation.
     /// The lowering pass renders this as the corresponding Typst construct.
     FunctionCall {

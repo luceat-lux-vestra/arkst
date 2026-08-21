@@ -500,3 +500,20 @@ cannot lower without loss. Source construction, node materialization, and
 backend lowering land together in the first component consumer slice so that
 the public IR never contains a component node that cannot be rendered
 correctly.
+
+## Addendum: Stacked layout consumer (2026-08-21)
+
+The reviewed `.row`, `.column`, and `.grid` consumer slice now follows the
+value-first boundary described by this decision:
+
+- source calls bind and validate typed alignment, `Size`, and positive-column
+  arguments before lazily evaluating their required block bodies;
+- completed calls construct `IrValue::Component(IrComponent::Stacked)` with
+  structured `Vec<IrNode>` children and source provenance;
+- block output materializes the closed component as `IrNode::Component`; and
+- the Typst backend lowers only that typed node, without adding Typst concepts
+  to the core IR.
+
+General String → Markdown body conversion, inline Stacked insertion, and the
+`container` / `align` layout family remain deferred. This addendum records
+implementation sequencing and does not rewrite the architectural decision.

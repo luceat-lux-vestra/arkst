@@ -1,0 +1,15 @@
+.row gap:{10px}
+    A
+
+    .column cross:{end}
+        ## B
+        C
+
+    D
+
+.grid columns:{2} gap:{1cm} vgap:{2cm} hgap:{3cm}
+    E
+
+    F
+
+    G
