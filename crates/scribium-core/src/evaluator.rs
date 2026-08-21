@@ -1620,6 +1620,17 @@ impl Evaluator {
             );
         }
 
+        if is_br(name) {
+            return self.evaluate_br(
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+            );
+        }
+
         if is_whitespace(name) {
             return self.evaluate_whitespace(
                 positional_args,
@@ -1888,6 +1899,48 @@ impl Evaluator {
                 span: *span,
             },
         )))
+    }
+
+    fn evaluate_br(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> CallOutcome {
+        if let Some(argument) = positional_args.first() {
+            diagnostics.push(br_argument_error(
+                "`.br` does not accept positional arguments",
+                value_source_span(argument, span),
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(argument) = named_args.first() {
+            diagnostics.push(br_argument_error(
+                "`.br` does not accept named arguments",
+                argument.span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            let diagnostic_span = parameters.first().map_or(*span, |parameter| parameter.span);
+            diagnostics.push(br_argument_error(
+                "`.br` does not accept a lambda body",
+                diagnostic_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if body.is_some() {
+            diagnostics.push(br_argument_error("`.br` does not accept a body", *span));
+            return CallOutcome::Failed;
+        }
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::HardBreak { span: *span }],
+            span: *span,
+        }]))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5597,6 +5650,10 @@ fn is_landscape(name: &str) -> bool {
     name == "landscape"
 }
 
+fn is_br(name: &str) -> bool {
+    name == "br"
+}
+
 fn is_whitespace(name: &str) -> bool {
     name == "whitespace"
 }
@@ -7759,6 +7816,17 @@ fn landscape_inline_materialization_error(span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["Use `.landscape` as a block call with a Markdown body.".to_string()],
+    }
+}
+
+fn br_argument_error(message: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: message.to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["`.br` accepts no arguments and no body.".to_string()],
     }
 }
 

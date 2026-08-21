@@ -1,0 +1,5 @@
+id = "br-line-break-family"
+feature = "inline-hard-break"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-text-line-break"
+description = "Argumentless inline .br materializes as a hard line break and is omitted by plaintext projection"
