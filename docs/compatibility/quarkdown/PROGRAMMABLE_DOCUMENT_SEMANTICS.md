@@ -111,8 +111,10 @@ The reviewed block-body consumer slice is implemented. `.row`, `.column`, and
 `.grid` construct one typed Stacked semantic component after argument binding,
 conversion, and lazy body evaluation. `.center`, `.align`, and the bounded
 `.container` sizing slice construct the typed Container component after their
-argument validation and lazy Markdown block-body evaluation. Typst lowering
-remains backend-owned and does not add Typst constructs to the core IR.
+argument validation and lazy Markdown block-body evaluation. `.landscape`
+constructs a typed Landscape component after validating its no-argument,
+required Markdown block-body contract. Typst lowering remains backend-owned and
+does not add Typst constructs to the core IR.
 
 | Function | v2.5.1 observable inputs | Validation/result |
 |---|---|---|
@@ -122,6 +124,7 @@ remains backend-owned and does not add Typst constructs to the core IR.
 | `center` | full-width centered Container with a required Markdown block body and no non-body arguments | bounded Container semantic node |
 | `align` | full-width Container, one required `alignment` positional or named argument, and required Markdown block body | bounded Container semantic node; `start`/`center`/`end` are closed and origin-aware |
 | `container` | optional `width: Size`, `height: Size`, `fullwidth: Boolean`, and optional Markdown block body | bounded Container semantic node; empty/body-only, structured children, and lazy validation are supported |
+| `landscape` | no non-body arguments and one required Markdown block body | typed Landscape semantic node; 90° counter-clockwise content transformation |
 
 The remaining future surface includes broader style/layout properties and
 component families; the direct `.container` consumer remains limited to this
@@ -209,6 +212,27 @@ Deferred from this slice:
 
 The component remains backend-neutral in value context and may pass through
 variables and callable results before the typed block output boundary.
+
+### Landscape component consumer slice (2026-08-21)
+
+`.landscape` is implemented as a bounded typed component consumer:
+
+- the native call accepts no positional or named arguments and requires one
+  Markdown block body; validation completes before lazy body evaluation;
+- lambda bodies and inline native calls fail closed with source-backed
+  diagnostics, while source-defined `landscape` functions retain precedence;
+- `IrComponent::Landscape` preserves ordered `Vec<IrNode>` children, nested
+  `Container`/`Stacked`/`Align`/Landscape composition, callable value-flow, and
+  call/child source provenance; and
+- Typst lowering emits `#rotate(-90deg, reflow: true)[...]`, preserving body
+  order and layout footprint in flow. It does not mutate page orientation or
+  page size and does not emit `page(flipped: true)`.
+
+The upstream feature is documented as experimental. `.float` remains deferred
+because Quarkdown's subsequent-content wrapping is not equivalent to Typst's
+`place(float: true)`, and `.fullspan` remains deferred because its in-flow
+multi-column full-column span is not equivalent to a parent-scoped floating
+placement. Neither is inferred from this component.
 
 ## Compatibility matrix
 

@@ -174,6 +174,60 @@ fn integration_center_layout_lowers_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_landscape_layout_lowers_to_valid_typst_and_pdf() {
+    let source = ".landscape\n    ## Wide section\n\n    .row gap:{1cm}\n        Left\n\n        Center\n\n        Right\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("landscape.qd")
+        .expect("valid entry path")
+        .add_source("landscape.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "landscape diagnostics: {:?}",
+        result.diagnostics
+    );
+    let [IrNode::Component {
+        component: IrComponent::Landscape(landscape),
+    }] = result.ir.nodes.as_slice()
+    else {
+        panic!("expected landscape root, got {:?}", result.ir.nodes);
+    };
+    assert!(matches!(
+        landscape.children.as_slice(),
+        [
+            IrNode::Heading { .. },
+            IrNode::Component {
+                component: IrComponent::Stacked(_)
+            }
+        ]
+    ));
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains("#rotate(-90deg, reflow: true)"),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("#stack(dir: ltr"), "{typst_code}");
+    assert!(!typst_code.contains("page(flipped: true)"), "{typst_code}");
+
+    with_typst("landscape-layout", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "landscape.qd".to_string(),
+            })
+            .expect("landscape Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_align_layout_lowers_to_valid_typst_and_pdf() {
     let source = ".align {end}\n    Hello\n\n    .row\n        A\n\n        B\n";
     let project = VirtualProjectBuilder::new()
