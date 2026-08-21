@@ -42,6 +42,7 @@ pub fn assert_golden(actual: &str, expected_path: &str) {
 
 /// The executable policy declared by a Quarkdown conformance case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub enum CompatibilityLevel {
     #[serde(rename = "Unsupported")]
     Unsupported,
@@ -53,6 +54,21 @@ pub enum CompatibilityLevel {
     OutputEquivalent,
     #[serde(rename = "Known divergence")]
     KnownDivergence,
+}
+
+impl TryFrom<String> for CompatibilityLevel {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "Unsupported" => Ok(Self::Unsupported),
+            "Parsed" => Ok(Self::Parsed),
+            "Semantically supported" => Ok(Self::SemanticallySupported),
+            "Output-equivalent" => Ok(Self::OutputEquivalent),
+            "Known divergence" => Ok(Self::KnownDivergence),
+            _ => Err(format!("unknown compatibility level '{value}'")),
+        }
+    }
 }
 
 /// Quarkdown conformance case metadata.
@@ -98,7 +114,6 @@ impl ConformanceCase {
     }
 
     fn load_from_dir(case_dir: PathBuf) -> Self {
-        let meta_path = case_dir.join("case.toml");
         let input_path = case_dir.join("input.qd");
 
         let directory_id = case_dir
@@ -108,10 +123,7 @@ impl ConformanceCase {
                 panic!("conformance case directory has no valid id: {:?}", case_dir)
             });
 
-        let meta_content = std::fs::read_to_string(&meta_path)
-            .unwrap_or_else(|e| panic!("cannot read case metadata {:?}: {}", meta_path, e));
-        let meta: ConformanceCaseMeta = toml::from_str(&meta_content)
-            .unwrap_or_else(|e| panic!("cannot parse case metadata {:?}: {}", meta_path, e));
+        let meta = Self::read_metadata(&case_dir);
 
         assert_eq!(
             directory_id, meta.id,
@@ -128,6 +140,14 @@ impl ConformanceCase {
         };
         case.validate_expected_artifacts();
         case
+    }
+
+    fn read_metadata(case_dir: &Path) -> ConformanceCaseMeta {
+        let meta_path = case_dir.join("case.toml");
+        let meta_content = std::fs::read_to_string(&meta_path)
+            .unwrap_or_else(|e| panic!("cannot read case metadata {:?}: {}", meta_path, e));
+        toml::from_str(&meta_content)
+            .unwrap_or_else(|e| panic!("cannot parse case metadata {:?}: {}", meta_path, e))
     }
 
     fn validate_expected_artifacts(&self) {
@@ -195,8 +215,6 @@ impl ConformanceCase {
     }
 
     fn validate_corpus_metadata(cases_dir: &Path) {
-        let mut metadata_ids = HashSet::new();
-        let mut case_ids = Vec::new();
         let entries = std::fs::read_dir(cases_dir).unwrap_or_else(|e| {
             panic!(
                 "cannot read conformance cases directory {:?}: {}",
@@ -204,24 +222,35 @@ impl ConformanceCase {
             )
         });
 
+        let mut cases = Vec::new();
         for entry in entries {
             let entry =
                 entry.unwrap_or_else(|e| panic!("cannot read conformance case entry: {}", e));
+            let case_dir = entry.path();
             if !entry.file_type().is_ok_and(|file_type| file_type.is_dir())
-                || !entry.path().join("case.toml").is_file()
+                || !case_dir.join("case.toml").is_file()
             {
                 continue;
             }
-            let case = Self::load_from_dir(entry.path());
-            assert!(
-                metadata_ids.insert(case.meta.id.clone()),
-                "duplicate conformance case metadata id '{}'",
-                case.meta.id
-            );
-            case_ids.push(case.meta.id);
+
+            let meta = Self::read_metadata(&case_dir);
+            cases.push((case_dir, meta));
         }
 
-        assert!(!case_ids.is_empty(), "conformance corpus contains no cases");
+        assert!(!cases.is_empty(), "conformance corpus contains no cases");
+
+        let mut metadata_ids = HashSet::new();
+        for (_, meta) in &cases {
+            assert!(
+                metadata_ids.insert(meta.id.clone()),
+                "duplicate conformance case metadata id '{}'",
+                meta.id
+            );
+        }
+
+        for (case_dir, _) in cases {
+            Self::load_from_dir(case_dir);
+        }
     }
 
     /// Compile the case input using Scribium core and return the result.
@@ -441,7 +470,12 @@ mod tests {
             "hello",
             &[],
         );
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "unknown compatibility level",
+        );
         drop(root);
     }
 
@@ -460,7 +494,12 @@ mod tests {
     #[test]
     fn semantic_level_requires_ir_artifact() {
         let (root, case_dir) = temporary_case("case-id", "Semantically supported", "hello", &[]);
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "requires expected artifact",
+        );
         drop(root);
     }
 
@@ -473,7 +512,12 @@ mod tests {
             &[("expected/ir.json", EMPTY_IR)],
         );
         let case = ConformanceCase::load_from_dir(case_dir);
-        assert_verify_fails(case);
+        assert_panics_with(
+            move || {
+                case.verify();
+            },
+            "semantic IR golden mismatch",
+        );
         drop(root);
     }
 
@@ -485,14 +529,24 @@ mod tests {
             "hello",
             &[("expected/ir.json", EMPTY_IR)],
         );
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "requires expected artifact",
+        );
         drop(root);
     }
 
     #[test]
     fn unsupported_requires_diagnostic_expectation() {
         let (root, case_dir) = temporary_case("case-id", "Unsupported", ".unknown", &[]);
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "requires expected artifact",
+        );
         drop(root);
     }
 
@@ -504,7 +558,12 @@ mod tests {
             "hello",
             &[("expected/ir.json", EMPTY_IR)],
         );
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "must declare a non-empty known_divergence",
+        );
         drop(root);
     }
 
@@ -512,7 +571,12 @@ mod tests {
     fn directory_name_must_match_metadata_id() {
         let (root, case_dir) =
             temporary_case_with_directory("directory-id", "metadata-id", "Parsed", "hello", &[]);
-        assert_load_fails(case_dir);
+        assert_panics_with(
+            move || {
+                ConformanceCase::load_from_dir(case_dir);
+            },
+            "conformance case directory id must match metadata id",
+        );
         drop(root);
     }
 
@@ -529,9 +593,10 @@ mod tests {
             .expect("metadata");
             std::fs::write(case_dir.join("input.qd"), "hello").expect("input");
         }
-        let result =
-            std::panic::catch_unwind(|| ConformanceCase::validate_corpus_metadata(root.path()));
-        assert!(result.is_err());
+        assert_panics_with(
+            || ConformanceCase::validate_corpus_metadata(root.path()),
+            "duplicate conformance case metadata id",
+        );
     }
 
     const EMPTY_IR: &str = r#"{"nodes":[],"metadata":{"title":null,"author":null,"date":null,"raw":[],"document_state":{"name":"","description":"","document_type":"Plain"}}}"#;
@@ -573,14 +638,26 @@ mod tests {
         (root, case_dir)
     }
 
-    fn assert_load_fails(case_dir: std::path::PathBuf) {
-        let result = std::panic::catch_unwind(|| ConformanceCase::load_from_dir(case_dir));
-        assert!(result.is_err());
+    fn assert_panics_with<F>(action: F, expected: &str)
+    where
+        F: FnOnce() + std::panic::UnwindSafe,
+    {
+        let panic = std::panic::catch_unwind(action).expect_err("expected the action to panic");
+        let message = panic_message(panic);
+        assert!(
+            message.contains(expected),
+            "unexpected panic: {message}; expected phrase: {expected}"
+        );
     }
 
-    fn assert_verify_fails(case: ConformanceCase) {
-        let result = std::panic::catch_unwind(|| case.verify());
-        assert!(result.is_err());
+    fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+        if let Some(message) = panic.downcast_ref::<String>() {
+            message.clone()
+        } else if let Some(message) = panic.downcast_ref::<&str>() {
+            (*message).to_owned()
+        } else {
+            "non-string panic payload".to_owned()
+        }
     }
 
     #[test]
