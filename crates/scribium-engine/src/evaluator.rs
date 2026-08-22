@@ -3103,6 +3103,15 @@ impl Evaluator {
             text: source,
         } = match provider.read_source(source_id, &reference) {
             Ok(source) => source,
+            Err(ResourceAccessError::NotFound { path }) => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!("`.include` resource not found: `{path}`"),
+                    *span,
+                    "Add the target source to the VirtualProject supplied by the host.",
+                ));
+                return CallOutcome::Failed;
+            }
             Err(error) => {
                 diagnostics.push(resource_access_diagnostic("include", error, *span));
                 return CallOutcome::Failed;
@@ -7437,25 +7446,25 @@ fn resource_access_diagnostic(
             "E8001",
             format!("`.{builtin}` does not support non-local resource reference `{reference}`"),
             span,
-            "Only source-relative paths inside the supplied project are available; network fetching is disabled.",
+            "Only source-relative paths inside the supplied VirtualProject are available; network fetching is disabled.",
         ),
         ResourceAccessError::UnknownSource { source_id } => resource_diagnostic(
             "E9001",
             format!("`.{builtin}` cannot resolve the current source identity {source_id:?}"),
             span,
-            "The host must provide the calling source through the supplied resource provider.",
+            "The host must provide the calling source through the VirtualProject SourceStore.",
         ),
         ResourceAccessError::Boundary { message } => resource_diagnostic(
             "E8001",
             format!("`.{builtin}` resource path is outside the project boundary: {message}"),
             span,
-            "Use a source-relative path that remains inside the supplied project.",
+            "Use a source-relative path that remains inside the supplied VirtualProject.",
         ),
         ResourceAccessError::NotFound { path } => resource_diagnostic(
             "E3001",
             format!("`.{builtin}` resource not found: `{path}`"),
             span,
-            "Add the logical resource to the host-supplied project.",
+            "Add the logical resource to the VirtualProject supplied by the host.",
         ),
         ResourceAccessError::InvalidUtf8 { path, message } => resource_diagnostic(
             "E3001",
@@ -7474,7 +7483,7 @@ fn resource_context<'a>(
     let Some(provider) = context.resources else {
         diagnostics.push(resource_diagnostic(
             "E8001",
-            "Resource builtin requires a host-supplied resource provider".to_string(),
+            "Resource builtin requires a host-supplied VirtualProject".to_string(),
             *span,
             "Compile through the project API so logical resources are supplied explicitly.",
         ));

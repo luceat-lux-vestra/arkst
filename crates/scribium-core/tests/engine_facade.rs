@@ -1,9 +1,9 @@
-fn accepts_core_evaluator(_: scribium_core::evaluator::Evaluator) {}
-fn accepts_engine_evaluator(_: scribium_engine::evaluator::Evaluator) {}
 fn accepts_core_capabilities(_: scribium_core::Capabilities) {}
 fn accepts_engine_capabilities(_: scribium_engine::Capabilities) {}
 fn accepts_core_capability(_: scribium_core::Capability) {}
 fn accepts_engine_capability(_: scribium_engine::Capability) {}
+
+fn assert_evaluator_traits<T: std::fmt::Debug + Clone + Copy + Default>() {}
 
 type LegacyAstToIr = fn(
     &scribium_markdown::ast::Document,
@@ -15,9 +15,7 @@ type LegacyAstToIr = fn(
 );
 
 #[test]
-fn core_engine_facades_preserve_physical_type_identity() {
-    let _: fn(scribium_core::evaluator::Evaluator) = accepts_engine_evaluator;
-    let _: fn(scribium_engine::evaluator::Evaluator) = accepts_core_evaluator;
+fn core_capability_facades_preserve_engine_type_identity() {
     let _: fn(scribium_core::Capabilities) = accepts_engine_capabilities;
     let _: fn(scribium_engine::Capabilities) = accepts_core_capabilities;
     let _: fn(scribium_core::Capability) = accepts_engine_capability;
@@ -26,9 +24,36 @@ fn core_engine_facades_preserve_physical_type_identity() {
 
 #[test]
 fn core_evaluator_facade_exposes_the_engine_constructor() {
+    assert_evaluator_traits::<scribium_core::evaluator::Evaluator>();
     let evaluator =
         scribium_core::evaluator::Evaluator::with_capabilities(scribium_core::Capabilities::none());
-    let _ = evaluator;
+    let copied = evaluator;
+    let _ = format!("{copied:?}");
+    let _ = scribium_core::evaluator::Evaluator::default();
+}
+
+#[test]
+fn core_evaluator_preserves_legacy_project_evaluation_api() {
+    let project = scribium_core::VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source("main.qd", "")
+        .expect("valid source")
+        .build()
+        .expect("valid project");
+    let (_, source_id) = project
+        .sources()
+        .get_with_id(project.entry())
+        .expect("entry source and identity");
+    let document = scribium_core::ir::IrDocument {
+        nodes: Vec::new(),
+        metadata: scribium_core::ir::IrMetadata::default(),
+    };
+    let evaluator = scribium_core::evaluator::Evaluator::new();
+    let (evaluated, diagnostics) = evaluator.evaluate_project(&project, source_id, &document);
+
+    assert_eq!(evaluated, document);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 
 #[test]

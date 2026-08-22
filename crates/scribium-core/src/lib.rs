@@ -10,8 +10,81 @@ pub mod ir;
 pub mod source;
 pub mod source_map;
 
-// Compatibility facades: implementation ownership lives in scribium-engine.
-pub use scribium_engine::{builtins, evaluator};
+// Compatibility facade: builtin implementation ownership lives in
+// scribium-engine. Evaluator keeps a core wrapper because its legacy public
+// project entry point must remain available without moving project types into
+// the engine.
+pub use scribium_engine::builtins;
+pub mod evaluator {
+    use crate::engine_adapter::VirtualProjectResourceProvider;
+    use crate::{Capabilities, VirtualProject};
+    use scribium_diagnostics::Diagnostic;
+    use scribium_engine::evaluator as engine_evaluator;
+    use scribium_ir::IrDocument;
+    use scribium_source::SourceId;
+
+    /// Core compatibility facade for the engine evaluator.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Evaluator {
+        inner: engine_evaluator::Evaluator,
+    }
+
+    impl Default for Evaluator {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Evaluator {
+        /// Creates a new evaluator.
+        pub fn new() -> Self {
+            Self {
+                inner: engine_evaluator::Evaluator::new(),
+            }
+        }
+
+        /// Creates an evaluator with explicit compatibility capabilities.
+        pub fn with_capabilities(capabilities: Capabilities) -> Self {
+            Self {
+                inner: engine_evaluator::Evaluator::with_capabilities(capabilities),
+            }
+        }
+
+        /// Evaluates an IR document without project-backed resources.
+        pub fn evaluate(&self, document: &IrDocument) -> (IrDocument, Vec<Diagnostic>) {
+            self.inner.evaluate(document)
+        }
+
+        /// Evaluates an IR document using the legacy project-backed entry
+        /// point. Project access remains adapted in core and is delegated to
+        /// the physical engine implementation.
+        pub fn evaluate_project(
+            &self,
+            project: &VirtualProject,
+            source_id: SourceId,
+            document: &IrDocument,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            let resource_provider = VirtualProjectResourceProvider::new(project);
+            self.inner.evaluate_with_resources(
+                &resource_provider,
+                source_id,
+                document,
+                &scribium_engine::DocumentMetadataDefaults::default(),
+            )
+        }
+
+        pub(crate) fn evaluate_with_resources<R: scribium_engine::ResourceProvider>(
+            &self,
+            resources: &R,
+            source_id: SourceId,
+            document: &IrDocument,
+            metadata_defaults: &scribium_engine::DocumentMetadataDefaults,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            self.inner
+                .evaluate_with_resources(resources, source_id, document, metadata_defaults)
+        }
+    }
+}
 
 /// Compatibility facade for the AST-to-IR module.
 ///

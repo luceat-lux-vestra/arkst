@@ -1,3 +1,4 @@
+use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_engine::{
     ast_to_ir::ast_to_ir_with_diagnostics_for_mode, DocumentMetadataDefaults, IncludedSource,
     ResourceAccessError, ResourceProvider, ResourceText,
@@ -81,6 +82,22 @@ fn evaluate(
         &document(source, source_id),
         &DocumentMetadataDefaults::default(),
     )
+}
+
+fn assert_exact_resource_diagnostic(
+    diagnostic: &Diagnostic,
+    code: &str,
+    message: &str,
+    source_id: SourceId,
+    end: usize,
+    hint: &str,
+) {
+    assert_eq!(diagnostic.code, code);
+    assert!(matches!(diagnostic.severity, Severity::Error));
+    assert_eq!(diagnostic.message, message);
+    assert_eq!(diagnostic.primary, Some(SourceSpan::new(source_id, 0, end)));
+    assert!(diagnostic.secondary.is_empty());
+    assert_eq!(diagnostic.hints, vec![hint.to_string()]);
 }
 
 #[test]
@@ -209,12 +226,24 @@ fn resource_failures_preserve_engine_diagnostic_categories_and_paths() {
     );
 
     let (_, unsupported) = evaluate(".read {unsupported}", source_id, &resources);
-    assert_eq!(unsupported[0].code, "E8001");
-    assert!(unsupported[0].message.contains("https://example.test/data"));
+    assert_exact_resource_diagnostic(
+        &unsupported[0],
+        "E8001",
+        "`.read` does not support non-local resource reference `https://example.test/data`",
+        source_id,
+        19,
+        "Only source-relative paths inside the supplied VirtualProject are available; network fetching is disabled.",
+    );
 
     let (_, invalid_utf8) = evaluate(".read {bad.bin}", source_id, &resources);
-    assert_eq!(invalid_utf8[0].code, "E3001");
-    assert!(invalid_utf8[0].message.contains("bad.bin"));
+    assert_exact_resource_diagnostic(
+        &invalid_utf8[0],
+        "E3001",
+        "`.read` resource `bad.bin` is not valid UTF-8: invalid utf-8 sequence",
+        source_id,
+        15,
+        "Text resource builtins require valid UTF-8 and do not perform lossy decoding.",
+    );
 }
 
 #[test]
@@ -225,10 +254,47 @@ fn missing_resource_is_a_source_backed_failure() {
         ..FakeResources::default()
     };
     let (_, diagnostics) = evaluate(".read {missing.txt}", source_id, &resources);
-    assert_eq!(diagnostics[0].code, "E3001");
-    assert_eq!(
-        diagnostics[0].primary,
-        Some(SourceSpan::new(source_id, 0, 19))
+    assert_exact_resource_diagnostic(
+        &diagnostics[0],
+        "E3001",
+        "`.read` resource not found: `missing.txt`",
+        source_id,
+        19,
+        "Add the logical resource to the VirtualProject supplied by the host.",
     );
-    assert!(diagnostics[0].message.contains("missing.txt"));
+}
+
+#[test]
+fn missing_include_source_keeps_its_legacy_diagnostic_hint() {
+    let source_id = SourceId(10);
+    let resources = FakeResources {
+        paths: [(source_id, "main.qd".into())].into_iter().collect(),
+        ..FakeResources::default()
+    };
+    let (_, diagnostics) = evaluate(".include {missing.qd}", source_id, &resources);
+
+    assert_exact_resource_diagnostic(
+        &diagnostics[0],
+        "E3001",
+        "`.include` resource not found: `missing.qd`",
+        source_id,
+        21,
+        "Add the target source to the VirtualProject supplied by the host.",
+    );
+}
+
+#[test]
+fn resource_builtin_without_provider_keeps_its_legacy_context_diagnostic() {
+    let source_id = SourceId(11);
+    let document = document(".read {missing.txt}", source_id);
+    let (_, diagnostics) = scribium_engine::evaluator::Evaluator::new().evaluate(&document);
+
+    assert_exact_resource_diagnostic(
+        &diagnostics[0],
+        "E8001",
+        "Resource builtin requires a host-supplied VirtualProject",
+        source_id,
+        19,
+        "Compile through the project API so logical resources are supplied explicitly.",
+    );
 }
