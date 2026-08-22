@@ -587,6 +587,7 @@ version = "0.0.1"
 dependencies = [
  "insta",
  "libm",
+ "scribium-diagnostics",
  "scribium-markdown",
  "scribium-project",
  "scribium-quarkdown",
@@ -595,6 +596,15 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "scribium-diagnostics"
+version = "0.0.1"
+dependencies = [
+ "scribium-source",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

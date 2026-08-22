@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/scribium-core",
+    "crates/scribium-diagnostics",
     "crates/scribium-project",
     "crates/scribium-source",
     "crates/scribium-quarkdown",
@@ -28,6 +29,7 @@ authors = ["Scribium Authors"]
 
 [workspace.dependencies]
 scribium-core = { path = "crates/scribium-core" }
+scribium-diagnostics = { path = "crates/scribium-diagnostics" }
 scribium-project = { path = "crates/scribium-project" }
 scribium-source = { path = "crates/scribium-source" }
 scribium-quarkdown = { path = "crates/scribium-quarkdown" }

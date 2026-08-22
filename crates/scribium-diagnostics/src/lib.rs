@@ -1,4 +1,4 @@
-//! Structured diagnostics with stable codes, severity, and source spans.
+//! Shared structured diagnostics with stable codes, severity, and source spans.
 
 use scribium_source::SourceSpan;
 
