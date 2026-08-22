@@ -13,44 +13,363 @@ pub(crate) struct BuiltinError {
     pub message: String,
 }
 
-/// Returns whether this builtin has an evaluator implementation.
-pub(crate) fn is_supported(name: &str) -> bool {
-    matches!(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuiltinKind {
+    Sum,
+    Subtract,
+    Multiply,
+    Divide,
+    Rem,
+    Pow,
+    Abs,
+    Negate,
+    Sqrt,
+    Logn,
+    Pi,
+    Sin,
+    Cos,
+    Tan,
+    Truncate,
+    Round,
+    IsEven,
+    String,
+    Concatenate,
+    Uppercase,
+    Lowercase,
+    Capitalize,
+    IsEmpty,
+    IsNotEmpty,
+    StartsWith,
+    Plaintext,
+    None,
+    Otherwise,
+    IsNone,
+    IsLower,
+    IsGreater,
+    Equals,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuiltinBodyPolicy {
+    Reject,
+    BindEvaluatedContent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BuiltinSignature {
+    pub(crate) parameter_names: &'static [&'static str],
+    pub(crate) max_positional: usize,
+    pub(crate) allows_named: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BuiltinSpec {
+    pub(crate) name: &'static str,
+    pub(crate) kind: BuiltinKind,
+    pub(crate) signature: BuiltinSignature,
+    pub(crate) body_policy: BuiltinBodyPolicy,
+}
+
+const fn builtin_spec(
+    name: &'static str,
+    kind: BuiltinKind,
+    parameter_names: &'static [&'static str],
+    max_positional: usize,
+    allows_named: bool,
+    body_policy: BuiltinBodyPolicy,
+) -> BuiltinSpec {
+    BuiltinSpec {
         name,
-        "sum"
-            | "subtract"
-            | "multiply"
-            | "divide"
-            | "rem"
-            | "pow"
-            | "abs"
-            | "negate"
-            | "sqrt"
-            | "logn"
-            | "pi"
-            | "sin"
-            | "cos"
-            | "tan"
-            | "truncate"
-            | "round"
-            | "iseven"
-            | "string"
-            | "concatenate"
-            | "uppercase"
-            | "lowercase"
-            | "capitalize"
-            | "isempty"
-            | "isnotempty"
-            | "startswith"
-            | "plaintext"
-            | "none"
-            | "otherwise"
-            | "isnone"
-            | "islower"
-            | "isgreater"
-            | "equals"
-            | "not"
-    )
+        kind,
+        signature: BuiltinSignature {
+            parameter_names,
+            max_positional,
+            allows_named,
+        },
+        body_policy,
+    }
+}
+
+/// The complete regular scalar builtin inventory.
+///
+/// Names, signatures, body policy, and dispatch identity are deliberately
+/// stored together. Bespoke evaluator-owned native calls are not represented
+/// here; their ownership remains explicit in `evaluator.rs`.
+static REGULAR_BUILTINS: &[BuiltinSpec] = &[
+    builtin_spec(
+        "sum",
+        BuiltinKind::Sum,
+        &["a", "b"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "subtract",
+        BuiltinKind::Subtract,
+        &["a", "b"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "multiply",
+        BuiltinKind::Multiply,
+        &["a", "by"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "divide",
+        BuiltinKind::Divide,
+        &["a", "by"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "rem",
+        BuiltinKind::Rem,
+        &["a", "b"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "pow",
+        BuiltinKind::Pow,
+        &["base", "to"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "abs",
+        BuiltinKind::Abs,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "negate",
+        BuiltinKind::Negate,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "sqrt",
+        BuiltinKind::Sqrt,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "logn",
+        BuiltinKind::Logn,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "pi",
+        BuiltinKind::Pi,
+        &[],
+        0,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "sin",
+        BuiltinKind::Sin,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "cos",
+        BuiltinKind::Cos,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "tan",
+        BuiltinKind::Tan,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "truncate",
+        BuiltinKind::Truncate,
+        &["x", "decimals"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "round",
+        BuiltinKind::Round,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "iseven",
+        BuiltinKind::IsEven,
+        &["x"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "string",
+        BuiltinKind::String,
+        &["value"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "concatenate",
+        BuiltinKind::Concatenate,
+        &["a", "with", "if"],
+        3,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "uppercase",
+        BuiltinKind::Uppercase,
+        &["string"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "lowercase",
+        BuiltinKind::Lowercase,
+        &["string"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "capitalize",
+        BuiltinKind::Capitalize,
+        &["string"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "isempty",
+        BuiltinKind::IsEmpty,
+        &["string"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "isnotempty",
+        BuiltinKind::IsNotEmpty,
+        &["string"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "startswith",
+        BuiltinKind::StartsWith,
+        &["string", "prefix", "ignorecase"],
+        3,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "plaintext",
+        BuiltinKind::Plaintext,
+        &["content"],
+        1,
+        true,
+        BuiltinBodyPolicy::BindEvaluatedContent,
+    ),
+    builtin_spec(
+        "none",
+        BuiltinKind::None,
+        &[],
+        0,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "otherwise",
+        BuiltinKind::Otherwise,
+        &["value", "fallback"],
+        2,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "isnone",
+        BuiltinKind::IsNone,
+        &["value"],
+        1,
+        false,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "islower",
+        BuiltinKind::IsLower,
+        &["a", "than", "orequals"],
+        3,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "isgreater",
+        BuiltinKind::IsGreater,
+        &["a", "than", "orequals"],
+        3,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "equals",
+        BuiltinKind::Equals,
+        &["a", "to"],
+        2,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+    builtin_spec(
+        "not",
+        BuiltinKind::Not,
+        &["value"],
+        1,
+        true,
+        BuiltinBodyPolicy::Reject,
+    ),
+];
+
+#[cfg(test)]
+pub(crate) fn regular_builtins() -> &'static [BuiltinSpec] {
+    REGULAR_BUILTINS
+}
+
+pub(crate) fn lookup(name: &str) -> Option<&'static BuiltinSpec> {
+    REGULAR_BUILTINS.iter().find(|builtin| builtin.name == name)
 }
 
 /// Evaluates one supported builtin without source or backend conversion.
@@ -71,7 +390,9 @@ pub(crate) fn evaluate(
         .cloned()
         .map(|arg| InvocationNamedArg::new(arg, ValueOrigin::Dynamic))
         .collect::<Vec<_>>();
-    evaluate_with_origins(name, &positional, &named, has_body)
+    let builtin =
+        lookup(name).ok_or_else(|| error(format!("`.{name}` has no builtin implementation")))?;
+    evaluate_with_origins(builtin, &positional, &named, has_body)
 }
 
 /// Evaluates a builtin with the invocation-time DynamicValue distinction
@@ -79,57 +400,64 @@ pub(crate) fn evaluate(
 /// above remains useful for focused builtin tests, where raw arguments model
 /// Quarkdown's dynamic argument boundary.
 pub(crate) fn evaluate_with_origins(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    match name {
-        "sum" | "subtract" | "multiply" | "divide" | "rem" | "pow" => {
-            evaluate_numeric(name, positional_args, named_args, has_body)
+    match builtin.kind {
+        BuiltinKind::Sum
+        | BuiltinKind::Subtract
+        | BuiltinKind::Multiply
+        | BuiltinKind::Divide
+        | BuiltinKind::Rem
+        | BuiltinKind::Pow => evaluate_numeric(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Abs | BuiltinKind::Negate | BuiltinKind::Sqrt | BuiltinKind::IsEven => {
+            evaluate_unary_numeric(builtin, positional_args, named_args, has_body)
         }
-        "abs" | "negate" | "sqrt" | "iseven" => {
-            evaluate_unary_numeric(name, positional_args, named_args, has_body)
+        BuiltinKind::Logn | BuiltinKind::Sin | BuiltinKind::Cos | BuiltinKind::Tan => {
+            evaluate_transcendental(builtin, positional_args, named_args, has_body)
         }
-        "logn" | "sin" | "cos" | "tan" => {
-            evaluate_transcendental(name, positional_args, named_args, has_body)
+        BuiltinKind::Pi => evaluate_pi(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Truncate => evaluate_truncate(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Round => evaluate_round(builtin, positional_args, named_args, has_body),
+        BuiltinKind::String => evaluate_string(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Concatenate => {
+            evaluate_concatenate(builtin, positional_args, named_args, has_body)
         }
-        "pi" => evaluate_pi(positional_args, named_args, has_body),
-        "truncate" => evaluate_truncate(positional_args, named_args, has_body),
-        "round" => evaluate_round(positional_args, named_args, has_body),
-        "string" => evaluate_string(positional_args, named_args, has_body),
-        "concatenate" => evaluate_concatenate(positional_args, named_args, has_body),
-        "uppercase" | "lowercase" | "capitalize" => {
-            evaluate_case(name, positional_args, named_args, has_body)
+        BuiltinKind::Uppercase | BuiltinKind::Lowercase | BuiltinKind::Capitalize => {
+            evaluate_case(builtin, positional_args, named_args, has_body)
         }
-        "isempty" | "isnotempty" => {
-            evaluate_empty_check(name, positional_args, named_args, has_body)
+        BuiltinKind::IsEmpty | BuiltinKind::IsNotEmpty => {
+            evaluate_empty_check(builtin, positional_args, named_args, has_body)
         }
-        "startswith" => evaluate_startswith(positional_args, named_args, has_body),
-        "plaintext" => evaluate_plaintext(positional_args, named_args, has_body),
-        "none" => evaluate_none(positional_args, named_args, has_body),
-        "otherwise" => evaluate_otherwise(positional_args, named_args, has_body),
-        "isnone" => evaluate_isnone(positional_args, named_args, has_body),
-        "islower" | "isgreater" => evaluate_ordering(name, positional_args, named_args, has_body),
-        "equals" => evaluate_equals(positional_args, named_args, has_body),
-        "not" => evaluate_not(positional_args, named_args, has_body),
-        _ => Err(error(format!("`.{name}` has no builtin implementation"))),
+        BuiltinKind::StartsWith => {
+            evaluate_startswith(builtin, positional_args, named_args, has_body)
+        }
+        BuiltinKind::Plaintext => {
+            evaluate_plaintext(builtin, positional_args, named_args, has_body)
+        }
+        BuiltinKind::None => evaluate_none(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Otherwise => {
+            evaluate_otherwise(builtin, positional_args, named_args, has_body)
+        }
+        BuiltinKind::IsNone => evaluate_isnone(builtin, positional_args, named_args, has_body),
+        BuiltinKind::IsLower | BuiltinKind::IsGreater => {
+            evaluate_ordering(builtin, positional_args, named_args, has_body)
+        }
+        BuiltinKind::Equals => evaluate_equals(builtin, positional_args, named_args, has_body),
+        BuiltinKind::Not => evaluate_not(builtin, positional_args, named_args, has_body),
     }
 }
 
 fn evaluate_ordering(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    let mut arguments = bind_arguments(
-        name,
-        positional_args,
-        named_args,
-        &["a", "than", "orequals"],
-        3,
-    )?;
+    let name = builtin.name;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     if has_body {
         return Err(error(format!("`.{name}` does not accept a block body")));
     }
@@ -147,7 +475,7 @@ fn evaluate_ordering(
         .unwrap_or(false);
     let a = numeric_argument(&a, "a")?;
     let b = numeric_argument(&b, "than")?;
-    let result = if name == "islower" {
+    let result = if builtin.kind == BuiltinKind::IsLower {
         if orequals {
             a <= b
         } else {
@@ -162,6 +490,7 @@ fn evaluate_ordering(
 }
 
 fn evaluate_equals(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -169,7 +498,7 @@ fn evaluate_equals(
     if has_body {
         return Err(error("`.equals` does not accept a block body".to_string()));
     }
-    let mut arguments = bind_arguments("equals", positional_args, named_args, &["a", "to"], 2)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let left = arguments
         .remove(0)
         .ok_or_else(|| error("`.equals` requires a first value argument".to_string()))?;
@@ -180,6 +509,7 @@ fn evaluate_equals(
 }
 
 fn evaluate_not(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -187,7 +517,7 @@ fn evaluate_not(
     if has_body {
         return Err(error("`.not` does not accept a block body".to_string()));
     }
-    let mut arguments = bind_arguments("not", positional_args, named_args, &["value"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.not` requires exactly one boolean argument".to_string()))?;
@@ -195,6 +525,7 @@ fn evaluate_not(
 }
 
 fn evaluate_string(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -202,7 +533,7 @@ fn evaluate_string(
     if has_body {
         return Err(error("`.string` does not accept a block body".to_string()));
     }
-    let mut arguments = bind_arguments("string", positional_args, named_args, &["value"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
@@ -213,6 +544,7 @@ fn evaluate_string(
 }
 
 fn evaluate_concatenate(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -222,13 +554,7 @@ fn evaluate_concatenate(
             "`.concatenate` does not accept a block body".to_string(),
         ));
     }
-    let mut arguments = bind_arguments(
-        "concatenate",
-        positional_args,
-        named_args,
-        &["a", "with", "if"],
-        3,
-    )?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let a = arguments
         .remove(0)
         .ok_or_else(|| error("`.concatenate` requires an `a` string argument".to_string()))?;
@@ -252,15 +578,16 @@ fn evaluate_concatenate(
 }
 
 fn evaluate_empty_check(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    let name = builtin.name;
     if has_body {
         return Err(error(format!("`.{name}` does not accept a block body")));
     }
-    let mut arguments = bind_arguments(name, positional_args, named_args, &["string"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
@@ -270,7 +597,7 @@ fn evaluate_empty_check(
         ))
     })?;
     let is_empty = text.is_empty();
-    Ok(IrValue::Boolean(if name == "isempty" {
+    Ok(IrValue::Boolean(if builtin.kind == BuiltinKind::IsEmpty {
         is_empty
     } else {
         !is_empty
@@ -278,6 +605,7 @@ fn evaluate_empty_check(
 }
 
 fn evaluate_startswith(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -287,13 +615,7 @@ fn evaluate_startswith(
             "`.startswith` does not accept a block body".to_string(),
         ));
     }
-    let mut arguments = bind_arguments(
-        "startswith",
-        positional_args,
-        named_args,
-        &["string", "prefix", "ignorecase"],
-        3,
-    )?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let string = arguments
         .remove(0)
         .ok_or_else(|| error("`.startswith` requires a `string` argument".to_string()))?;
@@ -318,6 +640,7 @@ fn evaluate_startswith(
 }
 
 fn evaluate_plaintext(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -327,7 +650,7 @@ fn evaluate_plaintext(
             "`.plaintext` body must bind as `content` before evaluation".to_string(),
         ));
     }
-    let mut arguments = bind_arguments("plaintext", positional_args, named_args, &["content"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let content = arguments
         .remove(0)
         .ok_or_else(|| error("`.plaintext` requires one content argument".to_string()))?;
@@ -341,23 +664,27 @@ fn evaluate_plaintext(
 }
 
 fn bind_arguments(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
-    parameter_names: &[&str],
-    max_arguments: usize,
 ) -> Result<Vec<Option<InvocationValue>>, BuiltinError> {
-    if positional_args.len() > max_arguments {
+    let name = builtin.name;
+    let signature = builtin.signature;
+    if positional_args.len() > signature.max_positional {
         return Err(error(format!(
             "`.{name}` received too many positional arguments"
         )));
     }
-    let mut arguments = vec![None; parameter_names.len()];
+    let mut arguments = vec![None; signature.parameter_names.len()];
     for (index, value) in positional_args.iter().enumerate() {
         arguments[index] = Some(value.clone());
     }
+    if !signature.allows_named && !named_args.is_empty() {
+        return Err(error(format!("`.{name}` does not support named arguments")));
+    }
     for argument in named_args {
-        let Some(index) = parameter_names
+        let Some(index) = signature
+            .parameter_names
             .iter()
             .position(|parameter| *parameter == argument.name)
         else {
@@ -556,11 +883,15 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
 }
 
 fn evaluate_otherwise(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    if has_body || !named_args.is_empty() || positional_args.len() != 2 {
+    if has_body
+        || !builtin.signature.allows_named && !named_args.is_empty()
+        || positional_args.len() != builtin.signature.max_positional
+    {
         return Err(error(
             "`.otherwise` requires exactly two positional arguments".to_string(),
         ));
@@ -573,11 +904,15 @@ fn evaluate_otherwise(
 }
 
 fn evaluate_none(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    if has_body || !named_args.is_empty() || !positional_args.is_empty() {
+    if has_body
+        || !builtin.signature.allows_named && !named_args.is_empty()
+        || !positional_args.is_empty()
+    {
         return Err(error(
             "`.none` does not accept arguments or a block body".to_string(),
         ));
@@ -586,11 +921,15 @@ fn evaluate_none(
 }
 
 fn evaluate_isnone(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
-    if has_body || !named_args.is_empty() || positional_args.len() != 1 {
+    if has_body
+        || !builtin.signature.allows_named && !named_args.is_empty()
+        || positional_args.len() != builtin.signature.max_positional
+    {
         return Err(error(
             "`.isnone` requires exactly one positional argument".to_string(),
         ));
@@ -602,68 +941,64 @@ fn evaluate_isnone(
 }
 
 fn evaluate_numeric(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    let name = builtin.name;
     if has_body {
         return Err(error(format!(
             "`.{name}` does not accept a block body in this evaluator slice"
         )));
     }
 
-    let parameter_names = match name {
-        "sum" | "subtract" | "rem" => ["a", "b"],
-        "multiply" | "divide" => ["a", "by"],
-        "pow" => ["base", "to"],
-        _ => unreachable!("unrecognized binary numeric builtin: {name}"),
-    };
-    let mut arguments = bind_arguments(name, positional_args, named_args, &parameter_names, 2)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let first = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires numeric arguments")))?;
     let second = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires numeric arguments")))?;
-    let first = numeric_argument(&first, parameter_names[0])
+    let first = numeric_argument(&first, builtin.signature.parameter_names[0])
         .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
-    let second = numeric_argument(&second, parameter_names[1])
+    let second = numeric_argument(&second, builtin.signature.parameter_names[1])
         .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
 
-    let result = match name {
-        "sum" => first + second,
-        "subtract" => first - second,
-        "multiply" => first * second,
-        "divide" => first / second,
-        "rem" => first % second,
-        "pow" => first.powi(kotlin_float_to_int(second)),
+    let result = match builtin.kind {
+        BuiltinKind::Sum => first + second,
+        BuiltinKind::Subtract => first - second,
+        BuiltinKind::Multiply => first * second,
+        BuiltinKind::Divide => first / second,
+        BuiltinKind::Rem => first % second,
+        BuiltinKind::Pow => first.powi(kotlin_float_to_int(second)),
         _ => unreachable!("unrecognized binary numeric builtin: {name}"),
     };
     Ok(numeric_result(result))
 }
 
 fn evaluate_unary_numeric(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    let name = builtin.name;
     if has_body {
         return Err(error(format!("`.{name}` does not accept a block body")));
     }
-    let mut arguments = bind_arguments(name, positional_args, named_args, &["x"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
     let value = numeric_argument(&value, "x")
         .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
 
-    match name {
-        "abs" => Ok(numeric_result(value.abs())),
-        "negate" => Ok(numeric_result(-value)),
-        "sqrt" => Ok(numeric_result(value.sqrt())),
-        "iseven" => Ok(IrValue::Boolean(kotlin_float_to_int(value) % 2 == 0)),
+    match builtin.kind {
+        BuiltinKind::Abs => Ok(numeric_result(value.abs())),
+        BuiltinKind::Negate => Ok(numeric_result(-value)),
+        BuiltinKind::Sqrt => Ok(numeric_result(value.sqrt())),
+        BuiltinKind::IsEven => Ok(IrValue::Boolean(kotlin_float_to_int(value) % 2 == 0)),
         _ => Err(error(format!(
             "`.{name}` has no unary numeric implementation"
         ))),
@@ -671,24 +1006,29 @@ fn evaluate_unary_numeric(
 }
 
 fn evaluate_transcendental(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    let name = builtin.name;
     if has_body {
         return Err(error(format!("`.{name}` does not accept a block body")));
     }
-    let mut arguments = bind_arguments(name, positional_args, named_args, &["x"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
     let value = numeric_argument(&value, "x")
         .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
-    Ok(numeric_result(deterministic_transcendental(name, value)))
+    Ok(numeric_result(deterministic_transcendental(
+        builtin.kind,
+        value,
+    )))
 }
 
 fn evaluate_pi(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -696,7 +1036,7 @@ fn evaluate_pi(
     if has_body {
         return Err(error("`.pi` does not accept a block body".to_string()));
     }
-    bind_arguments("pi", positional_args, named_args, &[], 0)?;
+    bind_arguments(builtin, positional_args, named_args)?;
 
     // Quarkdown passes kotlin.math.PI as a Double to NumberValue. Keep this
     // binary64 constant separate from the Float result normalization used by
@@ -710,19 +1050,20 @@ fn evaluate_pi(
 /// back to Float. `libm` is pinned and built with no default features so these
 /// operations use its pure-Rust software implementations on native and WASM
 /// targets rather than an OS libc/libm or a target-specific math intrinsic.
-fn deterministic_transcendental(name: &str, value: f32) -> f32 {
+fn deterministic_transcendental(kind: BuiltinKind, value: f32) -> f32 {
     let value = f64::from(value);
-    let result = match name {
-        "logn" => libm::log(value),
-        "sin" => libm::sin(value),
-        "cos" => libm::cos(value),
-        "tan" => libm::tan(value),
-        _ => unreachable!("unrecognized transcendental builtin: {name}"),
+    let result = match kind {
+        BuiltinKind::Logn => libm::log(value),
+        BuiltinKind::Sin => libm::sin(value),
+        BuiltinKind::Cos => libm::cos(value),
+        BuiltinKind::Tan => libm::tan(value),
+        _ => unreachable!("unrecognized transcendental builtin"),
     };
     result as f32
 }
 
 fn evaluate_truncate(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -732,13 +1073,7 @@ fn evaluate_truncate(
             "`.truncate` does not accept a block body".to_string(),
         ));
     }
-    let mut arguments = bind_arguments(
-        "truncate",
-        positional_args,
-        named_args,
-        &["x", "decimals"],
-        2,
-    )?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.truncate` requires a numeric `x` argument".to_string()))?;
@@ -772,6 +1107,7 @@ fn evaluate_truncate(
 }
 
 fn evaluate_round(
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
@@ -779,7 +1115,7 @@ fn evaluate_round(
     if has_body {
         return Err(error("`.round` does not accept a block body".to_string()));
     }
-    let mut arguments = bind_arguments("round", positional_args, named_args, &["x"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.round` requires one numeric argument".to_string()))?;
@@ -880,15 +1216,16 @@ fn kotlin_round_to_int(value: f32) -> i32 {
 }
 
 fn evaluate_case(
-    name: &str,
+    builtin: &BuiltinSpec,
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
+    let name = builtin.name;
     if has_body {
         return Err(error(format!("`.{name}` does not accept a block body")));
     }
-    let mut arguments = bind_arguments(name, positional_args, named_args, &["string"], 1)?;
+    let mut arguments = bind_arguments(builtin, positional_args, named_args)?;
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
@@ -897,10 +1234,10 @@ fn evaluate_case(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
     })?;
-    let transformed = match name {
-        "uppercase" => text.to_uppercase(),
-        "lowercase" => text.to_lowercase(),
-        "capitalize" => {
+    let transformed = match builtin.kind {
+        BuiltinKind::Uppercase => text.to_uppercase(),
+        BuiltinKind::Lowercase => text.to_lowercase(),
+        BuiltinKind::Capitalize => {
             let mut characters = text.chars();
             let Some(first) = characters.next() else {
                 return Ok(IrValue::String(text));
@@ -973,7 +1310,9 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{deterministic_transcendental, evaluate, evaluate_with_origins, is_supported};
+    use super::{
+        deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
+    };
     use crate::ir::{
         IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrValue,
     };
@@ -994,12 +1333,49 @@ mod tests {
     }
 
     #[test]
+    fn regular_inventory_is_unique_complete_and_round_trips() {
+        let inventory = regular_builtins();
+        assert!(!inventory.is_empty());
+        let mut dispatch_kinds = Vec::new();
+
+        for (index, builtin) in inventory.iter().enumerate() {
+            assert_eq!(lookup(builtin.name), Some(builtin));
+            assert_eq!(
+                builtin.signature.max_positional,
+                builtin.signature.parameter_names.len()
+            );
+            for (parameter_index, parameter) in builtin.signature.parameter_names.iter().enumerate()
+            {
+                assert!(
+                    !builtin.signature.parameter_names[..parameter_index].contains(parameter),
+                    "{}.{} is duplicated in its signature",
+                    builtin.name,
+                    parameter
+                );
+            }
+            assert!(
+                inventory[index + 1..]
+                    .iter()
+                    .all(|other| other.name != builtin.name),
+                "{} is registered more than once",
+                builtin.name
+            );
+            assert!(
+                !dispatch_kinds.contains(&builtin.kind),
+                "{} reuses another builtin dispatch identity",
+                builtin.name
+            );
+            dispatch_kinds.push(builtin.kind);
+        }
+    }
+
+    #[test]
     fn numeric_surface_is_registered_and_preserves_typed_results() {
         for name in [
             "sum", "subtract", "multiply", "divide", "rem", "pow", "abs", "negate", "sqrt", "logn",
             "pi", "sin", "cos", "tan", "truncate", "round", "iseven",
         ] {
-            assert!(is_supported(name), "{name} should be supported");
+            assert_eq!(lookup(name).map(|builtin| builtin.name), Some(name));
         }
 
         assert_eq!(
@@ -1161,7 +1537,7 @@ mod tests {
         )
         .is_err());
         assert!(evaluate_with_origins(
-            "truncate",
+            lookup("truncate").expect("truncate is in the regular inventory"),
             &[
                 InvocationValue::dynamic_value(number(1.0)),
                 InvocationValue::static_value(IrValue::String("2".into())),
@@ -1372,30 +1748,40 @@ mod tests {
             ("tan", f32::from_bits(0x4049_0fdb), 0x33bb_bd2e),
         ] {
             assert_eq!(
-                deterministic_transcendental(name, input).to_bits(),
+                deterministic_transcendental(
+                    lookup(name)
+                        .expect("transcendental builtin is registered")
+                        .kind,
+                    input,
+                )
+                .to_bits(),
                 expected_bits,
                 "{name}({input:?}) changed"
             );
         }
 
         assert_eq!(
-            deterministic_transcendental("sin", -0.0).to_bits(),
+            deterministic_transcendental(lookup("sin").expect("sin is registered").kind, -0.0,)
+                .to_bits(),
             (-0.0_f32).to_bits()
         );
         assert_eq!(
-            deterministic_transcendental("tan", -0.0).to_bits(),
+            deterministic_transcendental(lookup("tan").expect("tan is registered").kind, -0.0,)
+                .to_bits(),
             (-0.0_f32).to_bits()
         );
         assert_eq!(
-            deterministic_transcendental("cos", -0.0).to_bits(),
+            deterministic_transcendental(lookup("cos").expect("cos is registered").kind, -0.0,)
+                .to_bits(),
             1.0_f32.to_bits()
         );
         assert_eq!(
-            deterministic_transcendental("logn", 0.0).to_bits(),
+            deterministic_transcendental(lookup("logn").expect("logn is registered").kind, 0.0,)
+                .to_bits(),
             f32::NEG_INFINITY.to_bits()
         );
-        assert!(deterministic_transcendental("logn", -1.0).is_nan());
-        assert!(deterministic_transcendental("sin", f32::INFINITY).is_nan());
+        assert!(deterministic_transcendental(lookup("logn").unwrap().kind, -1.0).is_nan());
+        assert!(deterministic_transcendental(lookup("sin").unwrap().kind, f32::INFINITY).is_nan());
     }
 
     #[test]
@@ -1585,7 +1971,7 @@ mod tests {
             "startswith",
             "plaintext",
         ] {
-            assert!(is_supported(name), "{name} should be supported");
+            assert_eq!(lookup(name).map(|builtin| builtin.name), Some(name));
         }
 
         assert_eq!(
@@ -2099,7 +2485,7 @@ mod tests {
     #[test]
     fn logical_surface_is_registered_and_evaluates_typed_results() {
         for name in ["islower", "isgreater", "equals", "not"] {
-            assert!(is_supported(name));
+            assert_eq!(lookup(name).map(|builtin| builtin.name), Some(name));
         }
 
         assert_eq!(

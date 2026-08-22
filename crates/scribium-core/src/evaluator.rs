@@ -1406,7 +1406,7 @@ impl Evaluator {
             };
         }
 
-        if matches!(name, "docname" | "docdescription" | "doctype") {
+        if is_document_state(name) {
             return self.evaluate_document_state_builtin(
                 name,
                 positional_args,
@@ -1419,7 +1419,7 @@ impl Evaluator {
             );
         }
 
-        if name == "html" {
+        if is_html(name) {
             return self.evaluate_html(
                 positional_args,
                 named_args,
@@ -1430,7 +1430,7 @@ impl Evaluator {
             );
         }
 
-        if name == "markdown" {
+        if is_markdown(name) {
             return self.evaluate_markdown(
                 positional_args,
                 named_args,
@@ -1441,7 +1441,7 @@ impl Evaluator {
             );
         }
 
-        if matches!(name, "read" | "json" | "include") {
+        if is_resource(name) {
             return self.evaluate_resource_builtin(
                 name,
                 positional_args,
@@ -1453,7 +1453,7 @@ impl Evaluator {
             );
         }
 
-        if name == "llmstxt" {
+        if is_deferred(name) {
             diagnostics.push(resource_diagnostic(
                 "E8001",
                 "`.llmstxt` is not part of the tracked Quarkdown v2.5.1 standard builtin surface",
@@ -1724,7 +1724,7 @@ impl Evaluator {
             );
         }
 
-        if builtins::is_supported(name) {
+        if let Some(builtin) = builtins::lookup(name) {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
                 span,
@@ -1736,26 +1736,29 @@ impl Evaluator {
                 Err(outcome) => return outcome,
             };
             let mut evaluated_positional = evaluated_positional;
-            let has_body = body.is_some();
-            if name == "plaintext" {
-                if let Some(body) = body {
-                    let body = match self.evaluate_call_body(body, span, diagnostics, context) {
-                        CallOutcome::Value(value) => value,
-                        outcome => return outcome,
-                    };
-                    evaluated_positional.push(InvocationValue::static_value(body));
+            let has_body = match builtin.body_policy {
+                builtins::BuiltinBodyPolicy::Reject => body.is_some(),
+                builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+                    if let Some(body) = body {
+                        let body = match self.evaluate_call_body(body, span, diagnostics, context) {
+                            CallOutcome::Value(value) => value,
+                            outcome => return outcome,
+                        };
+                        evaluated_positional.push(InvocationValue::static_value(body));
+                    }
+                    false
                 }
-            }
+            };
             let evaluated_named =
                 match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                     Ok(values) => values,
                     Err(outcome) => return outcome,
                 };
             return match builtins::evaluate_with_origins(
-                name,
+                builtin,
                 &evaluated_positional,
                 &evaluated_named,
-                has_body && name != "plaintext",
+                has_body,
             ) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {
@@ -5630,32 +5633,246 @@ impl Evaluator {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeDispatchOwner {
+    #[cfg(test)]
+    RegularScalar,
+    Conditional,
+    DocumentState,
+    Html,
+    Markdown,
+    Resource,
+    Let,
+    Foreach,
+    Repeat,
+    OptionalityCallback,
+    VariableState,
+    Center,
+    Align,
+    Container,
+    Landscape,
+    Br,
+    Whitespace,
+    StackedLayout,
+    Range,
+    Pair,
+    Dictionary,
+    CollectionAccess,
+    CollectionTransform,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NativeOwnerInventory {
+    pub(crate) owner: NativeDispatchOwner,
+    pub(crate) names: &'static [&'static str],
+}
+
+const CONDITIONAL_NATIVE_NAMES: &[&str] = &["if", "ifnot"];
+const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &["docname", "docdescription", "doctype"];
+const HTML_NATIVE_NAMES: &[&str] = &["html"];
+const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
+const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include"];
+const LET_NATIVE_NAMES: &[&str] = &["let"];
+const FOREACH_NATIVE_NAMES: &[&str] = &["foreach"];
+const REPEAT_NATIVE_NAMES: &[&str] = &["repeat"];
+const OPTIONALITY_CALLBACK_NATIVE_NAMES: &[&str] = &["ifpresent", "takeif"];
+const VARIABLE_STATE_NATIVE_NAMES: &[&str] = &["var"];
+const CENTER_NATIVE_NAMES: &[&str] = &["center"];
+const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
+const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
+const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
+const BR_NATIVE_NAMES: &[&str] = &["br"];
+const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
+const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
+const RANGE_NATIVE_NAMES: &[&str] = &["range"];
+const PAIR_NATIVE_NAMES: &[&str] = &["pair"];
+const DICTIONARY_NATIVE_NAMES: &[&str] = &["dictionary"];
+const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
+    "size",
+    "first",
+    "second",
+    "third",
+    "last",
+    "getat",
+    "sumall",
+    "average",
+    "distinct",
+    "reversed",
+    "groupvalues",
+];
+const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
+const DEFERRED_NATIVE_NAMES: &[&str] = &["llmstxt"];
+
+static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Conditional,
+        names: CONDITIONAL_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::DocumentState,
+        names: DOCUMENT_STATE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Html,
+        names: HTML_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Markdown,
+        names: MARKDOWN_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Resource,
+        names: RESOURCE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Let,
+        names: LET_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Foreach,
+        names: FOREACH_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Repeat,
+        names: REPEAT_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::OptionalityCallback,
+        names: OPTIONALITY_CALLBACK_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::VariableState,
+        names: VARIABLE_STATE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Center,
+        names: CENTER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Align,
+        names: ALIGN_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Container,
+        names: CONTAINER_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Landscape,
+        names: LANDSCAPE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Br,
+        names: BR_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Whitespace,
+        names: WHITESPACE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::StackedLayout,
+        names: STACKED_LAYOUT_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Range,
+        names: RANGE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Pair,
+        names: PAIR_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Dictionary,
+        names: DICTIONARY_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::CollectionAccess,
+        names: COLLECTION_ACCESS_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::CollectionTransform,
+        names: COLLECTION_TRANSFORM_NATIVE_NAMES,
+    },
+];
+
+#[cfg(test)]
+pub(crate) fn bespoke_native_owners() -> &'static [NativeOwnerInventory] {
+    BESPOKE_NATIVE_OWNERS
+}
+
+#[cfg(test)]
+pub(crate) fn deferred_native_names() -> &'static [&'static str] {
+    DEFERRED_NATIVE_NAMES
+}
+
+#[cfg(test)]
+pub(crate) fn native_dispatch_owner(name: &str) -> Option<NativeDispatchOwner> {
+    let regular = builtins::lookup(name).is_some();
+    let bespoke = BESPOKE_NATIVE_OWNERS
+        .iter()
+        .filter(|inventory| inventory.names.contains(&name))
+        .map(|inventory| inventory.owner)
+        .collect::<Vec<_>>();
+    if regular && bespoke.is_empty() {
+        return Some(NativeDispatchOwner::RegularScalar);
+    }
+    if !regular && bespoke.len() == 1 {
+        return bespoke.into_iter().next();
+    }
+    None
+}
+
+fn has_native_owner(name: &str, owner: NativeDispatchOwner) -> bool {
+    BESPOKE_NATIVE_OWNERS
+        .iter()
+        .any(|inventory| inventory.owner == owner && inventory.names.contains(&name))
+}
+
 fn is_stacked_layout(name: &str) -> bool {
-    matches!(name, "row" | "column" | "grid")
+    has_native_owner(name, NativeDispatchOwner::StackedLayout)
 }
 
 fn is_center(name: &str) -> bool {
-    name == "center"
+    has_native_owner(name, NativeDispatchOwner::Center)
 }
 
 fn is_align(name: &str) -> bool {
-    name == "align"
+    has_native_owner(name, NativeDispatchOwner::Align)
 }
 
 fn is_container(name: &str) -> bool {
-    name == "container"
+    has_native_owner(name, NativeDispatchOwner::Container)
 }
 
 fn is_landscape(name: &str) -> bool {
-    name == "landscape"
+    has_native_owner(name, NativeDispatchOwner::Landscape)
 }
 
 fn is_br(name: &str) -> bool {
-    name == "br"
+    has_native_owner(name, NativeDispatchOwner::Br)
 }
 
 fn is_whitespace(name: &str) -> bool {
-    name == "whitespace"
+    has_native_owner(name, NativeDispatchOwner::Whitespace)
+}
+
+fn is_document_state(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::DocumentState)
+}
+
+fn is_html(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Html)
+}
+
+fn is_markdown(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Markdown)
+}
+
+fn is_resource(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Resource)
+}
+
+fn is_deferred(name: &str) -> bool {
+    DEFERRED_NATIVE_NAMES.contains(&name)
 }
 
 fn bind_whitespace_arguments(
@@ -6375,57 +6592,44 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
 
 /// Returns true for the conditional constructs this evaluator resolves.
 fn is_conditional(name: &str) -> bool {
-    name == "if" || name == "ifnot"
+    has_native_owner(name, NativeDispatchOwner::Conditional)
 }
 
 /// Returns true for the scoped `.let` semantic form.
 fn is_let(name: &str) -> bool {
-    name == "let"
+    has_native_owner(name, NativeDispatchOwner::Let)
 }
 
 fn is_foreach(name: &str) -> bool {
-    name == "foreach"
+    has_native_owner(name, NativeDispatchOwner::Foreach)
 }
 
 fn is_repeat(name: &str) -> bool {
-    name == "repeat"
+    has_native_owner(name, NativeDispatchOwner::Repeat)
 }
 
 fn is_optionality_callback(name: &str) -> bool {
-    matches!(name, "ifpresent" | "takeif")
+    has_native_owner(name, NativeDispatchOwner::OptionalityCallback)
 }
 
 fn is_range(name: &str) -> bool {
-    name == "range"
+    has_native_owner(name, NativeDispatchOwner::Range)
 }
 
 fn is_pair(name: &str) -> bool {
-    name == "pair"
+    has_native_owner(name, NativeDispatchOwner::Pair)
 }
 
 fn is_dictionary(name: &str) -> bool {
-    name == "dictionary"
+    has_native_owner(name, NativeDispatchOwner::Dictionary)
 }
 
 fn is_collection_access(name: &str) -> bool {
-    matches!(
-        name,
-        "size"
-            | "first"
-            | "second"
-            | "third"
-            | "last"
-            | "getat"
-            | "sumall"
-            | "average"
-            | "distinct"
-            | "reversed"
-            | "groupvalues"
-    )
+    has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
 
 fn is_collection_transform(name: &str) -> bool {
-    matches!(name, "map" | "filter" | "sorted")
+    has_native_owner(name, NativeDispatchOwner::CollectionTransform)
 }
 
 fn transform_operands(
@@ -7927,7 +8131,7 @@ fn take_branch(name: &str, condition: bool) -> bool {
 
 /// Returns true for `.var` declarations.
 fn is_var_declaration(name: &str) -> bool {
-    name == "var"
+    has_native_owner(name, NativeDispatchOwner::VariableState)
 }
 
 /// Returns true if a call is a variable reference (parameterless call to a known variable).
@@ -8309,6 +8513,51 @@ mod tests {
             name_span: span(0, name.len()),
             value,
             span: span(0, name.len()),
+        }
+    }
+
+    #[test]
+    fn native_dispatch_inventory_has_exactly_one_owner() {
+        let mut registered = Vec::new();
+
+        for builtin in builtins::regular_builtins() {
+            assert_eq!(
+                native_dispatch_owner(builtin.name),
+                Some(NativeDispatchOwner::RegularScalar),
+                "regular builtin {} has no unique owner",
+                builtin.name
+            );
+            assert!(
+                registered.iter().all(|(name, _)| *name != builtin.name),
+                "{} is registered by more than one native owner",
+                builtin.name
+            );
+            registered.push((builtin.name, NativeDispatchOwner::RegularScalar));
+        }
+
+        for inventory in bespoke_native_owners() {
+            for &name in inventory.names {
+                assert_eq!(
+                    native_dispatch_owner(name),
+                    Some(inventory.owner),
+                    "{name} does not have one unique native owner"
+                );
+                assert!(
+                    registered
+                        .iter()
+                        .all(|(registered_name, _)| *registered_name != name),
+                    "{name} is registered by more than one native owner"
+                );
+                registered.push((name, inventory.owner));
+            }
+        }
+
+        for &name in deferred_native_names() {
+            assert_eq!(
+                native_dispatch_owner(name),
+                None,
+                "deferred name {name} must not be a supported native owner"
+            );
         }
     }
 
