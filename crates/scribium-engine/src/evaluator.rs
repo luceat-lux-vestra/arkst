@@ -623,13 +623,18 @@ struct EvaluationContext<'a> {
     document_state: Rc<RefCell<DocumentState>>,
     limits: EvaluationLimits,
     runtime: Rc<RefCell<EvaluationRuntime>>,
-    assigned_variables: BTreeSet<String>,
+    assigned_variables: BTreeMap<String, IrValue>,
+    variable_owners: BTreeSet<String>,
+    forwarded_variable_owners: BTreeSet<String>,
+    parameter_names: BTreeSet<String>,
 }
 
 #[derive(Clone)]
 struct VariableStateSnapshot {
     variables: BTreeMap<String, VariableValue>,
-    assigned_variables: BTreeSet<String>,
+    assigned_variables: BTreeMap<String, IrValue>,
+    variable_owners: BTreeSet<String>,
+    forwarded_variable_owners: BTreeSet<String>,
     parent: Option<Box<VariableStateSnapshot>>,
 }
 
@@ -651,7 +656,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::new(RefCell::new(DocumentState::default())),
             limits,
             runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
-            assigned_variables: BTreeSet::new(),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners: BTreeSet::new(),
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -670,7 +678,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
-            assigned_variables: BTreeSet::new(),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners: BTreeSet::new(),
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -718,35 +729,97 @@ impl<'a> EvaluationContext<'a> {
     /// Records a variable write made by semantic `.var` handling.
     ///
     /// Callable invocation uses this small write set to distinguish an
-    /// existing caller binding that was reassigned from a declaration that
+    /// existing caller owner that was reassigned from a declaration that
     /// should remain local to the invocation scope. Parameter and capture
     /// installation deliberately use `set_value` directly and are therefore
     /// not treated as user assignments.
     fn assign_value(&mut self, name: String, value: IrValue) {
-        self.set_value(name.clone(), value);
-        self.assigned_variables.insert(name);
+        let has_forwarded_owner = self.has_forwarded_variable_owner(&name);
+        if !self.assign_to_real_owner(&name, value.clone()) {
+            // A lambda parameter is a lookup binding, not a variable owner.
+            // Keep it shadowing a same-named `.var` declaration while still
+            // recording the assignment for a real owner at the boundary.
+            if !self.parameter_names.contains(&name) {
+                self.set_value(name.clone(), value.clone());
+            }
+            if !has_forwarded_owner {
+                self.variable_owners.insert(name.clone());
+            }
+        }
+        self.assigned_variables.insert(name, value);
     }
 
     fn assigned_values(&self) -> BTreeMap<String, IrValue> {
-        self.assigned_variables
-            .iter()
-            .filter_map(|name| self.get(name).map(|value| (name.clone(), value.to_value())))
-            .collect()
+        self.assigned_variables.clone()
     }
 
-    /// Publishes a successful nested callable assignment into its caller's
-    /// current scope. The outer invocation will publish the same name again
-    /// if that caller is itself nested, allowing writes to travel through
-    /// several invocation-local scopes without exposing new locals.
-    fn apply_callable_assignment(&mut self, name: String, value: IrValue) {
-        self.set_value(name.clone(), value);
-        self.assigned_variables.insert(name);
+    /// Publishes a successful nested callable assignment into an actual
+    /// variable owner visible from the caller. Lookup-only bindings such as
+    /// parameters, captures, and copied caller overlays are never owners by
+    /// themselves. A forwarded overlay is updated as a relay so an outer
+    /// callable boundary can continue the writeback to its real caller.
+    fn apply_callable_assignment(&mut self, name: String, value: IrValue) -> bool {
+        if !self.assign_to_owner(&name, value.clone()) {
+            return false;
+        }
+        self.assigned_variables.insert(name, value);
+        true
+    }
+
+    /// Assigns directly to the outermost real `.var` owner in this parent
+    /// chain. This is used for ordinary child scopes, not copied callable
+    /// overlays.
+    fn assign_to_real_owner(&mut self, name: &str, value: IrValue) -> bool {
+        if let Some(parent) = self.parent.as_mut() {
+            if parent.assign_to_real_owner(name, value.clone()) {
+                return true;
+            }
+        }
+        if self.variable_owners.contains(name) {
+            self.set_value(name.to_string(), value);
+            return true;
+        }
+        false
+    }
+
+    /// Assigns to the outermost real or forwarded owner. Forwarded owners
+    /// represent caller libraries copied into an invocation overlay; they are
+    /// relays rather than proof that the overlay itself owns the variable.
+    fn assign_to_owner(&mut self, name: &str, value: IrValue) -> bool {
+        if let Some(parent) = self.parent.as_mut() {
+            if parent.assign_to_owner(name, value.clone()) {
+                return true;
+            }
+        }
+        if self.variable_owners.contains(name) || self.forwarded_variable_owners.contains(name) {
+            self.set_value(name.to_string(), value);
+            return true;
+        }
+        false
+    }
+
+    fn has_forwarded_variable_owner(&self, name: &str) -> bool {
+        self.forwarded_variable_owners.contains(name)
+            || self
+                .parent
+                .as_deref()
+                .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
+    }
+
+    fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
+        if let Some(parent) = self.parent.as_deref() {
+            parent.collect_variable_owners(owners);
+        }
+        owners.extend(self.variable_owners.iter().cloned());
+        owners.extend(self.forwarded_variable_owners.iter().cloned());
     }
 
     fn snapshot_variables(&self) -> VariableStateSnapshot {
         VariableStateSnapshot {
             variables: self.variables.clone(),
             assigned_variables: self.assigned_variables.clone(),
+            variable_owners: self.variable_owners.clone(),
+            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
             parent: self
                 .parent
                 .as_deref()
@@ -757,6 +830,8 @@ impl<'a> EvaluationContext<'a> {
     fn restore_variables(&mut self, snapshot: &VariableStateSnapshot) {
         self.variables = snapshot.variables.clone();
         self.assigned_variables = snapshot.assigned_variables.clone();
+        self.variable_owners = snapshot.variable_owners.clone();
+        self.forwarded_variable_owners = snapshot.forwarded_variable_owners.clone();
         match (&mut self.parent, &snapshot.parent) {
             (Some(parent), Some(snapshot)) => parent.restore_variables(snapshot),
             (None, None) => {}
@@ -846,6 +921,8 @@ impl<'a> EvaluationContext<'a> {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         caller_context.collect_bindings(&mut variables, &mut functions);
+        let mut forwarded_variable_owners = BTreeSet::new();
+        caller_context.collect_variable_owners(&mut forwarded_variable_owners);
 
         Self {
             parent: Some(Box::new(definition_context)),
@@ -865,7 +942,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
             runtime: Rc::clone(&caller_context.runtime),
-            assigned_variables: BTreeSet::new(),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners,
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -4363,6 +4443,7 @@ impl Evaluator {
                 child.set_lambda_scope(LambdaScope::Explicit);
                 if let Some(parameters) = callable.parameters.as_deref() {
                     for (parameter, value) in parameters.iter().zip(values) {
+                        child.parameter_names.insert(parameter.name.clone());
                         child.set_value(parameter.name.clone(), value);
                     }
                 }
@@ -4374,9 +4455,7 @@ impl Evaluator {
         let outcome = self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
         if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
             for (name, value) in child.assigned_values() {
-                if caller_context.contains(&name) {
-                    caller_context.apply_callable_assignment(name, value);
-                }
+                caller_context.apply_callable_assignment(name, value);
             }
         }
         outcome
@@ -11587,7 +11666,7 @@ mod tests {
         let operation_span = span(0, 40);
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::new();
-        context.set_value("total".into(), IrValue::Number(0.0));
+        context.assign_value("total".into(), IrValue::Number(0.0));
 
         let increment = call_value(
             "sum",

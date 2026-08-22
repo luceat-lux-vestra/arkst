@@ -2099,6 +2099,54 @@ mod tests {
     }
 
     #[test]
+    fn compile_callable_var_updates_owner_without_overwriting_shadowing_parameter() {
+        let source = r#".var {x} {root}
+.function {setx}
+    .var {x} {changed}
+
+.let {param}
+    x:
+    .setx
+    .x
+
+.x
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "param\nchanged");
+    }
+
+    #[test]
+    fn compile_callable_var_does_not_treat_parameter_as_an_owner() {
+        let source = r#".function {setx}
+    .var {x} {changed}
+
+.let {param}
+    x:
+    .setx
+    .x
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "param");
+    }
+
+    #[test]
+    fn compile_callable_var_updates_caller_local_owner_without_definition_owner() {
+        let source = r#".function {setx}
+    .var {x} {changed}
+
+.let {outer}
+    .var {x} {caller}
+    .setx
+    .x
+"#;
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "changed");
+    }
+
+    #[test]
     fn compile_captured_callable_sees_caller_defined_function() {
         let source = r#".function {outer}
     .helper
