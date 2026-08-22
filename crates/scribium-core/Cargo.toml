@@ -11,6 +11,7 @@ description = "Core Scribium library: composition, semantics, evaluation, IR, an
 [dependencies]
 scribium-compat.workspace = true
 scribium-diagnostics.workspace = true
+scribium-ir.workspace = true
 scribium-markdown.workspace = true
 scribium-project.workspace = true
 scribium-quarkdown.workspace = true
