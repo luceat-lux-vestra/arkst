@@ -582,11 +582,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scribium-compat"
+version = "0.0.1"
+
+[[package]]
 name = "scribium-core"
 version = "0.0.1"
 dependencies = [
  "insta",
  "libm",
+ "scribium-compat",
  "scribium-diagnostics",
  "scribium-markdown",
  "scribium-project",

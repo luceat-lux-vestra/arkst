@@ -649,7 +649,7 @@ endless.
 
 - **Unsupported:** Syntax may be parsed and preserved, but normal compilation
   produces an explicit `E8xxx` error diagnostic for the unsupported semantics
-  (see `compatibility/diagnostics.rs`)
+  (see `crates/scribium-compat/src/diagnostics.rs`)
 - **Error:** Produces an explicit parse diagnostic (`E2xxx`) at the call site
 - **Parsed:** Accepted syntactically; behavior may be undefined or rejected
 - **Semantically supported:** Scribium semantics match documented behavior
