@@ -241,18 +241,6 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
-            IrNode::RawTypst { source, span } => {
-                let before = self.output.len();
-                let was_verbatim = std::mem::replace(&mut self.verbatim, true);
-                self.push_str(source);
-                if !source.ends_with('\n') {
-                    self.push('\n');
-                }
-                self.verbatim = was_verbatim;
-                if span.source_id != SourceId(0) {
-                    self.record_span(*span, self.output.len() - before);
-                }
-            }
             IrNode::RawHtml { .. } | IrNode::TargetSpecificContent { .. } => {
                 // Raw HTML is either rejected by core evaluation or consumed
                 // by a future HTML output backend. Typst/PDF intentionally

@@ -266,8 +266,6 @@ pub enum IrNode {
         source: String,
         span: SourceSpan,
     },
-    /// Raw Typst source — inserted verbatim into the output.
-    RawTypst { source: String, span: SourceSpan },
     /// Parser-owned raw HTML retained only while a function body can claim it
     /// as an opaque String argument. Ordinary document raw HTML is rejected
     /// before it reaches evaluated IR.

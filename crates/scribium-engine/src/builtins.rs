@@ -784,7 +784,6 @@ fn append_node_plain_text(node: &IrNode, output: &mut String) -> Option<()> {
         | IrNode::ChainedFunctionCall { .. }
         | IrNode::FunctionDeclaration { .. }
         | IrNode::Component { .. }
-        | IrNode::RawTypst { .. }
         | IrNode::RawHtml { .. }
         | IrNode::TargetSpecificContent { .. }
         | IrNode::ThematicBreak { .. }
