@@ -9,6 +9,7 @@ authors.workspace = true
 description = "Core Scribium library: composition, semantics, evaluation, IR, and source maps"
 
 [dependencies]
+scribium-compat.workspace = true
 scribium-diagnostics.workspace = true
 scribium-markdown.workspace = true
 scribium-project.workspace = true

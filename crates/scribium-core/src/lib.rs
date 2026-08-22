@@ -11,7 +11,6 @@
 /// - Compatibility profile selection and divergence tracking
 pub mod ast_to_ir;
 pub mod builtins;
-pub mod compatibility;
 pub mod evaluator;
 pub mod ir;
 pub mod source;
@@ -19,6 +18,8 @@ pub mod source_map;
 mod value_conversion;
 pub use scribium_project::virtual_project;
 
+// Compatibility facade: implementation ownership lives in scribium-compat.
+pub use scribium_compat as compatibility;
 // Compatibility facade: implementation ownership lives in scribium-diagnostics.
 pub use scribium_diagnostics as diagnostics;
 pub use scribium_diagnostics::{Diagnostic, Severity};

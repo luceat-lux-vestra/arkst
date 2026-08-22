@@ -2,8 +2,8 @@
 
 This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
-Quarkdown, and Markdown frontend boundary crates are now physically
-present; broader compiler-layer extraction remains migration work.
+compatibility, Quarkdown, and Markdown frontend boundary crates are now
+physically present; broader compiler-layer extraction remains migration work.
 Implementation and
 migration status must not be confused with target ownership.
 
@@ -240,10 +240,9 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
 
 These are target architectural boundaries. `scribium-source`,
-`scribium-project`, `scribium-diagnostics`, `scribium-quarkdown`, and
-`scribium-markdown` are
-physically extracted; the remaining engine/IR extraction is subsequent
-migration work.
+`scribium-project`, `scribium-diagnostics`, `scribium-compat`,
+`scribium-quarkdown`, and `scribium-markdown` are physically extracted; the
+remaining engine/IR extraction is subsequent migration work.
 
 ## Platform Independence
 
@@ -998,9 +997,9 @@ reliably. Fragment-level provenance or no primary location is preferable to a
 fabricated original-source span.
 
 The shared diagnostic representation is now physically implemented in
-`scribium-diagnostics`; the remaining engine/IR/compatibility/backend
-extraction is migration state. Target ownership and physical ownership now
-agree for this representation.
+`scribium-diagnostics`, and compatibility policy is physically implemented in
+`scribium-compat`; the remaining engine/IR/backend extraction is migration
+state. Target ownership and physical ownership now agree for these models.
 
 ## Configuration Model
 
