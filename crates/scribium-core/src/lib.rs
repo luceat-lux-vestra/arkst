@@ -12,7 +12,6 @@
 pub mod ast_to_ir;
 pub mod builtins;
 pub mod compatibility;
-pub mod diagnostics;
 pub mod evaluator;
 pub mod ir;
 pub mod source;
@@ -20,7 +19,9 @@ pub mod source_map;
 mod value_conversion;
 pub use scribium_project::virtual_project;
 
-pub use diagnostics::*;
+// Compatibility facade: implementation ownership lives in scribium-diagnostics.
+pub use scribium_diagnostics as diagnostics;
+pub use scribium_diagnostics::{Diagnostic, Severity};
 pub use source::*;
 // Compatibility facade: implementation ownership lives in scribium-project.
 pub use scribium_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
