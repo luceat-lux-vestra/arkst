@@ -805,11 +805,11 @@ mod tests {
     }
 
     #[test]
-    fn compile_let_isolates_local_variables_and_functions() {
+    fn compile_let_reassigns_outer_variable_and_isolates_local_functions() {
         let source = ".var {x} {outer}\n.let {inner}\n    value:\n    .var {x} {.value}\n    .x\n\n.x\n\n.let {hello}\n    value:\n    .function {local}\n        body:\n        .body\n\n.local\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-        assert_eq!(output_text(&result), "inner\nouter");
+        assert_eq!(output_text(&result), "inner\ninner");
         let Some(IrNode::FunctionCall { name, .. }) = result.ir.nodes.last() else {
             panic!("expected local function reference to remain outside the let scope")
         };
@@ -826,6 +826,14 @@ mod tests {
             assert!(result.diagnostics.is_empty(), "{result:?}");
             assert_eq!(output_text(&result), "2\n3\n4");
         }
+    }
+
+    #[test]
+    fn compile_foreach_reassignment_updates_existing_outer_variable() {
+        let source = ".var {total} {0}\n.foreach {1..2}\n    .var {total} {.total::sum {1}}\n    .total\n\n.total\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(output_text(&result), "1\n2\n2");
     }
 
     #[test]
