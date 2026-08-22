@@ -7,7 +7,7 @@
 //! construction, callable conversion, and layout consumers remain outside this
 //! policy.
 
-use crate::ir::{
+use scribium_ir::{
     IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
     IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
 };
@@ -1762,7 +1762,7 @@ mod tests {
         ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget,
         DomainValue, InvocationValue, ScalarTarget, ScalarValue,
     };
-    use crate::ir::{
+    use scribium_ir::{
         IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType,
         IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
         IrStackedLayout, IrValue,

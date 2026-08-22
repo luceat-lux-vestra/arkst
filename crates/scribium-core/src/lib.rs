@@ -1,21 +1,59 @@
+mod engine_adapter;
 /// `scribium-core` — Scribium's foundational library.
 ///
 /// Responsibilities:
-/// - Source abstraction and span management
 /// - Composition of the Markdown/Quarkdown frontend
-/// - Semantic analysis and scope resolution
-/// - Evaluator and built-in functions
-/// - Document IR (Intermediate Representation)
-/// - Source map construction and querying
-/// - Structured diagnostics with stable codes
-/// - Compatibility profile selection and divergence tracking
-pub mod ast_to_ir;
-pub mod builtins;
-pub mod evaluator;
+/// - Project-to-engine input adaptation
+/// - Compiler orchestration and public facade types
+/// - Document IR and shared diagnostic compatibility facades
 pub mod ir;
 pub mod source;
 pub mod source_map;
-mod value_conversion;
+
+// Compatibility facades: implementation ownership lives in scribium-engine.
+pub use scribium_engine::{builtins, evaluator};
+
+/// Compatibility facade for the AST-to-IR module.
+///
+/// The implementation is in `scribium-engine`; these small adapters preserve
+/// the historical core signatures that accepted project metadata and the
+/// core-private source-mode distinction.
+pub mod ast_to_ir {
+    use super::{engine_adapter, ProjectMetadata, SourceMode};
+    use scribium_diagnostics::Diagnostic;
+    use scribium_ir::IrDocument;
+    use scribium_markdown::ast::Document;
+    use scribium_source::SourceId;
+
+    pub fn ast_to_ir_with_diagnostics(
+        doc: &Document,
+        source_id: SourceId,
+        project_metadata: &ProjectMetadata,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        scribium_engine::ast_to_ir::ast_to_ir_with_diagnostics(
+            doc,
+            source_id,
+            &engine_adapter::document_metadata_defaults(project_metadata),
+        )
+    }
+
+    pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
+        doc: &Document,
+        source_id: SourceId,
+        project_metadata: &ProjectMetadata,
+        source_mode: SourceMode,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        scribium_engine::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            doc,
+            source_id,
+            &engine_adapter::document_metadata_defaults(project_metadata),
+            match source_mode {
+                SourceMode::Markdown => scribium_markdown::Mode::Markdown,
+                SourceMode::Quarkdown => scribium_markdown::Mode::Quarkdown,
+            },
+        )
+    }
+}
 pub use scribium_project::virtual_project;
 
 // Compatibility facade: implementation ownership lives in scribium-compat.
@@ -25,58 +63,8 @@ pub use scribium_diagnostics as diagnostics;
 pub use scribium_diagnostics::{Diagnostic, Severity};
 pub use source::*;
 // Compatibility facade: implementation ownership lives in scribium-project.
+pub use scribium_engine::{Capabilities, Capability};
 pub use scribium_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
-
-/// The closed evaluator capability set used by the compatibility pipeline.
-///
-/// This is deliberately narrow: granting native content authorizes creation
-/// of the opaque target-specific semantic payload, not execution, parsing, or
-/// access to any host capability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Capability {
-    NativeContent,
-}
-
-/// Explicit evaluator capabilities for one compilation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Capabilities {
-    native_content: bool,
-}
-
-impl Capabilities {
-    /// The normal Quarkdown-compatible default, matching v2.5.1.
-    pub const fn compatibility_default() -> Self {
-        Self {
-            native_content: true,
-        }
-    }
-
-    /// No optional evaluator capabilities are granted.
-    pub const fn none() -> Self {
-        Self {
-            native_content: false,
-        }
-    }
-
-    /// Returns a copy with NativeContent explicitly granted or denied.
-    pub const fn with_native_content(self, granted: bool) -> Self {
-        Self {
-            native_content: granted,
-        }
-    }
-
-    pub const fn allows(self, capability: Capability) -> bool {
-        match capability {
-            Capability::NativeContent => self.native_content,
-        }
-    }
-}
-
-impl Default for Capabilities {
-    fn default() -> Self {
-        Self::compatibility_default()
-    }
-}
 
 /// The Scribium core result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -157,14 +145,16 @@ pub fn compile_with_capabilities(
             scribium_markdown::parse_with_mode(source, scribium_markdown::Mode::Quarkdown)
         }
     };
+    let metadata_defaults = engine_adapter::document_metadata_defaults(project.metadata());
     let (ir, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
         &parsed.document,
         source_id,
         project.metadata(),
         source_mode,
     );
+    let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
     let (ir, evaluation_diagnostics) = evaluator::Evaluator::with_capabilities(capabilities)
-        .evaluate_project(project, source_id, &ir);
+        .evaluate_with_resources(&resource_provider, source_id, &ir, &metadata_defaults);
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()
