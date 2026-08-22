@@ -1,11 +1,9 @@
-pub mod asset_store;
-pub mod resource;
-pub mod source_store;
 pub mod span;
-pub mod virtual_path;
 
-pub use asset_store::*;
-pub use resource::*;
-pub use source_store::*;
+// Compatibility facade: implementation ownership lives in scribium-project.
+pub use scribium_project::{asset_store, resource, source_store, virtual_path};
+pub use scribium_project::{
+    AssetStore, AssetStoreError, ResourceAccessError, ResourceReference, SourceStore,
+    SourceStoreError, VirtualPathBuf, VirtualPathError,
+};
 pub use span::*;
-pub use virtual_path::*;

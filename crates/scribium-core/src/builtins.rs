@@ -1316,8 +1316,8 @@ mod tests {
     use crate::ir::{
         IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrValue,
     };
-    use crate::source::{SourceId, SourceSpan};
     use crate::value_conversion::InvocationValue;
+    use scribium_source::{SourceId, SourceSpan};
 
     fn number(value: f64) -> IrValue {
         IrValue::Number(value)
@@ -1326,9 +1326,9 @@ mod tests {
     fn named_arg(name: &str, value: IrValue) -> crate::ir::IrNamedArg {
         crate::ir::IrNamedArg {
             name: name.to_string(),
-            name_span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+            name_span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
             value,
-            span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+            span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
         }
     }
 
@@ -2417,11 +2417,11 @@ mod tests {
             content: vec![IrInline::Strong {
                 content: vec![IrInline::Text {
                     content: "rich".into(),
-                    span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+                    span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 4),
                 }],
-                span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+                span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 4),
             }],
-            span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+            span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 4),
         }]);
         assert!(evaluate("string", &[rich_content], &[], false).is_err());
         assert!(evaluate(
@@ -2494,9 +2494,9 @@ mod tests {
                 &[number(2.0)],
                 &[crate::ir::IrNamedArg {
                     name: "than".into(),
-                    name_span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+                    name_span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
                     value: number(3.0),
-                    span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 0),
+                    span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
                 }],
                 false,
             )
@@ -2540,15 +2540,19 @@ mod tests {
                         content: vec![IrInline::Strong {
                             content: vec![IrInline::Text {
                                 content: "same".into(),
-                                span: crate::source::SourceSpan::new(
-                                    crate::source::SourceId(0),
+                                span: scribium_source::SourceSpan::new(
+                                    scribium_source::SourceId(0),
                                     0,
                                     4,
                                 ),
                             }],
-                            span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4,),
+                            span: scribium_source::SourceSpan::new(
+                                scribium_source::SourceId(0),
+                                0,
+                                4,
+                            ),
                         }],
-                        span: crate::source::SourceSpan::new(crate::source::SourceId(0), 0, 4),
+                        span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 4),
                     }]),
                     IrValue::String("same".into()),
                 ],

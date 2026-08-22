@@ -2,7 +2,7 @@
 //!
 //! Provides in-memory storage for binary assets (fonts, images, etc.).
 
-use crate::source::virtual_path::VirtualPathBuf;
+use crate::VirtualPathBuf;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -90,7 +90,7 @@ impl AssetStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::virtual_path::VirtualPathBuf;
+    use crate::VirtualPathBuf;
 
     fn path(s: &str) -> VirtualPathBuf {
         VirtualPathBuf::parse(s).unwrap()

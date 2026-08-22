@@ -10,6 +10,7 @@ description = "Core Scribium library: composition, semantics, evaluation, IR, an
 
 [dependencies]
 scribium-markdown.workspace = true
+scribium-project.workspace = true
 scribium-quarkdown.workspace = true
 scribium-source.workspace = true
 serde.workspace = true

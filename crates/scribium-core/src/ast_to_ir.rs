@@ -9,12 +9,12 @@ use crate::ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
     IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
-use crate::source::{ByteSpan, ResourceReference, SourceId, SourceSpan};
-use crate::virtual_project::ProjectMetadata;
 use crate::SourceMode;
 use scribium_markdown::ast::{
     Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
 };
+use scribium_project::{ProjectMetadata, ResourceReference};
+use scribium_source::{ByteSpan, SourceId, SourceSpan};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
 ///
@@ -867,7 +867,7 @@ fn value_to_ir(
             } else {
                 let start = inlines.first().map(inline_span_start);
                 let end = inlines.last().map(inline_span_end);
-                let span = crate::source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
+                let span = scribium_source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
                 crate::ir::IrValue::Content(vec![IrNode::Paragraph {
                     content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
                     span: byte_to_source_span(&span, source_id),
@@ -954,7 +954,7 @@ fn inline_lambda_body_to_ir(
 fn push_unsupported(
     diagnostics: &mut Vec<Diagnostic>,
     feature: &str,
-    span: &crate::source::ByteSpan,
+    span: &scribium_source::ByteSpan,
     source_id: SourceId,
 ) {
     diagnostics.push(Diagnostic {
@@ -973,7 +973,7 @@ fn push_unsupported(
 
 fn image_resource_diagnostic(
     destination: &str,
-    span: &crate::source::ByteSpan,
+    span: &scribium_source::ByteSpan,
     source_id: SourceId,
 ) -> Option<Diagnostic> {
     let reference = ResourceReference::classify(destination);
@@ -1002,7 +1002,7 @@ fn image_resource_diagnostic(
 
 fn invalid_function_declaration(
     message: &str,
-    span: &crate::source::ByteSpan,
+    span: &scribium_source::ByteSpan,
     source_id: SourceId,
 ) -> Diagnostic {
     Diagnostic {
@@ -1049,14 +1049,14 @@ fn inline_span_end(inline: &Inline) -> usize {
     }
 }
 
-fn byte_to_source_span(byte_span: &crate::source::ByteSpan, source_id: SourceId) -> SourceSpan {
+fn byte_to_source_span(byte_span: &scribium_source::ByteSpan, source_id: SourceId) -> SourceSpan {
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{ByteSpan, SourceId};
     use scribium_markdown::ast::{FrontMatter, TableAlignment, TableCell, TableRow};
+    use scribium_source::{ByteSpan, SourceId};
 
     fn source_id() -> SourceId {
         SourceId(42)

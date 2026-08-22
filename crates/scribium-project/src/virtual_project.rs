@@ -7,10 +7,11 @@
 //! - Easy testing with in-memory fixtures
 //! - CLI and WASM builds from same core
 
-use crate::source::{
-    AssetStore, AssetStoreError, ResourceAccessError, ResourceReference, SourceId, SourceStore,
+use crate::{
+    AssetStore, AssetStoreError, ResourceAccessError, ResourceReference, SourceStore,
     SourceStoreError, VirtualPathBuf, VirtualPathError,
 };
+use scribium_source::SourceId;
 
 /// A compilation project with all sources and assets in memory.
 ///
@@ -205,7 +206,8 @@ impl ProjectMetadata {
 
 /// Builder for constructing a VirtualProject.
 ///
-/// Supports building from disk (CLI) or from memory (WASM/testing).
+/// Hosts load files and assets themselves before adding them to this builder;
+/// the builder itself only accepts in-memory data.
 #[derive(Default)]
 pub struct VirtualProjectBuilder {
     entry: Option<VirtualPathBuf>,
@@ -343,7 +345,7 @@ pub enum BuildError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::virtual_path::VirtualPathBuf;
+    use crate::VirtualPathBuf;
 
     #[test]
     fn build_requires_entry() {
@@ -519,11 +521,11 @@ mod tests {
 
         assert!(matches!(
             project.resolve_resource_path(source_id, "https://example.com/file"),
-            Err(crate::source::ResourceAccessError::UnsupportedReference { .. })
+            Err(crate::ResourceAccessError::UnsupportedReference { .. })
         ));
         assert!(matches!(
             project.resolve_resource_path(source_id, "../../secret"),
-            Err(crate::source::ResourceAccessError::Boundary(_))
+            Err(crate::ResourceAccessError::Boundary(_))
         ));
     }
 
@@ -542,7 +544,7 @@ mod tests {
 
         assert!(matches!(
             project.read_resource_text(source_id, "bad.bin"),
-            Err(crate::source::ResourceAccessError::InvalidUtf8 { .. })
+            Err(crate::ResourceAccessError::InvalidUtf8 { .. })
         ));
     }
 

@@ -572,6 +572,7 @@ dependencies = [
  "clap",
  "same-file",
  "scribium-core",
+ "scribium-project",
  "scribium-typst",
  "serde",
  "serde_json",
@@ -587,6 +588,7 @@ dependencies = [
  "insta",
  "libm",
  "scribium-markdown",
+ "scribium-project",
  "scribium-quarkdown",
  "scribium-source",
  "serde",
@@ -617,6 +619,14 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "scribium-project"
+version = "0.0.1"
+dependencies = [
+ "scribium-source",
+ "thiserror",
 ]
 
 [[package]]
