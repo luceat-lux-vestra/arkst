@@ -1,0 +1,17 @@
+[package]
+name = "scribium-typst-subprocess"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Native Typst CLI subprocess adapter for Scribium"
+
+[dependencies]
+scribium-project.workspace = true
+scribium-typst.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+scribium-core.workspace = true

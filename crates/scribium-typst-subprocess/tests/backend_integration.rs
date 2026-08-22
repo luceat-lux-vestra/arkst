@@ -14,9 +14,11 @@ use std::process::Command;
 
 use scribium_core::ir::{IrComponent, IrInline, IrNode, NativeTarget};
 use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-use scribium_typst::backend::TypstSourceContext;
-use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput};
 use scribium_typst::lowering::{lower_to_typst, lower_to_typst_code};
+use scribium_typst::{TypstBackend, TypstInput};
+#[cfg(unix)]
+use scribium_typst_subprocess::TypstError;
+use scribium_typst_subprocess::{SubprocessBackend, TypstSourceContext};
 use tempfile::tempdir;
 
 /// Locates a Typst executable, in order of preference:
@@ -649,7 +651,7 @@ fn integration_image_symlink_escape_is_rejected_before_typst() {
             .expect_err("image symlink escape must fail closed");
         assert!(matches!(
             result,
-            scribium_typst::backend::TypstError::ResourceBoundaryViolation(path)
+            TypstError::ResourceBoundaryViolation(path)
                 if path == "docs/assets/leak.svg"
         ));
     });

@@ -85,8 +85,9 @@ CLI integration tests:
 ## Typst Integration Tests
 
 Backend tests that invoke a **real** `typst` executable live in
-`crates/scribium-typst/tests/backend_integration.rs`, separate from the unit
-tests in `src/backend.rs` (which use fake executable fixtures and never
+`crates/scribium-typst-subprocess/tests/backend_integration.rs`, separate from
+the subprocess unit tests in `crates/scribium-typst-subprocess/src/lib.rs`
+(which use fake executable fixtures and never
 require a Typst install, so the ordinary Rust suite is environment-independent).
 
 The integration tests locate an executable via (in order) `SCRIBIUM_TYPST_PATH`,

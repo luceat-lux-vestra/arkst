@@ -74,3 +74,16 @@ pub struct GeneratedSpan {
     pub start: usize,
     pub end: usize,
 }
+
+/// An entry in a generated-source map linking output bytes to source input.
+///
+/// The representation is backend-neutral; a lowering backend owns the
+/// entries it produces while this crate owns their shared source-span type.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceMapEntry {
+    /// Range in generated output (byte offsets).
+    pub generated_start: usize,
+    pub generated_end: usize,
+    /// The original source span this generated range belongs to.
+    pub original: SourceSpan,
+}

@@ -5,7 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use scribium_project::{VirtualPathBuf, VirtualProject, VirtualProjectBuilder};
-use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput, TypstSourceContext};
+use scribium_typst::{TypstBackend, TypstInput};
+use scribium_typst_subprocess::{SubprocessBackend, TypstSourceContext};
 
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {

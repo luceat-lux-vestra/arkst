@@ -17,7 +17,7 @@ end-to-end Scribium compatibility claim.
 - Representative PDF fixture:
   [`fixtures/markdown/commonmark_gfm_baseline.md`](../../../fixtures/markdown/commonmark_gfm_baseline.md)
 - PDF integration coverage:
-  `crates/scribium-typst/tests/backend_integration.rs`
+  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
 - Frontend and source-span coverage:
   `crates/scribium-markdown/src/parser.rs` and
   `crates/scribium-markdown/tests/range_invariants.rs`
@@ -26,10 +26,10 @@ end-to-end Scribium compatibility claim.
 - Raw HTML semantic/diagnostic coverage:
   `crates/scribium-core/src/ast_to_ir.rs`,
   `crates/scribium-cli/src/commands.rs`, and
-  `crates/scribium-typst/tests/backend_integration.rs`
+  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
 - UTF-8/CRLF semantic break coverage:
   `crates/scribium-core/src/lib.rs` and
-  `crates/scribium-typst/tests/backend_integration.rs`
+  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
 
 The existing `KNOWN_UPSTREAM_SOUNDNESS_RISK_ACCEPTED` decision is unchanged.
 Rushdown remains the Markdown parser substrate; this audit introduces no

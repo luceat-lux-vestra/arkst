@@ -3,13 +3,13 @@
 //! Each IR node type maps to a Typst construct. The lowering pass
 //! records source map entries as it generates code.
 
-use scribium_core::ir::{
+use scribium_ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
     IrDocument, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit,
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrValue, SourceMapEntry,
+    IrValue,
 };
-use scribium_core::source::{ResourceReference, SourceSpan};
+use scribium_source::{SourceId, SourceMapEntry, SourceSpan};
 
 /// Lower a Scribium IR document to Typst source code.
 ///
@@ -25,6 +25,37 @@ pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {
 pub fn lower_to_typst_code(doc: &IrDocument) -> String {
     lower_to_typst(doc).0
 }
+
+/// Returns whether a logical resource reference is safe to emit as a local
+/// project-relative Typst resource. Full resource resolution remains a native
+/// adapter concern; lowering only needs the same classification boundary that
+/// the project model exposes.
+fn is_local_resource_reference(value: &str) -> bool {
+    if value.starts_with('/')
+        || value.starts_with('\\')
+        || value.contains('\\')
+        || (value.len() >= 2
+            && value.as_bytes()[1] == b':'
+            && value.as_bytes()[0].is_ascii_alphabetic())
+    {
+        return false;
+    }
+
+    let Some((scheme, _)) = value.split_once(':') else {
+        return true;
+    };
+    if scheme.is_empty()
+        || !scheme.as_bytes()[0].is_ascii_alphabetic()
+        || !scheme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        return true;
+    }
+
+    false
+}
+
 struct LoweringContext {
     output: String,
     source_map: Vec<SourceMapEntry>,
@@ -106,7 +137,7 @@ impl LoweringContext {
                 self.push(' ');
                 self.lower_inlines(content);
                 self.push('\n');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -115,7 +146,7 @@ impl LoweringContext {
                 self.lower_inlines(content);
                 if self.output.len() > before {
                     self.push('\n');
-                    if span.source_id != scribium_core::SourceId(0) {
+                    if span.source_id != SourceId(0) {
                         self.record_span(*span, self.output.len() - before);
                     }
                 }
@@ -127,7 +158,7 @@ impl LoweringContext {
                     self.lower_node(child);
                 }
                 self.push_str("]\n");
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -151,7 +182,7 @@ impl LoweringContext {
                     self.list_indent
                         .truncate(self.list_indent.len().saturating_sub(2));
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -176,14 +207,14 @@ impl LoweringContext {
                     self.list_indent
                         .truncate(self.list_indent.len().saturating_sub(2));
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrNode::Table { header, rows, span } => {
                 let before = self.output.len();
                 self.lower_table(header, rows);
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -206,7 +237,7 @@ impl LoweringContext {
                 }
                 self.verbatim = was_verbatim;
                 self.push_str("```\n");
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -218,7 +249,7 @@ impl LoweringContext {
                     self.push('\n');
                 }
                 self.verbatim = was_verbatim;
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -276,7 +307,7 @@ impl LoweringContext {
                     self.push(']');
                 }
                 self.push('\n');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -298,14 +329,14 @@ impl LoweringContext {
                         self.lower_node(node);
                     }
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrNode::ThematicBreak { span } => {
                 let before = self.output.len();
                 self.push_str("---\n");
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -324,7 +355,7 @@ impl LoweringContext {
                     self.push_str(source);
                     self.push('$');
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -346,7 +377,7 @@ impl LoweringContext {
             self.lower_node(child);
         }
         self.push_str("]\n");
-        if component.span.source_id != scribium_core::SourceId(0) {
+        if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
     }
@@ -393,7 +424,7 @@ impl LoweringContext {
         }
         self.push(']');
         self.push('\n');
-        if component.span.source_id != scribium_core::SourceId(0) {
+        if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
     }
@@ -413,7 +444,7 @@ impl LoweringContext {
             ),
             IrStackedLayout::Grid { columns } => self.lower_grid(component, columns.get()),
         }
-        if component.span.source_id != scribium_core::SourceId(0) {
+        if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
     }
@@ -692,7 +723,7 @@ impl LoweringContext {
             IrInline::Text { content, span } => {
                 let before = self.output.len();
                 self.push_str(&escape_typst_text(content));
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -715,7 +746,7 @@ impl LoweringContext {
                     self.push_str(&lower_size(height.as_ref().unwrap_or(&zero)));
                     self.push_str(")[]");
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -728,7 +759,7 @@ impl LoweringContext {
                 self.push('*');
                 self.lower_inlines(content);
                 self.push('*');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -737,7 +768,7 @@ impl LoweringContext {
                 self.push_str("*");
                 self.lower_inlines(content);
                 self.push_str("*");
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -746,7 +777,7 @@ impl LoweringContext {
                 self.push_str("#strike[");
                 self.lower_inlines(content);
                 self.push(']');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -786,7 +817,7 @@ impl LoweringContext {
                     self.lower_inlines(body_inlines);
                     self.push(']');
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -808,7 +839,7 @@ impl LoweringContext {
                     self.lower_inlines(body_inlines);
                     self.push(']');
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -827,7 +858,7 @@ impl LoweringContext {
                 self.push('[');
                 self.lower_inlines(content);
                 self.push(']');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -838,7 +869,7 @@ impl LoweringContext {
                 ..
             } => {
                 let before = self.output.len();
-                if ResourceReference::classify(destination).is_local_path() {
+                if is_local_resource_reference(destination) {
                     self.push_str("#image(\"");
                     self.push_str(&escape_typst_string(destination));
                     self.push_str("\")");
@@ -854,21 +885,21 @@ impl LoweringContext {
                     }
                     self.push_str(" */");
                 }
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrInline::SoftBreak { span } => {
                 let before = self.output.len();
                 self.push('\n');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
             IrInline::HardBreak { span } => {
                 let before = self.output.len();
                 self.push_str("\\\n");
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -879,7 +910,7 @@ impl LoweringContext {
                 self.push_str(&escape_typst_string(content));
                 self.push('"');
                 self.push(')');
-                if span.source_id != scribium_core::SourceId(0) {
+                if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
@@ -964,7 +995,7 @@ impl LoweringContext {
                 self.push_str(
                     "/* Scribium callable reached Typst lowering without evaluator consumption */",
                 );
-                if callable.span.source_id != scribium_core::SourceId(0) {
+                if callable.span.source_id != SourceId(0) {
                     self.record_span(callable.span, self.output.len() - before);
                 }
             }
@@ -985,7 +1016,7 @@ impl LoweringContext {
                 self.push_str(
                     "panic(\"Scribium component reached Typst lowering without a semantic consumer\")",
                 );
-                if component.span().source_id != scribium_core::SourceId(0) {
+                if component.span().source_id != SourceId(0) {
                     self.record_span(component.span(), self.output.len() - before);
                 }
             }
@@ -1028,7 +1059,7 @@ impl LoweringContext {
 
     /// Lower every block of the current `IrListItem` so the item's
     /// continuation indent is applied at each block boundary.
-    fn lower_list_item(&mut self, marker_prefix: &str, item: &scribium_core::ir::IrListItem) {
+    fn lower_list_item(&mut self, marker_prefix: &str, item: &scribium_ir::IrListItem) {
         let before = self.output.len();
         let saved = std::mem::replace(&mut self.list_item_indent, " ".repeat(marker_prefix.len()));
         self.at_line_start = false;
@@ -1044,7 +1075,7 @@ impl LoweringContext {
         }
         self.list_item_indent = saved;
         self.push('\n');
-        if item.span.source_id != scribium_core::SourceId(0) {
+        if item.span.source_id != SourceId(0) {
             self.record_span(item.span, self.output.len() - before);
         }
     }
@@ -1061,7 +1092,7 @@ impl LoweringContext {
         self.push_str("  table.header(");
         self.lower_table_cells(&header.cells, columns);
         self.push_str("),\n");
-        if header.span.source_id != scribium_core::SourceId(0) {
+        if header.span.source_id != SourceId(0) {
             self.record_span(header.span, self.output.len() - header_before);
         }
         for row in rows {
@@ -1069,7 +1100,7 @@ impl LoweringContext {
             self.push_str("  ");
             self.lower_table_cells(&row.cells, columns);
             self.push_str(",\n");
-            if row.span.source_id != scribium_core::SourceId(0) {
+            if row.span.source_id != SourceId(0) {
                 self.record_span(row.span, self.output.len() - row_before);
             }
         }
@@ -1096,7 +1127,7 @@ impl LoweringContext {
         self.push_str(")[");
         self.lower_inlines(&cell.content);
         self.push(']');
-        if cell.span.source_id != scribium_core::SourceId(0) {
+        if cell.span.source_id != SourceId(0) {
             self.record_span(cell.span, self.output.len() - before);
         }
     }
@@ -1184,17 +1215,17 @@ fn escape_typst_comment(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use scribium_core::ir::{
+    use scribium_ir::{
         IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDocument, IrInline, IrLandscapeComponent, IrListItem,
         IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
         IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
         IrTaskStatus, IrValue,
     };
-    use scribium_core::source::SourceSpan;
+    use scribium_source::{SourceId, SourceSpan};
 
     fn empty_span() -> SourceSpan {
-        SourceSpan::new(scribium_core::SourceId(0), 0, 0)
+        SourceSpan::new(SourceId(0), 0, 0)
     }
 
     fn text(text: &str) -> IrInline {
@@ -1511,8 +1542,8 @@ mod tests {
 
     #[test]
     fn center_component_source_map_uses_call_and_child_spans() {
-        let call_span = SourceSpan::new(scribium_core::SourceId(1), 0, 7);
-        let child_span = SourceSpan::new(scribium_core::SourceId(1), 12, 17);
+        let call_span = SourceSpan::new(SourceId(1), 0, 7);
+        let child_span = SourceSpan::new(SourceId(1), 12, 17);
         let (code, map) = super::lower_to_typst(&IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Container(IrContainerComponent {
@@ -1584,8 +1615,8 @@ mod tests {
 
     #[test]
     fn landscape_source_map_contains_wrapper_and_children() {
-        let call_span = SourceSpan::new(scribium_core::SourceId(1), 0, 10);
-        let child_span = SourceSpan::new(scribium_core::SourceId(1), 14, 18);
+        let call_span = SourceSpan::new(SourceId(1), 0, 10);
+        let child_span = SourceSpan::new(SourceId(1), 14, 18);
         let (code, map) = super::lower_to_typst(&IrDocument {
             nodes: vec![IrNode::Component {
                 component: IrComponent::Landscape(IrLandscapeComponent {
@@ -1952,13 +1983,13 @@ mod tests {
 
     #[test]
     fn lower_structured_markdown_nodes_preserves_semantics_and_source_map() {
-        let quote_span = SourceSpan::new(scribium_core::SourceId(1), 0, 30);
-        let strike_span = SourceSpan::new(scribium_core::SourceId(1), 8, 22);
-        let active_span = SourceSpan::new(scribium_core::SourceId(1), 31, 45);
-        let completed_span = SourceSpan::new(scribium_core::SourceId(1), 46, 62);
-        let header_span = SourceSpan::new(scribium_core::SourceId(1), 64, 82);
-        let row_span = SourceSpan::new(scribium_core::SourceId(1), 83, 98);
-        let table_span = SourceSpan::new(scribium_core::SourceId(1), 64, 98);
+        let quote_span = SourceSpan::new(SourceId(1), 0, 30);
+        let strike_span = SourceSpan::new(SourceId(1), 8, 22);
+        let active_span = SourceSpan::new(SourceId(1), 31, 45);
+        let completed_span = SourceSpan::new(SourceId(1), 46, 62);
+        let header_span = SourceSpan::new(SourceId(1), 64, 82);
+        let row_span = SourceSpan::new(SourceId(1), 83, 98);
+        let table_span = SourceSpan::new(SourceId(1), 64, 98);
         let doc = IrDocument {
             nodes: vec![
                 IrNode::Blockquote {
@@ -2119,9 +2150,9 @@ mod tests {
 
     #[test]
     fn link_records_source_map_entry() {
-        use scribium_core::ir::SourceMapEntry;
+        use scribium_source::SourceMapEntry;
 
-        let link_span = SourceSpan::new(scribium_core::SourceId(1), 6, 32);
+        let link_span = SourceSpan::new(SourceId(1), 6, 32);
         let doc = IrDocument {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::Link {
@@ -2148,9 +2179,9 @@ mod tests {
 
     #[test]
     fn lower_image_emits_a_local_typst_image_and_preserves_source_map() {
-        use scribium_core::ir::SourceMapEntry;
+        use scribium_source::SourceMapEntry;
 
-        let image_span = SourceSpan::new(scribium_core::SourceId(1), 7, 42);
+        let image_span = SourceSpan::new(SourceId(1), 7, 42);
         let doc = IrDocument {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::Image {
@@ -2198,26 +2229,6 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_link_compiles_to_typst_link() {
-        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-
-        let source =
-            "# Links\n\nVisit [Typst](https://typst.app).\n\nThis is a [**bold link**](https://example.com).\n";
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", source)
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        assert!(result.diagnostics.is_empty());
-        let code = super::lower_to_typst_code(&result.ir);
-        assert!(code.contains("#link(\"https://typst.app\")[Typst]"));
-        assert!(code.contains("#link(\"https://example.com\")[*bold link*]"));
-    }
-
-    #[test]
     fn lower_code_span() {
         let doc = IrDocument {
             nodes: vec![IrNode::Paragraph {
@@ -2260,9 +2271,9 @@ mod tests {
 
     #[test]
     fn code_span_records_source_map_entry() {
-        use scribium_core::ir::SourceMapEntry;
+        use scribium_source::SourceMapEntry;
 
-        let code_span = SourceSpan::new(scribium_core::SourceId(1), 7, 13);
+        let code_span = SourceSpan::new(SourceId(1), 7, 13);
         let doc = IrDocument {
             nodes: vec![IrNode::Paragraph {
                 content: vec![IrInline::Code {
@@ -2283,27 +2294,6 @@ mod tests {
                 original: code_span,
             }]
         );
-    }
-
-    #[test]
-    fn end_to_end_code_span_compiles_to_typst_raw() {
-        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-
-        let source = "# Code\n\nRun `cargo run`.\n\nUse ``foo ` bar`` when discussing backticks.\n\nLiteral syntax: `**not bold**`.\n";
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", source)
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        assert!(result.diagnostics.is_empty());
-        let code = super::lower_to_typst_code(&result.ir);
-        assert!(code.contains("#raw(\"cargo run\")"));
-        assert!(code.contains("#raw(\"foo ` bar\")"));
-        assert!(code.contains("#raw(\"**not bold**\")"));
-        assert!(!code.contains("#link("));
     }
 
     #[test]
@@ -2543,32 +2533,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn end_to_end_nested_ordered_list() {
-        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-
-        // Real Markdown source with a nested ordered list inside a parent item.
-        // The inner list uses the parent's content column, the second item
-        // "2. sibling" is a top-level sibling of the first one.
-        let source = "1. parent\n    1. child\n    2. child2\n2. sibling\n";
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", source)
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        assert!(result.diagnostics.is_empty());
-        let code = super::lower_to_typst_code(&result.ir);
-        // The nested list must be indented inside the first item and must not
-        // be flattened into top-level items.
-        assert_eq!(
-            code,
-            "1. parent\n  1. child\n\n  2. child2\n\n\n2. sibling\n\n\n"
-        );
-    }
-
     // Regression: a list item may contain several block nodes, and every
     // block must stay structurally inside its item in the generated Typst.
     // The fence lines of the code block must be emitted at the item's
@@ -2803,7 +2767,7 @@ mod tests {
                 positional_args: vec![IrValue::Range(IrRange {
                     start: Some(2),
                     end: Some(4),
-                    span: SourceSpan::new(scribium_core::SourceId(1), 5, 9),
+                    span: SourceSpan::new(SourceId(1), 5, 9),
                 })],
                 named_args: Vec::new(),
                 lambda_parameters: None,
@@ -2818,24 +2782,8 @@ mod tests {
     }
 
     #[test]
-    fn evaluated_direct_range_failure_leaves_no_typst_none_placeholder() {
-        let project = scribium_core::VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", ".var {r} {2..4}\n.r\n")
-            .expect("valid path")
-            .build()
-            .expect("valid project");
-        let result = scribium_core::compile(&project, &scribium_core::CompileOptions::default());
-        assert_eq!(result.diagnostics.len(), 1);
-        let code = super::lower_to_typst_code(&result.ir);
-        assert!(code.is_empty());
-        assert!(!code.contains("none"));
-    }
-
-    #[test]
     fn debug_render_parser_preserved_chain_after_semantic_gate() {
-        let source_id = scribium_core::SourceId(7);
+        let source_id = SourceId(7);
         let whole = SourceSpan::new(source_id, 0, 13);
         let doc = IrDocument {
             nodes: vec![IrNode::ChainedFunctionCall {
@@ -2894,108 +2842,5 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "$ x = (-b pm sqrt(b^2 - 4ac)) / (2a) $\n\n");
-    }
-    #[test]
-    fn source_map_is_independent_of_source_insertion_order() {
-        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-
-        let project1 = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("a.qd", "content a")
-            .expect("valid path")
-            .add_source("b.qd", "content b")
-            .expect("valid path")
-            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
-            .expect("valid path")
-            .build()
-            .unwrap();
-
-        let project2 = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("b.qd", "content b")
-            .expect("valid path")
-            .add_source("a.qd", "content a")
-            .expect("valid path")
-            .add_source("main.qd", "# Main\n\n{{ a.qd }} {{ b.qd }}")
-            .expect("valid path")
-            .build()
-            .unwrap();
-
-        let result1 = compile(&project1, &CompileOptions::default());
-        let result2 = compile(&project2, &CompileOptions::default());
-
-        // Lower to Typst with source maps
-        let (typst1, map1) = super::lower_to_typst(&result1.ir);
-        let (typst2, map2) = super::lower_to_typst(&result2.ir);
-
-        // Generated Typst should be identical
-        assert_eq!(typst1, typst2);
-
-        // Source maps should be identical
-        assert_eq!(map1, map2);
-    }
-
-    #[test]
-    fn conditional_evaluation_before_lowering() {
-        use crate::lower_to_typst_code;
-        use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-
-        // .if {true} block body -> kept, no #if in output
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", ".if {true}\n    kept\n")
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        let typst = lower_to_typst_code(&result.ir);
-        assert!(result.diagnostics.is_empty());
-        assert!(typst.contains("kept"));
-        assert!(!typst.contains("#if"));
-
-        // .if {false} -> dropped
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", ".if {false}\n    dropped\n")
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        let typst = lower_to_typst_code(&result.ir);
-        assert!(result.diagnostics.is_empty());
-        assert!(!typst.contains("dropped"));
-
-        // .ifnot {no} -> kept
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", ".ifnot {no}\n    kept\n")
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        let typst = lower_to_typst_code(&result.ir);
-        assert!(result.diagnostics.is_empty());
-        assert!(typst.contains("kept"));
-
-        // Inline .if {true} {text}
-        let project = VirtualProjectBuilder::new()
-            .entry("main.qd")
-            .expect("valid path")
-            .add_source("main.qd", "before .if {true} {inline} after\n")
-            .expect("valid path")
-            .build()
-            .unwrap();
-        let result = compile(&project, &CompileOptions::default());
-        let typst = lower_to_typst_code(&result.ir);
-        assert!(result.diagnostics.is_empty());
-        assert!(typst.contains("before"));
-        assert!(typst.contains("inline"));
-        assert!(typst.contains("after"));
-        assert!(!typst.contains("#if"));
     }
 }

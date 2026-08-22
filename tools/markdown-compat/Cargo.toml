@@ -18,6 +18,7 @@ quick-xml.workspace = true
 scribium-core.workspace = true
 scribium-markdown.workspace = true
 scribium-typst.workspace = true
+scribium-typst-subprocess.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
