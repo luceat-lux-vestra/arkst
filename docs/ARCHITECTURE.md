@@ -4,8 +4,9 @@ This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
 compatibility, Quarkdown, Markdown frontend, IR, engine, pure Typst lowering,
 and native Typst subprocess boundary crates are physically present. The
-remaining `scribium-core` role is orchestration and facade compatibility;
-`IrNode::RawTypst` remains unchanged and F-004 is not resolved here.
+remaining `scribium-core` role is orchestration and facade compatibility; R9
+physically removed the transitional `IrNode::RawTypst` escape hatch and
+resolved F-004.
 
 ## Context Diagram
 
@@ -640,11 +641,12 @@ Scribium semantics and `scribium-typst` translates those semantics into Typst.
 
 ### Migration Note
 
-The physically extracted `scribium-ir` still contains `IrNode::RawTypst`. This
-remains transitional debt under F-004 only; it does not represent accepted
-target ownership. Its eventual removal or elimination is a separate reviewed
-IR/backend compatibility task, not part of R6. PR #46 did not decide or
-implement that code migration.
+The physically extracted `scribium-ir` contains only backend-neutral semantic
+nodes. R9 removed the transitional `IrNode::RawTypst` escape hatch and its
+Typst lowering branch. The repository inventory found no supported persisted
+serialized artifact containing that variant, so removal required no
+compatibility decoder, migration layer, or IR versioning change. PR #46 did
+not decide or implement that code migration; R9 is the reviewed follow-up.
 
 ## HTML Interoperability Policy
 
@@ -885,8 +887,8 @@ The separate Quarkdown `.html` target-specific node defined by ADR-0018 is
 intentionally omitted by Typst/PDF lowering after evaluation; that omission
 must not be confused with dropping unsupported Markdown foreign content. No
 HTML payload may be passed directly into Typst source, sent to xberg from
-`scribium-typst`, or silently reinterpreted. `RawTypst` remains forbidden in
-backend-neutral IR; the
+`scribium-typst`, or silently reinterpreted. Typst-specific raw-source nodes
+remain forbidden in backend-neutral IR; the
 exact foreign-HTML diagnostic and policy are outside this section.
 
 The current physical `scribium-typst` implementation may still combine
@@ -1017,8 +1019,9 @@ fabricated original-source span.
 The shared diagnostic representation is physically implemented in
 `scribium-diagnostics`, compatibility policy in `scribium-compat`, the
 document IR in `scribium-ir`, and semantic compilation in `scribium-engine`.
-Backend extraction remains migration state. `RawTypst` remains transitional
-F-004 debt; R7 did not remove or redesign it. `SourceMapEntry` remains on the
+Backend extraction remains migration state. R9 physically resolved the
+transitional F-004 `RawTypst` debt without redesigning the IR or source maps.
+`SourceMapEntry` remains on the
 `scribium-core::ir` compatibility surface pending separate source-map
 ownership work. Target ownership and physical ownership now agree for the
 extracted models through the engine boundary.

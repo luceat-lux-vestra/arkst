@@ -239,11 +239,21 @@ re-exports, and Typst adapter placement.
 bug fixes and the migration itself can be reviewed independently, but the
 current evaluator should not continue growing without this checkpoint.
 
-### F-004 — P1 — `RawTypst` remains a backend escape hatch in public IR
+### F-004 — P1 — `RawTypst` backend escape hatch in public IR (resolved by R9)
 
 **Category:** IR neutrality, backend boundary, security/maintainability
 
-**Evidence**
+**Follow-up status:** **Resolved physically by R9.** The R9 inventory found
+only the enum definition, two engine match arms, and one Typst lowering branch
+in production; it found no producer, test-only construction, fixture, or
+supported persisted serialized artifact containing the variant. The existing
+serde-derived IR and CLI/conformance JSON surfaces therefore required no
+compatibility decoder, migration layer, or IR versioning change. R9 removed the
+variant and lowering path without introducing a replacement raw-backend or
+generic native-content escape hatch. The closed `TargetSpecificContent`
+(`NativeTarget::Html`) model was not changed.
+
+The following records the historical pre-extraction audit evidence:
 
 - `crates/scribium-core/src/ir.rs:269-270` exposes
   `IrNode::RawTypst { source: String, span: SourceSpan }` with the comment
@@ -255,7 +265,7 @@ current evaluator should not continue growing without this checkpoint.
   preserves the no-generic-backend-raw rule at
   `docs/adr/0016-full-quarkdown-compatibility-and-upstream-evolution.md:234-239`.
 
-**Impact**
+**Pre-R9 impact**
 
 Even if the current frontend does not construct this node for ordinary user
 input, a public/serde-visible IR variant permits manually constructed IR or a
@@ -263,7 +273,7 @@ future shortcut to bypass backend-neutral semantics and escaping. It keeps a
 forbidden backend-specific representation alive in the contract and makes a
 second backend or an IR extraction less fail-closed.
 
-**Recommendation**
+**Pre-R9 recommendation**
 
 Treat this as transitional debt in the IR migration: inventory any serialized
 or external consumers, add an explicit compatibility decision if old data
@@ -545,7 +555,8 @@ not be weakened while addressing F-002 or F-008:
 The current IR intentionally has one semantic model rather than a new HIR/MIR
 stack. `IrValue::Component`, `IrValue::Content`, unresolved calls, and block vs
 inline materializers are complementary positions in that model, not duplicate
-backend representations. The exception is `RawTypst`, covered by F-004.
+backend representations. R9 removed the former `RawTypst` exception; no
+backend-specific raw-source node remains.
 
 ### Frontend and HTML boundaries
 
@@ -581,9 +592,9 @@ those are not evidence of production user-input handling. The Markdown parser
 also catches a Rushdown panic at its boundary and returns `E9003` rather than
 letting a parser panic escape.
 
-The confirmed transitional code is the physical architecture in F-003 and the
-`RawTypst` variant in F-004. No deletion of helpers, fixtures, ADR history, or
-compatibility shims is recommended without separate usage/ownership evidence.
+The confirmed transitional code is the physical architecture in F-003. The
+`RawTypst` variant identified by F-004 was removed by R9 after the required
+usage and serialization inventory; ADR history remains unchanged.
 
 ## Baseline validation
 
@@ -638,6 +649,11 @@ These are independent, reviewable work units. None is part of this audit PR.
 | R8 | Correct hex alpha conversion and add consumer-level color evidence | Before any color/style consumer | Low-to-medium: verify public upstream representation | `value_conversion.rs`, tests, later style consumer | Yes for unrelated behavior | **Yes for color/style work only** |
 | R9 | Add diagnostic catalog/builders and secondary-span/de-duplication matrix tests | R5/R6 diagnostics ownership | Medium: message/code compatibility risk | diagnostics crate, evaluator/AST-to-IR/parser adapters | Yes if codes/messages are retained | No immediate block |
 | R10 | Measure callable/context copy costs and optimize only if evidence warrants | R4 resource instrumentation; after semantic contract stabilization | Medium: scope semantics can regress | evaluator benchmarks/instrumentation and context internals | Must be behavior-preserving | No immediate block; before large M3 collection growth |
+
+The `RawTypst` removal portion of the historical R7 recommendation is
+completed by R9. The table is retained as the audit's original remediation
+sequence; remaining R7 wording does not authorize a generic raw-backend
+replacement.
 
 The recommended ordering is therefore:
 

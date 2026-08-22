@@ -571,7 +571,6 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::OrderedList { span, .. }
         | IrNode::Table { span, .. }
         | IrNode::CodeBlock { span, .. }
-        | IrNode::RawTypst { span, .. }
         | IrNode::RawHtml { span, .. }
         | IrNode::FunctionCall { span, .. }
         | IrNode::ChainedFunctionCall { span, .. }
