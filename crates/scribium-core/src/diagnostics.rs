@@ -1,6 +1,6 @@
 //! Structured diagnostics with stable codes, severity, and source spans.
 
-use crate::source::SourceSpan;
+use scribium_source::SourceSpan;
 
 /// A structured diagnostic with stable code, severity, and source spans.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

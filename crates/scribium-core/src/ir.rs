@@ -3,7 +3,7 @@
 //! The IR is a flat sequence of evaluated nodes. Each node represents an already-resolved
 //! content fragment ready for code generation. Source spans are preserved throughout.
 
-use crate::source::SourceSpan;
+use scribium_source::SourceSpan;
 use std::num::NonZeroU32;
 
 /// A compiled document in intermediate representation.
@@ -577,7 +577,7 @@ mod tests {
         IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
         IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, TargetSpecificContent,
     };
-    use crate::source::{SourceId, SourceSpan};
+    use scribium_source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
 
     #[test]

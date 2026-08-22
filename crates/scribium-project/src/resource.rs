@@ -4,7 +4,8 @@
 //! resource context. This module deliberately does not resolve paths or touch
 //! the filesystem.
 
-use crate::source::{SourceId, VirtualPathBuf, VirtualPathError};
+use crate::{VirtualPathBuf, VirtualPathError};
+use scribium_source::SourceId;
 
 /// Failure while resolving or reading a logical project resource.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

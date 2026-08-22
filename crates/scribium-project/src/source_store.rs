@@ -2,8 +2,8 @@
 //!
 //! Provides in-memory storage for source files with efficient lookup.
 //! Uses existing SourceId for source identification.
-use crate::source::span::SourceId;
-use crate::source::virtual_path::VirtualPathBuf;
+use crate::VirtualPathBuf;
+use scribium_source::SourceId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -202,7 +202,7 @@ impl SourceStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::virtual_path::VirtualPathBuf;
+    use crate::VirtualPathBuf;
 
     #[test]
     fn insert_and_get_by_path() {

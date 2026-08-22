@@ -52,14 +52,14 @@ use crate::ir::{
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
     TargetSpecificContent,
 };
-use crate::source::{ResourceAccessError, SourceId, SourceSpan};
 use crate::value_conversion::{
     self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
 };
-use crate::VirtualProject;
 use crate::{Capabilities, Capability};
 use scribium_markdown::Mode;
+use scribium_project::{ResourceAccessError, VirtualProject};
 use scribium_quarkdown::is_valid_normal_call_name;
+use scribium_source::{SourceId, SourceSpan};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -743,8 +743,8 @@ impl EvaluationContext {
             .into_iter()
             .map(|name| IrParameter {
                 name,
-                name_span: SourceSpan::new(crate::source::SourceId(0), 0, 0),
-                span: SourceSpan::new(crate::source::SourceId(0), 0, 0),
+                name_span: SourceSpan::new(scribium_source::SourceId(0), 0, 0),
+                span: SourceSpan::new(scribium_source::SourceId(0), 0, 0),
                 optional: false,
             })
             .collect();
@@ -752,7 +752,7 @@ impl EvaluationContext {
             name,
             LambdaParameters::Explicit(parameters),
             Vec::new(),
-            SourceSpan::new(crate::source::SourceId(0), 0, 0),
+            SourceSpan::new(scribium_source::SourceId(0), 0, 0),
             None,
         );
     }
@@ -7716,7 +7716,7 @@ fn json_number_to_ir(value: &serde_json::Number) -> Result<IrValue, String> {
     Ok(IrValue::Number(value))
 }
 
-fn source_mode_for_resource_path(path: &crate::source::VirtualPathBuf) -> Mode {
+fn source_mode_for_resource_path(path: &scribium_project::VirtualPathBuf) -> Mode {
     let is_markdown = path
         .file_name()
         .and_then(|file_name| file_name.rsplit_once('.'))
@@ -8501,7 +8501,7 @@ mod tests {
         IrComponent, IrCrossAxisAlignment, IrListItem, IrMainAxisAlignment, IrSize, IrSizeUnit,
         IrStackedComponent, IrStackedLayout,
     };
-    use crate::source::SourceId;
+    use scribium_source::SourceId;
 
     fn span(start: usize, end: usize) -> SourceSpan {
         SourceSpan::new(SourceId(1), start, end)

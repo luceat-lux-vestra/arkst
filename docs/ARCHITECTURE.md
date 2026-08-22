@@ -1,8 +1,8 @@
 # Architecture — Scribium
 
 This document describes the accepted target architecture defined by ADR-0014,
-ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, Quarkdown, and Markdown
-frontend boundary crates are now physically present; project and broader
+ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, Quarkdown,
+and Markdown frontend boundary crates are now physically present; broader
 compiler-layer extraction remains migration work. Implementation and
 migration status must not be confused with target ownership.
 
@@ -239,8 +239,9 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
 
 These are target architectural boundaries. `scribium-source`,
-`scribium-quarkdown`, and `scribium-markdown` are physically extracted; the
-remaining project/engine/IR extraction is subsequent migration work.
+`scribium-project`, `scribium-quarkdown`, and `scribium-markdown` are
+physically extracted; the remaining engine/IR extraction is subsequent
+migration work.
 
 ## Platform Independence
 

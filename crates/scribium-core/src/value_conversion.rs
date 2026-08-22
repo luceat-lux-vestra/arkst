@@ -11,7 +11,7 @@ use crate::ir::{
     IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
     IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
 };
-use crate::source::SourceSpan;
+use scribium_source::SourceSpan;
 use std::ops::Deref;
 
 /// Origin of a value at a Quarkdown invocation boundary.
@@ -1767,7 +1767,7 @@ mod tests {
         IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
         IrStackedLayout, IrValue,
     };
-    use crate::source::{SourceId, SourceSpan};
+    use scribium_source::{SourceId, SourceSpan};
 
     fn span() -> SourceSpan {
         SourceSpan::new(SourceId(7), 10, 16)

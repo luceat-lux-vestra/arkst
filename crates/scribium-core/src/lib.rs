@@ -18,11 +18,12 @@ pub mod ir;
 pub mod source;
 pub mod source_map;
 mod value_conversion;
-pub mod virtual_project;
+pub use scribium_project::virtual_project;
 
 pub use diagnostics::*;
 pub use source::*;
-pub use virtual_project::*;
+// Compatibility facade: implementation ownership lives in scribium-project.
+pub use scribium_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
 
 /// The closed evaluator capability set used by the compatibility pipeline.
 ///
@@ -93,7 +94,7 @@ pub(crate) enum SourceMode {
     Quarkdown,
 }
 
-fn source_mode_for_entry(entry: &VirtualPathBuf) -> SourceMode {
+fn source_mode_for_entry(entry: &scribium_project::VirtualPathBuf) -> SourceMode {
     let is_markdown = entry
         .file_name()
         .and_then(|file_name| file_name.rsplit_once('.'))
@@ -110,13 +111,16 @@ fn source_mode_for_entry(entry: &VirtualPathBuf) -> SourceMode {
 /// Returns a `CompileResult` with the generated IR and diagnostics.
 /// The entry point source and its `SourceId` come from the project's
 /// `SourceStore`; no global ID generator is involved.
-pub fn compile(project: &VirtualProject, options: &CompileOptions) -> CompileResult {
+pub fn compile(
+    project: &scribium_project::VirtualProject,
+    options: &CompileOptions,
+) -> CompileResult {
     compile_with_capabilities(project, options, Capabilities::compatibility_default())
 }
 
 /// Compile a Scribium project with an explicit evaluator capability set.
 pub fn compile_with_capabilities(
-    project: &VirtualProject,
+    project: &scribium_project::VirtualProject,
     _options: &CompileOptions,
     capabilities: Capabilities,
 ) -> CompileResult {
@@ -166,7 +170,7 @@ pub fn compile_with_capabilities(
             code: d.code.to_string(),
             severity: Severity::Error,
             message: d.message,
-            primary: Some(SourceSpan {
+            primary: Some(scribium_source::SourceSpan {
                 source_id,
                 start: d.span.start,
                 end: d.span.end,
@@ -574,7 +578,7 @@ mod tests {
         };
         assert_eq!(
             first_span,
-            crate::source::SourceSpan::new(source_id, 0, source.find('\n').unwrap())
+            scribium_source::SourceSpan::new(source_id, 0, source.find('\n').unwrap())
         );
 
         let IrNode::Paragraph { content, .. } = &result.ir.nodes[1] else {
@@ -704,7 +708,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 range_start,
                 range_start + "2..4".len()
@@ -722,7 +726,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 range_start,
                 range_start + "2..4".len()
@@ -740,7 +744,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 range_start,
                 range_start + "2..4".len()
@@ -818,7 +822,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 0,
                 source.find("\r\n").expect("line ending")
@@ -836,7 +840,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 range_start,
                 range_start + "2..4".len()
@@ -1190,7 +1194,7 @@ mod tests {
         let nested_end = nested_start + ".multiply {true} {2}".len();
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 nested_start,
                 nested_end
@@ -1204,7 +1208,7 @@ mod tests {
         let range_end = range_start + ".range from:{3}".len();
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 range_start,
                 range_end
@@ -1338,7 +1342,7 @@ mod tests {
         let second_call = source.find(".docname {   }").expect("blank docname call");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 second_call,
                 second_call + ".docname {   }".len(),
@@ -1391,7 +1395,7 @@ mod tests {
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
             assert_eq!(
                 result.diagnostics[0].primary,
-                Some(crate::source::SourceSpan::new(
+                Some(scribium_source::SourceSpan::new(
                     source_id,
                     0,
                     source.trim_end().len(),
@@ -1486,7 +1490,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 source.find(".sum").expect("predicate call"),
                 source.find(".sum").expect("predicate call") + ".sum {.value} {1}".len()
@@ -1556,7 +1560,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 source.find(".divide").expect("nested divide call"),
                 source.find(".divide").expect("nested divide call")
@@ -1577,7 +1581,7 @@ mod tests {
         let call_end = call_start + ".truncate {12.34} decimals:{1.5}".len();
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id, call_start, call_end
             ))
         );
@@ -1595,7 +1599,7 @@ mod tests {
         let call_end = call_start + ".multiply {10} by:{true}".len();
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id, call_start, call_end
             ))
         );
@@ -1614,7 +1618,7 @@ mod tests {
         let call_end = call_start + ".startswith {Hello} {he} ignorecase:{maybe}".len();
         assert_eq!(
             diagnostic.primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id, call_start, call_end
             ))
         );
@@ -1644,7 +1648,7 @@ mod tests {
         assert_eq!(result.diagnostics[0].code, "E3003");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 0,
                 missing_value.trim_end().len()
@@ -1657,7 +1661,7 @@ mod tests {
         let reference_start = missing_implicit.find(".2").expect("implicit reference");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 reference_start,
                 reference_start + 2
@@ -1670,7 +1674,7 @@ mod tests {
         let first_start = multiple_parameters.find("first").expect("first parameter");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 first_start,
                 first_start + "first".len()
@@ -1751,7 +1755,11 @@ mod tests {
         let start = source.find(".2").expect("implicit parameter span");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(source_id, start, start + 2))
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                start,
+                start + 2
+            ))
         );
     }
 
@@ -2105,7 +2113,7 @@ mod tests {
         let start = source.find("unknown").expect("named argument name");
         assert_eq!(
             diagnostic.primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 start,
                 start + "unknown".len()
@@ -2166,7 +2174,7 @@ mod tests {
         let parameter_start = source.find("required").expect("required parameter");
         assert_eq!(
             diagnostic.primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 parameter_start,
                 parameter_start + "required".len()
@@ -2250,7 +2258,7 @@ mod tests {
         let failure_start = source.find(".sum").expect("callback failure span");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
                 failure_start + ".sum {true} {2}".len()
@@ -2268,7 +2276,7 @@ mod tests {
         let failure_start = source.find(".sum").expect("callback failure span");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
                 failure_start + ".sum {true} {2}".len()
@@ -2286,7 +2294,7 @@ mod tests {
         let failure_start = source.find(".sum").expect("callback failure span");
         assert_eq!(
             result.diagnostics[0].primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
                 failure_start + ".sum {true} {2}".len()
@@ -2455,7 +2463,7 @@ mod tests {
             assert!(diagnostic.message.contains("no semantic implementation"));
             assert_eq!(
                 diagnostic.primary,
-                Some(crate::source::SourceSpan::new(source_id, 0, 2))
+                Some(scribium_source::SourceSpan::new(source_id, 0, 2))
             );
             assert!(result.ir.nodes.is_empty());
         }
@@ -2935,19 +2943,25 @@ mod tests {
                 assert_eq!(first, "한글");
                 assert_eq!(second, "다음");
                 assert_eq!(third, "끝");
-                assert_eq!(*first_span, crate::source::SourceSpan::new(source_id, 0, 6));
-                assert_eq!(*soft_span, crate::source::SourceSpan::new(source_id, 6, 8));
+                assert_eq!(
+                    *first_span,
+                    scribium_source::SourceSpan::new(source_id, 0, 6)
+                );
+                assert_eq!(
+                    *soft_span,
+                    scribium_source::SourceSpan::new(source_id, 6, 8)
+                );
                 assert_eq!(
                     *second_span,
-                    crate::source::SourceSpan::new(source_id, 8, 14)
+                    scribium_source::SourceSpan::new(source_id, 8, 14)
                 );
                 assert_eq!(
                     *hard_span,
-                    crate::source::SourceSpan::new(source_id, 14, 18)
+                    scribium_source::SourceSpan::new(source_id, 14, 18)
                 );
                 assert_eq!(
                     *third_span,
-                    crate::source::SourceSpan::new(source_id, 18, 21)
+                    scribium_source::SourceSpan::new(source_id, 18, 21)
                 );
             }
             other => panic!("unexpected inline structure: {other:?}"),
@@ -3402,7 +3416,7 @@ mod tests {
         let comparison_end = comparison_start + ".islower {not-a-number} than:{3}".len();
         assert_eq!(
             diagnostic.primary,
-            Some(crate::source::SourceSpan::new(
+            Some(scribium_source::SourceSpan::new(
                 source_id,
                 comparison_start,
                 comparison_end,

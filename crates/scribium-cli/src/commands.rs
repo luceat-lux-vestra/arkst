@@ -4,13 +4,12 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use scribium_core::virtual_path::VirtualPathBuf;
-use scribium_core::VirtualProjectBuilder;
+use scribium_project::{VirtualPathBuf, VirtualProject, VirtualProjectBuilder};
 use scribium_typst::backend::{SubprocessBackend, TypstBackend, TypstInput, TypstSourceContext};
 
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {
-    project: scribium_core::VirtualProject,
+    project: VirtualProject,
     /// The path as requested by the user (logical path for output naming)
     requested_entry: PathBuf,
     /// Explicit physical source root passed to the native Typst backend.
@@ -232,9 +231,7 @@ fn collect_project_files(
 }
 
 /// Compiles a pre-loaded VirtualProject.
-fn compile_project(
-    project: &scribium_core::VirtualProject,
-) -> anyhow::Result<scribium_core::CompileResult> {
+fn compile_project(project: &VirtualProject) -> anyhow::Result<scribium_core::CompileResult> {
     let options = scribium_core::CompileOptions {
         compatibility_profile: None,
     };
