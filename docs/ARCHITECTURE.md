@@ -2,8 +2,8 @@
 
 This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
-compatibility, Quarkdown, and Markdown frontend boundary crates are now
-physically present; broader compiler-layer extraction remains migration work.
+compatibility, Quarkdown, Markdown frontend, and IR boundary crates are now
+physically present; engine and backend extraction remain migration work.
 Implementation and
 migration status must not be confused with target ownership.
 
@@ -241,8 +241,9 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 
 These are target architectural boundaries. `scribium-source`,
 `scribium-project`, `scribium-diagnostics`, `scribium-compat`,
-`scribium-quarkdown`, and `scribium-markdown` are physically extracted; the
-remaining engine/IR extraction is subsequent migration work.
+`scribium-quarkdown`, `scribium-markdown`, and `scribium-ir` are physically
+extracted; the remaining engine and backend extraction is subsequent migration
+work.
 
 ## Platform Independence
 
@@ -623,10 +624,11 @@ Scribium semantics and `scribium-typst` translates those semantics into Typst.
 
 ### Migration Note
 
-The current physical implementation still contains `IrNode::RawTypst`. This is
-a migration artifact only and does not represent accepted target ownership. It
-must be removed or eliminated during the later physical crate/IR migration;
-PR #46 does not decide or implement that code migration.
+The physically extracted `scribium-ir` still contains `IrNode::RawTypst`. This
+remains transitional debt under F-004 only; it does not represent accepted
+target ownership. Its eventual removal or elimination is a separate reviewed
+IR/backend compatibility task, not part of R6. PR #46 did not decide or
+implement that code migration.
 
 ## HTML Interoperability Policy
 
@@ -997,9 +999,13 @@ reliably. Fragment-level provenance or no primary location is preferable to a
 fabricated original-source span.
 
 The shared diagnostic representation is now physically implemented in
-`scribium-diagnostics`, and compatibility policy is physically implemented in
-`scribium-compat`; the remaining engine/IR/backend extraction is migration
-state. Target ownership and physical ownership now agree for these models.
+`scribium-diagnostics`, compatibility policy is physically implemented in
+`scribium-compat`, and the existing document IR is physically implemented in
+`scribium-ir`. The remaining engine and backend extraction is migration state.
+`RawTypst` remains transitional F-004 debt; this migration did not remove or
+redesign it. `SourceMapEntry` remains on the `scribium-core::ir` compatibility
+surface pending separate source-map ownership work. Target ownership and
+physical ownership now agree for the extracted models.
 
 ## Configuration Model
 

@@ -593,6 +593,7 @@ dependencies = [
  "libm",
  "scribium-compat",
  "scribium-diagnostics",
+ "scribium-ir",
  "scribium-markdown",
  "scribium-project",
  "scribium-quarkdown",
@@ -605,6 +606,15 @@ dependencies = [
 
 [[package]]
 name = "scribium-diagnostics"
+version = "0.0.1"
+dependencies = [
+ "scribium-source",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scribium-ir"
 version = "0.0.1"
 dependencies = [
  "scribium-source",

@@ -1,0 +1,16 @@
+[package]
+name = "scribium-ir"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Backend-neutral document IR for Scribium"
+
+[dependencies]
+scribium-source.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
