@@ -1,9 +1,9 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
-use crate::ir::{IrInline, IrNode, IrValue};
 use crate::value_conversion::{
     self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
 };
+use scribium_ir::{IrInline, IrNode, IrValue};
 
 type Arguments<'a> = &'a [InvocationValue];
 type NamedArguments<'a> = &'a [InvocationNamedArg];
@@ -377,7 +377,7 @@ pub(crate) fn lookup(name: &str) -> Option<&'static BuiltinSpec> {
 pub(crate) fn evaluate(
     name: &str,
     positional_args: &[IrValue],
-    named_args: &[crate::ir::IrNamedArg],
+    named_args: &[scribium_ir::IrNamedArg],
     has_body: bool,
 ) -> Result<IrValue, BuiltinError> {
     let positional = positional_args
@@ -793,7 +793,7 @@ fn append_node_plain_text(node: &IrNode, output: &mut String) -> Option<()> {
     Some(())
 }
 
-fn append_row_plain_text(row: &crate::ir::IrTableRow, output: &mut String) -> Option<()> {
+fn append_row_plain_text(row: &scribium_ir::IrTableRow, output: &mut String) -> Option<()> {
     for cell in &row.cells {
         for inline in &cell.content {
             append_inline_plain_text(inline, output)?;
@@ -1313,18 +1313,18 @@ mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
     };
-    use crate::ir::{
+    use crate::value_conversion::InvocationValue;
+    use scribium_ir::{
         IrCallable, IrDictionary, IrInline, IrNode, IrPair, IrRange, IrSize, IrSizeUnit, IrValue,
     };
-    use crate::value_conversion::InvocationValue;
     use scribium_source::{SourceId, SourceSpan};
 
     fn number(value: f64) -> IrValue {
         IrValue::Number(value)
     }
 
-    fn named_arg(name: &str, value: IrValue) -> crate::ir::IrNamedArg {
-        crate::ir::IrNamedArg {
+    fn named_arg(name: &str, value: IrValue) -> scribium_ir::IrNamedArg {
+        scribium_ir::IrNamedArg {
             name: name.to_string(),
             name_span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
             value,
@@ -2492,7 +2492,7 @@ mod tests {
             evaluate(
                 "islower",
                 &[number(2.0)],
-                &[crate::ir::IrNamedArg {
+                &[scribium_ir::IrNamedArg {
                     name: "than".into(),
                     name_span: scribium_source::SourceSpan::new(scribium_source::SourceId(0), 0, 0),
                     value: number(3.0),

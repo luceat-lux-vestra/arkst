@@ -4,16 +4,16 @@
 //! (evaluator input / lowering input). It preserves semantic values and call
 //! structure for the evaluator without rewriting source text.
 
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::ir::{
+use crate::DocumentMetadataDefaults;
+use scribium_diagnostics::{Diagnostic, Severity};
+use scribium_ir::{
     IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
     IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
-use crate::SourceMode;
 use scribium_markdown::ast::{
     Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
 };
-use scribium_project::{ProjectMetadata, ResourceReference};
+use scribium_markdown::Mode;
 use scribium_source::{ByteSpan, SourceId, SourceSpan};
 
 /// Convert a parsed Markdown `Document` into an `IrDocument`.
@@ -25,7 +25,7 @@ use scribium_source::{ByteSpan, SourceId, SourceSpan};
 fn ast_to_ir(
     doc: &Document,
     source_id: SourceId,
-    project_metadata: &ProjectMetadata,
+    project_metadata: &DocumentMetadataDefaults,
 ) -> IrDocument {
     ast_to_ir_with_diagnostics(doc, source_id, project_metadata).0
 }
@@ -35,16 +35,16 @@ fn ast_to_ir(
 pub fn ast_to_ir_with_diagnostics(
     doc: &Document,
     source_id: SourceId,
-    project_metadata: &ProjectMetadata,
+    project_metadata: &DocumentMetadataDefaults,
 ) -> (IrDocument, Vec<Diagnostic>) {
-    ast_to_ir_with_diagnostics_for_mode(doc, source_id, project_metadata, SourceMode::Markdown)
+    ast_to_ir_with_diagnostics_for_mode(doc, source_id, project_metadata, Mode::Markdown)
 }
 
-pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
+pub fn ast_to_ir_with_diagnostics_for_mode(
     doc: &Document,
     source_id: SourceId,
-    project_metadata: &ProjectMetadata,
-    source_mode: SourceMode,
+    project_metadata: &DocumentMetadataDefaults,
+    source_mode: Mode,
 ) -> (IrDocument, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
     let nodes: Vec<IrNode> = doc
@@ -54,10 +54,10 @@ pub(crate) fn ast_to_ir_with_diagnostics_for_mode(
         .collect();
 
     // Start with project metadata as defaults
-    let mut title = project_metadata.title().map(|s| s.to_string());
-    let mut author = project_metadata.author().map(|s| s.to_string());
-    let mut date = project_metadata.date().map(|s| s.to_string());
-    let mut raw = project_metadata.fields().to_vec();
+    let mut title = project_metadata.title.clone();
+    let mut author = project_metadata.author.clone();
+    let mut date = project_metadata.date.clone();
+    let mut raw = project_metadata.fields.clone();
 
     // Override with front matter if present
     if let Some(ref fm) = doc.front_matter {
@@ -97,7 +97,7 @@ fn block_to_ir(
     block: &Block,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     function_body: bool,
 ) -> Option<IrNode> {
     match block {
@@ -268,7 +268,7 @@ fn block_to_ir(
             span: byte_to_source_span(span, source_id),
         }),
         Block::RawHtml { source, span } => {
-            if source_mode == SourceMode::Markdown && is_comment_only_raw_html_block(source) {
+            if source_mode == Mode::Markdown && is_comment_only_raw_html_block(source) {
                 return None;
             }
             push_unsupported(diagnostics, "raw HTML block", span, source_id);
@@ -303,7 +303,7 @@ fn list_item_to_ir(
     item: &scribium_markdown::ast::ListItem,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     function_body: bool,
 ) -> IrListItem {
     IrListItem {
@@ -330,7 +330,7 @@ fn table_row_to_ir(
     row: &scribium_markdown::ast::TableRow,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     function_body: bool,
 ) -> IrTableRow {
     IrTableRow {
@@ -366,7 +366,7 @@ fn call_segment_to_ir(
     segment: &CallSegment,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
 ) -> IrCallSegment {
     IrCallSegment {
         name: segment.name.clone(),
@@ -394,14 +394,14 @@ fn inlines_to_ir(
     inlines: &[Inline],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     function_body: bool,
 ) -> Vec<IrInline> {
     let mut output = Vec::new();
-    let html_pairs = (source_mode == SourceMode::Markdown).then(|| raw_html_pairs(inlines));
+    let html_pairs = (source_mode == Mode::Markdown).then(|| raw_html_pairs(inlines));
     let mut index = 0;
     while index < inlines.len() {
-        if source_mode == SourceMode::Markdown {
+        if source_mode == Mode::Markdown {
             if let Inline::RawHtml { content, span } = &inlines[index] {
                 match classify_raw_html(content) {
                     Some(RawHtmlToken::Comment) => {
@@ -632,7 +632,7 @@ fn inline_to_ir(
     inline: &Inline,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     function_body: bool,
 ) -> Option<IrInline> {
     match inline {
@@ -737,7 +737,7 @@ fn inline_to_ir(
             title,
             span,
         } => {
-            if source_mode == SourceMode::Markdown {
+            if source_mode == Mode::Markdown {
                 if let Some(diagnostic) = image_resource_diagnostic(destination, span, source_id) {
                     diagnostics.push(diagnostic);
                 }
@@ -774,20 +774,20 @@ fn value_to_ir(
     value: &Value,
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
-) -> crate::ir::IrValue {
+    source_mode: Mode,
+) -> scribium_ir::IrValue {
     match value {
-        Value::String(s) => crate::ir::IrValue::String(s.clone()),
-        Value::Number(n) => crate::ir::IrValue::Number(*n),
-        Value::Boolean(b) => crate::ir::IrValue::Boolean(*b),
-        Value::Identifier(id) => crate::ir::IrValue::Identifier(id.clone()),
+        Value::String(s) => scribium_ir::IrValue::String(s.clone()),
+        Value::Number(n) => scribium_ir::IrValue::Number(*n),
+        Value::Boolean(b) => scribium_ir::IrValue::Boolean(*b),
+        Value::Identifier(id) => scribium_ir::IrValue::Identifier(id.clone()),
         Value::Range(range) => {
             // The literal grammar intentionally accepts only non-negative
             // decimal endpoints. Quarkdown's v2.5.1 Range factory stores
             // endpoints through `toIntOrNull`: an out-of-domain literal does
             // not wrap, but becomes an open endpoint. Preserve that observed
             // behavior with an explicit checked conversion.
-            crate::ir::IrValue::Range(IrRange {
+            scribium_ir::IrValue::Range(IrRange {
                 start: range.start.and_then(|value| i32::try_from(value).ok()),
                 end: range.end.and_then(|value| i32::try_from(value).ok()),
                 span: byte_to_source_span(&range.span, source_id),
@@ -797,7 +797,7 @@ fn value_to_ir(
             parameters,
             body,
             span,
-        } => crate::ir::IrValue::Callable(crate::ir::IrCallable {
+        } => scribium_ir::IrValue::Callable(scribium_ir::IrCallable {
             parameters: parameters
                 .as_ref()
                 .map(|header| lambda_parameters_to_ir(header, source_id)),
@@ -837,7 +837,7 @@ fn value_to_ir(
                     }]
                 });
                 if chain.is_empty() {
-                    crate::ir::IrValue::Content(vec![IrNode::FunctionCall {
+                    scribium_ir::IrValue::Content(vec![IrNode::FunctionCall {
                         name: name.clone(),
                         positional_args: ir_positional,
                         named_args: ir_named,
@@ -846,7 +846,7 @@ fn value_to_ir(
                         span: byte_to_source_span(span, source_id),
                     }])
                 } else {
-                    crate::ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
+                    scribium_ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
                         head: IrCallSegment {
                             name: name.clone(),
                             name_span: byte_to_source_span(name_span, source_id),
@@ -868,7 +868,7 @@ fn value_to_ir(
                 let start = inlines.first().map(inline_span_start);
                 let end = inlines.last().map(inline_span_end);
                 let span = scribium_source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
-                crate::ir::IrValue::Content(vec![IrNode::Paragraph {
+                scribium_ir::IrValue::Content(vec![IrNode::Paragraph {
                     content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
                     span: byte_to_source_span(&span, source_id),
                 }])
@@ -881,7 +881,7 @@ fn inline_lambda_body_to_ir(
     body: &[Inline],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
-    source_mode: SourceMode,
+    source_mode: Mode,
     fallback_span: ByteSpan,
 ) -> Vec<IrNode> {
     match body {
@@ -976,28 +976,55 @@ fn image_resource_diagnostic(
     span: &scribium_source::ByteSpan,
     source_id: SourceId,
 ) -> Option<Diagnostic> {
-    let reference = ResourceReference::classify(destination);
-    let message = match reference {
-        ResourceReference::LocalPath(_) => return None,
-        ResourceReference::AbsolutePath(_) => {
+    if image_reference_is_local(destination) {
+        None
+    } else {
+        let message = if image_reference_is_absolute_or_platform_path(destination) {
             "absolute or platform-specific Markdown image resource paths are not allowed"
                 .to_string()
-        }
-        ResourceReference::Uri { scheme, .. } => {
+        } else {
+            let scheme = image_reference_uri_scheme(destination)?;
             format!("unsupported Markdown image resource scheme: {scheme}")
-        }
-    };
-    Some(Diagnostic {
-        code: "E8001".to_string(),
-        severity: Severity::Error,
-        message,
-        primary: Some(byte_to_source_span(span, source_id)),
-        secondary: Vec::new(),
-        hints: vec![
-            "Use a project-relative local image path; network and absolute resources are not fetched by Scribium."
-                .to_string(),
-        ],
-    })
+        };
+        Some(Diagnostic {
+            code: "E8001".to_string(),
+            severity: Severity::Error,
+            message,
+            primary: Some(byte_to_source_span(span, source_id)),
+            secondary: Vec::new(),
+            hints: vec![
+                "Use a project-relative local image path; network and absolute resources are not fetched by Scribium."
+                    .to_string(),
+            ],
+        })
+    }
+}
+
+fn image_reference_is_local(value: &str) -> bool {
+    !image_reference_is_absolute_or_platform_path(value)
+        && image_reference_uri_scheme(value).is_none()
+}
+
+fn image_reference_is_absolute_or_platform_path(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with('\\')
+        || value.contains('\\')
+        || (value.len() >= 2
+            && value.as_bytes()[1] == b':'
+            && value.as_bytes()[0].is_ascii_alphabetic())
+}
+
+fn image_reference_uri_scheme(value: &str) -> Option<String> {
+    let (scheme, _) = value.split_once(':')?;
+    if scheme.is_empty()
+        || !scheme.as_bytes()[0].is_ascii_alphabetic()
+        || !scheme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        return None;
+    }
+    Some(scheme.to_ascii_lowercase())
 }
 
 fn invalid_function_declaration(
@@ -1066,8 +1093,8 @@ mod tests {
         ByteSpan::new(start, end)
     }
 
-    fn empty_project_metadata() -> ProjectMetadata {
-        ProjectMetadata::default()
+    fn empty_project_metadata() -> DocumentMetadataDefaults {
+        DocumentMetadataDefaults::default()
     }
 
     #[test]
@@ -1122,7 +1149,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Quarkdown,
+            Mode::Quarkdown,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::ChainedFunctionCall {
@@ -1152,7 +1179,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Quarkdown,
+            Mode::Quarkdown,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionCall {
@@ -1187,7 +1214,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Quarkdown,
+            Mode::Quarkdown,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let IrNode::FunctionCall {
@@ -1220,7 +1247,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Quarkdown,
+                Mode::Quarkdown,
             );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let IrNode::FunctionCall {
@@ -1233,7 +1260,7 @@ mod tests {
             };
             assert!(matches!(
                 positional_args.as_slice(),
-                [crate::ir::IrValue::Range(crate::ir::IrRange {
+                [scribium_ir::IrValue::Range(scribium_ir::IrRange {
                     start,
                     end,
                     span,
@@ -1260,7 +1287,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Quarkdown,
+                Mode::Quarkdown,
             );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let IrNode::FunctionCall {
@@ -1271,7 +1298,7 @@ mod tests {
             };
             assert!(matches!(
                 positional_args.as_slice(),
-                [crate::ir::IrValue::Range(crate::ir::IrRange { start, end, .. })]
+                [scribium_ir::IrValue::Range(scribium_ir::IrRange { start, end, .. })]
                     if *start == expected_start && *end == expected_end
             ));
         }
@@ -1307,13 +1334,13 @@ mod tests {
             panic!("expected Range in Markdown AST")
         }
 
-        fn ir_range_span(document: &crate::ir::IrDocument) -> SourceSpan {
+        fn ir_range_span(document: &scribium_ir::IrDocument) -> SourceSpan {
             for node in &document.nodes {
                 match node {
                     IrNode::FunctionCall {
                         positional_args, ..
                     } => {
-                        if let Some(crate::ir::IrValue::Range(range)) = positional_args.first() {
+                        if let Some(scribium_ir::IrValue::Range(range)) = positional_args.first() {
                             return range.span;
                         }
                     }
@@ -1323,7 +1350,7 @@ mod tests {
                                 positional_args, ..
                             } = inline
                             {
-                                if let Some(crate::ir::IrValue::Range(range)) =
+                                if let Some(scribium_ir::IrValue::Range(range)) =
                                     positional_args.first()
                                 {
                                     return range.span;
@@ -1350,7 +1377,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Quarkdown,
+                Mode::Quarkdown,
             );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let ir_span = ir_range_span(&ir);
@@ -1745,7 +1772,7 @@ mod tests {
             &doc,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(
             diagnostics.is_empty(),
@@ -1886,7 +1913,7 @@ mod tests {
             &doc,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
 
         let paragraph = ir
@@ -1942,7 +1969,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(
             diagnostics.is_empty(),
@@ -1980,7 +2007,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert_eq!(diagnostics.len(), 1, "destination {destination:?}");
             assert_eq!(diagnostics[0].code, "E8001");
@@ -1995,7 +2022,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Quarkdown,
+            Mode::Quarkdown,
         );
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "E8001" && diagnostic.message.contains("image")
@@ -2011,7 +2038,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(
             diagnostics.is_empty(),
@@ -2051,7 +2078,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
 
@@ -2068,7 +2095,7 @@ mod tests {
             &nested_document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(nested_diagnostics.is_empty(), "{nested_diagnostics:?}");
         let IrNode::Paragraph {
@@ -2106,7 +2133,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert_eq!(diagnostics.len(), expected_raw.len(), "{source:?}");
             assert!(
@@ -2149,7 +2176,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
             let IrNode::Paragraph { content, .. } = &ir.nodes[0] else {
@@ -2182,7 +2209,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
             assert!(matches!(
@@ -2198,7 +2225,7 @@ mod tests {
             &document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
         assert!(diagnostics
@@ -2223,7 +2250,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
             assert!(ir.nodes.is_empty(), "{source:?}: {:?}", ir.nodes);
@@ -2241,7 +2268,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             assert_eq!(ir.nodes.len(), 0, "{source:?}: {:?}", ir.nodes);
             assert_eq!(diagnostics.len(), 1, "{source:?}: {diagnostics:?}");
@@ -2264,7 +2291,7 @@ mod tests {
                 &document,
                 source_id(),
                 &empty_project_metadata(),
-                SourceMode::Markdown,
+                Mode::Markdown,
             );
             if source.starts_with("<span>") {
                 assert!(matches!(
@@ -2294,7 +2321,7 @@ mod tests {
             &lists,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(list_diagnostics.is_empty(), "{list_diagnostics:?}");
         assert!(matches!(
@@ -2307,7 +2334,7 @@ mod tests {
             &list_and_code,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert!(code_diagnostics.is_empty(), "{code_diagnostics:?}");
         assert!(matches!(
@@ -2324,7 +2351,7 @@ mod tests {
             &inline_document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert_eq!(inline_diagnostics.len(), 2, "{inline_diagnostics:?}");
         assert!(inline_diagnostics
@@ -2346,7 +2373,7 @@ mod tests {
             &block_document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert_eq!(block_diagnostics.len(), 1, "{block_diagnostics:?}");
         let block_span = block_diagnostics[0]
@@ -2364,7 +2391,7 @@ mod tests {
             &ambiguous_document,
             source_id(),
             &empty_project_metadata(),
-            SourceMode::Markdown,
+            Mode::Markdown,
         );
         assert_eq!(ambiguous_diagnostics.len(), 3, "{ambiguous_diagnostics:?}");
         let IrNode::Paragraph { content, .. } = &ambiguous_ir.nodes[0] else {

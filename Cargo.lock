@@ -593,10 +593,10 @@ dependencies = [
  "libm",
  "scribium-compat",
  "scribium-diagnostics",
+ "scribium-engine",
  "scribium-ir",
  "scribium-markdown",
  "scribium-project",
- "scribium-quarkdown",
  "scribium-source",
  "serde",
  "serde_json",
@@ -611,6 +611,23 @@ dependencies = [
  "scribium-source",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "scribium-engine"
+version = "0.0.1"
+dependencies = [
+ "insta",
+ "libm",
+ "scribium-compat",
+ "scribium-diagnostics",
+ "scribium-ir",
+ "scribium-markdown",
+ "scribium-quarkdown",
+ "scribium-source",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

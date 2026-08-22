@@ -42,9 +42,15 @@
 //! segments continue in source order. No source or backend text is generated
 //! during this process.
 
-use crate::builtins;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::ir::{
+use crate::value_conversion::{
+    self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
+};
+use crate::{ast_to_ir, builtins};
+use crate::{
+    Capabilities, Capability, IncludedSource, ResourceAccessError, ResourceProvider, ResourceText,
+};
+use scribium_diagnostics::{Diagnostic, Severity};
+use scribium_ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
     IrDocument, IrEnumValue, IrInline, IrLandscapeComponent, IrListItem, IrMainAxisAlignment,
@@ -52,12 +58,7 @@ use crate::ir::{
     IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
     TargetSpecificContent,
 };
-use crate::value_conversion::{
-    self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
-};
-use crate::{Capabilities, Capability};
 use scribium_markdown::Mode;
-use scribium_project::{ResourceAccessError, VirtualProject};
 use scribium_quarkdown::is_valid_normal_call_name;
 use scribium_source::{SourceId, SourceSpan};
 use std::cell::RefCell;
@@ -318,11 +319,11 @@ enum CallOutcome {
 struct DocumentState {
     name: String,
     description: String,
-    document_type: crate::ir::IrDocumentType,
+    document_type: scribium_ir::IrDocumentType,
 }
 
 impl DocumentState {
-    fn from_snapshot(snapshot: &crate::ir::IrDocumentState) -> Self {
+    fn from_snapshot(snapshot: &scribium_ir::IrDocumentState) -> Self {
         Self {
             name: snapshot.name.clone(),
             description: snapshot.description.clone(),
@@ -330,8 +331,8 @@ impl DocumentState {
         }
     }
 
-    fn snapshot(&self) -> crate::ir::IrDocumentState {
-        crate::ir::IrDocumentState {
+    fn snapshot(&self) -> scribium_ir::IrDocumentState {
+        scribium_ir::IrDocumentState {
             name: self.name.clone(),
             description: self.description.clone(),
             document_type: self.document_type,
@@ -589,19 +590,20 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
 /// the visible parent context at creation time and local writes stay in the
 /// child. The snapshot is deliberate: a lambda observes the bindings visible
 /// when it is entered, while its local declarations cannot leak back.
-#[derive(Debug, Clone, Default)]
-struct EvaluationContext {
-    parent: Option<Box<EvaluationContext>>,
+#[derive(Clone, Default)]
+struct EvaluationContext<'a> {
+    parent: Option<Box<EvaluationContext<'a>>>,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, FunctionBinding>,
     lambda_scope: Option<LambdaScope>,
-    project: Option<VirtualProject>,
+    resources: Option<&'a dyn ResourceProvider>,
+    metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
     active_sources: Vec<SourceId>,
     document_state: Rc<RefCell<DocumentState>>,
 }
 
-impl EvaluationContext {
+impl<'a> EvaluationContext<'a> {
     fn new() -> Self {
         Self::default()
     }
@@ -614,16 +616,22 @@ impl EvaluationContext {
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             lambda_scope: None,
-            project: self.project.clone(),
+            resources: self.resources,
+            metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             active_sources: self.active_sources.clone(),
             document_state: Rc::clone(&self.document_state),
         }
     }
 
-    fn project(project: &VirtualProject, source_id: SourceId) -> Self {
+    fn with_resources(
+        resources: &'a dyn ResourceProvider,
+        source_id: SourceId,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> Self {
         Self {
-            project: Some(project.clone()),
+            resources: Some(resources),
+            metadata_defaults: metadata_defaults.clone(),
             current_source: Some(source_id),
             active_sources: vec![source_id],
             ..Self::new()
@@ -730,7 +738,8 @@ impl EvaluationContext {
             // Runtime/compiler state is intentionally not copied into this
             // lookup-only layer. Document state is the one explicit shared
             // exception required by the document-state contract.
-            project: None,
+            resources: None,
+            metadata_defaults: Default::default(),
             current_source: None,
             active_sources: Vec::new(),
             document_state: Rc::clone(&caller_context.document_state),
@@ -761,11 +770,11 @@ impl EvaluationContext {
         self.lambda_scope = Some(scope);
     }
 
-    fn initialize_document_state(&mut self, snapshot: &crate::ir::IrDocumentState) {
+    fn initialize_document_state(&mut self, snapshot: &scribium_ir::IrDocumentState) {
         self.document_state = Rc::new(RefCell::new(DocumentState::from_snapshot(snapshot)));
     }
 
-    fn document_state_snapshot(&self) -> crate::ir::IrDocumentState {
+    fn document_state_snapshot(&self) -> scribium_ir::IrDocumentState {
         self.document_state.borrow().snapshot()
     }
 
@@ -788,7 +797,7 @@ impl EvaluationContext {
         }
     }
 
-    fn set_document_type(&self, value: crate::ir::IrDocumentType) {
+    fn set_document_type(&self, value: scribium_ir::IrDocumentType) {
         self.document_state.borrow_mut().document_type = value;
     }
 
@@ -891,17 +900,35 @@ impl Evaluator {
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
-    /// Evaluates an IR document with access to the host-supplied virtual
-    /// project. The project is cloned into the explicit evaluation context;
-    /// no filesystem capability is introduced into the evaluator.
-    pub fn evaluate_project(
+    /// Evaluates an IR document with access to an explicit semantic resource
+    /// provider. The provider is retained only for this evaluation; the
+    /// engine performs no filesystem or network I/O.
+    pub fn evaluate_project<R: ResourceProvider>(
         &self,
-        project: &VirtualProject,
+        resources: &R,
         source_id: SourceId,
         document: &IrDocument,
     ) -> (IrDocument, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
-        let mut context = EvaluationContext::project(project, source_id);
+        let mut context = EvaluationContext::with_resources(
+            resources,
+            source_id,
+            &crate::DocumentMetadataDefaults::default(),
+        );
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Alias naming the engine-neutral input boundary explicitly.
+    pub fn evaluate_with_resources<R: ResourceProvider>(
+        &self,
+        resources: &R,
+        source_id: SourceId,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context =
+            EvaluationContext::with_resources(resources, source_id, metadata_defaults);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
@@ -909,14 +936,14 @@ impl Evaluator {
         &self,
         document: &IrDocument,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> (IrDocument, Vec<Diagnostic>) {
         context.initialize_document_state(&document.metadata.document_state);
         let nodes = self.evaluate_nodes(&document.nodes, diagnostics, context);
         (
             IrDocument {
                 nodes,
-                metadata: crate::ir::IrMetadata {
+                metadata: scribium_ir::IrMetadata {
                     document_state: context.document_state_snapshot(),
                     ..document.metadata.clone()
                 },
@@ -930,7 +957,7 @@ impl Evaluator {
         &self,
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrNode> {
         let mut out = Vec::new();
         for node in nodes {
@@ -944,7 +971,7 @@ impl Evaluator {
         &self,
         node: &IrNode,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrNode> {
         match node {
             IrNode::FunctionDeclaration {
@@ -1014,7 +1041,7 @@ impl Evaluator {
             IrNode::UnorderedList { items, span } => {
                 let items = items
                     .iter()
-                    .map(|item| crate::ir::IrListItem {
+                    .map(|item| scribium_ir::IrListItem {
                         nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
                         task: item.task,
                         span: item.span,
@@ -1025,7 +1052,7 @@ impl Evaluator {
             IrNode::OrderedList { items, start, span } => {
                 let items = items
                     .iter()
-                    .map(|item| crate::ir::IrListItem {
+                    .map(|item| scribium_ir::IrListItem {
                         nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
                         task: item.task,
                         span: item.span,
@@ -1038,11 +1065,11 @@ impl Evaluator {
                 }]
             }
             IrNode::Table { header, rows, span } => vec![IrNode::Table {
-                header: crate::ir::IrTableRow {
+                header: scribium_ir::IrTableRow {
                     cells: header
                         .cells
                         .iter()
-                        .map(|cell| crate::ir::IrTableCell {
+                        .map(|cell| scribium_ir::IrTableCell {
                             content: self.evaluate_inlines(&cell.content, diagnostics, context),
                             alignment: cell.alignment,
                             span: cell.span,
@@ -1052,11 +1079,11 @@ impl Evaluator {
                 },
                 rows: rows
                     .iter()
-                    .map(|row| crate::ir::IrTableRow {
+                    .map(|row| scribium_ir::IrTableRow {
                         cells: row
                             .cells
                             .iter()
-                            .map(|cell| crate::ir::IrTableCell {
+                            .map(|cell| scribium_ir::IrTableCell {
                                 content: self.evaluate_inlines(&cell.content, diagnostics, context),
                                 alignment: cell.alignment,
                                 span: cell.span,
@@ -1085,7 +1112,7 @@ impl Evaluator {
         &self,
         inlines: &[IrInline],
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrInline> {
         let mut out = Vec::new();
         for inline in inlines {
@@ -1099,7 +1126,7 @@ impl Evaluator {
         &self,
         inline: &IrInline,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrInline> {
         match inline {
             IrInline::Emphasis { content, span } => vec![IrInline::Emphasis {
@@ -1178,7 +1205,7 @@ impl Evaluator {
         body: Option<&[IrNode]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match self.evaluate_call_value(
             name,
@@ -1224,7 +1251,7 @@ impl Evaluator {
         body: Option<&[IrInline]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrInline> {
         if is_stacked_layout(name) {
             diagnostics.push(stacked_inline_materialization_error(*span));
@@ -1283,7 +1310,7 @@ impl Evaluator {
         body: &Option<Vec<IrNode>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match self.evaluate_chain_value(
             head,
@@ -1312,7 +1339,7 @@ impl Evaluator {
         body: &Option<Vec<IrInline>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Vec<IrInline> {
         match self.evaluate_chain_value(
             head,
@@ -1341,7 +1368,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         self.evaluate_call_value_with_first_origin(
             name,
@@ -1366,7 +1393,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if let Some(result) = context.get_implicit_parameter(name) {
@@ -1782,7 +1809,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if !positional_args.is_empty() {
             diagnostics.push(center_argument_error(
@@ -1848,7 +1875,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if let Some(argument) = positional_args.first() {
             diagnostics.push(landscape_argument_error(
@@ -1955,7 +1982,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2049,7 +2076,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2136,7 +2163,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2252,7 +2279,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2503,7 +2530,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if body.is_some() {
@@ -2586,9 +2613,9 @@ impl Evaluator {
                     value_conversion::ClosedEnumTarget::DocumentType,
                 ),
             ) {
-                Ok(value_conversion::DomainValue::Enum(crate::ir::IrEnumValue::DocumentType(
-                    value,
-                ))) => value,
+                Ok(value_conversion::DomainValue::Enum(
+                    scribium_ir::IrEnumValue::DocumentType(value),
+                )) => value,
                 Ok(_) | Err(_) => {
                     diagnostics.push(document_state_conversion_error(
                         "`.doctype` requires one of `plain`, `paged`, `slides`, or `docs` from a dynamic argument"
@@ -2647,7 +2674,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if !self.capabilities.allows(Capability::NativeContent) {
             diagnostics.push(native_content_denied(*span));
@@ -2749,7 +2776,7 @@ impl Evaluator {
         body: CallBody<'_>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match body {
             CallBody::Block(nodes) if body_contains_raw_html(nodes) => {
@@ -2779,7 +2806,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if !self.capabilities.allows(Capability::NativeContent) {
             diagnostics.push(Diagnostic {
@@ -2888,8 +2915,8 @@ impl Evaluator {
     /// Evaluates the resource-backed subset of the Quarkdown standard library.
     ///
     /// Resource access is deliberately routed through the host-supplied
-    /// `VirtualProject`. The evaluator never receives a native path and never
-    /// performs filesystem or network I/O itself.
+    /// semantic provider. The evaluator never receives a native path and
+    /// never performs filesystem or network I/O itself.
     #[allow(clippy::too_many_arguments)]
     fn evaluate_resource_builtin(
         &self,
@@ -2899,7 +2926,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if body.is_some() {
             diagnostics.push(resource_diagnostic(
@@ -2953,7 +2980,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &EvaluationContext,
+        context: &EvaluationContext<'_>,
     ) -> CallOutcome {
         let Some(reference) =
             resource_path_argument("read", positional_args, named_args, span, diagnostics)
@@ -2964,10 +2991,10 @@ impl Evaluator {
             Ok(lines) => lines,
             Err(()) => return CallOutcome::Failed,
         };
-        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
-        let (path, text) = match project.read_resource_text(source_id, &reference) {
+        let ResourceText { path, text } = match provider.read_text(source_id, &reference) {
             Ok(value) => value,
             Err(error) => {
                 diagnostics.push(resource_access_diagnostic("read", error, *span));
@@ -2998,7 +3025,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &EvaluationContext,
+        context: &EvaluationContext<'_>,
     ) -> CallOutcome {
         let Some(reference) =
             resource_path_argument("json", positional_args, named_args, span, diagnostics)
@@ -3014,10 +3041,10 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
-        let (path, text) = match project.read_resource_text(source_id, &reference) {
+        let ResourceText { path, text } = match provider.read_text(source_id, &reference) {
             Ok(value) => value,
             Err(error) => {
                 diagnostics.push(resource_access_diagnostic("json", error, *span));
@@ -3056,7 +3083,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let Some(reference) =
             resource_path_argument("include", positional_args, named_args, span, diagnostics)
@@ -3067,24 +3094,28 @@ impl Evaluator {
             Ok(sandbox) => sandbox,
             Err(()) => return CallOutcome::Failed,
         };
-        let Some((project, source_id)) = resource_context(context, span, diagnostics) else {
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
-        let path = match project.resolve_resource_path(source_id, &reference) {
-            Ok(path) => path,
+        let IncludedSource {
+            path,
+            source_id: target_id,
+            text: source,
+        } = match provider.read_source(source_id, &reference) {
+            Ok(source) => source,
+            Err(ResourceAccessError::NotFound { path }) => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    format!("`.include` resource not found: `{path}`"),
+                    *span,
+                    "Add the target source to the VirtualProject supplied by the host.",
+                ));
+                return CallOutcome::Failed;
+            }
             Err(error) => {
                 diagnostics.push(resource_access_diagnostic("include", error, *span));
                 return CallOutcome::Failed;
             }
-        };
-        let Some((source, target_id)) = project.sources().get_with_id(&path) else {
-            diagnostics.push(resource_diagnostic(
-                "E3001",
-                format!("`.include` resource not found: `{path}`"),
-                *span,
-                "Add the target source to the VirtualProject supplied by the host.",
-            ));
-            return CallOutcome::Failed;
         };
         if let Some(position) = context
             .active_sources
@@ -3093,7 +3124,7 @@ impl Evaluator {
         {
             let mut chain = context.active_sources[position..]
                 .iter()
-                .filter_map(|id| project.sources().path_by_id(*id).map(ToString::to_string))
+                .filter_map(|id| provider.source_path(*id))
                 .collect::<Vec<_>>();
             chain.push(path.to_string());
             diagnostics.push(resource_diagnostic(
@@ -3107,7 +3138,7 @@ impl Evaluator {
 
         let mode = source_mode_for_resource_path(&path);
         let include_diagnostics_start = diagnostics.len();
-        let parsed = scribium_markdown::parse_with_mode(source, mode);
+        let parsed = scribium_markdown::parse_with_mode(&source, mode);
         for diagnostic in parsed.diagnostics {
             diagnostics.push(Diagnostic {
                 code: diagnostic.code.to_string(),
@@ -3125,13 +3156,12 @@ impl Evaluator {
         if diagnostics.len() != include_diagnostics_start {
             return CallOutcome::Failed;
         }
-        let (document, lowering_diagnostics) =
-            crate::ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
-                &parsed.document,
-                target_id,
-                project.metadata(),
-                source_mode_for_path_mode(mode),
-            );
+        let (document, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            target_id,
+            &context.metadata_defaults,
+            mode,
+        );
         diagnostics.extend(lowering_diagnostics);
         if diagnostics.len() != include_diagnostics_start {
             return CallOutcome::Failed;
@@ -3258,7 +3288,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if positional_args.len() != 2 {
             diagnostics.push(iteration_error(
@@ -3313,7 +3343,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if !positional_args.is_empty() {
             diagnostics.push(iteration_error(
@@ -3358,7 +3388,7 @@ impl Evaluator {
         nodes: &[IrNode],
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrPair>, CallOutcome> {
         let list = match nodes {
             [] => return Ok(Vec::new()),
@@ -3404,7 +3434,7 @@ impl Evaluator {
         item: &IrListItem,
         fallback_span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<(String, IrValue), CallOutcome> {
         let Some(IrNode::Paragraph { content, span }) = item.nodes.first() else {
             diagnostics.push(iteration_error(
@@ -3483,7 +3513,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if positional_args.len() != 1 {
             diagnostics.push(let_error(
@@ -3581,7 +3611,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if positional_args.len() != 1 {
@@ -3663,7 +3693,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if positional_args.len() != 1 {
             diagnostics.push(iteration_error(
@@ -3767,7 +3797,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let (raw_collection, raw_callback) = match transform_operands(
@@ -3906,7 +3936,7 @@ impl Evaluator {
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let (raw_value, raw_callback) = match optionality_operands(
             name,
@@ -4030,7 +4060,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if body.is_some() {
@@ -4075,7 +4105,7 @@ impl Evaluator {
         value: &IrValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         origin: Option<ValueOrigin>,
     ) -> Result<i32, CallOutcome> {
         let evaluated = self
@@ -4102,7 +4132,7 @@ impl Evaluator {
         body: &[IrNode],
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let callable = self.make_callable(lambda_parameters, body, options.span, context);
         self.invoke_callable(&callable, vec![value], options, diagnostics, context)
@@ -4113,7 +4143,7 @@ impl Evaluator {
         parameters: Option<&[IrParameter]>,
         body: &[IrNode],
         span: SourceSpan,
-        context: &EvaluationContext,
+        context: &EvaluationContext<'_>,
     ) -> IrCallable {
         IrCallable {
             parameters: parameters.map(ToOwned::to_owned),
@@ -4131,7 +4161,7 @@ impl Evaluator {
         arguments: Vec<IrValue>,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &EvaluationContext,
+        caller_context: &EvaluationContext<'_>,
     ) -> CallOutcome {
         let bound = match bind_invocation_arguments(
             callable.parameters.as_deref(),
@@ -4152,7 +4182,7 @@ impl Evaluator {
         bound: BoundLambdaArguments,
         _options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &EvaluationContext,
+        caller_context: &EvaluationContext<'_>,
     ) -> CallOutcome {
         let definition_context = callable
             .capture
@@ -4189,7 +4219,7 @@ impl Evaluator {
         body: &[IrNode],
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let callable = self.make_callable(lambda_parameters, body, options.span, context);
         self.map_callable_values(elements, &callable, options, diagnostics, context)
@@ -4201,7 +4231,7 @@ impl Evaluator {
         callable: &IrCallable,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
@@ -4237,7 +4267,7 @@ impl Evaluator {
         callable: &IrCallable,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
@@ -4286,7 +4316,7 @@ impl Evaluator {
         callable: Option<&IrCallable>,
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let mut keyed = Vec::new();
         if let Err(error) = keyed.try_reserve_exact(elements.len()) {
@@ -4439,7 +4469,7 @@ impl Evaluator {
 
     fn list_item_value(
         &self,
-        item: &crate::ir::IrListItem,
+        item: &scribium_ir::IrListItem,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<IrValue, CallOutcome> {
@@ -4556,7 +4586,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         // Caller arguments are evaluated before any callee scope is created.
         // The parser guarantees that positional arguments precede named ones,
@@ -4605,7 +4635,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<BoundLambdaArguments, CallOutcome> {
         match parameters {
             LambdaParameters::Implicit => {
@@ -4717,7 +4747,7 @@ impl Evaluator {
         &self,
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let mut result = CallableBodyValueAccumulator::Empty;
         for node in nodes {
@@ -4746,7 +4776,7 @@ impl Evaluator {
         &self,
         node: &IrNode,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match node {
             IrNode::FunctionCall {
@@ -4811,7 +4841,7 @@ impl Evaluator {
         chain: &[IrCallSegment],
         body: Option<CallBody<'_>>,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let mut value_origin = call_result_origin(&head.name, context);
         let mut value = match self.chain_outcome(
@@ -4877,7 +4907,7 @@ impl Evaluator {
         segment: &IrCallSegment,
         value_required: bool,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &EvaluationContext,
+        context: &EvaluationContext<'_>,
     ) -> CallOutcome {
         match outcome {
             CallOutcome::Value(value) => CallOutcome::Value(value),
@@ -4918,7 +4948,7 @@ impl Evaluator {
         body: CallBody<'_>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let before = diagnostics.len();
         let value = match body {
@@ -4947,7 +4977,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> Result<bool, CallOutcome> {
         let Some((raw_condition, condition_origin)) = named_args
@@ -5003,7 +5033,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if let Some(body) = body {
             return self.evaluate_call_body(body, span, diagnostics, context);
@@ -5023,7 +5053,7 @@ impl Evaluator {
         value: &IrValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match self.evaluate_value(value, diagnostics, context) {
             CallOutcome::Value(value) => match self.scalar_or_content(value, span, diagnostics) {
@@ -5108,7 +5138,7 @@ impl Evaluator {
         &self,
         value: &IrValue,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<IrValue, CallOutcome> {
         match value {
             IrValue::Content(nodes) => {
@@ -5159,7 +5189,7 @@ impl Evaluator {
         body: Option<&[IrNode]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
         let positional_args =
             self.evaluate_values_for_preservation(positional_args, span, diagnostics, context)?;
@@ -5194,7 +5224,7 @@ impl Evaluator {
         body: Option<&[IrInline]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrInline>, CallOutcome> {
         let positional_args =
             self.evaluate_values_for_preservation(positional_args, span, diagnostics, context)?;
@@ -5354,7 +5384,7 @@ impl Evaluator {
         &self,
         value: &IrValue,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         match value {
             IrValue::Content(nodes) => {
@@ -5423,7 +5453,7 @@ impl Evaluator {
         values: &[IrValue],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
         let mut evaluated = Vec::new();
         if let Err(error) = evaluated.try_reserve(values.len()) {
@@ -5458,7 +5488,7 @@ impl Evaluator {
         values: &[IrValue],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> Result<Vec<InvocationValue>, CallOutcome> {
         let mut evaluated = Vec::new();
@@ -5499,7 +5529,7 @@ impl Evaluator {
         named: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<InvocationNamedArg>, CallOutcome> {
         let mut evaluated = Vec::new();
         if let Err(error) = evaluated.try_reserve(named.len()) {
@@ -5540,7 +5570,7 @@ impl Evaluator {
         named: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNamedArg>, CallOutcome> {
         let mut evaluated = Vec::new();
         if let Err(error) = evaluated.try_reserve(named.len()) {
@@ -5577,7 +5607,7 @@ impl Evaluator {
         values: &[IrValue],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
         let mut evaluated = Vec::with_capacity(values.len());
         for value in values {
@@ -5604,7 +5634,7 @@ impl Evaluator {
         named: &[IrNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNamedArg>, CallOutcome> {
         let mut evaluated = Vec::with_capacity(named.len());
         for arg in named {
@@ -7418,19 +7448,19 @@ fn resource_access_diagnostic(
             span,
             "Only source-relative paths inside the supplied VirtualProject are available; network fetching is disabled.",
         ),
-        ResourceAccessError::UnknownSource(source_id) => resource_diagnostic(
+        ResourceAccessError::UnknownSource { source_id } => resource_diagnostic(
             "E9001",
             format!("`.{builtin}` cannot resolve the current source identity {source_id:?}"),
             span,
             "The host must provide the calling source through the VirtualProject SourceStore.",
         ),
-        ResourceAccessError::Boundary(error) => resource_diagnostic(
+        ResourceAccessError::Boundary { message } => resource_diagnostic(
             "E8001",
-            format!("`.{builtin}` resource path is outside the project boundary: {error}"),
+            format!("`.{builtin}` resource path is outside the project boundary: {message}"),
             span,
             "Use a source-relative path that remains inside the supplied VirtualProject.",
         ),
-        ResourceAccessError::NotFound(path) => resource_diagnostic(
+        ResourceAccessError::NotFound { path } => resource_diagnostic(
             "E3001",
             format!("`.{builtin}` resource not found: `{path}`"),
             span,
@@ -7446,11 +7476,11 @@ fn resource_access_diagnostic(
 }
 
 fn resource_context<'a>(
-    context: &'a EvaluationContext,
+    context: &'a EvaluationContext<'_>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(&'a VirtualProject, SourceId)> {
-    let Some(project) = context.project.as_ref() else {
+) -> Option<(&'a dyn ResourceProvider, SourceId)> {
+    let Some(provider) = context.resources else {
         diagnostics.push(resource_diagnostic(
             "E8001",
             "Resource builtin requires a host-supplied VirtualProject".to_string(),
@@ -7468,7 +7498,7 @@ fn resource_context<'a>(
         ));
         return None;
     };
-    Some((project, source_id))
+    Some((provider, source_id))
 }
 
 fn resource_path_argument(
@@ -7716,22 +7746,15 @@ fn json_number_to_ir(value: &serde_json::Number) -> Result<IrValue, String> {
     Ok(IrValue::Number(value))
 }
 
-fn source_mode_for_resource_path(path: &scribium_project::VirtualPathBuf) -> Mode {
-    let is_markdown = path
-        .file_name()
-        .and_then(|file_name| file_name.rsplit_once('.'))
+fn source_mode_for_resource_path(path: &str) -> Mode {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let is_markdown = file_name
+        .rsplit_once('.')
         .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("md"));
     if is_markdown {
         Mode::Markdown
     } else {
         Mode::Quarkdown
-    }
-}
-
-fn source_mode_for_path_mode(mode: Mode) -> crate::SourceMode {
-    match mode {
-        Mode::Markdown => crate::SourceMode::Markdown,
-        Mode::Quarkdown => crate::SourceMode::Quarkdown,
     }
 }
 
@@ -8095,7 +8118,7 @@ fn scalar_boolean_value(value: &IrValue) -> Option<bool> {
 /// the upstream DynamicValue binder path. A nested builtin such as
 /// `.string`, a typed range, or a resource result is already a materialized
 /// semantic value and must not be reinterpreted by unrelated target types.
-fn invocation_origin(value: &IrValue, context: &EvaluationContext) -> ValueOrigin {
+fn invocation_origin(value: &IrValue, context: &EvaluationContext<'_>) -> ValueOrigin {
     match value {
         IrValue::String(_) | IrValue::Identifier(_) => ValueOrigin::Dynamic,
         IrValue::Content(nodes) => match nodes.as_slice() {
@@ -8112,7 +8135,7 @@ fn invocation_origin(value: &IrValue, context: &EvaluationContext) -> ValueOrigi
     }
 }
 
-fn call_result_origin(name: &str, context: &EvaluationContext) -> ValueOrigin {
+fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigin {
     if context.contains(name) || context.get_function(name).is_some() {
         ValueOrigin::Dynamic
     } else {
@@ -8140,7 +8163,7 @@ fn is_variable_reference_call(
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
     body: Option<CallBody<'_>>,
-    context: &EvaluationContext,
+    context: &EvaluationContext<'_>,
 ) -> bool {
     // Variable reference: parameterless call (no positional args, no named args, no body)
     // to a name that exists in the variable environment.
@@ -8153,7 +8176,7 @@ fn is_variable_reassignment_call(
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
     body: Option<CallBody<'_>>,
-    context: &EvaluationContext,
+    context: &EvaluationContext<'_>,
 ) -> bool {
     // Variable reassignment: call to a known variable name with exactly one
     // positional argument (the new value), no named args, no body.
@@ -8278,7 +8301,7 @@ impl Evaluator {
         body: &[IrNode],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) {
         let function_name = match name {
             IrValue::Identifier(name) | IrValue::String(name) => name,
@@ -8343,7 +8366,7 @@ impl Evaluator {
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         // Check for malformed declaration: must have a name (first positional arg)
         let var_name = match positional_args.first() {
@@ -8468,7 +8491,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let value = &positional_args[0];
         match self.evaluate_value(value, diagnostics, context) {
@@ -8497,7 +8520,7 @@ impl Evaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{
+    use scribium_ir::{
         IrComponent, IrCrossAxisAlignment, IrListItem, IrMainAxisAlignment, IrSize, IrSizeUnit,
         IrStackedComponent, IrStackedLayout,
     };
@@ -8568,7 +8591,7 @@ mod tests {
         named_args: &[IrNamedArg],
         operation_span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext,
+        context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         evaluator.evaluate_call_value(
             name,
@@ -8623,7 +8646,7 @@ mod tests {
     fn doc(nodes: Vec<IrNode>) -> IrDocument {
         IrDocument {
             nodes,
-            metadata: crate::ir::IrMetadata::default(),
+            metadata: scribium_ir::IrMetadata::default(),
         }
     }
 
@@ -12011,7 +12034,7 @@ mod tests {
                         IrValue::Boolean(true),
                         vec![text_paragraph("task content")],
                     )],
-                    task: Some(crate::ir::IrTaskStatus::Completed),
+                    task: Some(scribium_ir::IrTaskStatus::Completed),
                     span: span(10, 30),
                 }],
                 span: span(10, 30),
@@ -12028,22 +12051,22 @@ mod tests {
                 span: span(30, 40),
             },
             IrNode::Table {
-                header: crate::ir::IrTableRow {
-                    cells: vec![crate::ir::IrTableCell {
+                header: scribium_ir::IrTableRow {
+                    cells: vec![scribium_ir::IrTableCell {
                         content: vec![text_inline("Header")],
-                        alignment: crate::ir::IrTableAlignment::Center,
+                        alignment: scribium_ir::IrTableAlignment::Center,
                         span: span(40, 46),
                     }],
                     span: span(40, 46),
                 },
-                rows: vec![crate::ir::IrTableRow {
-                    cells: vec![crate::ir::IrTableCell {
+                rows: vec![scribium_ir::IrTableRow {
+                    cells: vec![scribium_ir::IrTableCell {
                         content: vec![inline_if_call(
                             "if",
                             IrValue::Boolean(true),
                             vec![text_inline("cell")],
                         )],
-                        alignment: crate::ir::IrTableAlignment::None,
+                        alignment: scribium_ir::IrTableAlignment::None,
                         span: span(46, 50),
                     }],
                     span: span(46, 50),
@@ -12066,7 +12089,7 @@ mod tests {
         let IrNode::UnorderedList { items, .. } = &evaluated.nodes[1] else {
             panic!("expected list")
         };
-        assert_eq!(items[0].task, Some(crate::ir::IrTaskStatus::Completed));
+        assert_eq!(items[0].task, Some(scribium_ir::IrTaskStatus::Completed));
         assert_eq!(items[0].nodes, vec![text_paragraph("task content")]);
 
         let IrNode::Paragraph { content, .. } = &evaluated.nodes[2] else {

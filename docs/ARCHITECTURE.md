@@ -2,8 +2,8 @@
 
 This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
-compatibility, Quarkdown, Markdown frontend, and IR boundary crates are now
-physically present; engine and backend extraction remain migration work.
+compatibility, Quarkdown, Markdown frontend, IR, and engine boundary crates are now
+physically present; backend extraction remains migration work.
 Implementation and
 migration status must not be confused with target ownership.
 
@@ -241,9 +241,9 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 
 These are target architectural boundaries. `scribium-source`,
 `scribium-project`, `scribium-diagnostics`, `scribium-compat`,
-`scribium-quarkdown`, `scribium-markdown`, and `scribium-ir` are physically
-extracted; the remaining engine and backend extraction is subsequent migration
-work.
+`scribium-quarkdown`, `scribium-markdown`, `scribium-ir`, and
+`scribium-engine` are physically extracted; backend extraction is subsequent
+migration work. `scribium-core` remains the orchestration and facade layer.
 
 ## Platform Independence
 
@@ -327,17 +327,24 @@ Ownership of the I/O boundary is explicit:
 acquires the required inputs and applies native filesystem policy before core
 compilation.
 
-Resource-backed Quarkdown builtins use the same logical project model. The
-evaluator receives an explicit `VirtualProject` and current `SourceId`, then
-uses source-relative APIs such as `resolve_resource_path` and
-`read_resource_text`; it never constructs a native `PathBuf` or calls a host
-filesystem API. `ResourceReference` classifies local paths separately from
-absolute paths and URI schemes before `VirtualPathBuf` normalization enforces
-the project boundary. `.include` temporarily changes the current source
-identity while evaluating the included IR, so nested resource operations use
-the included document directory and diagnostics retain that document's
-`SourceId`. The active include stack detects cycles, while completed repeated
-includes are not globally suppressed.
+Resource-backed Quarkdown builtins use the same logical project model. Core
+adapts the completed `VirtualProject` into the engine-owned `ResourceProvider`
+contract, delegating source-relative resolution, project-boundary validation,
+UTF-8 validation, and source-store lookup to the existing project APIs. The
+engine receives only semantic resource results: logical path text, source
+identity, and stable resource failures. It never constructs a native
+`PathBuf`, accesses a project store, or calls a host filesystem API.
+`.include` temporarily changes the current source identity while evaluating
+the included IR, so nested resource operations use the included document
+directory and diagnostics retain that document's `SourceId`. The active
+include stack detects cycles, while completed repeated includes are not
+globally suppressed.
+
+Core also copies `ProjectMetadata` into the engine-owned immutable
+`DocumentMetadataDefaults` input before AST-to-IR conversion. Front matter
+continues to override typed project defaults, custom fields retain last-wins
+and deterministic ordering behavior, and the engine does not consume the
+project model itself.
 
 The native CLI loads the bounded project tree into sources/assets at the host
 boundary and does not import symlink targets outside the canonical project
@@ -998,14 +1005,14 @@ be reported as original `.qd` source offsets unless they can be mapped
 reliably. Fragment-level provenance or no primary location is preferable to a
 fabricated original-source span.
 
-The shared diagnostic representation is now physically implemented in
-`scribium-diagnostics`, compatibility policy is physically implemented in
-`scribium-compat`, and the existing document IR is physically implemented in
-`scribium-ir`. The remaining engine and backend extraction is migration state.
-`RawTypst` remains transitional F-004 debt; this migration did not remove or
-redesign it. `SourceMapEntry` remains on the `scribium-core::ir` compatibility
-surface pending separate source-map ownership work. Target ownership and
-physical ownership now agree for the extracted models.
+The shared diagnostic representation is physically implemented in
+`scribium-diagnostics`, compatibility policy in `scribium-compat`, the
+document IR in `scribium-ir`, and semantic compilation in `scribium-engine`.
+Backend extraction remains migration state. `RawTypst` remains transitional
+F-004 debt; R7 did not remove or redesign it. `SourceMapEntry` remains on the
+`scribium-core::ir` compatibility surface pending separate source-map
+ownership work. Target ownership and physical ownership now agree for the
+extracted models through the engine boundary.
 
 ## Configuration Model
 
