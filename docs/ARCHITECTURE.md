@@ -2,10 +2,10 @@
 
 This document describes the accepted target architecture defined by ADR-0014,
 ADR-0015, ADR-0016, ADR-0017, and ADR-0018. The source, project, diagnostics,
-compatibility, Quarkdown, Markdown frontend, IR, and engine boundary crates are now
-physically present; backend extraction remains migration work.
-Implementation and
-migration status must not be confused with target ownership.
+compatibility, Quarkdown, Markdown frontend, IR, engine, pure Typst lowering,
+and native Typst subprocess boundary crates are physically present. The
+remaining `scribium-core` role is orchestration and facade compatibility;
+`IrNode::RawTypst` remains unchanged and F-004 is not resolved here.
 
 ## Context Diagram
 
@@ -239,11 +239,20 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | scribium-cli             | native host, filesystem/config/output composition                         | No   |
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
 
-These are target architectural boundaries. `scribium-source`,
+These are the physical architectural boundaries after R8. `scribium-source`,
 `scribium-project`, `scribium-diagnostics`, `scribium-compat`,
 `scribium-quarkdown`, `scribium-markdown`, `scribium-ir`, and
-`scribium-engine` are physically extracted; backend extraction is subsequent
-migration work. `scribium-core` remains the orchestration and facade layer.
+`scribium-engine` own their extracted domains. `scribium-typst` owns only pure,
+platform-neutral IR-to-Typst lowering and its contract, while
+`scribium-typst-subprocess` is native-only and owns Typst CLI execution,
+filesystem staging, and security-boundary enforcement. `scribium-core` remains
+the orchestration and facade layer.
+
+The native adapter API (`SubprocessBackend`, `TypstSourceContext`, and
+`TypstError`) is intentionally imported from `scribium-typst-subprocess`.
+The former `scribium_typst::backend` native paths are not retained as
+re-exports, because doing so would reverse the accepted pure-lowering to
+native-adapter dependency direction.
 
 ## Platform Independence
 

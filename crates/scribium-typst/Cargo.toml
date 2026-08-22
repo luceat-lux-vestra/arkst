@@ -6,12 +6,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Scribium Typst backend: lowering, compiler interface, and backend adapters"
+description = "Scribium's platform-neutral IR-to-Typst lowering"
 
 [dependencies]
-scribium-core.workspace = true
+scribium-ir.workspace = true
+scribium-source.workspace = true
 thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tracing.workspace = true
-tempfile.workspace = true

@@ -11,6 +11,7 @@ members = [
     "crates/scribium-quarkdown",
     "crates/scribium-markdown",
     "crates/scribium-typst",
+    "crates/scribium-typst-subprocess",
     "crates/scribium-cli",
     "crates/scribium-test-support",
     "tools/markdown-compat",
@@ -41,6 +42,7 @@ scribium-source = { path = "crates/scribium-source" }
 scribium-quarkdown = { path = "crates/scribium-quarkdown" }
 scribium-markdown = { path = "crates/scribium-markdown" }
 scribium-typst = { path = "crates/scribium-typst" }
+scribium-typst-subprocess = { path = "crates/scribium-typst-subprocess" }
 scribium-cli = { path = "crates/scribium-cli" }
 scribium-test-support = { path = "crates/scribium-test-support" }
 

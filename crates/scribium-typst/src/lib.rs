@@ -1,14 +1,13 @@
-/// `scribium-typst` — Typst backend for Scribium.
+/// `scribium-typst` — platform-neutral Typst lowering for Scribium.
 ///
 /// Responsibilities:
 /// - Typst lowering (IR → Typst source code)
-/// - TypstBackend trait definition
-/// - Subprocess backend adapter
-/// - Backend diagnostics conversion
+/// - platform-neutral Typst backend input/output contract
 /// - Source map updates during lowering
 pub mod backend;
 pub mod lowering;
 
+pub use backend::{TypstBackend, TypstInput, TypstOutput};
 pub use lowering::{lower_to_typst, lower_to_typst_code};
 /// The Scribium-Typst result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;

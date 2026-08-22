@@ -16,6 +16,7 @@ path = "src/main.rs"
 scribium-core.workspace = true
 scribium-project.workspace = true
 scribium-typst.workspace = true
+scribium-typst-subprocess.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 same-file.workspace = true

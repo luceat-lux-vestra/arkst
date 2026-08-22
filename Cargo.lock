@@ -574,6 +574,7 @@ dependencies = [
  "scribium-core",
  "scribium-project",
  "scribium-typst",
+ "scribium-typst-subprocess",
  "serde",
  "serde_json",
  "tempfile",
@@ -658,6 +659,7 @@ dependencies = [
  "scribium-core",
  "scribium-markdown",
  "scribium-typst",
+ "scribium-typst-subprocess",
  "serde",
  "serde_json",
  "toml",
@@ -702,12 +704,19 @@ dependencies = [
 name = "scribium-typst"
 version = "0.0.1"
 dependencies = [
- "scribium-core",
- "serde",
- "serde_json",
- "tempfile",
+ "scribium-ir",
+ "scribium-source",
  "thiserror",
- "tracing",
+]
+
+[[package]]
+name = "scribium-typst-subprocess"
+version = "0.0.1"
+dependencies = [
+ "scribium-core",
+ "scribium-project",
+ "scribium-typst",
+ "tempfile",
 ]
 
 [[package]]

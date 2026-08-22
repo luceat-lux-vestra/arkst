@@ -123,7 +123,7 @@ The deferred surface includes `float`, `fullspan`, `classname`, StyleOptions,
 container alignment/text alignment, colors, borders, margin/padding/radius,
 font/text-style properties, and inline Container insertion. Evidence is in
 `crates/scribium-core/tests/quarkdown_container.rs`, the IR/lowering unit
-tests, and `crates/scribium-typst/tests/backend_integration.rs`.
+tests, and `crates/scribium-typst-subprocess/tests/backend_integration.rs`.
 
 ### Target-specific `.html` contract
 

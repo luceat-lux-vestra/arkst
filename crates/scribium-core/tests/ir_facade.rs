@@ -23,7 +23,7 @@ fn core_ir_facade_preserves_physical_type_identity() {
     let _: fn(scribium_core::ir::IrValue) = accepts_physical_value;
     let _: fn(scribium_ir::IrValue) = accepts_core_value;
 
-    // SourceMapEntry remains the existing core transitional surface; there is
-    // intentionally no scribium_ir::SourceMapEntry path.
+    // SourceMapEntry remains available through the core facade after its
+    // physical extraction to scribium-source.
     let _: fn(scribium_core::ir::SourceMapEntry) = accepts_source_map_entry;
 }
