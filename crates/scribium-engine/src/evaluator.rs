@@ -64,7 +64,7 @@ use scribium_quarkdown::is_valid_normal_call_name;
 use scribium_source::{SourceId, SourceSpan};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
@@ -605,9 +605,11 @@ impl Drop for EvaluationDepthGuard {
 ///
 /// Created fresh per `evaluate()` call to ensure isolation and determinism.
 /// Lookups walk the parent chain without cloning it. A child scope snapshots
-/// the visible parent context at creation time and local writes stay in the
-/// child. The snapshot is deliberate: a lambda observes the bindings visible
-/// when it is entered, while its local declarations cannot leak back.
+/// the visible parent context at creation time; new local declarations stay in
+/// the child, while successful writes to caller-visible variables are
+/// published at the callable boundary. The snapshot is deliberate: a lambda
+/// observes the bindings visible when it is entered, while new locals cannot
+/// leak back.
 #[derive(Clone)]
 struct EvaluationContext<'a> {
     parent: Option<Box<EvaluationContext<'a>>>,
@@ -621,6 +623,19 @@ struct EvaluationContext<'a> {
     document_state: Rc<RefCell<DocumentState>>,
     limits: EvaluationLimits,
     runtime: Rc<RefCell<EvaluationRuntime>>,
+    assigned_variables: BTreeMap<String, IrValue>,
+    variable_owners: BTreeSet<String>,
+    forwarded_variable_owners: BTreeSet<String>,
+    parameter_names: BTreeSet<String>,
+}
+
+#[derive(Clone)]
+struct VariableStateSnapshot {
+    variables: BTreeMap<String, VariableValue>,
+    assigned_variables: BTreeMap<String, IrValue>,
+    variable_owners: BTreeSet<String>,
+    forwarded_variable_owners: BTreeSet<String>,
+    parent: Option<Box<VariableStateSnapshot>>,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -641,6 +656,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::new(RefCell::new(DocumentState::default())),
             limits,
             runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners: BTreeSet::new(),
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -659,6 +678,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners: BTreeSet::new(),
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -701,6 +724,119 @@ impl<'a> EvaluationContext<'a> {
     fn set_value(&mut self, name: String, value: IrValue) {
         self.variables
             .insert(name, VariableValue::from_evaluated_value(value));
+    }
+
+    /// Records a variable write made by semantic `.var` handling.
+    ///
+    /// Callable invocation uses this small write set to distinguish an
+    /// existing caller owner that was reassigned from a declaration that
+    /// should remain local to the invocation scope. Parameter and capture
+    /// installation deliberately use `set_value` directly and are therefore
+    /// not treated as user assignments.
+    fn assign_value(&mut self, name: String, value: IrValue) {
+        let has_forwarded_owner = self.has_forwarded_variable_owner(&name);
+        if !self.assign_to_real_owner(&name, value.clone()) {
+            // A lambda parameter is a lookup binding, not a variable owner.
+            // Keep it shadowing a same-named `.var` declaration while still
+            // recording the assignment for a real owner at the boundary.
+            if !self.parameter_names.contains(&name) {
+                self.set_value(name.clone(), value.clone());
+            }
+            if !has_forwarded_owner {
+                self.variable_owners.insert(name.clone());
+            }
+        }
+        self.assigned_variables.insert(name, value);
+    }
+
+    fn assigned_values(&self) -> BTreeMap<String, IrValue> {
+        self.assigned_variables.clone()
+    }
+
+    /// Publishes a successful nested callable assignment into an actual
+    /// variable owner visible from the caller. Lookup-only bindings such as
+    /// parameters, captures, and copied caller overlays are never owners by
+    /// themselves. A forwarded overlay is updated as a relay so an outer
+    /// callable boundary can continue the writeback to its real caller.
+    fn apply_callable_assignment(&mut self, name: String, value: IrValue) -> bool {
+        if !self.assign_to_owner(&name, value.clone()) {
+            return false;
+        }
+        self.assigned_variables.insert(name, value);
+        true
+    }
+
+    /// Assigns directly to the outermost real `.var` owner in this parent
+    /// chain. This is used for ordinary child scopes, not copied callable
+    /// overlays.
+    fn assign_to_real_owner(&mut self, name: &str, value: IrValue) -> bool {
+        if let Some(parent) = self.parent.as_mut() {
+            if parent.assign_to_real_owner(name, value.clone()) {
+                return true;
+            }
+        }
+        if self.variable_owners.contains(name) {
+            self.set_value(name.to_string(), value);
+            return true;
+        }
+        false
+    }
+
+    /// Assigns to the outermost real or forwarded owner. Forwarded owners
+    /// represent caller libraries copied into an invocation overlay; they are
+    /// relays rather than proof that the overlay itself owns the variable.
+    fn assign_to_owner(&mut self, name: &str, value: IrValue) -> bool {
+        if let Some(parent) = self.parent.as_mut() {
+            if parent.assign_to_owner(name, value.clone()) {
+                return true;
+            }
+        }
+        if self.variable_owners.contains(name) || self.forwarded_variable_owners.contains(name) {
+            self.set_value(name.to_string(), value);
+            return true;
+        }
+        false
+    }
+
+    fn has_forwarded_variable_owner(&self, name: &str) -> bool {
+        self.forwarded_variable_owners.contains(name)
+            || self
+                .parent
+                .as_deref()
+                .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
+    }
+
+    fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
+        if let Some(parent) = self.parent.as_deref() {
+            parent.collect_variable_owners(owners);
+        }
+        owners.extend(self.variable_owners.iter().cloned());
+        owners.extend(self.forwarded_variable_owners.iter().cloned());
+    }
+
+    fn snapshot_variables(&self) -> VariableStateSnapshot {
+        VariableStateSnapshot {
+            variables: self.variables.clone(),
+            assigned_variables: self.assigned_variables.clone(),
+            variable_owners: self.variable_owners.clone(),
+            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
+            parent: self
+                .parent
+                .as_deref()
+                .map(|parent| Box::new(parent.snapshot_variables())),
+        }
+    }
+
+    fn restore_variables(&mut self, snapshot: &VariableStateSnapshot) {
+        self.variables = snapshot.variables.clone();
+        self.assigned_variables = snapshot.assigned_variables.clone();
+        self.variable_owners = snapshot.variable_owners.clone();
+        self.forwarded_variable_owners = snapshot.forwarded_variable_owners.clone();
+        match (&mut self.parent, &snapshot.parent) {
+            (Some(parent), Some(snapshot)) => parent.restore_variables(snapshot),
+            (None, None) => {}
+            _ => unreachable!("variable snapshot must match its context shape"),
+        }
     }
 
     /// Installs a user-function binding in the current local scope.
@@ -785,6 +921,8 @@ impl<'a> EvaluationContext<'a> {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         caller_context.collect_bindings(&mut variables, &mut functions);
+        let mut forwarded_variable_owners = BTreeSet::new();
+        caller_context.collect_variable_owners(&mut forwarded_variable_owners);
 
         Self {
             parent: Some(Box::new(definition_context)),
@@ -804,6 +942,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
             runtime: Rc::clone(&caller_context.runtime),
+            assigned_variables: BTreeMap::new(),
+            variable_owners: BTreeSet::new(),
+            forwarded_variable_owners,
+            parameter_names: BTreeSet::new(),
         }
     }
 
@@ -4097,6 +4239,7 @@ impl Evaluator {
                 callback
             }
         };
+        let variable_snapshot = context.snapshot_variables();
         let callback_result = match self.invoke_callable(
             &callable,
             vec![value.clone()],
@@ -4110,10 +4253,17 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(callable.span));
+                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
-            CallOutcome::Failed => return CallOutcome::Failed,
-            CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            CallOutcome::Failed => {
+                context.restore_variables(&variable_snapshot);
+                return CallOutcome::Failed;
+            }
+            CallOutcome::Unresolved => {
+                context.restore_variables(&variable_snapshot);
+                return CallOutcome::Unresolved;
+            }
         };
 
         if name == "ifpresent" {
@@ -4125,6 +4275,7 @@ impl Evaluator {
                 "`.takeif` condition must return Boolean".to_string(),
                 value_source_span(&callback_result, &callable.span),
             ));
+            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         };
         if condition {
@@ -4239,14 +4390,16 @@ impl Evaluator {
     }
 
     /// Shared first-class callable invocation path for loops, transforms, and
-    /// user-defined callables. Invocation never mutates the caller context.
+    /// user-defined callables. Successful assignments to existing caller
+    /// variables are published after the callable completes; new variables
+    /// remain invocation-local.
     fn invoke_callable(
         &self,
         callable: &IrCallable,
         arguments: Vec<IrValue>,
         options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &EvaluationContext<'_>,
+        caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let _depth = match caller_context.enter_evaluation_depth(options.span, diagnostics) {
             Ok(depth) => depth,
@@ -4271,7 +4424,7 @@ impl Evaluator {
         bound: BoundLambdaArguments,
         _options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
-        caller_context: &EvaluationContext<'_>,
+        caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         let definition_context = callable
             .capture
@@ -4290,6 +4443,7 @@ impl Evaluator {
                 child.set_lambda_scope(LambdaScope::Explicit);
                 if let Some(parameters) = callable.parameters.as_deref() {
                     for (parameter, value) in parameters.iter().zip(values) {
+                        child.parameter_names.insert(parameter.name.clone());
                         child.set_value(parameter.name.clone(), value);
                     }
                 }
@@ -4298,7 +4452,13 @@ impl Evaluator {
                 child.set_lambda_scope(LambdaScope::Implicit(values));
             }
         }
-        self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child)
+        let outcome = self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
+        if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
+            for (name, value) in child.assigned_values() {
+                caller_context.apply_callable_assignment(name, value);
+            }
+        }
+        outcome
     }
 
     fn map_iteration_values(
@@ -4327,6 +4487,7 @@ impl Evaluator {
         {
             return outcome;
         }
+        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -4346,10 +4507,17 @@ impl Evaluator {
                 CallOutcome::Value(value) => results.push(value),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(options.span));
+                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => return CallOutcome::Failed,
-                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                CallOutcome::Failed => {
+                    context.restore_variables(&variable_snapshot);
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Unresolved => {
+                    context.restore_variables(&variable_snapshot);
+                    return CallOutcome::Unresolved;
+                }
             }
         }
         CallOutcome::Value(IrValue::Collection(results))
@@ -4368,6 +4536,7 @@ impl Evaluator {
         {
             return outcome;
         }
+        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -4390,16 +4559,24 @@ impl Evaluator {
                 CallOutcome::Value(value) => value,
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(callable.span));
+                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => return CallOutcome::Failed,
-                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                CallOutcome::Failed => {
+                    context.restore_variables(&variable_snapshot);
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Unresolved => {
+                    context.restore_variables(&variable_snapshot);
+                    return CallOutcome::Unresolved;
+                }
             };
             let Some(keep) = scalar_boolean_value(&predicate) else {
                 diagnostics.push(iteration_error(
                     "`.filter` predicate must return Boolean".to_string(),
                     value_source_span(&predicate, &callable.span),
                 ));
+                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             };
             if keep {
@@ -4422,6 +4599,7 @@ impl Evaluator {
         {
             return outcome;
         }
+        let variable_snapshot = context.snapshot_variables();
         let mut keyed = Vec::new();
         if let Err(error) = keyed.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -4445,10 +4623,17 @@ impl Evaluator {
                     CallOutcome::Value(value) => value,
                     CallOutcome::NoValue => {
                         diagnostics.push(no_value_required(callable.span));
+                        context.restore_variables(&variable_snapshot);
                         return CallOutcome::Failed;
                     }
-                    CallOutcome::Failed => return CallOutcome::Failed,
-                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                    CallOutcome::Failed => {
+                        context.restore_variables(&variable_snapshot);
+                        return CallOutcome::Failed;
+                    }
+                    CallOutcome::Unresolved => {
+                        context.restore_variables(&variable_snapshot);
+                        return CallOutcome::Unresolved;
+                    }
                 },
                 None => element.clone(),
             };
@@ -4456,6 +4641,7 @@ impl Evaluator {
                 Ok(key) => key,
                 Err(message) => {
                     diagnostics.push(iteration_error(message, value_source_span(&key, &span)));
+                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
             };
@@ -4471,6 +4657,7 @@ impl Evaluator {
                     "`.sorted` does not compare heterogeneous key types".to_string(),
                     span,
                 ));
+                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
         }
@@ -4481,6 +4668,7 @@ impl Evaluator {
                 format!("sorted result collection cannot be allocated: {error}"),
                 span,
             ));
+            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         }
         sorted.extend(keyed.into_iter().map(|(value, _)| value));
@@ -8569,7 +8757,7 @@ impl Evaluator {
             };
             match outcome {
                 CallOutcome::Value(value) => {
-                    context.set_value(var_name, value);
+                    context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
                 }
                 CallOutcome::Failed => return CallOutcome::Failed,
@@ -8584,13 +8772,13 @@ impl Evaluator {
             let value = &arg.value;
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
-                    context.set_value(var_name, value);
+                    context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
                 }
                 CallOutcome::Unresolved => {
                     match self.preserve_value_expression(value, diagnostics, context) {
                         Ok(value) => {
-                            context.set_value(var_name, value);
+                            context.assign_value(var_name, value);
                             return CallOutcome::NoValue;
                         }
                         Err(outcome) => return outcome,
@@ -8609,13 +8797,13 @@ impl Evaluator {
             let value = &arg.value;
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
-                    context.set_value(var_name, value);
+                    context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
                 }
                 CallOutcome::Unresolved => {
                     match self.preserve_value_expression(value, diagnostics, context) {
                         Ok(value) => {
-                            context.set_value(var_name, value);
+                            context.assign_value(var_name, value);
                             return CallOutcome::NoValue;
                         }
                         Err(outcome) => return outcome,
@@ -8633,13 +8821,13 @@ impl Evaluator {
         if let Some(value) = positional_args.get(1) {
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
-                    context.set_value(var_name, value);
+                    context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
                 }
                 CallOutcome::Unresolved => {
                     match self.preserve_value_expression(value, diagnostics, context) {
                         Ok(value) => {
-                            context.set_value(var_name, value);
+                            context.assign_value(var_name, value);
                             return CallOutcome::NoValue;
                         }
                         Err(outcome) => return outcome,
@@ -8670,13 +8858,13 @@ impl Evaluator {
         let value = &positional_args[0];
         match self.evaluate_value(value, diagnostics, context) {
             CallOutcome::Value(value) => {
-                context.set_value(name.to_string(), value);
+                context.assign_value(name.to_string(), value);
                 CallOutcome::NoValue
             }
             CallOutcome::Unresolved => {
                 match self.preserve_value_expression(value, diagnostics, context) {
                     Ok(value) => {
-                        context.set_value(name.to_string(), value);
+                        context.assign_value(name.to_string(), value);
                         CallOutcome::NoValue
                     }
                     Err(outcome) => outcome,
@@ -9063,7 +9251,7 @@ mod tests {
     }
 
     #[test]
-    fn let_shadows_parent_and_local_variables_do_not_leak() {
+    fn let_parameter_shadows_parent_and_var_reassignment_updates_parent() {
         let nodes = evaluate(vec![
             var_declaration("name", IrValue::String("outer".to_string())),
             let_call(
@@ -9091,7 +9279,7 @@ mod tests {
         ]);
         assert_eq!(nodes.len(), 2);
         assert_paragraph_text(&nodes[0..1], "local");
-        assert_paragraph_text(&nodes[1..2], "outer");
+        assert_paragraph_text(&nodes[1..2], "local");
     }
 
     #[test]
@@ -11417,6 +11605,163 @@ mod tests {
     }
 
     #[test]
+    fn foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        assert!(matches!(
+            evaluator.evaluate_call_value(
+                "var",
+                &[IrValue::Identifier("total".into()), IrValue::Number(0.0)],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            ),
+            CallOutcome::NoValue
+        ));
+
+        let increment = call_value(
+            "sum",
+            vec![call_value("total", Vec::new()), IrValue::Number(1.0)],
+        );
+        let outcome = evaluator.evaluate_call_value(
+            "foreach",
+            &[IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span: span(1, 5),
+            })],
+            &[],
+            Some(CallBody::Block(&[
+                var_reassignment("total", increment),
+                var_declaration("local", IrValue::String("only here".into())),
+                var_ref("total"),
+            ])),
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Collection(values))
+                if values == vec![IrValue::Number(1.0), IrValue::Number(2.0)]
+        ));
+        assert_eq!(
+            context.get("total").map(VariableValue::to_value),
+            Some(IrValue::Number(2.0))
+        );
+        assert!(context.get("local").is_none());
+    }
+
+    #[test]
+    fn nested_callable_reassignment_reaches_the_outer_caller() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.assign_value("total".into(), IrValue::Number(0.0));
+
+        let increment = call_value(
+            "sum",
+            vec![call_value("total", Vec::new()), IrValue::Number(1.0)],
+        );
+        let inner = foreach_call(
+            IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(2),
+                span: span(1, 5),
+            }),
+            None,
+            vec![var_reassignment("total", increment), var_ref("total")],
+        );
+        let capture = context.capture_snapshot();
+        context.set_function_binding(
+            "bump".into(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![inner],
+            span(20, 25),
+            Some(Box::new(capture)),
+        );
+
+        let outcome = evaluator.evaluate_call_value(
+            "bump",
+            &[],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Collection(_))
+        ));
+        assert_eq!(
+            context.get("total").map(VariableValue::to_value),
+            Some(IrValue::Number(2.0))
+        );
+    }
+
+    #[test]
+    fn failed_callable_reassignment_is_atomic_and_keeps_the_inner_span() {
+        let evaluator = Evaluator::new();
+        let operation_span = span(0, 40);
+        let failure_span = span(30, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_value("total".into(), IrValue::Number(0.0));
+        let failing = IrNode::FunctionCall {
+            name: "multiply".to_string(),
+            positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+            named_args: Vec::new(),
+            lambda_parameters: None,
+            body: None,
+            span: failure_span,
+        };
+        let outcome = evaluator.evaluate_call_value(
+            "foreach",
+            &[IrValue::Range(IrRange {
+                start: Some(1),
+                end: Some(1),
+                span: span(1, 5),
+            })],
+            &[],
+            Some(CallBody::Block(&[
+                var_reassignment(
+                    "total",
+                    call_value(
+                        "sum",
+                        vec![call_value("total", Vec::new()), IrValue::Number(1.0)],
+                    ),
+                ),
+                failing,
+            ])),
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(failure_span));
+        assert_eq!(
+            context.get("total").map(VariableValue::to_value),
+            Some(IrValue::Number(0.0))
+        );
+    }
+
+    #[test]
     fn foreach_local_function_does_not_leak_to_parent() {
         let local = IrNode::FunctionDeclaration {
             name: IrValue::Identifier("local".to_string()),
@@ -13268,7 +13613,7 @@ mod tests {
                 allow_destructuring: false,
             },
             &mut diagnostics,
-            &caller_context,
+            &mut caller_context,
         );
 
         assert!(matches!(outcome, CallOutcome::Failed));
