@@ -484,6 +484,17 @@ pub struct IrCallable {
     pub capture: Option<Box<IrCallableCapture>>,
 }
 
+/// A source-backed inline argument whose callable interpretation is selected
+/// by the resolved callee. Native iteration consumes `parameters` and `body`;
+/// ordinary positional parameters receive `content` instead.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrInlineBody {
+    pub content: Vec<IrNode>,
+    pub parameters: Option<Vec<IrParameter>>,
+    pub body: Vec<IrNode>,
+    pub span: SourceSpan,
+}
+
 /// Immutable lexical bindings captured by a first-class callable.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrCallableCapture {
@@ -565,6 +576,9 @@ pub enum IrValue {
     /// A first-class typed callable. It is consumed by the evaluator and must
     /// never be lowered as a backend expression.
     Callable(IrCallable),
+    /// A contextual inline argument. It is resolved to ordinary content or a
+    /// callable by the evaluator after the callee binding is selected.
+    InlineBody(IrInlineBody),
 }
 
 #[cfg(test)]

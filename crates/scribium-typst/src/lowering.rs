@@ -987,6 +987,19 @@ impl LoweringContext {
                     self.record_span(callable.span, self.output.len() - before);
                 }
             }
+            IrValue::InlineBody(body) => {
+                // Contextual inline bodies are evaluator-owned inputs. A
+                // successful document consumes them during call resolution;
+                // keep direct IR lowering explicit rather than inventing a
+                // backend callable/content representation.
+                let before = self.output.len();
+                self.push_str(
+                    "/* Scribium contextual inline body reached Typst lowering without evaluator consumption */",
+                );
+                if body.span.source_id != SourceId(0) {
+                    self.record_span(body.span, self.output.len() - before);
+                }
+            }
             IrValue::Size(_) | IrValue::Color(_) | IrValue::Enum(_) => {
                 // Domain values are evaluator-owned semantic inputs. This is
                 // a defensive invalid-IR marker only; Size/Color/enum

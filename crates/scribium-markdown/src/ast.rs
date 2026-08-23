@@ -183,6 +183,15 @@ pub enum Value {
     Identifier(String),
     Range(RangeValue),
     Content(Vec<Inline>),
+    /// A parser-preserved inline argument that may become a callable only
+    /// after the callee's parameter contract has been resolved. The complete
+    /// content remains available for ordinary positional parameters.
+    InlineBody {
+        content: Vec<Inline>,
+        parameters: Option<LambdaHeader>,
+        body: Vec<Inline>,
+        span: ByteSpan,
+    },
     /// A source-backed first-class inline lambda. Its body has already passed
     /// through the Rushdown-backed inline frontend.
     Lambda {

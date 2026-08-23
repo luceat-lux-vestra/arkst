@@ -970,7 +970,18 @@ fn directive_block(
         positional_args: call
             .positional_args
             .iter()
-            .map(|arg| convert_arg(arg, source, base, call_base, diagnostics))
+            .enumerate()
+            .map(|(index, arg)| {
+                convert_arg_with_mode(
+                    arg,
+                    source,
+                    base,
+                    call_base,
+                    diagnostics,
+                    is_contextual_inline_body_position(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
+                )
+            })
             .collect(),
         named_args: call
             .named_args
@@ -1370,7 +1381,18 @@ fn convert_inline(
                 positional_args: call
                     .positional_args
                     .iter()
-                    .map(|arg| convert_arg(arg, source, base, 0, diagnostics))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        convert_arg_with_mode(
+                            arg,
+                            source,
+                            base,
+                            0,
+                            diagnostics,
+                            is_contextual_inline_body_position(&call_name, index),
+                            is_contextual_inline_body_position(&call_name, index),
+                        )
+                    })
                     .collect(),
                 named_args: call
                     .named_args
@@ -1402,14 +1424,12 @@ fn convert_inline(
     }
 }
 
-fn convert_arg(
-    arg: &Arg,
-    source: &str,
-    base: usize,
-    call_base: usize,
-    diagnostics: &mut Vec<ParserDiagnostic>,
-) -> Value {
-    convert_arg_with_mode(arg, source, base, call_base, diagnostics, false)
+fn is_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
+    positional_index == 1 && matches!(call_name, "foreach" | "repeat")
+}
+
+fn is_chained_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
+    positional_index == 0 && matches!(call_name, "foreach" | "repeat")
 }
 
 fn convert_arg_with_mode(
@@ -1419,6 +1439,7 @@ fn convert_arg_with_mode(
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
     allow_unmarked_lambda: bool,
+    contextual_inline_body: bool,
 ) -> Value {
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
@@ -1459,10 +1480,21 @@ fn convert_arg_with_mode(
                         )
                         .unwrap_or(ByteSpan::new(lambda.span.start, lambda.body.start)),
                     });
-                    Value::Lambda {
-                        parameters,
-                        body: parse_original_content(source, lambda.body, base, diagnostics),
-                        span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                    let content = parse_original_content(source, span, base, diagnostics);
+                    let body = parse_original_content(source, lambda.body, base, diagnostics);
+                    if contextual_inline_body {
+                        Value::InlineBody {
+                            content,
+                            parameters,
+                            body,
+                            span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                        }
+                    } else {
+                        Value::Lambda {
+                            parameters,
+                            body,
+                            span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                        }
                     }
                 }
                 Ok(None) => Value::Content(parse_original_content(source, span, base, diagnostics)),
@@ -1588,7 +1620,18 @@ fn convert_content_call(
         positional_args: call
             .positional_args
             .iter()
-            .map(|arg| convert_arg(arg, source, base, 0, diagnostics))
+            .enumerate()
+            .map(|(index, arg)| {
+                convert_arg_with_mode(
+                    arg,
+                    source,
+                    base,
+                    0,
+                    diagnostics,
+                    is_contextual_inline_body_position(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
+                )
+            })
             .collect(),
         named_args: call
             .named_args
@@ -1625,7 +1668,18 @@ fn convert_call_segment(
         positional_args: segment
             .positional_args
             .iter()
-            .map(|arg| convert_arg(arg, source, base, call_base, diagnostics))
+            .enumerate()
+            .map(|(index, arg)| {
+                convert_arg_with_mode(
+                    arg,
+                    source,
+                    base,
+                    call_base,
+                    diagnostics,
+                    is_chained_contextual_inline_body_position(&call_name, index),
+                    is_chained_contextual_inline_body_position(&call_name, index),
+                )
+            })
             .collect(),
         named_args: segment
             .named_args
@@ -1667,6 +1721,7 @@ fn convert_named_arg(
             call_base,
             diagnostics,
             callback_lambda,
+            false,
         ),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
     }
@@ -3522,6 +3577,49 @@ mod tests {
                 body,
                 ..
             }) if header.parameters[0].name == "value" && !body.is_empty()
+        ));
+    }
+
+    #[test]
+    fn iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion() {
+        let output = parse_with_diagnostics(".foreach {1..3} {item: .item}\n");
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            positional_args, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected foreach directive")
+        };
+        assert!(matches!(
+            positional_args.get(1),
+            Some(Value::InlineBody {
+                parameters: Some(header),
+                body,
+                ..
+            }) if header.parameters[0].name == "item" && !body.is_empty()
+        ));
+    }
+
+    #[test]
+    fn implicit_iteration_body_keeps_nested_named_arguments_in_the_body() {
+        let output = parse_with_diagnostics(".foreach {1..3} {.islower {.1} than:{5}}\n");
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            positional_args, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected foreach directive")
+        };
+        assert!(matches!(
+            positional_args.get(1),
+            Some(Value::InlineBody {
+                parameters: None,
+                body,
+                ..
+            }) if body.iter().any(|inline| matches!(
+                inline,
+                Inline::DirectiveCall { name, .. } if name == "islower"
+            ))
         ));
     }
 

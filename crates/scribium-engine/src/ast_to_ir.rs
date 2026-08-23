@@ -7,8 +7,8 @@
 use crate::DocumentMetadataDefaults;
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
-    IrCallSegment, IrDocument, IrInline, IrListItem, IrMetadata, IrNamedArg, IrNode, IrParameter,
-    IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrCallSegment, IrDocument, IrInline, IrInlineBody, IrListItem, IrMetadata, IrNamedArg, IrNode,
+    IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
 use scribium_markdown::ast::{
     Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
@@ -805,75 +805,98 @@ fn value_to_ir(
             span: byte_to_source_span(span, source_id),
             capture: None,
         }),
-        Value::Content(inlines) => {
-            if let [Inline::DirectiveCall {
-                name,
-                name_span,
-                head_span,
-                positional_args,
-                named_args,
-                chain,
-                body,
-                span,
-            }] = inlines.as_slice()
-            {
-                let ir_positional: Vec<_> = positional_args
+        Value::InlineBody {
+            content,
+            parameters,
+            body,
+            span,
+        } => scribium_ir::IrValue::InlineBody(IrInlineBody {
+            content: content_value_to_ir(content, source_id, diagnostics, source_mode),
+            parameters: parameters
+                .as_ref()
+                .map(|header| lambda_parameters_to_ir(header, source_id)),
+            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span),
+            span: byte_to_source_span(span, source_id),
+        }),
+        Value::Content(inlines) => scribium_ir::IrValue::Content(content_value_to_ir(
+            inlines,
+            source_id,
+            diagnostics,
+            source_mode,
+        )),
+    }
+}
+
+fn content_value_to_ir(
+    inlines: &[Inline],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> Vec<IrNode> {
+    if let [Inline::DirectiveCall {
+        name,
+        name_span,
+        head_span,
+        positional_args,
+        named_args,
+        chain,
+        body,
+        span,
+    }] = inlines
+    {
+        let ir_positional: Vec<_> = positional_args
+            .iter()
+            .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
+            .collect();
+        let ir_named: Vec<_> = named_args
+            .iter()
+            .map(|arg| IrNamedArg {
+                name: arg.name.clone(),
+                name_span: byte_to_source_span(&arg.name_span, source_id),
+                value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
+                span: byte_to_source_span(&arg.span, source_id),
+            })
+            .collect();
+        let ir_body = body.as_ref().map(|b| {
+            vec![IrNode::Paragraph {
+                content: inlines_to_ir(b, source_id, diagnostics, source_mode, false),
+                span: byte_to_source_span(span, source_id),
+            }]
+        });
+        if chain.is_empty() {
+            vec![IrNode::FunctionCall {
+                name: name.clone(),
+                positional_args: ir_positional,
+                named_args: ir_named,
+                lambda_parameters: None,
+                body: ir_body,
+                span: byte_to_source_span(span, source_id),
+            }]
+        } else {
+            vec![IrNode::ChainedFunctionCall {
+                head: IrCallSegment {
+                    name: name.clone(),
+                    name_span: byte_to_source_span(name_span, source_id),
+                    positional_args: ir_positional,
+                    named_args: ir_named,
+                    span: byte_to_source_span(head_span, source_id),
+                },
+                chain: chain
                     .iter()
-                    .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
-                    .collect();
-                let ir_named: Vec<_> = named_args
-                    .iter()
-                    .map(|arg| IrNamedArg {
-                        name: arg.name.clone(),
-                        name_span: byte_to_source_span(&arg.name_span, source_id),
-                        value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
-                        span: byte_to_source_span(&arg.span, source_id),
-                    })
-                    .collect();
-                let ir_body = body.as_ref().map(|b| {
-                    vec![IrNode::Paragraph {
-                        content: inlines_to_ir(b, source_id, diagnostics, source_mode, false),
-                        span: byte_to_source_span(span, source_id),
-                    }]
-                });
-                if chain.is_empty() {
-                    scribium_ir::IrValue::Content(vec![IrNode::FunctionCall {
-                        name: name.clone(),
-                        positional_args: ir_positional,
-                        named_args: ir_named,
-                        lambda_parameters: None,
-                        body: ir_body,
-                        span: byte_to_source_span(span, source_id),
-                    }])
-                } else {
-                    scribium_ir::IrValue::Content(vec![IrNode::ChainedFunctionCall {
-                        head: IrCallSegment {
-                            name: name.clone(),
-                            name_span: byte_to_source_span(name_span, source_id),
-                            positional_args: ir_positional,
-                            named_args: ir_named,
-                            span: byte_to_source_span(head_span, source_id),
-                        },
-                        chain: chain
-                            .iter()
-                            .map(|segment| {
-                                call_segment_to_ir(segment, source_id, diagnostics, source_mode)
-                            })
-                            .collect(),
-                        body: ir_body,
-                        span: byte_to_source_span(span, source_id),
-                    }])
-                }
-            } else {
-                let start = inlines.first().map(inline_span_start);
-                let end = inlines.last().map(inline_span_end);
-                let span = scribium_source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
-                scribium_ir::IrValue::Content(vec![IrNode::Paragraph {
-                    content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
-                    span: byte_to_source_span(&span, source_id),
-                }])
-            }
+                    .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
+                    .collect(),
+                body: ir_body,
+                span: byte_to_source_span(span, source_id),
+            }]
         }
+    } else {
+        let start = inlines.first().map(inline_span_start);
+        let end = inlines.last().map(inline_span_end);
+        let span = scribium_source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
+        vec![IrNode::Paragraph {
+            content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
+            span: byte_to_source_span(&span, source_id),
+        }]
     }
 }
 
