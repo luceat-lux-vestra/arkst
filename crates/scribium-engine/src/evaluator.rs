@@ -327,6 +327,7 @@ struct DocumentState {
     description: String,
     document_type: scribium_ir::IrDocumentType,
     authors: Vec<IrDocumentAuthor>,
+    keywords: Vec<String>,
 }
 
 impl DocumentState {
@@ -336,6 +337,7 @@ impl DocumentState {
             description: snapshot.description.clone(),
             document_type: snapshot.document_type,
             authors: snapshot.authors.clone(),
+            keywords: snapshot.keywords.clone(),
         }
     }
 
@@ -345,6 +347,7 @@ impl DocumentState {
             description: self.description.clone(),
             document_type: self.document_type,
             authors: self.authors.clone(),
+            keywords: self.keywords.clone(),
         }
     }
 }
@@ -1002,6 +1005,14 @@ impl<'a> EvaluationContext<'a> {
                     .map(|author| author.name.clone())
                     .unwrap_or_default(),
             ),
+            "dockeywords" => IrValue::Collection(
+                state
+                    .keywords
+                    .iter()
+                    .cloned()
+                    .map(IrValue::String)
+                    .collect(),
+            ),
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
@@ -1035,6 +1046,10 @@ impl<'a> EvaluationContext<'a> {
                 name,
                 info: Vec::new(),
             });
+    }
+
+    fn replace_document_keywords(&self, keywords: Vec<String>) {
+        self.document_state.borrow_mut().keywords = keywords;
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
@@ -1703,7 +1718,8 @@ impl Evaluator {
         }
 
         let source_defined_shadowable_document_state =
-            matches!(name, "docauthor" | "docauthors") && context.get_function(name).is_some();
+            matches!(name, "docauthor" | "docauthors" | "dockeywords")
+                && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
                 name,
@@ -2834,6 +2850,18 @@ impl Evaluator {
             );
         }
 
+        if name == "dockeywords" {
+            return self.evaluate_document_keywords_builtin(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if body.is_some() {
             diagnostics.push(document_state_call_error(
                 format!("`.{name}` does not accept a block body"),
@@ -3242,6 +3270,316 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
         CallOutcome::NoValue
+    }
+
+    /// Implements the bounded `.dockeywords` iterable read/write contract.
+    /// Candidate elements are materialized, converted, and validated before
+    /// replacing the shared keyword state. Unlike the author builtins, this
+    /// state is deliberately replace-on-write rather than append-only.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_document_keywords_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
+            return CallOutcome::Value(context.document_state_value("dockeywords"));
+        }
+
+        let previous_state = context.document_state.borrow().clone();
+        let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
+            context.restore_document_state(state.clone());
+        };
+
+        let (candidate, candidate_span) = if let Some(body) = body {
+            if !positional_args.is_empty() || !named_args.is_empty() {
+                let invalid_span = named_args
+                    .first()
+                    .map(|argument| argument.span)
+                    .or_else(|| {
+                        positional_args
+                            .first()
+                            .map(|value| value_source_span(value, span))
+                    })
+                    .unwrap_or(*span);
+                diagnostics.push(document_state_call_error(
+                    "`.dockeywords` cannot combine a body with positional or named arguments"
+                        .to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+
+            let nodes = match body {
+                CallBody::Block(nodes) => nodes,
+                CallBody::Inline(_) => {
+                    diagnostics.push(document_state_call_error(
+                        "`.dockeywords` requires a Markdown list block body".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            };
+            let values = match self.document_keyword_body_values(nodes, *span, diagnostics) {
+                Ok(values) => values,
+                Err(outcome) => {
+                    restore_on_failure(context, &previous_state);
+                    return outcome;
+                }
+            };
+            (values, *span)
+        } else {
+            let invalid_span = if positional_args.len() > 1 {
+                positional_args
+                    .get(1)
+                    .map(|value| value_source_span(value, span))
+                    .unwrap_or(*span)
+            } else if let Some(argument) = named_args.first() {
+                argument.span
+            } else {
+                *span
+            };
+
+            if positional_args.len() > 1 {
+                diagnostics.push(document_state_call_error(
+                    "`.dockeywords` accepts exactly one iterable argument".to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if positional_args.len() == 1 && !named_args.is_empty() {
+                let argument = &named_args[0];
+                let message = if argument.name == "keywords" {
+                    "`.dockeywords` received the `keywords` argument more than once"
+                } else {
+                    "`.dockeywords` accepts one positional argument or `keywords:`"
+                };
+                diagnostics.push(document_state_call_error(
+                    message.to_string(),
+                    argument.span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if named_args.len() > 1 {
+                let argument = &named_args[1];
+                let message = if argument.name == "keywords" {
+                    "`.dockeywords` received the `keywords` argument more than once"
+                } else {
+                    "`.dockeywords` accepts exactly one `keywords` argument"
+                };
+                diagnostics.push(document_state_call_error(
+                    message.to_string(),
+                    argument.span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if let Some(argument) = named_args.first() {
+                if argument.name != "keywords" {
+                    diagnostics.push(document_state_call_error(
+                        format!(
+                            "Unknown named argument `{}` for `.dockeywords`",
+                            argument.name
+                        ),
+                        argument.name_span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            }
+
+            if positional_args.len() == 1 {
+                let argument_span = value_source_span(&positional_args[0], span);
+                let evaluated = match self.evaluate_invocation_values(
+                    positional_args,
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                ) {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        restore_on_failure(context, &previous_state);
+                        return outcome;
+                    }
+                };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.dockeywords` requires one iterable argument".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                };
+                let values = match self.coerce_iterable(argument, &argument_span, diagnostics) {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        restore_on_failure(context, &previous_state);
+                        return outcome;
+                    }
+                };
+                (
+                    values
+                        .into_iter()
+                        .map(|value| {
+                            let value_span = value_source_span(&value, &argument_span);
+                            (value, value_span)
+                        })
+                        .collect(),
+                    argument_span,
+                )
+            } else {
+                let evaluated =
+                    match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                        Ok(values) => values,
+                        Err(outcome) => {
+                            restore_on_failure(context, &previous_state);
+                            return outcome;
+                        }
+                    };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.dockeywords` requires one iterable argument".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                };
+                let argument_span = named_args[0].span;
+                let values = match self.coerce_iterable(
+                    InvocationValue {
+                        value: argument.value.clone(),
+                        origin: argument.origin,
+                    },
+                    &argument_span,
+                    diagnostics,
+                ) {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        restore_on_failure(context, &previous_state);
+                        return outcome;
+                    }
+                };
+                (
+                    values
+                        .into_iter()
+                        .map(|value| {
+                            let value_span = value_source_span(&value, &argument_span);
+                            (value, value_span)
+                        })
+                        .collect(),
+                    argument_span,
+                )
+            }
+        };
+
+        let keywords = match self.validate_document_keywords(candidate, candidate_span, diagnostics)
+        {
+            Ok(keywords) => keywords,
+            Err(outcome) => {
+                restore_on_failure(context, &previous_state);
+                return outcome;
+            }
+        };
+        context.replace_document_keywords(keywords);
+        CallOutcome::NoValue
+    }
+
+    fn document_keyword_body_values(
+        &self,
+        nodes: &[IrNode],
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<(IrValue, SourceSpan)>, CallOutcome> {
+        let list = match nodes {
+            [] => return Ok(Vec::new()),
+            [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => items,
+            _ => {
+                diagnostics.push(document_state_conversion_error(
+                    "`.dockeywords` requires exactly one Markdown list body".to_string(),
+                    span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
+        self.check_materialized_elements_len(list.len(), span, diagnostics)?;
+        let mut values = Vec::new();
+        if let Err(error) = values.try_reserve_exact(list.len()) {
+            diagnostics.push(document_state_conversion_error(
+                format!("document keywords cannot be allocated: {error}"),
+                span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for item in list {
+            let value = self.document_keyword_body_item_value(item, diagnostics)?;
+            values.push((value, item.span));
+        }
+        Ok(values)
+    }
+
+    fn document_keyword_body_item_value(
+        &self,
+        item: &scribium_ir::IrListItem,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<IrValue, CallOutcome> {
+        match item.nodes.as_slice() {
+            [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
+                .coerce_iterable(
+                    InvocationValue::static_value(IrValue::Content(item.nodes.clone())),
+                    &item.span,
+                    diagnostics,
+                )
+                .map(IrValue::Collection),
+            [IrNode::Paragraph { content, .. }] => {
+                let mut text = String::new();
+                for inline in content {
+                    let IrInline::Text { content, .. } = inline else {
+                        return Ok(IrValue::Content(item.nodes.clone()));
+                    };
+                    text.push_str(content);
+                }
+                Ok(IrValue::String(text))
+            }
+            _ => Ok(IrValue::Content(item.nodes.clone())),
+        }
+    }
+
+    fn validate_document_keywords(
+        &self,
+        values: Vec<(IrValue, SourceSpan)>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<String>, CallOutcome> {
+        self.check_materialized_elements_len(values.len(), span, diagnostics)?;
+        let mut keywords = Vec::new();
+        if let Err(error) = keywords.try_reserve_exact(values.len()) {
+            diagnostics.push(document_state_conversion_error(
+                format!("document keywords cannot be allocated: {error}"),
+                span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        for (value, value_span) in values {
+            let Some(keyword) = bounded_document_keyword_string(&value) else {
+                diagnostics.push(document_state_conversion_error(
+                    "`.dockeywords` elements must be bounded scalar strings".to_string(),
+                    value_span,
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            keywords.push(keyword);
+        }
+        Ok(keywords)
     }
 
     fn validate_document_authors(
@@ -6574,6 +6912,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "doctype",
     "docauthor",
     "docauthors",
+    "dockeywords",
 ];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
@@ -7394,6 +7733,19 @@ fn bounded_document_author_string(value: &IrValue) -> Option<String> {
             | IrValue::Number(_)
             | IrValue::Boolean(_)
             | IrValue::Content(_)
+    ) {
+        return None;
+    }
+    builtins::scalar_string_argument(&InvocationValue::static_value(value.clone()))
+}
+
+/// Applies only the scalar-to-string families already evidenced by the
+/// evaluator. Ranges, collections, rich content, and other semantic values
+/// remain unsupported for the bounded `.dockeywords` adapter.
+fn bounded_document_keyword_string(value: &IrValue) -> Option<String> {
+    if !matches!(
+        value,
+        IrValue::String(_) | IrValue::Identifier(_) | IrValue::Number(_) | IrValue::Boolean(_)
     ) {
         return None;
     }

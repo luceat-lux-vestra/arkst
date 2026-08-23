@@ -1,0 +1,5 @@
+id = "dockeywords-family"
+feature = "document-state-dockeywords"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-dockeywords"
+description = "Bounded .dockeywords empty getter, ordered iterable state, replacement, and surrounding content"

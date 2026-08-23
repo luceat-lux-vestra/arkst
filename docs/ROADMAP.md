@@ -117,6 +117,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 |------|--------|
 | Bounded `.docauthor` document-state semantics | Completed (v2.5.1 evidenced slice) |
 | Bounded `.docauthors` document-state semantics | Completed (v2.5.1 evidenced slice) |
+| Bounded `.dockeywords` document-state semantics | Completed (v2.5.1 evidenced slice) |
 | Broader document metadata and programmable-document convergence | Planned |
 
 ## M4 — Developer Experience

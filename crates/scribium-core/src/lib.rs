@@ -1850,6 +1850,186 @@ mod tests {
     }
 
     #[test]
+    fn dockeywords_getter_is_empty_typed_and_does_not_mutate_state() {
+        let (result, _) = compile_source(".dockeywords::size\n.dockeywords\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn dockeywords_documented_body_preserves_order() {
+        let source = ".dockeywords\n    - quarkdown\n    - markdown\n    - documentation\n.dockeywords::getat {2}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "markdown");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec![
+                "quarkdown".to_string(),
+                "markdown".to_string(),
+                "documentation".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn dockeywords_setter_replaces_the_previous_list() {
+        let source = ".dockeywords\n    - first\n    - second\n.dockeywords\n    - replacement\n.dockeywords::size\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\nreplacement");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["replacement".to_string()]
+        );
+        assert!(result.ir.metadata.document_state.authors.is_empty());
+    }
+
+    #[test]
+    fn dockeywords_typed_iterable_and_named_binding_use_the_same_state_path() {
+        let source = ".var {keywords} {.range {1} {3}}\n.dockeywords {.keywords}\n.dockeywords keywords:{.range {4} {5}}\n.dockeywords\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "4\n5");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["4".to_string(), "5".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_supports_bounded_scalar_elements_but_rejects_nested_values() {
+        let source = ".dockeywords {.pair {stable} {.range {1} {2}}}\n.dockeywords\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn dockeywords_supports_existing_boolean_and_number_string_conversion() {
+        let source = ".dockeywords {.pair {true} {42}}\n.dockeywords\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "true\n42");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["true".to_string(), "42".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_state_is_shared_by_callable_child_scopes() {
+        let source = ".function {set-keywords}\n    .dockeywords\n        - callable\n        - shared\n\n.set-keywords\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "callable");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["callable".to_string(), "shared".to_string()]
+        );
+    }
+
+    #[test]
+    fn source_defined_dockeywords_shadows_native_direct_and_chain() {
+        for source in [
+            ".function {dockeywords}\n    shadowed\n\n.dockeywords\n",
+            ".function {dockeywords}\n    .pair {left} {right}\n\n.dockeywords::size\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(
+                output_text(&result),
+                if source.contains("::size") {
+                    "2"
+                } else {
+                    "shadowed"
+                },
+                "{source:?}"
+            );
+            assert!(result.ir.metadata.document_state.keywords.is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_dockeywords_setters_are_source_backed_and_atomic() {
+        let cases = [
+            (".dockeywords {one} {two}\n", ".dockeywords {one} {two}"),
+            (".dockeywords unknown:{one}\n", "unknown"),
+            (
+                ".dockeywords keywords:{.pair {one} {two}} keywords:{.pair {three} {four}}\n",
+                "keywords:{.pair {three} {four}}",
+            ),
+            (
+                ".dockeywords {not-an-iterable}\n",
+                ".dockeywords {not-an-iterable}",
+            ),
+        ];
+        for (invalid, marker) in cases {
+            let source = format!(".dockeywords\n    - stable\n{invalid}.dockeywords::first\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id),
+                "{source:?}: {result:?}"
+            );
+            assert!(
+                result.diagnostics[0]
+                    .primary
+                    .is_some_and(|span| span.start <= source.find(marker).unwrap()
+                        && span.end >= source.find(marker).unwrap() + marker.len()),
+                "{source:?}: {result:?}"
+            );
+            assert_eq!(output_text(&result), "stable", "{source:?}: {result:?}");
+            assert_eq!(
+                result.ir.metadata.document_state.keywords,
+                vec!["stable".to_string()],
+                "{source:?}: {result:?}"
+            );
+        }
+
+        let source = ".dockeywords\n    - stable\n.dockeywords {.pair {valid} {.range {1} {2}}}\n.dockeywords::first\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert_eq!(output_text(&result), "stable");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["stable".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_remains_separate_from_front_matter_metadata() {
+        let source = "---\nkeywords: front matter\n---\n.dockeywords\n    - document\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["document".to_string()]
+        );
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .raw
+                .iter()
+                .find(|(key, _)| key == "keywords")
+                .map(|(_, value)| value.as_str()),
+            Some("front matter")
+        );
+    }
+
+    #[test]
     fn existing_document_state_builtins_keep_native_precedence_over_source_functions() {
         let source = ".function {docname}\n    shadowed-name\n\n.function {docdescription}\n    shadowed-description\n\n.function {doctype}\n    shadowed-type\n\nValues: [.docname]|[.docdescription]|[.doctype]\n";
         let (result, _) = compile_source(source);

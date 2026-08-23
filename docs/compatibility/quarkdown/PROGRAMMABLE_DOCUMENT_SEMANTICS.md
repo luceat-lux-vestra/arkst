@@ -112,17 +112,19 @@ child scopes, plus a final immutable `IrDocument.metadata.document_state`
 snapshot. Typst lowering consumes the snapshot and does not replay calls.
 
 The Document State Foundation slice is implemented. `.docname`,
-`.docdescription`, `.doctype`, and the bounded `.docauthor`/`.docauthors`
-slice support the
-read/write dual API; writes return no document output, `.docname` rejects
-blank values before mutation, `.doctype` validates a closed
-`plain`/`paged`/`slides`/`docs` enum before mutation, and `.docauthor` appends
-minimal ordered author records while reading the first author name; `.docauthors`
-appends validated authors with ordered string info and returns an ordinary
-typed dictionary view. The
+`.docdescription`, `.doctype`, the bounded `.docauthor`/`.docauthors` slice,
+and the bounded `.dockeywords` slice support the read/write dual API; writes
+return no document output, `.docname` rejects blank values before mutation,
+`.doctype` validates a closed `plain`/`paged`/`slides`/`docs` enum before
+mutation, `.docauthor` appends minimal ordered author records while reading
+the first author name, `.docauthors` appends validated authors with ordered
+string info and returns an ordinary typed dictionary view, and `.dockeywords`
+returns an ordered iterable while replacing the complete keyword list only
+after all candidate elements validate. The
 snapshot is serializable plain data with explicit defaults for older
-serialized IR; the document type defaults to `plain`, missing authors default
-to an empty collection, and missing author info defaults to empty. The
+serialized IR; the document type defaults to `plain`, missing authors and
+keywords default to empty collections, and missing author info defaults to
+empty. The
 remaining document metadata fields remain deferred.
 
 ### Domain conversion adapters
@@ -343,7 +345,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | Inline iteration body | Regular binding first resolves the callee parameter; an inline likely-body becomes a `Lambda` only for a callable target, while an ordinary dynamic parameter receives content | `Value::InlineBody`/`IrValue::InlineBody` preserves structured content and callable metadata until source-defined/native resolution; native iteration adapts it into the shared `IrCallable` path | Keep contextual inline bodies target-sensitive and source-backed | Bounded `.foreach`/`.repeat` support implemented, including direct/chain source-defined shadowing | Generalized inline component/callback bodies |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, and bounded `.docauthor`/`.docauthors` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, and `.docauthors` implemented at bounded evidenced boundaries | `.dockeywords`, `.doclang`, `.theme`, rendering/layout metadata, and remaining document fields |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, and bounded `.dockeywords` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, and `.dockeywords` implemented at bounded evidenced boundaries | `.doclang`, `.theme`, rendering/layout metadata, front-matter merge policy, and remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -463,10 +465,11 @@ necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
 The remaining direct `.container` style parameters and related layout families
-remain deferred. `.dockeywords`, `.doclang`, `.theme`, rendering policy,
-front-matter/document-state merging, and other document metadata remain
-deferred. `.docauthor` and `.docauthors` are implemented only at their
-bounded evaluator/IR document-state boundaries.
+remain deferred. `.doclang`, `.theme`, rendering policy,
+front-matter/document-state merging, generalized DynamicValue conversion, and
+other document metadata remain deferred. `.docauthor`, `.docauthors`, and
+`.dockeywords` are implemented only at their bounded evaluator/IR
+document-state boundaries.
 
 The `.br` slice does not promote the broader text/layout family: `.text`,
 `.codespan`, `.clip`, `.float`, and `.fullspan` remain separate deferred work.

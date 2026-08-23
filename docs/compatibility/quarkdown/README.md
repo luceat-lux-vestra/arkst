@@ -81,7 +81,7 @@ style, or layout surface to compatibility.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor` and `.docauthors` are implemented only at the bounded evaluator/IR state boundary; the remaining metadata surface stays deferred | Partial (bounded) |
+| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, and `.dockeywords` are implemented only at bounded evaluator/IR state boundaries; rendering and the remaining metadata surface stay deferred | Partial (bounded) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -155,6 +155,31 @@ introduced.
 Evidence is in `crates/scribium-core/src/lib.rs::tests::docauthors_*`, the
 ordered author serde tests, and
 `fixtures/quarkdown-conformance/cases/docauthors-family/`.
+
+### Bounded `.dockeywords` document-state contract
+
+The pinned Quarkdown v2.5.1 contract gives `.dockeywords` an argumentless
+getter returning the current keywords as an iterable and a setter accepting an
+iterable. Scribium supports the documented Markdown list body, an already
+evaluated typed iterable through normal positional binding, and the named
+`keywords:` binding. Getter order is preserved, the default is an empty list,
+and every successful setter **replaces** the complete prior keyword list.
+
+The evaluator materializes and validates the complete candidate before one
+state commit. Only the existing bounded String-like scalar families
+(String/Identifier/Number/Boolean) are accepted as keyword elements; ranges,
+nested collections, rich content, callables, components, and unresolved
+values remain rejected. The shared evaluator state is visible in ordinary
+callable child scopes, while `IrDocument.metadata.document_state.keywords` is
+an immutable backend-neutral snapshot with serde defaults for older IR.
+Source-defined `.dockeywords` functions shadow this native builtin under the
+same model as `.docauthor(s)`; `.docname`, `.docdescription`, and `.doctype`
+retain native-first precedence. No HTML SEO rendering, Typst metadata,
+front-matter merging, or generalized conversion is introduced.
+
+Evidence is in `crates/scribium-core/src/lib.rs::tests::dockeywords_*`, the IR
+serde test, and the independently authored
+`fixtures/quarkdown-conformance/cases/dockeywords-family/` case.
 
 ### Bounded `.container` sizing contract
 
