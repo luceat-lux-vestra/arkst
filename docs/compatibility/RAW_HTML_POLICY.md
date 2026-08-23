@@ -49,9 +49,9 @@ The Quarkdown compatibility contract is therefore:
 
 - ordinary mixed raw HTML in `.qd` / `.scrib` is **not** a compatibility feature;
 - Scribium must not promote Markdown raw-HTML recognition into successful Quarkdown semantics;
-- `.html` is a separate Quarkdown language feature and must be implemented, if/when supported, with its explicit target-specific contract rather than by enabling arbitrary mixed HTML globally;
-- `.html {<em>x</em>}` evaluates a single `String` argument and eventually requires a closed, HTML-only target-specific semantic representation; and
-- the feature remains unsupported/pending in Scribium until the capability, IR-carrier, evaluator, and HTML-backend boundaries are implemented and reviewed. See [ADR-0018](../adr/0018-quarkdown-target-specific-native-content.md).
+- `.html` is a separate Quarkdown language feature with an implemented closed `Html` semantic slice; it does not enable arbitrary mixed HTML globally;
+- `.html {<em>x</em>}` evaluates a single `String` argument into a closed target-specific semantic representation after the explicit capability check; and
+- the HTML output backend remains future work, while the current Typst/PDF path deliberately omits the evaluated target-specific node. See [ADR-0018](../adr/0018-quarkdown-target-specific-native-content.md).
 
 ### Quarkdown `.html` is not Markdown raw HTML
 
@@ -66,20 +66,22 @@ discard the call during parsing.
 
 The v2.5.1 CLI grants `native-content` through its default permission set, but
 the capability is checked before node construction and denial raises a typed
-missing-permission error. Scribium's eventual normal/default
-Quarkdown-compatible compilation therefore starts with `NativeContent`
-granted; the host/API may explicitly deny it. Scribium has no equivalent
-compile/evaluation permission context today, so this is a documented future
-contract rather than an implemented permission API. Granting it must not
-authorize CSS, JavaScript, filesystem/network access, Markdown mixed raw HTML,
-Typst injection, or arbitrary native payloads. `.css` shares the upstream
+missing-permission error. Scribium's compatibility-default compilation grants
+`NativeContent`; the host/API may explicitly deny it through
+`compile_with_capabilities`, which emits one source-backed `E3004` before
+target-specific node creation. When `.html` is authorized, that builtin creates
+only the closed `TargetSpecificContent { target: Html, ... }` value. The
+`NativeContent` capability may also gate separately specified closed
+native-content features; it does not authorize arbitrary target kinds, generic
+native/MIME payloads, CSS, JavaScript, filesystem/network access, Markdown
+mixed raw HTML, or Typst/backend-source injection. `.css` shares the upstream
 permission but remains outside this slice.
 
-The intended future Typst/PDF behavior is deliberate silent omission after
-evaluation and capability checking: retain the target-specific HTML semantic
-node until backend selection, then emit no Typst output and no warning. A
-future HTML backend may consume the node and emit the evaluated content
-verbatim. This is not a generic native-content or MIME escape hatch.
+The current Typst/PDF behavior is deliberate silent omission after evaluation
+and capability checking: retain the target-specific HTML semantic node until
+backend selection, then emit no Typst output and no warning. A future HTML
+backend may consume the node and emit the evaluated content verbatim. This is
+not a generic native-content or MIME escape hatch.
 
 ### Typst
 
@@ -225,7 +227,7 @@ This policy does not authorize:
   parser mode;
 - making Typst/PDF emit a warning or visible text for an upstream-ignored
   `.html` node; or
-- allowing the future target-specific mechanism to authorize `.css`,
+- allowing the target-specific mechanism to authorize `.css`,
   JavaScript, SVG, LaTeX, Typst source, arbitrary MIME, or plugin payloads.
 
 Rushdown's renderer can still be useful as a Markdown-only differential oracle, but production Scribium semantics continue through frontend AST -> backend-neutral IR -> single evaluator -> backend lowering.

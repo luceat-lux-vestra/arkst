@@ -680,9 +680,10 @@ engine invokes `scribium-html` for HTML requiring semantic normalization.
 This HTML interoperability path is for parser-owned Markdown raw HTML and
 bounded foreign-content normalization. It does not recognize or implement the
 Quarkdown `.html` function. `.html {<em>x</em>}` is an evaluated Quarkdown
-function whose future target-specific semantic representation, permission
-boundary, HTML consumption, and intentional Typst/PDF omission are defined by
-ADR-0018; ordinary `<em>x</em>` in `.qd`/`.scrib` remains the source-backed
+function whose closed target-specific semantic representation and permission
+boundary are implemented under ADR-0018; its HTML output consumption remains a
+future backend concern and its intentional Typst/PDF omission is current
+behavior. Ordinary `<em>x</em>` in `.qd`/`.scrib` remains the source-backed
 `E8001` case in `RAW_HTML_POLICY.md`.
 
 The Quarkdown `.html` payload does not pass through `scribium-html`. A future
