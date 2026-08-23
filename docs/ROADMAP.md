@@ -59,7 +59,7 @@ front matter, deterministic output.
 
 ## M2 — Quarkdown Core Language + Markdown MVP
 
-**Status:** In progress
+**Status:** Completed (bounded, evidence-backed baseline; broader compatibility remains)
 
 **Objective:** Quarkdown core language + Markdown MVP for v0.1.0, with honest
 partial compatibility claims and a growing evidence-backed baseline.
@@ -90,6 +90,21 @@ evidenced, while broader function-driven metadata, style/layout families,
 generalized conversions, and remaining programmable-document functionality
 continue into M3+ and later convergence. See the gap inventory for the complete
 evidence-backed classification. v0.1 may be partial.
+
+### M2 closure evidence
+
+The M2 completion audit is independently reviewable from the repository:
+
+- [current product status and Markdown evidence](../README.md)
+- [Markdown capability matrix and differential-corpus workflow](compatibility/markdown/README.md)
+- [Quarkdown capability matrix and v2.5.1 gap inventory](compatibility/quarkdown/README.md)
+- [executable independently authored Quarkdown conformance corpus](../fixtures/quarkdown-conformance/README.md)
+- [raw HTML policy](compatibility/RAW_HTML_POLICY.md) and [resource-context contract](adr/0019-typst-source-and-resource-context.md)
+- [real Typst/PDF backend integration coverage](../crates/scribium-typst-subprocess/tests/backend_integration.rs)
+
+This closure means the bounded M2 baseline is implemented and evidenced. It
+does not claim complete v2.5.1 compatibility; deferred and partial families
+remain compatibility debt for M3+ and later convergence.
 
 ## M3 — Programmable Documents
 

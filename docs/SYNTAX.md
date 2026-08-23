@@ -94,12 +94,12 @@ Implemented (M2):
   - Evidence covers `.md`, `.qd`, and Markdown in an indented Quarkdown body
   - This is a tested M2 slice, not a claim of complete CommonMark/GFM support
 
-Planned (M2+):
+Remaining M2+ / deferred:
 
-- Images (`![alt](url)`)
 - Footnotes
 - Math (`$...$` and `$$...$$`)
-- HTML passthrough (policy TBD)
+- General raw HTML semantics (the bounded policy is documented in
+  `docs/compatibility/RAW_HTML_POLICY.md`)
 
 ## Quarkdown-Compatible Function Calls
 
@@ -664,10 +664,17 @@ functions. Dynamic
 bounds are evaluated normally and truncated to signed integer endpoints using
 the verified upstream Number-to-Int behavior.
 
-### Include / Read (Planned)
+### Include / Read (Implemented bounded)
 
-Planned. `include` and `read` are function calls like any other and will be
-evaluated by the builtin layer.
+`.include`, `.read`, and `.json` are evaluated through the engine's
+`VirtualProject` resource provider. Paths are logical and source-relative;
+normalization rejects traversal outside the project boundary, and nested
+includes retain source identity for subsequent relative resources. The
+compiler does not access the host filesystem or network from this boundary.
+
+See [`docs/compatibility/quarkdown/README.md`](compatibility/quarkdown/README.md),
+[`docs/compatibility/quarkdown/GAP_INVENTORY.md`](compatibility/quarkdown/GAP_INVENTORY.md),
+and [`docs/adr/0019-typst-source-and-resource-context.md`](adr/0019-typst-source-and-resource-context.md).
 
 ### Native Typst passthrough
 
@@ -677,9 +684,12 @@ does not embed raw Typst source in backend-neutral IR and does not define a
 generic backend escape block. The current CLI rejects `.typ` input until the
 separate passthrough capability is implemented.
 
-### Data Loading (Planned)
+### Data Loading (Partial; bounded `.read` / `.json` / `.include`)
 
-Planned.
+The implemented resource model covers project-backed text, JSON, and nested
+document inclusion. Other data-loading families, including directory
+enumeration, CSV/list loading, and remote/package resources, remain deferred
+until their separate compatibility and host-boundary contracts are reviewed.
 
 ## Reserved Syntax
 

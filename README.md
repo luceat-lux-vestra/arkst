@@ -39,7 +39,10 @@ The supported Markdown output path includes paragraphs, headings, blockquotes, o
 
 Scribium also supports a deliberately bounded, attribute-free inline raw-HTML subset when it maps exactly to existing Markdown semantics: `<em>`, `<strong>`, `<del>`, `<s>`, and `<br>` variants. Other raw HTML is preserved with source provenance but rejected at the document-output boundary with `E8001`; Scribium does not contain a general HTML parser or DOM.
 
-Images are parsed and retained in IR but are not yet lowered because resource-resolution semantics are intentionally deferred.
+Project-relative local images are parsed, retained in the backend-neutral IR,
+and lowered through the explicit Typst source-context/resource boundary.
+Absolute paths, remote/network loading, and a general resource registry remain
+unsupported or deferred.
 
 **HTML, SVG, and PNG output backends are not implemented yet.** PDF output through the external Typst executable is experimental; generating `.typ` does not require Typst to be installed.
 
@@ -146,8 +149,8 @@ Nested objects, arrays, and block strings are not supported. Duplicate keys use 
 | General raw HTML semantics | Unsupported, fail-closed with `E8001` |
 | Quarkdown variables/conditionals/callables/collections/string/numeric slices | Partial, implemented in bounded verified families |
 | Quarkdown complete v2.5.1 compatibility | In progress |
-| Images/resource resolution | Deferred |
-| Include/read/data loading | Planned host-boundary work |
+| Images/resource resolution | Implemented / bounded project-relative local resources |
+| Include/read/data loading | Partial / `.read`, `.json`, and `.include` through `VirtualProject` |
 | HTML/SVG/PNG output | Not implemented |
 | Native `.typ` passthrough | Planned |
 | Watch/LSP | Planned |
