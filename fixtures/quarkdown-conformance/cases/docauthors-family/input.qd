@@ -1,0 +1,13 @@
+.docauthor {Before}
+.docauthors
+    - Alice
+        - email: alice@example.com
+        - website: alice.example
+    - Bob
+        - email: bob@example.com
+.docauthor {After}
+
+.foreach {.docauthors}
+    name info:
+    .name
+    .info::size

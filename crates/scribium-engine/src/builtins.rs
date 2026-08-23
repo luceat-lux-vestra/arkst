@@ -826,7 +826,7 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
 
 /// Projects the bounded `.plaintext` input contract without converting a
 /// value back into source text or invoking a Markdown parser.
-fn plain_text_argument(value: &IrValue) -> Option<String> {
+pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::Identifier(value) => Some(value.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),

@@ -1538,9 +1538,11 @@ mod tests {
             vec![
                 crate::ir::IrDocumentAuthor {
                     name: "Alice".to_string(),
+                    info: Vec::new(),
                 },
                 crate::ir::IrDocumentAuthor {
                     name: "Bob".to_string(),
+                    info: Vec::new(),
                 },
             ]
         );
@@ -1555,6 +1557,7 @@ mod tests {
             result.ir.metadata.document_state.authors,
             vec![crate::ir::IrDocumentAuthor {
                 name: "Alice".to_string(),
+                info: Vec::new(),
             }]
         );
     }
@@ -1579,6 +1582,7 @@ mod tests {
             result.ir.metadata.document_state.authors,
             vec![crate::ir::IrDocumentAuthor {
                 name: "Alice".to_string(),
+                info: Vec::new(),
             }]
         );
 
@@ -1602,6 +1606,7 @@ mod tests {
             result.ir.metadata.document_state.authors,
             vec![crate::ir::IrDocumentAuthor {
                 name: "Alice".to_string(),
+                info: Vec::new(),
             }]
         );
     }
@@ -1617,9 +1622,11 @@ mod tests {
             vec![
                 crate::ir::IrDocumentAuthor {
                     name: "Alice".to_string(),
+                    info: Vec::new(),
                 },
                 crate::ir::IrDocumentAuthor {
                     name: "Bob".to_string(),
+                    info: Vec::new(),
                 },
             ]
         );
@@ -1636,6 +1643,7 @@ mod tests {
             result.ir.metadata.document_state.authors,
             vec![crate::ir::IrDocumentAuthor {
                 name: "Document State".to_string(),
+                info: Vec::new(),
             }]
         );
     }
@@ -1646,6 +1654,199 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "shadowed");
         assert!(result.ir.metadata.document_state.authors.is_empty());
+    }
+
+    #[test]
+    fn docauthors_getter_is_empty_typed_and_does_not_mutate_state() {
+        let (result, _) = compile_source(".docauthors::size\n.docauthors\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+        assert!(result.ir.metadata.document_state.authors.is_empty());
+    }
+
+    #[test]
+    fn docauthors_documented_body_preserves_author_and_info_order() {
+        let source = ".docauthors\n    - Alice\n        - email: alice@example.com\n        - website: alice.example\n    - Bob\n        - email: bob@example.com\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![
+                crate::ir::IrDocumentAuthor {
+                    name: "Alice".to_string(),
+                    info: vec![
+                        ("email".to_string(), "alice@example.com".to_string()),
+                        ("website".to_string(), "alice.example".to_string()),
+                    ],
+                },
+                crate::ir::IrDocumentAuthor {
+                    name: "Bob".to_string(),
+                    info: vec![("email".to_string(), "bob@example.com".to_string())],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn docauthors_named_and_typed_dictionary_arguments_share_the_body_path() {
+        let source = ".var {authors}\n    .dictionary\n        - Carol\n            - email: carol@example.com\n.var {more-authors}\n    .dictionary\n        - Dave\n            - website: dave.example\n.docauthors {.authors}\n.docauthors authors:{.more-authors}\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Carol");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![
+                crate::ir::IrDocumentAuthor {
+                    name: "Carol".to_string(),
+                    info: vec![("email".to_string(), "carol@example.com".to_string())],
+                },
+                crate::ir::IrDocumentAuthor {
+                    name: "Dave".to_string(),
+                    info: vec![("website".to_string(), "dave.example".to_string())],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn docauthors_and_docauthor_share_append_only_state() {
+        let source = ".docauthor {Alice}\n.docauthors\n    - Bob\n    - Carol\n.docauthor {Dave}\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .document_state
+                .authors
+                .iter()
+                .map(|author| author.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Alice", "Bob", "Carol", "Dave"]
+        );
+        assert!(result
+            .ir
+            .metadata
+            .document_state
+            .authors
+            .iter()
+            .all(|author| author.info.is_empty()));
+    }
+
+    #[test]
+    fn docauthors_getter_uses_first_slot_last_value_for_duplicate_names() {
+        let source = ".docauthor {Alice}\n.docauthor {Alice}\n.docauthors\n    - Alice\n        - email: first\n.docauthors\n    - Alice\n        - email: second\n.foreach {.docauthors}\n    name info:\n    .name\n    .info::first::last\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Alice\nsecond");
+        assert_eq!(
+            result.ir.metadata.document_state.authors.len(),
+            4,
+            "repeated .docauthor and .docauthors calls remain ordered state"
+        );
+        assert_eq!(result.ir.metadata.document_state.authors[0].name, "Alice");
+        assert_eq!(result.ir.metadata.document_state.authors[1].name, "Alice");
+        assert!(result.ir.metadata.document_state.authors[0].info.is_empty());
+        assert!(result.ir.metadata.document_state.authors[1].info.is_empty());
+        assert_eq!(
+            result.ir.metadata.document_state.authors[2].info,
+            vec![("email".to_string(), "first".to_string())]
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.authors[3].info,
+            vec![("email".to_string(), "second".to_string())]
+        );
+    }
+
+    #[test]
+    fn docauthors_info_dictionary_iteration_preserves_order() {
+        let source = ".docauthors\n    - Alice\n        - email: alice@example.com\n        - website: alice.example\n.foreach {.docauthors}\n    name info:\n    .info::first::first\n    .info::last::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "email\nwebsite");
+    }
+
+    #[test]
+    fn docauthors_state_is_shared_by_callable_child_scopes() {
+        let source = ".function {set-authors}\n    .docauthors\n        - Callable\n            - email: callable@example.com\n\n.set-authors\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Callable");
+        assert_eq!(
+            result.ir.metadata.document_state.authors[0].info,
+            vec![("email".to_string(), "callable@example.com".to_string())]
+        );
+    }
+
+    #[test]
+    fn source_defined_docauthors_shadows_native_direct_and_chain() {
+        for source in [
+            ".function {docauthors}\n    shadowed\n\n.docauthors\n",
+            ".function {docauthors}\n    .dictionary\n        - Shadow\n\n.docauthors::size\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(
+                output_text(&result),
+                if source.contains("::size") {
+                    "1"
+                } else {
+                    "shadowed"
+                },
+                "{source:?}"
+            );
+            assert!(result.ir.metadata.document_state.authors.is_empty());
+        }
+    }
+
+    #[test]
+    fn docauthors_invalid_inputs_are_source_backed_and_atomic() {
+        let cases = [
+            (".docauthors {true}\n", ".docauthors {true}"),
+            (
+                ".docauthors\n    - Alice\n        - email: ok\n    - Broken: text\n",
+                "- Broken: text",
+            ),
+            (
+                ".docauthors\n    - Alice\n        - email: .range {1} {2}\n",
+                ".range {1} {2}",
+            ),
+            (
+                ".docauthors\n    not-a-list\n",
+                ".docauthors\n    not-a-list",
+            ),
+        ];
+        for (source, invalid) in cases {
+            let source = format!(".docauthor {{Existing}}\n{source}.docauthor\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let start = source.find(invalid).expect("invalid docauthors input");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert_eq!(
+                result.diagnostics[0].primary,
+                Some(scribium_source::SourceSpan::new(
+                    source_id,
+                    start,
+                    start + invalid.len()
+                )),
+                "{source:?}: {result:?}"
+            );
+            assert_eq!(output_text(&result), "Existing", "{source:?}: {result:?}");
+            assert_eq!(result.ir.metadata.document_state.authors.len(), 1);
+        }
+
+        for source in [
+            ".docauthors {true} {false}\n",
+            ".docauthors authors:{true} other:{false}\n",
+            ".docauthors other:{true}\n",
+            ".docauthors {true} authors:{false}\n",
+        ] {
+            let (result, _) = compile_source(&format!(".docauthor {{Existing}}\n{source}"));
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.ir.metadata.document_state.authors.len(), 1);
+        }
     }
 
     #[test]

@@ -55,13 +55,16 @@ pub struct IrDocumentState {
     pub authors: Vec<IrDocumentAuthor>,
 }
 
-/// A minimal backend-neutral document author.
+/// A backend-neutral document author with bounded, ordered string metadata.
 ///
-/// Additional author information belongs to a future `.docauthors` slice and
-/// is intentionally not modeled here.
+/// The ordered pairs preserve the observable dictionary iteration order from
+/// Quarkdown without introducing a backend-specific author representation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IrDocumentAuthor {
     pub name: String,
+    /// Additional string information such as `email` or `website`.
+    #[serde(default)]
+    pub info: Vec<(String, String)>,
 }
 
 /// The closed document-type enum exposed by Quarkdown's `.doctype` builtin.
@@ -966,9 +969,14 @@ mod tests {
                 authors: vec![
                     IrDocumentAuthor {
                         name: "Alice".to_string(),
+                        info: vec![
+                            ("email".to_string(), "alice@example.com".to_string()),
+                            ("website".to_string(), "alice.example".to_string()),
+                        ],
                     },
                     IrDocumentAuthor {
                         name: "Bob".to_string(),
+                        info: Vec::new(),
                     },
                 ],
             },
@@ -1015,6 +1023,33 @@ mod tests {
             .expect("old author-less document state remains readable")
             .authors,
             Vec::new()
+        );
+
+        let old_author = serde_json::json!({ "name": "Alice" });
+        assert_eq!(
+            serde_json::from_value::<IrDocumentAuthor>(old_author)
+                .expect("old author objects remain readable")
+                .info,
+            Vec::<(String, String)>::new()
+        );
+
+        let state = IrDocumentState {
+            name: String::new(),
+            description: String::new(),
+            document_type: IrDocumentType::Plain,
+            authors: vec![IrDocumentAuthor {
+                name: "Ordered".to_string(),
+                info: vec![
+                    ("first".to_string(), "one".to_string()),
+                    ("second".to_string(), "two".to_string()),
+                ],
+            }],
+        };
+        let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
+        assert_eq!(
+            serde_json::from_str::<IrDocumentState>(&serialized)
+                .expect("ordered author state deserializes"),
+            state
         );
     }
 }
