@@ -898,8 +898,17 @@ mod tests {
         for source in sources {
             let (result, _) = compile_source(source);
             assert!(result.diagnostics.is_empty(), "{result:?}");
-            assert_eq!(output_text(&result), "1\n2\n2", "{source:?}");
+            assert_eq!(output_text(&result), "1\n2\n3", "{source:?}");
         }
+    }
+
+    #[test]
+    fn compile_inline_foreach_rhs_sees_outer_owner_with_different_parameter_name() {
+        let source =
+            ".var {total} {0}\n.foreach {1..2} {item: .var {total} {.item::sum {.total}}.item}\n.total\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\n3");
     }
 
     #[test]

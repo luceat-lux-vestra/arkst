@@ -811,15 +811,6 @@ impl<'a> EvaluationContext<'a> {
                 .is_some_and(|parent| parent.has_forwarded_variable_owner(name))
     }
 
-    fn has_variable_owner(&self, name: &str) -> bool {
-        self.variable_owners.contains(name)
-            || self.forwarded_variable_owners.contains(name)
-            || self
-                .parent
-                .as_deref()
-                .is_some_and(|parent| parent.has_variable_owner(name))
-    }
-
     fn collect_variable_owners(&self, owners: &mut BTreeSet<String>) {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_variable_owners(owners);
@@ -1646,21 +1637,6 @@ impl Evaluator {
             };
         }
 
-        // Resolve source-defined functions before any native builtin branch.
-        // Only a selected native iteration target may adapt a contextual
-        // inline-body carrier into a callable.
-        if let Some(binding) = context.get_function(name).cloned() {
-            return self.evaluate_user_function(
-                &binding,
-                positional_args,
-                named_args,
-                body,
-                span,
-                diagnostics,
-                context,
-            );
-        }
-
         if is_conditional(name) {
             let condition = match self.resolve_call_condition(
                 name,
@@ -1757,6 +1733,24 @@ impl Evaluator {
             );
         }
 
+        // Inline iteration bodies remain target-sensitive: a source-defined
+        // `foreach`/`repeat` binding must resolve before the native adapter
+        // can interpret an InlineBody as a callable. Other native dispatch
+        // keeps its existing precedence.
+        if matches!(name, "foreach" | "repeat") {
+            if let Some(binding) = context.get_function(name).cloned() {
+                return self.evaluate_user_function(
+                    &binding,
+                    positional_args,
+                    named_args,
+                    body,
+                    span,
+                    diagnostics,
+                    context,
+                );
+            }
+        }
+
         if is_foreach(name) {
             return self.evaluate_foreach(
                 positional_args,
@@ -1831,6 +1825,21 @@ impl Evaluator {
             return self.handle_variable_reassignment_value(
                 name,
                 positional_args,
+                span,
+                diagnostics,
+                context,
+            );
+        }
+
+        // Preserve the existing fallback for source-defined names that are
+        // not handled by an earlier native branch. Iteration shadowing is
+        // resolved explicitly above because its inline body is contextual.
+        if let Some(binding) = context.get_function(name).cloned() {
+            return self.evaluate_user_function(
+                &binding,
+                positional_args,
+                named_args,
+                body,
                 span,
                 diagnostics,
                 context,
@@ -8834,32 +8843,6 @@ impl Evaluator {
 
     // Variable handling methods
 
-    /// Evaluates a `.var` RHS in the existing owner's lookup context. An
-    /// invocation parameter with the same name remains installed for the
-    /// eventual body and for the assignment target; it is hidden only while
-    /// resolving this RHS, matching Quarkdown's owner-context evaluation.
-    fn evaluate_var_rhs<F>(
-        &self,
-        name: &str,
-        context: &mut EvaluationContext<'_>,
-        evaluate: F,
-    ) -> CallOutcome
-    where
-        F: FnOnce(&Self, &mut EvaluationContext<'_>) -> CallOutcome,
-    {
-        let has_owner = context.has_variable_owner(name);
-        let had_parameter = has_owner && context.parameter_names.remove(name);
-        let parameter_value = had_parameter.then(|| context.variables.remove(name));
-        let outcome = evaluate(self, context);
-        if had_parameter {
-            context.parameter_names.insert(name.to_string());
-            if let Some(Some(value)) = parameter_value {
-                context.variables.insert(name.to_string(), value);
-            }
-        }
-        outcome
-    }
-
     /// Handles a `.var` declaration in value context.
     #[allow(clippy::too_many_arguments)]
     fn handle_var_declaration(
@@ -8888,14 +8871,14 @@ impl Evaluator {
 
         // Determine the value: body > named "body" > second positional > named "value" > empty
         if let Some(body) = body {
-            let outcome = self.evaluate_var_rhs(&var_name, context, |this, context| match body {
+            let outcome = match body {
                 CallBody::Block(nodes) => {
-                    this.evaluate_callable_body_value(nodes, diagnostics, context)
+                    self.evaluate_callable_body_value(nodes, diagnostics, context)
                 }
                 CallBody::Inline(inlines) => {
-                    this.evaluate_call_body(CallBody::Inline(inlines), span, diagnostics, context)
+                    self.evaluate_call_body(CallBody::Inline(inlines), span, diagnostics, context)
                 }
-            });
+            };
             match outcome {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
@@ -8911,26 +8894,24 @@ impl Evaluator {
         // Check named "body" argument
         if let Some(arg) = named_args.iter().find(|arg| arg.name == "body") {
             let value = &arg.value;
-            match self.evaluate_var_rhs(&var_name, context, |this, context| {
-                match this.evaluate_value(value, diagnostics, context) {
-                    CallOutcome::Unresolved => {
-                        match this.preserve_value_expression(value, diagnostics, context) {
-                            Ok(value) => CallOutcome::Value(value),
-                            Err(outcome) => outcome,
-                        }
-                    }
-                    outcome => outcome,
-                }
-            }) {
+            match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
+                }
+                CallOutcome::Unresolved => {
+                    match self.preserve_value_expression(value, diagnostics, context) {
+                        Ok(value) => {
+                            context.assign_value(var_name, value);
+                            return CallOutcome::NoValue;
+                        }
+                        Err(outcome) => return outcome,
+                    }
                 }
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(value, span)));
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Unresolved => return CallOutcome::Failed,
                 CallOutcome::Failed => return CallOutcome::Failed,
             }
         }
@@ -8938,52 +8919,48 @@ impl Evaluator {
         // Check named "value" argument
         if let Some(arg) = named_args.iter().find(|arg| arg.name == "value") {
             let value = &arg.value;
-            match self.evaluate_var_rhs(&var_name, context, |this, context| {
-                match this.evaluate_value(value, diagnostics, context) {
-                    CallOutcome::Unresolved => {
-                        match this.preserve_value_expression(value, diagnostics, context) {
-                            Ok(value) => CallOutcome::Value(value),
-                            Err(outcome) => outcome,
-                        }
-                    }
-                    outcome => outcome,
-                }
-            }) {
+            match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
+                }
+                CallOutcome::Unresolved => {
+                    match self.preserve_value_expression(value, diagnostics, context) {
+                        Ok(value) => {
+                            context.assign_value(var_name, value);
+                            return CallOutcome::NoValue;
+                        }
+                        Err(outcome) => return outcome,
+                    }
                 }
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(value, span)));
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Unresolved => return CallOutcome::Failed,
                 CallOutcome::Failed => return CallOutcome::Failed,
             }
         }
 
         // Fall back to second positional argument
         if let Some(value) = positional_args.get(1) {
-            match self.evaluate_var_rhs(&var_name, context, |this, context| {
-                match this.evaluate_value(value, diagnostics, context) {
-                    CallOutcome::Unresolved => {
-                        match this.preserve_value_expression(value, diagnostics, context) {
-                            Ok(value) => CallOutcome::Value(value),
-                            Err(outcome) => outcome,
-                        }
-                    }
-                    outcome => outcome,
-                }
-            }) {
+            match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
                     return CallOutcome::NoValue;
+                }
+                CallOutcome::Unresolved => {
+                    match self.preserve_value_expression(value, diagnostics, context) {
+                        Ok(value) => {
+                            context.assign_value(var_name, value);
+                            return CallOutcome::NoValue;
+                        }
+                        Err(outcome) => return outcome,
+                    }
                 }
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(value_source_span(value, span)));
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Unresolved => return CallOutcome::Failed,
                 CallOutcome::Failed => return CallOutcome::Failed,
             }
         }
