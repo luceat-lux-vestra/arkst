@@ -1547,12 +1547,35 @@ mod tests {
             })
         );
 
+        let (both_positional, _) = compile_source(".theme {DaRk} {My-LaYoUt}\n");
+        assert!(
+            both_positional.diagnostics.is_empty(),
+            "{both_positional:?}"
+        );
+        assert_eq!(
+            both_positional.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("my-layout".to_string()),
+            })
+        );
+
         let (layout_only, _) = compile_source(".theme layout:{Compact}\n");
         assert!(layout_only.diagnostics.is_empty(), "{layout_only:?}");
         assert_eq!(
             layout_only.ir.metadata.document_state.theme,
             Some(crate::ir::IrDocumentTheme {
                 color: None,
+                layout: Some("compact".to_string()),
+            })
+        );
+
+        let (both_named, _) = compile_source(".theme color:{DaRk} layout:{Compact}\n");
+        assert!(both_named.diagnostics.is_empty(), "{both_named:?}");
+        assert_eq!(
+            both_named.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
                 layout: Some("compact".to_string()),
             })
         );
@@ -1566,6 +1589,81 @@ mod tests {
                 layout: None,
             })
         );
+    }
+
+    #[test]
+    fn theme_accepts_nullable_none_components_in_positional_and_named_forms() {
+        for (source, expected) in [
+            (
+                ".theme {.none} {Minimal}\n",
+                crate::ir::IrDocumentTheme {
+                    color: None,
+                    layout: Some("minimal".to_string()),
+                },
+            ),
+            (
+                ".theme {Dark} {.none}\n",
+                crate::ir::IrDocumentTheme {
+                    color: Some("dark".to_string()),
+                    layout: None,
+                },
+            ),
+            (
+                ".theme color:{.none} layout:{Minimal}\n",
+                crate::ir::IrDocumentTheme {
+                    color: None,
+                    layout: Some("minimal".to_string()),
+                },
+            ),
+            (
+                ".theme color:{Dark} layout:{.none}\n",
+                crate::ir::IrDocumentTheme {
+                    color: Some("dark".to_string()),
+                    layout: None,
+                },
+            ),
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(result.ir.metadata.document_state.theme, Some(expected));
+            assert_eq!(output_text(&result), "");
+        }
+    }
+
+    #[test]
+    fn theme_body_falls_back_to_nullable_layout_string() {
+        let (body_only, _) = compile_source(".theme\n    Minimal\n");
+        assert!(body_only.diagnostics.is_empty(), "{body_only:?}");
+        assert_eq!(
+            body_only.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: None,
+                layout: Some("minimal".to_string()),
+            })
+        );
+        assert_eq!(output_text(&body_only), "");
+
+        let (mixed, _) = compile_source(".theme {Dark}\n    Minimal\n");
+        assert!(mixed.diagnostics.is_empty(), "{mixed:?}");
+        assert_eq!(
+            mixed.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("minimal".to_string()),
+            })
+        );
+        assert_eq!(output_text(&mixed), "");
+
+        let (named_mixed, _) = compile_source(".theme color:{Dark}\n    Minimal\n");
+        assert!(named_mixed.diagnostics.is_empty(), "{named_mixed:?}");
+        assert_eq!(
+            named_mixed.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("minimal".to_string()),
+            })
+        );
+        assert_eq!(output_text(&named_mixed), "");
     }
 
     #[test]
@@ -1691,17 +1789,23 @@ mod tests {
     #[test]
     fn invalid_theme_bindings_are_source_backed_and_atomic() {
         for invalid in [
-            ".theme {Light} {Extra}",
+            ".theme {Light} {Extra} {TooMany}",
             ".theme unknown:{Light}",
             ".theme {Light} color:{Other}",
+            ".theme {Light} {Compact} layout:{Other}",
+            ".theme layout:{Compact} {Light}",
             ".theme layout:{one} layout:{two}",
             ".theme color:{one} color:{two}",
+            ".theme {Light} {Compact}\n    Other",
         ] {
             let source = format!(".theme {{Existing}} layout:{{Compact}}\n{invalid}\n");
             let (result, source_id) = compile_source(&source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert!(
-                matches!(result.diagnostics[0].code.as_str(), "E3001" | "E3003"),
+                matches!(
+                    result.diagnostics[0].code.as_str(),
+                    "E2001" | "E3001" | "E3003"
+                ),
                 "{source:?}: {result:?}"
             );
             assert_eq!(

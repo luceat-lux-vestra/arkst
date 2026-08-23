@@ -1,9 +1,18 @@
 Ordinary content remains separate from theme state.
 
-.theme {DaRk} layout:{My-LaYoUt}
+.theme {DaRk} {My-LaYoUt}
+
+.theme {.none} {Minimal}
+
+.theme {Dark} {.none}
+
+.theme color:{.none} layout:{Compact}
+
+.theme {Dark} layout:{My-LaYoUt}
 
 The first theme is replaced below.
 
-.theme {LiGhT}
+.theme
+    Body-LaYoUt
 
 Final content remains ordinary document text.
