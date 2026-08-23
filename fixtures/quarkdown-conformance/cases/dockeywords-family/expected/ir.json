@@ -1,0 +1,163 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Surrounding content remains ordinary document text",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 50
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 50,
+                "end": 51
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 51
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Initial keyword count: ",
+              "span": {
+                "source_id": 1,
+                "start": 53,
+                "end": 76
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 76,
+                "end": 94
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 53,
+          "end": 94
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Before replacement: ",
+              "span": {
+                "source_id": 1,
+                "start": 152,
+                "end": 172
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "compiler",
+              "span": {
+                "source_id": 1,
+                "start": 172,
+                "end": 191
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": " / ",
+              "span": {
+                "source_id": 1,
+                "start": 191,
+                "end": 194
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "deterministic output",
+              "span": {
+                "source_id": 1,
+                "start": 194,
+                "end": 212
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 152,
+          "end": 212
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "After replacement: ",
+              "span": {
+                "source_id": 1,
+                "start": 246,
+                "end": 265
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "replacement",
+              "span": {
+                "source_id": 1,
+                "start": 265,
+                "end": 284
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 246,
+          "end": 284
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [
+        "replacement"
+      ]
+    }
+  }
+}

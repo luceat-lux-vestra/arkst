@@ -53,6 +53,9 @@ pub struct IrDocumentState {
     /// Authors in document-state insertion order.
     #[serde(default)]
     pub authors: Vec<IrDocumentAuthor>,
+    /// Keywords in document-state insertion order.
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
 
 /// A backend-neutral document author with bounded, ordered string metadata.
@@ -961,6 +964,7 @@ mod tests {
 
     #[test]
     fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
+        assert!(IrDocumentState::default().keywords.is_empty());
         let metadata = IrMetadata {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
@@ -979,6 +983,7 @@ mod tests {
                         info: Vec::new(),
                     },
                 ],
+                keywords: vec!["quarkdown".to_string(), "documents".to_string()],
             },
             ..IrMetadata::default()
         };
@@ -1024,6 +1029,17 @@ mod tests {
             .authors,
             Vec::new()
         );
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(serde_json::json!({
+                "name": "Document",
+                "description": "Description",
+                "document_type": "Plain",
+                "authors": []
+            }))
+            .expect("old keyword-less document state remains readable")
+            .keywords,
+            Vec::<String>::new()
+        );
 
         let old_author = serde_json::json!({ "name": "Alice" });
         assert_eq!(
@@ -1044,6 +1060,7 @@ mod tests {
                     ("second".to_string(), "two".to_string()),
                 ],
             }],
+            keywords: vec!["first".to_string(), "second".to_string()],
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(

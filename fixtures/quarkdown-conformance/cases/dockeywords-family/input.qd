@@ -1,0 +1,14 @@
+Surrounding content remains ordinary document text.
+
+Initial keyword count: .dockeywords::size
+
+.dockeywords
+    - compiler
+    - deterministic output
+
+Before replacement: .dockeywords::first / .dockeywords::last
+
+.dockeywords
+    - replacement
+
+After replacement: .dockeywords::first
