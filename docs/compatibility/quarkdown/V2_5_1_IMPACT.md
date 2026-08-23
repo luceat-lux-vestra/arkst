@@ -50,12 +50,13 @@ fixed tag commit
 boundary in [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md).
 The v2.5.1 contract is one evaluated `String` argument, evaluator-time
 `NativeContent` authorization, generic-node block/inline placement, verbatim
-HTML-target output, and empty output for non-HTML visitors. Scribium remains
-unsupported/pending: no production IR, evaluator builtin, permission context,
-or HTML backend is added by this audit. Typst/PDF is intended to retain the
-future semantic node until lowering and then omit it silently, while ordinary
-mixed raw HTML in `.qd`/`.scrib` remains `E8001` under the separate Markdown
-raw-HTML policy.
+HTML-target output, and empty output for non-HTML visitors. This release-impact
+review itself added no implementation; the subsequent current-main slice now
+implements the closed `Html` semantic boundary with production IR, evaluator
+capability checking, source-backed `E3004` denial, and silent Typst/PDF
+omission. The HTML output backend remains future work, while ordinary mixed raw
+HTML in `.qd`/`.scrib` remains `E8001` under the separate Markdown raw-HTML
+policy.
 
 ## Clean-room and substrate record
 

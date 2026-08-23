@@ -12,6 +12,10 @@
 
 ## Context
 
+> Historical context note: the state described in this section is the
+> decision-time state from before the implementation slice. The current
+> implementation status is recorded in the header and the addendum below.
+
 Quarkdown v2.5.1 exposes `.html` as an explicit, last-resort native-content
 function. It is not the same language feature as Markdown raw HTML. The
 function evaluates its content to a `String`, constructs an `Html` node, and
@@ -19,12 +23,12 @@ lets the selected target decide whether that node is rendered. The upstream
 contract is therefore target-specific document semantics, not source-level
 HTML recognition and not an instruction to translate HTML into Typst.
 
-Scribium currently has a Rushdown-backed Markdown frontend, a backend-neutral
-IR, an evaluator, and a Typst/PDF backend. It has no HTML renderer and no
-compile/evaluation permission context. The current parser can preserve the
-syntax as a Quarkdown directive call, but the current evaluator has no `.html`
-builtin and the current IR has no target-specific native-content variant. The
-existing fallback is evidence of the gap, not the compatibility contract.
+At the decision point, Scribium had a Rushdown-backed Markdown frontend, a
+backend-neutral IR, an evaluator, and a Typst/PDF backend. It had no HTML
+renderer or compile/evaluation permission context. The parser could preserve
+the syntax as a Quarkdown directive call, but the evaluator had no `.html`
+builtin and the IR had no target-specific native-content variant. The existing
+fallback was evidence of the gap, not the compatibility contract.
 
 ## Decision drivers
 
@@ -323,7 +327,7 @@ Markdown raw HTML and Quarkdown `.html` remain separate at every layer:
 | Source | Owner and meaning |
 |---|---|
 | `<em>x</em>` or `<!-- comment -->` in `.md` | Rushdown-owned Markdown raw HTML; only the bounded Markdown adapter policy applies. |
-| `.html {<em>x</em>}` in `.qd`/`.scrib` | Quarkdown function call; evaluated String becomes target-specific native HTML only after the future capability gate. |
+| `.html {<em>x</em>}` in `.qd`/`.scrib` | Quarkdown function call; evaluated String becomes target-specific native HTML after the capability gate specified by this ADR. |
 | `<em>x</em>` in `.qd`/`.scrib` | Ordinary mixed raw HTML; remains source-backed and fails closed with `E8001`. |
 
 Adding the `.html` builtin must never broaden the Quarkdown frontend's raw
@@ -392,3 +396,16 @@ This ADR does not:
 - enable ordinary mixed raw HTML in `.qd`/`.scrib`;
 - implement `.css`, `.htmloptions`, or a general permission framework; or
 - define a generic plugin, MIME, or backend escape-hatch system.
+
+## Addendum: implementation status reconciliation
+
+The context, decision drivers, and explicit non-goals above preserve the
+decision-time record from when this ADR was accepted; they are not a claim
+that the implementation remains at that earlier boundary. The accepted
+implementation now provides the closed `NativeTarget::Html` carrier in block
+and inline IR positions, evaluates `.html` through the regular `String`
+boundary after the `NativeContent` check, reports denied capability as one
+source-backed `E3004`, and omits the payload silently in Typst/PDF. A future
+HTML output backend may consume the evaluated payload. Ordinary mixed raw HTML
+in `.qd`/`.scrib`, `.css`, and generic native/backend payloads remain outside
+this decision.

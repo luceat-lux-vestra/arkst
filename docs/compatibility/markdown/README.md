@@ -24,7 +24,8 @@ end-to-end Scribium compatibility claim.
 - Raw HTML audit and adapter coverage:
   `crates/scribium-markdown/tests/raw_html.rs`
 - Raw HTML semantic/diagnostic coverage:
-  `crates/scribium-core/src/ast_to_ir.rs`,
+  `crates/scribium-engine/src/ast_to_ir.rs`,
+  `crates/scribium-core/src/lib.rs`,
   `crates/scribium-cli/src/commands.rs`, and
   `crates/scribium-typst-subprocess/tests/backend_integration.rs`
 - UTF-8/CRLF semantic break coverage:
