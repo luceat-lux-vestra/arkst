@@ -392,7 +392,7 @@ the upstream `asDouble()` conversion to every element; invalid conversions
 contribute zero, and `.average` divides by the full input count (empty input
 therefore produces `NaN`). These results remain typed until an output boundary.
 
-### scoped `.let` (Implemented slice)
+### Scoped `.let` (Implemented slice)
 
 Block-form `.let` invokes a one-parameter lambda in a child scope. The value
 argument is evaluated once in the caller scope, then binds either the explicit
