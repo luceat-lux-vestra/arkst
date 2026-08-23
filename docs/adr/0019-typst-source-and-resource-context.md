@@ -125,12 +125,20 @@ an in-process Typst backend remain separate work.
 ## Implementation status addendum (2026-08-23)
 
 The original decision and follow-up scope above are preserved as historical
-context. The current M2 implementation now uses this contract for bounded
-project-relative Markdown image lowering and for engine-owned `.read`, `.json`,
-and `.include` access through `VirtualProject`. Source-relative resolution,
-project-boundary rejection, nested source identity, and temporary Typst mirror
-separation are covered by the resource and backend integration tests.
+context. The current M2 implementation applies this Typst source-context
+contract to bounded project-relative Markdown image lowering. Source-relative
+image resolution, project-boundary rejection, symlink handling, and temporary
+Typst mirror separation are covered by the backend integration tests.
+
+Quarkdown `.read`, `.json`, and `.include` use a separate semantic resource
+path: `scribium-engine` owns the engine-neutral `ResourceProvider` interface,
+while `scribium-core` owns the adapter from `VirtualProject` to that interface.
+Those built-ins therefore remain filesystem-free at the compiler boundary and
+do not depend on the Typst subprocess mirror. Their source-relative resolution,
+project-boundary rejection, and nested source identity are covered by core and
+engine resource tests.
 
 Remote loading, package resolution, caching, directory/data families beyond
 the bounded built-ins, and an in-process Typst backend remain separate or
-deferred work; this addendum does not widen the architecture boundary.
+deferred work; this addendum records the implemented boundaries without
+widening or merging their ownership.
