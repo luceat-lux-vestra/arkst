@@ -1006,6 +1006,14 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
+    fn document_authors_snapshot(&self) -> Vec<IrDocumentAuthor> {
+        self.document_state.borrow().authors.clone()
+    }
+
+    fn restore_document_state(&self, snapshot: DocumentState) {
+        *self.document_state.borrow_mut() = snapshot;
+    }
+
     fn set_document_state_value(&self, name: &str, value: String) {
         let mut state = self.document_state.borrow_mut();
         match name {
@@ -1023,7 +1031,20 @@ impl<'a> EvaluationContext<'a> {
         self.document_state
             .borrow_mut()
             .authors
-            .push(IrDocumentAuthor { name });
+            .push(IrDocumentAuthor {
+                name,
+                info: Vec::new(),
+            });
+    }
+
+    fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
+        let mut state = self.document_state.borrow_mut();
+        state
+            .authors
+            .try_reserve_exact(authors.len())
+            .map_err(|error| format!("document authors cannot be allocated: {error}"))?;
+        state.authors.extend(authors);
+        Ok(())
     }
 
     /// Gets a variable value if it exists.
@@ -1681,8 +1702,9 @@ impl Evaluator {
             };
         }
 
-        let source_defined_docauthor = name == "docauthor" && context.get_function(name).is_some();
-        if is_document_state(name) && !source_defined_docauthor {
+        let source_defined_shadowable_document_state =
+            matches!(name, "docauthor" | "docauthors") && context.get_function(name).is_some();
+        if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
                 name,
                 positional_args,
@@ -2800,6 +2822,18 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if name == "docauthors" {
+            return self.evaluate_document_authors_builtin(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if body.is_some() {
             diagnostics.push(document_state_call_error(
                 format!("`.{name}` does not accept a block body"),
@@ -3012,6 +3046,350 @@ impl Evaluator {
 
         context.set_document_state_value(name, value);
         CallOutcome::NoValue
+    }
+
+    /// Implements the bounded `.docauthors` dictionary read/write contract.
+    /// Candidate authors are fully evaluated and validated before the shared
+    /// document state is changed. The prior state is restored if evaluating
+    /// the candidate itself produces a failure or a nested state mutation is
+    /// followed by invalid author data.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_document_authors_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
+            return self.document_authors_value(*span, diagnostics, context);
+        }
+
+        let previous_state = context.document_state.borrow().clone();
+        let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
+            context.restore_document_state(state.clone());
+        };
+
+        let (candidate, candidate_span) = if let Some(body) = body {
+            if !positional_args.is_empty() || !named_args.is_empty() {
+                let invalid_span = named_args
+                    .first()
+                    .map(|argument| argument.span)
+                    .or_else(|| {
+                        positional_args
+                            .first()
+                            .map(|value| value_source_span(value, span))
+                    })
+                    .unwrap_or(*span);
+                diagnostics.push(document_state_call_error(
+                    "`.docauthors` cannot combine a body with positional or named arguments"
+                        .to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+
+            let nodes = match body {
+                CallBody::Block(nodes) => nodes,
+                CallBody::Inline(_) => {
+                    diagnostics.push(document_state_call_error(
+                        "`.docauthors` requires a Markdown list block body".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            };
+            let entries = match self.evaluate_dictionary_entries(
+                nodes,
+                *span,
+                diagnostics,
+                context,
+                ".docauthors",
+            ) {
+                Ok(entries) => entries,
+                Err(outcome) => {
+                    restore_on_failure(context, &previous_state);
+                    return outcome;
+                }
+            };
+            (
+                IrValue::Dictionary(IrDictionary {
+                    entries,
+                    span: *span,
+                }),
+                *span,
+            )
+        } else {
+            let invalid_span = if positional_args.len() > 1 {
+                positional_args
+                    .get(1)
+                    .map(|value| value_source_span(value, span))
+                    .unwrap_or(*span)
+            } else if !positional_args.is_empty() && !named_args.is_empty() {
+                named_args
+                    .first()
+                    .map(|argument| argument.span)
+                    .unwrap_or(*span)
+            } else if named_args.len() > 1 {
+                named_args
+                    .get(1)
+                    .map(|argument| argument.span)
+                    .unwrap_or(*span)
+            } else {
+                *span
+            };
+
+            if positional_args.len() > 1 {
+                diagnostics.push(document_state_call_error(
+                    "`.docauthors` accepts exactly one dictionary argument".to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if !positional_args.is_empty() && !named_args.is_empty() {
+                diagnostics.push(document_state_call_error(
+                    "`.docauthors` accepts either one positional argument or `authors:`"
+                        .to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if named_args.len() > 1 {
+                diagnostics.push(document_state_call_error(
+                    "`.docauthors` accepts exactly one `authors` argument".to_string(),
+                    invalid_span,
+                ));
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            }
+            if let Some(argument) = named_args.first() {
+                if argument.name != "authors" {
+                    diagnostics.push(document_state_call_error(
+                        format!(
+                            "Unknown named argument `{}` for `.docauthors`",
+                            argument.name
+                        ),
+                        argument.name_span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            }
+
+            if positional_args.len() == 1 {
+                let argument_span = value_source_span(&positional_args[0], span);
+                let evaluated = match self.evaluate_invocation_values(
+                    positional_args,
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                ) {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        restore_on_failure(context, &previous_state);
+                        return outcome;
+                    }
+                };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.docauthors` requires one dictionary argument".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                };
+                (argument.value, argument_span)
+            } else {
+                let evaluated =
+                    match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                        Ok(values) => values,
+                        Err(outcome) => {
+                            restore_on_failure(context, &previous_state);
+                            return outcome;
+                        }
+                    };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.docauthors` requires one dictionary argument".to_string(),
+                        *span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                };
+                (argument.value.clone(), named_args[0].span)
+            }
+        };
+
+        let authors = match self.validate_document_authors(candidate, candidate_span, diagnostics) {
+            Ok(authors) => authors,
+            Err(outcome) => {
+                restore_on_failure(context, &previous_state);
+                return outcome;
+            }
+        };
+
+        if let Err(error) = context.append_document_authors(authors) {
+            diagnostics.push(document_state_conversion_error(error, *span));
+            restore_on_failure(context, &previous_state);
+            return CallOutcome::Failed;
+        }
+        CallOutcome::NoValue
+    }
+
+    fn validate_document_authors(
+        &self,
+        value: IrValue,
+        value_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrDocumentAuthor>, CallOutcome> {
+        let IrValue::Dictionary(dictionary) = value else {
+            diagnostics.push(document_state_conversion_error(
+                "`.docauthors` requires a Dictionary<String, Dictionary<String, String>> value"
+                    .to_string(),
+                value_source_span(&value, &value_span),
+            ));
+            return Err(CallOutcome::Failed);
+        };
+        self.check_materialized_elements_len(dictionary.entries.len(), value_span, diagnostics)?;
+        let mut authors = Vec::new();
+        if let Err(error) = authors.try_reserve_exact(dictionary.entries.len()) {
+            diagnostics.push(document_state_conversion_error(
+                format!("document authors cannot be allocated: {error}"),
+                value_span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+
+        for pair in dictionary.entries {
+            let author_name = match pair.first.as_ref() {
+                IrValue::String(name) if !name.is_empty() => name.clone(),
+                _ => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.docauthors` author keys must be non-empty strings".to_string(),
+                        value_source_span(pair.first.as_ref(), &pair.span),
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+            };
+            let IrValue::Dictionary(info_dictionary) = pair.second.as_ref() else {
+                diagnostics.push(document_state_conversion_error(
+                    "Each `.docauthors` author value must be a nested dictionary".to_string(),
+                    value_source_span(pair.second.as_ref(), &pair.span),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            self.check_materialized_elements_len(
+                info_dictionary.entries.len(),
+                pair.span,
+                diagnostics,
+            )?;
+            let mut info = Vec::new();
+            if let Err(error) = info.try_reserve_exact(info_dictionary.entries.len()) {
+                diagnostics.push(document_state_conversion_error(
+                    format!("author information cannot be allocated: {error}"),
+                    pair.span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            for info_pair in &info_dictionary.entries {
+                let info_name = match info_pair.first.as_ref() {
+                    IrValue::String(name) if !name.is_empty() => name.clone(),
+                    _ => {
+                        diagnostics.push(document_state_conversion_error(
+                            "`.docauthors` information keys must be non-empty strings".to_string(),
+                            value_source_span(info_pair.first.as_ref(), &info_pair.span),
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
+                };
+                let info_value_span = value_source_span(info_pair.second.as_ref(), &info_pair.span);
+                let Some(info_value) = bounded_document_author_string(info_pair.second.as_ref())
+                else {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.docauthors` information values must be bounded scalar strings"
+                            .to_string(),
+                        info_value_span,
+                    ));
+                    return Err(CallOutcome::Failed);
+                };
+                upsert_ordered_string_pair(&mut info, info_name, info_value);
+            }
+            upsert_ordered_author(
+                &mut authors,
+                IrDocumentAuthor {
+                    name: author_name,
+                    info,
+                },
+            );
+        }
+        Ok(authors)
+    }
+
+    fn document_authors_value(
+        &self,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let authors = context.document_authors_snapshot();
+        if let Err(outcome) = self.check_materialized_elements_len(authors.len(), span, diagnostics)
+        {
+            return outcome;
+        }
+        let mut entries = Vec::new();
+        if let Err(error) = entries.try_reserve_exact(authors.len()) {
+            diagnostics.push(document_state_conversion_error(
+                format!("document author dictionary cannot be allocated: {error}"),
+                span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        for author in authors {
+            if let Err(outcome) =
+                self.check_materialized_elements_len(author.info.len(), span, diagnostics)
+            {
+                return outcome;
+            }
+            let mut info_entries = Vec::new();
+            if let Err(error) = info_entries.try_reserve_exact(author.info.len()) {
+                diagnostics.push(document_state_conversion_error(
+                    format!("author information dictionary cannot be allocated: {error}"),
+                    span,
+                ));
+                return CallOutcome::Failed;
+            }
+            for (key, value) in author.info {
+                upsert_ordered_pair(
+                    &mut info_entries,
+                    IrPair {
+                        first: Box::new(IrValue::String(key)),
+                        second: Box::new(IrValue::String(value)),
+                        span,
+                    },
+                );
+            }
+            upsert_ordered_pair(
+                &mut entries,
+                IrPair {
+                    first: Box::new(IrValue::String(author.name)),
+                    second: Box::new(IrValue::Dictionary(IrDictionary {
+                        entries: info_entries,
+                        span,
+                    })),
+                    span,
+                },
+            );
+        }
+        CallOutcome::Value(IrValue::Dictionary(IrDictionary { entries, span }))
     }
 
     /// Evaluates the closed Quarkdown `.html(content: String)` builtin.
@@ -3725,7 +4103,13 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
         };
-        let entries = match self.evaluate_dictionary_entries(body, *span, diagnostics, context) {
+        let entries = match self.evaluate_dictionary_entries(
+            body,
+            *span,
+            diagnostics,
+            context,
+            ".dictionary",
+        ) {
             Ok(entries) => entries,
             Err(outcome) => return outcome,
         };
@@ -3741,13 +4125,14 @@ impl Evaluator {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        function_name: &str,
     ) -> Result<Vec<IrPair>, CallOutcome> {
         let list = match nodes {
             [] => return Ok(Vec::new()),
             [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => items,
             _ => {
                 diagnostics.push(iteration_error(
-                    "`.dictionary` requires exactly one Markdown list body".to_string(),
+                    format!("`{function_name}` requires exactly one Markdown list body"),
                     span,
                 ));
                 return Err(CallOutcome::Failed);
@@ -3763,7 +4148,8 @@ impl Evaluator {
             return Err(CallOutcome::Failed);
         }
         for item in list {
-            let (key, value) = self.dictionary_item_parts(item, span, diagnostics, context)?;
+            let (key, value) =
+                self.dictionary_item_parts(item, span, diagnostics, context, function_name)?;
             let pair = IrPair {
                 first: Box::new(IrValue::String(key.clone())),
                 second: Box::new(value),
@@ -3788,6 +4174,7 @@ impl Evaluator {
         fallback_span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        function_name: &str,
     ) -> Result<(String, IrValue), CallOutcome> {
         let Some(IrNode::Paragraph { content, span }) = item.nodes.first() else {
             diagnostics.push(iteration_error(
@@ -3808,6 +4195,8 @@ impl Evaluator {
                     return Err(CallOutcome::Failed);
                 };
                 (key, Vec::new(), String::new(), *span)
+            } else if let Some(key) = plain_dictionary_key(content) {
+                (key, Vec::new(), String::new(), *span)
             } else {
                 diagnostics.push(iteration_error(
                     "Dictionary entries require a string key followed by `:`".to_string(),
@@ -3826,10 +4215,18 @@ impl Evaluator {
         let value = if value_inlines.is_empty() && value_text.is_empty() {
             let nested = &item.nodes[1..];
             if nested.is_empty() {
-                IrValue::String(String::new())
+                IrValue::Dictionary(IrDictionary {
+                    entries: Vec::new(),
+                    span: item.span,
+                })
             } else {
-                let nested =
-                    self.evaluate_dictionary_entries(nested, item.span, diagnostics, context)?;
+                let nested = self.evaluate_dictionary_entries(
+                    nested,
+                    item.span,
+                    diagnostics,
+                    context,
+                    function_name,
+                )?;
                 IrValue::Dictionary(IrDictionary {
                     entries: nested,
                     span: item.span,
@@ -6171,7 +6568,13 @@ pub(crate) struct NativeOwnerInventory {
 }
 
 const CONDITIONAL_NATIVE_NAMES: &[&str] = &["if", "ifnot"];
-const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &["docname", "docdescription", "doctype", "docauthor"];
+const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
+    "docname",
+    "docdescription",
+    "doctype",
+    "docauthor",
+    "docauthors",
+];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include"];
@@ -6901,7 +7304,17 @@ fn split_dictionary_paragraph(
         .unwrap_or(value_start);
     let value_span = SourceSpan::new(text_span.source_id, value_start, value_end);
     if !trimmed.is_empty() {
-        return Some((key, Vec::new(), trimmed.to_string(), value_span));
+        let tail = content.get(1..).unwrap_or_default();
+        if tail.is_empty() {
+            return Some((key, Vec::new(), trimmed.to_string(), value_span));
+        }
+        let mut value_inlines = Vec::with_capacity(tail.len() + 1);
+        value_inlines.push(IrInline::Text {
+            content: trimmed.to_string(),
+            span: value_span,
+        });
+        value_inlines.extend_from_slice(tail);
+        return Some((key, value_inlines, String::new(), value_span));
     }
     let mut tail = content.get(1..).unwrap_or_default().to_vec();
     if let Some(IrInline::Text {
@@ -6930,6 +7343,61 @@ fn split_dictionary_paragraph(
         .map(inline_source_span)
         .unwrap_or(paragraph_span);
     Some((key, tail, String::new(), tail_span))
+}
+
+fn upsert_ordered_string_pair(entries: &mut Vec<(String, String)>, key: String, value: String) {
+    if let Some(existing) = entries.iter_mut().find(|(existing, _)| existing == &key) {
+        existing.1 = value;
+    } else {
+        entries.push((key, value));
+    }
+}
+
+fn upsert_ordered_author(entries: &mut Vec<IrDocumentAuthor>, author: IrDocumentAuthor) {
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|existing| existing.name == author.name)
+    {
+        *existing = author;
+    } else {
+        entries.push(author);
+    }
+}
+
+fn upsert_ordered_pair(entries: &mut Vec<IrPair>, pair: IrPair) {
+    let key = match pair.first.as_ref() {
+        IrValue::String(key) => key,
+        _ => {
+            entries.push(pair);
+            return;
+        }
+    };
+    if let Some(existing) = entries.iter_mut().find(|existing| {
+        matches!(existing.first.as_ref(), IrValue::String(existing_key) if existing_key == key)
+    }) {
+        *existing = pair;
+    } else {
+        entries.push(pair);
+    }
+}
+
+/// Applies the bounded scalar String boundary to author information without
+/// widening it to rich content, components, callables, ranges, or collections.
+fn bounded_document_author_string(value: &IrValue) -> Option<String> {
+    if matches!(value, IrValue::Content(_)) {
+        return builtins::plain_text_argument(value);
+    }
+    if !matches!(
+        value,
+        IrValue::String(_)
+            | IrValue::Identifier(_)
+            | IrValue::Number(_)
+            | IrValue::Boolean(_)
+            | IrValue::Content(_)
+    ) {
+        return None;
+    }
+    builtins::scalar_string_argument(&InvocationValue::static_value(value.clone()))
 }
 
 fn plain_dictionary_key(content: &[IrInline]) -> Option<String> {

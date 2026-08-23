@@ -1,0 +1,215 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Before",
+              "span": {
+                "source_id": 1,
+                "start": 217,
+                "end": 222
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 217,
+          "end": 222
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 227,
+                "end": 238
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 227,
+          "end": 238
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Alice",
+              "span": {
+                "source_id": 1,
+                "start": 217,
+                "end": 222
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 217,
+          "end": 222
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "2",
+              "span": {
+                "source_id": 1,
+                "start": 227,
+                "end": 238
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 227,
+          "end": 238
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Bob",
+              "span": {
+                "source_id": 1,
+                "start": 217,
+                "end": 222
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 217,
+          "end": 222
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "1",
+              "span": {
+                "source_id": 1,
+                "start": 227,
+                "end": 238
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 227,
+          "end": 238
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "After",
+              "span": {
+                "source_id": 1,
+                "start": 217,
+                "end": 222
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 217,
+          "end": 222
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "0",
+              "span": {
+                "source_id": 1,
+                "start": 227,
+                "end": 238
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 227,
+          "end": 238
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [
+        {
+          "name": "Before",
+          "info": []
+        },
+        {
+          "name": "Alice",
+          "info": [
+            [
+              "email",
+              "alice@example.com"
+            ],
+            [
+              "website",
+              "alice.example"
+            ]
+          ]
+        },
+        {
+          "name": "Bob",
+          "info": [
+            [
+              "email",
+              "bob@example.com"
+            ]
+          ]
+        },
+        {
+          "name": "After",
+          "info": []
+        }
+      ]
+    }
+  }
+}

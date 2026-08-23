@@ -81,7 +81,7 @@ style, or layout surface to compatibility.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor` is implemented only at the bounded evaluator/IR state boundary; `.docauthors` and the remaining metadata surface stay deferred | Partial (bounded) |
+| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor` and `.docauthors` are implemented only at the bounded evaluator/IR state boundary; the remaining metadata surface stays deferred | Partial (bounded) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -117,14 +117,44 @@ evaluator-owned `DocumentState` and the final immutable
 The bounded implementation reuses the existing invocation-time String
 conversion boundary, validates arity and named-argument shape before the
 author commit, and reports invalid calls through source-backed structured
-diagnostics. `IrDocumentAuthor` intentionally stores only `name`; additional
-author information belongs to a future `.docauthors` slice. Front-matter
+diagnostics. `IrDocumentAuthor` stores only bounded ordered string info for
+the separate `.docauthors` slice. Front-matter
 `IrMetadata.author` is not synchronized with document-state authors, and no
 Typst author rendering policy is introduced here.
 
 Evidence is in `crates/scribium-core/src/lib.rs::tests::docauthor_*`, the IR
 serde test, and the independently authored
 `fixtures/quarkdown-conformance/cases/docauthor-family/` case.
+
+### Bounded `.docauthors` document-state contract
+
+The pinned Quarkdown v2.5.1 contract gives `.docauthors` the same read/write
+dual behavior as `.docauthor`. A setter accepts a
+`Dictionary<String, Dictionary<String, String>>` through the documented
+nested Markdown-list body, an already-evaluated typed dictionary, or the
+normal `authors:` binding. It appends each dictionary entry to the shared
+ordered author state and returns no document value. The argumentless getter
+returns an ordinary typed dictionary whose values are nested typed
+dictionaries.
+
+Scribium stores each author as a backend-neutral name plus ordered string info
+pairs. Dictionary construction preserves the first insertion slot and uses
+the last value for duplicate names or info keys, matching the pinned
+`mutableMapOf`/`dictionaryOf` behavior. Repeated `.docauthor` calls remain
+duplicate ordered state, while the getter presents the resulting dictionary
+view. Validation is bounded to scalar/plain-text-safe strings; rich
+components, callables, ranges, collections, and arbitrary recursive metadata
+are rejected. Setter evaluation is validate-then-commit and restores the
+previous document state on failure.
+
+Source-defined `.docauthors` functions shadow the native only in the same
+model as `.docauthor`; `.docname`, `.docdescription`, and `.doctype` retain
+native-first precedence. No author rendering or front-matter merging is
+introduced.
+
+Evidence is in `crates/scribium-core/src/lib.rs::tests::docauthors_*`, the
+ordered author serde tests, and
+`fixtures/quarkdown-conformance/cases/docauthors-family/`.
 
 ### Bounded `.container` sizing contract
 
