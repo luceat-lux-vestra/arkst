@@ -392,7 +392,7 @@ the upstream `asDouble()` conversion to every element; invalid conversions
 contribute zero, and `.average` divides by the full input count (empty input
 therefore produces `NaN`). These results remain typed until an output boundary.
 
-### Scoped `.let` (Implemented slice)
+### scoped `.let` (Implemented slice)
 
 Block-form `.let` invokes a one-parameter lambda in a child scope. The value
 argument is evaluated once in the caller scope, then binds either the explicit
@@ -666,8 +666,10 @@ the verified upstream Number-to-Int behavior.
 
 ### Include / Read (Implemented bounded)
 
-`.include`, `.read`, and `.json` are evaluated through the engine's
-`VirtualProject` resource provider. Paths are logical and source-relative;
+`.include`, `.read`, and `.json` are evaluated by `scribium-engine` through its
+engine-neutral `ResourceProvider` interface. `scribium-core` owns the adapter
+that backs that interface with `VirtualProject`; the engine does not own or
+depend directly on the project model. Paths are logical and source-relative;
 normalization rejects traversal outside the project boundary, and nested
 includes retain source identity for subsequent relative resources. The
 compiler does not access the host filesystem or network from this boundary.
