@@ -1,0 +1,5 @@
+id = "theme-document-state"
+feature = "document-state-theme"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-theme-document-state"
+description = "Bounded .theme scalar binding, lowercase normalization, whole-state replacement, and ordinary surrounding content"

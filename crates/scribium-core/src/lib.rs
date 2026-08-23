@@ -1517,6 +1517,208 @@ mod tests {
             result.ir.metadata.document_state.document_type,
             crate::ir::IrDocumentType::Plain
         );
+        assert!(result.ir.metadata.document_state.theme.is_none());
+    }
+
+    #[test]
+    fn theme_color_only_is_lowercased_and_emits_no_output() {
+        let (result, _) = compile_source(".theme {DaRk}\nSurrounding content\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Surrounding content");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: None,
+            })
+        );
+    }
+
+    #[test]
+    fn theme_binds_named_layout_and_replaces_both_components() {
+        let (result, _) = compile_source(".theme {DaRk} layout:{My-LaYoUt}\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("my-layout".to_string()),
+            })
+        );
+
+        let (layout_only, _) = compile_source(".theme layout:{Compact}\n");
+        assert!(layout_only.diagnostics.is_empty(), "{layout_only:?}");
+        assert_eq!(
+            layout_only.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: None,
+                layout: Some("compact".to_string()),
+            })
+        );
+
+        let (named_color, _) = compile_source(".theme color:{DaRk}\n");
+        assert!(named_color.diagnostics.is_empty(), "{named_color:?}");
+        assert_eq!(
+            named_color.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: None,
+            })
+        );
+    }
+
+    #[test]
+    fn theme_uses_whole_state_replacement_and_empty_invocation_is_a_setter() {
+        let source = ".theme {Dark} layout:{Compact}\n.theme {Light}\n";
+        let (replaced, _) = compile_source(source);
+        assert!(replaced.diagnostics.is_empty(), "{replaced:?}");
+        assert_eq!(
+            replaced.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("light".to_string()),
+                layout: None,
+            })
+        );
+
+        let source = ".theme {Dark} layout:{Compact}\n.theme\n";
+        let (empty, _) = compile_source(source);
+        assert!(empty.diagnostics.is_empty(), "{empty:?}");
+        assert_eq!(output_text(&empty), "");
+        assert_eq!(
+            empty.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: None,
+                layout: None,
+            })
+        );
+    }
+
+    #[test]
+    fn theme_state_is_shared_by_callables_and_front_matter_stays_separate() {
+        let source = ".function {set-theme}\n    .theme {Dark} layout:{Compact}\n\n.set-theme\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("compact".to_string()),
+            })
+        );
+
+        let source = "---\ntheme: front matter\n---\n.theme {Dark}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .raw
+                .iter()
+                .find(|(key, _)| key == "theme")
+                .map(|(_, value)| value.as_str()),
+            Some("front matter")
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: None,
+            })
+        );
+    }
+
+    #[test]
+    fn source_defined_theme_shadows_native_direct_and_chain() {
+        for source in [
+            ".function {theme}\n    shadowed\n\n.theme\n",
+            ".function {theme}\n    .pair {left} {right}\n\n.theme::size\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(
+                output_text(&result),
+                if source.contains("::size") {
+                    "2"
+                } else {
+                    "shadowed"
+                },
+                "{source:?}"
+            );
+            assert!(result.ir.metadata.document_state.theme.is_none());
+        }
+    }
+
+    #[test]
+    fn theme_accepts_only_bounded_scalar_string_values() {
+        let (result, _) = compile_source(".theme {42} layout:{true}\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: Some("42".to_string()),
+                layout: Some("true".to_string()),
+            })
+        );
+
+        for invalid in [
+            ".theme {.pair {one} {two}}",
+            ".theme {.range {1} {2}}",
+            ".var {content}\n    rich content\n.theme {.content}",
+        ] {
+            let source = format!(".theme {{Existing}} layout:{{Compact}}\n{invalid}\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert_eq!(
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id),
+                "{source:?}"
+            );
+            assert_eq!(
+                result.ir.metadata.document_state.theme,
+                Some(crate::ir::IrDocumentTheme {
+                    color: Some("existing".to_string()),
+                    layout: Some("compact".to_string()),
+                }),
+                "{source:?}"
+            );
+            assert_eq!(output_text(&result), "", "{source:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_theme_bindings_are_source_backed_and_atomic() {
+        for invalid in [
+            ".theme {Light} {Extra}",
+            ".theme unknown:{Light}",
+            ".theme {Light} color:{Other}",
+            ".theme layout:{one} layout:{two}",
+            ".theme color:{one} color:{two}",
+        ] {
+            let source = format!(".theme {{Existing}} layout:{{Compact}}\n{invalid}\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert!(
+                matches!(result.diagnostics[0].code.as_str(), "E3001" | "E3003"),
+                "{source:?}: {result:?}"
+            );
+            assert_eq!(
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id),
+                "{source:?}"
+            );
+            assert_eq!(
+                result.ir.metadata.document_state.theme,
+                Some(crate::ir::IrDocumentTheme {
+                    color: Some("existing".to_string()),
+                    layout: Some("compact".to_string()),
+                }),
+                "{source:?}"
+            );
+            assert_eq!(output_text(&result), "", "{source:?}");
+        }
     }
 
     #[test]

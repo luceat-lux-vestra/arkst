@@ -1,0 +1,9 @@
+Ordinary content remains separate from theme state.
+
+.theme {DaRk} layout:{My-LaYoUt}
+
+The first theme is replaced below.
+
+.theme {LiGhT}
+
+Final content remains ordinary document text.

@@ -81,7 +81,7 @@ style, or layout surface to compatibility.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, and `.dockeywords` are implemented only at bounded evaluator/IR state boundaries; rendering and the remaining metadata surface stay deferred | Partial (bounded) |
+| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, `.dockeywords`, and `.theme` are implemented only at bounded evaluator/IR state boundaries; rendering and the remaining metadata surface stay deferred | Partial (bounded) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -180,6 +180,40 @@ front-matter merging, or generalized conversion is introduced.
 Evidence is in `crates/scribium-core/src/lib.rs::tests::dockeywords_*`, the IR
 serde test, and the independently authored
 `fixtures/quarkdown-conformance/cases/dockeywords-family/` case.
+
+### Bounded `.theme` document-state contract
+
+The pinned Quarkdown v2.5.1 implementation exposes `.theme(color: String? =
+null, layout: String? = null)` as a setter returning no document value. The
+positional argument binds `color`, while `layout` is likely named. Supplied
+components are lowercased and theme existence is left to the rendering
+boundary. Scribium stores the result as an explicit backend-neutral
+`IrDocumentTheme` in the shared evaluator-owned document state.
+
+Each successful call replaces the complete theme. Therefore a later
+`.theme {Light}` stores `color = "light"` and `layout = null` after an earlier
+call supplied both components; it does not preserve the previous layout. An
+argumentless `.theme` is still a setter and stores an explicit empty theme
+`Some({ color: null, layout: null })`, distinct from the absence of any
+`.theme` call. This follows the pinned source implementation even though the
+public KDoc describes omitted components as being kept/defaulted; resolution
+and defaults remain outside this bounded contract.
+
+The existing invocation-time scalar String boundary accepts String,
+Identifier, Number, and Boolean values for each component. Collections,
+Dictionary/Pair, Range, Callable, Component, rich content, and unresolved
+values are rejected. Binding, evaluation, conversion, normalization, and
+shape validation complete before one state commit; failures retain the old
+full theme and keep the original argument span in the structured diagnostic.
+Callable child scopes share the state. Source-defined `.theme` shadows the
+native setter under the same bounded policy as the newer document-state
+setters, while `.docname`, `.docdescription`, and `.doctype` retain
+native-first precedence. Front matter remains separate and no renderer,
+theme registry, filesystem lookup, or CSS/Typst integration is introduced.
+
+Evidence is in `crates/scribium-core/src/lib.rs::tests::theme_*`, the IR serde
+tests, and the independently authored
+`fixtures/quarkdown-conformance/cases/theme-document-state/` case.
 
 ### Bounded `.container` sizing contract
 

@@ -9,13 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bounded theme document state (M3):** `.theme` now stores optional
+  lowercase `color` and `layout` components in evaluator-owned shared state
+  and the immutable backend-neutral IR snapshot. Positional color and named
+  `color`/`layout` binding use the existing bounded scalar String boundary;
+  every successful call replaces the complete theme, including an explicit
+  empty setter, and failed calls preserve the previous state with
+  source-backed diagnostics. Theme resolution, existence validation,
+  defaults, rendering, `.doclang`, and layout metadata remain deferred.
+
 - **Bounded keyword document state (M3):** `.dockeywords` now provides an
   ordered iterable getter and a validate-then-replace setter for documented
   Markdown list bodies and existing evaluated iterables. The evaluator-owned
   state is shared through callable child scopes and snapshots to serde-backed
   backend-neutral IR. Supported scalar elements remain bounded to the existing
   String-like conversion boundary; failures preserve the previous state with
-  source-backed diagnostics. `.doclang`, `.theme`, rendering policy,
+  source-backed diagnostics. `.doclang`, theme resolution, rendering policy,
   front-matter merging, and generalized DynamicValue conversion remain
   deferred.
 
@@ -25,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string info such as `email` and `website`, and returns a typed dictionary
   view with deterministic duplicate-key behavior. The immutable IR snapshot
   remains serde-compatible with older author objects, and invalid setters are
-  source-backed and atomic. `.doclang`, `.theme`, rendering policy, and other
+  source-backed and atomic. `.doclang`, theme resolution, rendering policy, and other
   document metadata remain deferred.
 
 - **Evaluator resource budgets (R10):** `scribium-engine` now applies typed,

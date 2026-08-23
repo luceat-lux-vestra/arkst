@@ -56,6 +56,26 @@ pub struct IrDocumentState {
     /// Keywords in document-state insertion order.
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// The document theme selected by `.theme`, if the setter has been called.
+    ///
+    /// `Some` with two absent components is distinct from `None`: the former
+    /// records an explicit empty theme setter, while the latter means that no
+    /// `.theme` call has committed state.
+    #[serde(default)]
+    pub theme: Option<IrDocumentTheme>,
+}
+
+/// Backend-neutral document theme components.
+///
+/// This state intentionally carries no theme registry, renderer object, or
+/// filesystem identity. Theme existence and rendering remain downstream
+/// responsibilities.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrDocumentTheme {
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub layout: Option<String>,
 }
 
 /// A backend-neutral document author with bounded, ordered string metadata.
@@ -616,7 +636,7 @@ pub enum IrValue {
 mod tests {
     use super::{
         IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-        IrDictionary, IrDocumentAuthor, IrDocumentState, IrDocumentType, IrInline,
+        IrDictionary, IrDocumentAuthor, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
         IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize,
         IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
         TargetSpecificContent,
@@ -965,6 +985,7 @@ mod tests {
     #[test]
     fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
         assert!(IrDocumentState::default().keywords.is_empty());
+        assert!(IrDocumentState::default().theme.is_none());
         let metadata = IrMetadata {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
@@ -984,6 +1005,10 @@ mod tests {
                     },
                 ],
                 keywords: vec!["quarkdown".to_string(), "documents".to_string()],
+                theme: Some(IrDocumentTheme {
+                    color: Some("dark".to_string()),
+                    layout: Some("compact".to_string()),
+                }),
             },
             ..IrMetadata::default()
         };
@@ -1017,6 +1042,18 @@ mod tests {
                 .expect("old document state remains readable")
                 .document_type,
             IrDocumentType::Plain
+        );
+        assert!(
+            serde_json::from_value::<IrDocumentState>(serde_json::json!({
+                "name": "Document",
+                "description": "Description",
+                "document_type": "Plain",
+                "authors": [],
+                "keywords": []
+            }))
+            .expect("old theme-less document state remains readable")
+            .theme
+            .is_none()
         );
 
         assert_eq!(
@@ -1061,12 +1098,59 @@ mod tests {
                 ],
             }],
             keywords: vec!["first".to_string(), "second".to_string()],
+            theme: Some(IrDocumentTheme {
+                color: None,
+                layout: None,
+            }),
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(
             serde_json::from_str::<IrDocumentState>(&serialized)
                 .expect("ordered author state deserializes"),
             state
+        );
+    }
+
+    #[test]
+    fn document_theme_component_shapes_roundtrip_without_collapsing_empty_state() {
+        let shapes = [
+            IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: None,
+            },
+            IrDocumentTheme {
+                color: None,
+                layout: Some("compact".to_string()),
+            },
+            IrDocumentTheme {
+                color: Some("dark".to_string()),
+                layout: Some("compact".to_string()),
+            },
+            IrDocumentTheme {
+                color: None,
+                layout: None,
+            },
+        ];
+
+        for theme in shapes {
+            let state = IrDocumentState {
+                theme: Some(theme),
+                ..IrDocumentState::default()
+            };
+            let serialized = serde_json::to_string(&state).expect("theme state serializes");
+            assert_eq!(
+                serde_json::from_str::<IrDocumentState>(&serialized)
+                    .expect("theme state deserializes"),
+                state
+            );
+        }
+
+        assert_ne!(
+            Some(IrDocumentTheme {
+                color: None,
+                layout: None,
+            }),
+            IrDocumentState::default().theme
         );
     }
 }
