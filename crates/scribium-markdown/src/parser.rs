@@ -978,7 +978,8 @@ fn directive_block(
                     base,
                     call_base,
                     diagnostics,
-                    is_inline_iteration_body(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
                 )
             })
             .collect(),
@@ -1388,7 +1389,8 @@ fn convert_inline(
                             base,
                             0,
                             diagnostics,
-                            is_inline_iteration_body(&call_name, index),
+                            is_contextual_inline_body_position(&call_name, index),
+                            is_contextual_inline_body_position(&call_name, index),
                         )
                     })
                     .collect(),
@@ -1422,11 +1424,11 @@ fn convert_inline(
     }
 }
 
-fn is_inline_iteration_body(call_name: &str, positional_index: usize) -> bool {
+fn is_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
     positional_index == 1 && matches!(call_name, "foreach" | "repeat")
 }
 
-fn is_chained_inline_iteration_body(call_name: &str, positional_index: usize) -> bool {
+fn is_chained_contextual_inline_body_position(call_name: &str, positional_index: usize) -> bool {
     positional_index == 0 && matches!(call_name, "foreach" | "repeat")
 }
 
@@ -1437,6 +1439,7 @@ fn convert_arg_with_mode(
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
     allow_unmarked_lambda: bool,
+    contextual_inline_body: bool,
 ) -> Value {
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
@@ -1477,10 +1480,21 @@ fn convert_arg_with_mode(
                         )
                         .unwrap_or(ByteSpan::new(lambda.span.start, lambda.body.start)),
                     });
-                    Value::Lambda {
-                        parameters,
-                        body: parse_original_content(source, lambda.body, base, diagnostics),
-                        span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                    let content = parse_original_content(source, span, base, diagnostics);
+                    let body = parse_original_content(source, lambda.body, base, diagnostics);
+                    if contextual_inline_body {
+                        Value::InlineBody {
+                            content,
+                            parameters,
+                            body,
+                            span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                        }
+                    } else {
+                        Value::Lambda {
+                            parameters,
+                            body,
+                            span: offset_span(lambda.span, base).unwrap_or(lambda.span),
+                        }
                     }
                 }
                 Ok(None) => Value::Content(parse_original_content(source, span, base, diagnostics)),
@@ -1614,7 +1628,8 @@ fn convert_content_call(
                     base,
                     0,
                     diagnostics,
-                    is_inline_iteration_body(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
+                    is_contextual_inline_body_position(&call_name, index),
                 )
             })
             .collect(),
@@ -1661,7 +1676,8 @@ fn convert_call_segment(
                     base,
                     call_base,
                     diagnostics,
-                    is_chained_inline_iteration_body(&call_name, index),
+                    is_chained_contextual_inline_body_position(&call_name, index),
+                    is_chained_contextual_inline_body_position(&call_name, index),
                 )
             })
             .collect(),
@@ -1705,6 +1721,7 @@ fn convert_named_arg(
             call_base,
             diagnostics,
             callback_lambda,
+            false,
         ),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
     }
@@ -3564,7 +3581,7 @@ mod tests {
     }
 
     #[test]
-    fn iteration_callback_lambda_uses_contextual_unmarked_form() {
+    fn iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion() {
         let output = parse_with_diagnostics(".foreach {1..3} {item: .item}\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::DirectiveCall {
@@ -3575,7 +3592,7 @@ mod tests {
         };
         assert!(matches!(
             positional_args.get(1),
-            Some(Value::Lambda {
+            Some(Value::InlineBody {
                 parameters: Some(header),
                 body,
                 ..
@@ -3595,7 +3612,7 @@ mod tests {
         };
         assert!(matches!(
             positional_args.get(1),
-            Some(Value::Lambda {
+            Some(Value::InlineBody {
                 parameters: None,
                 body,
                 ..

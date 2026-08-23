@@ -339,6 +339,7 @@ pub(crate) fn convert_scalar_with_origin(
             | IrValue::Dictionary(_)
             | IrValue::Content(_)
             | IrValue::Callable(_)
+            | IrValue::InlineBody(_)
             | IrValue::Size(_)
             | IrValue::Color(_)
             | IrValue::Enum(_)

@@ -891,10 +891,29 @@ mod tests {
 
     #[test]
     fn compile_inline_foreach_preserves_owner_reassignment_and_parameter_shadowing() {
-        let source = ".var {x} {0}\n.foreach {1..2} {x: .var {x} {.x::sum {1}}.x}\n.x\n";
-        let (result, _) = compile_source(source);
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert_eq!(output_text(&result), "1\n2\n3");
+        let sources = [
+            ".var {x} {0}\n.foreach {1..2} {x: .var {x} {.x::sum {1}}.x}\n.x\n",
+            ".var {x} {0}\n.foreach {1..2}\n    x:\n    .var {x} {.x::sum {1}}\n    .x\n\n.x\n",
+        ];
+        for source in sources {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{result:?}");
+            assert_eq!(output_text(&result), "1\n2\n2", "{source:?}");
+        }
+    }
+
+    #[test]
+    fn compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain() {
+        for source in [
+            ".function {foreach}\n    a b:\n    .b\n\n.foreach {left} {right}\n",
+            ".function {foreach}\n    a b:\n    .b\n\n.var {left} {left}\n.left::foreach {right}\n",
+            ".function {repeat}\n    a b:\n    .b\n\n.repeat {left} {right}\n",
+            ".function {repeat}\n    a b:\n    .b\n\n.var {left} {left}\n.left::repeat {right}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(output_text(&result), "right", "{source:?}");
+        }
     }
 
     #[test]
