@@ -164,11 +164,11 @@ return empty output. The normal CLI permission default includes
 
 Scribium's implementation status is **implemented for the closed `Html` target
 semantic slice**. The evaluator accepts one regular `content: String` through
-positional, named, inline, and indented-body forms, grants `NativeContent` by
-default through `CompileOptions::default()`, and exposes explicit denial with
-`compile_with_capabilities(..., Capabilities::none())`. The ordinary `compile`
-entry point always uses the compatibility-default grant. Denial emits one
-source-backed `E3004` diagnostic before node creation.
+positional, named, inline, and indented-body forms. The ordinary `compile(...)`
+entry point uses `Capabilities::compatibility_default()`, which grants
+`NativeContent`; hosts using `compile_with_capabilities(...)` may supply an
+explicit capability set, including one that denies `NativeContent`. Denial
+emits one source-backed `E3004` diagnostic before node creation.
 
 - `.html {<em>world</em>}` evaluates to a block `TargetSpecificContent` node;
 - `**Hello** .html {<em>world</em>}!` keeps the target node inline between
@@ -807,8 +807,8 @@ representative corpus; all three produced the same selected bits, and
 tests fix representative `to_bits()` values and separately cover `ln(0)`,
 negative-domain NaN, infinities, and signed zero. At the evaluator boundary,
 the existing `NumberValue(Float)` normalization remains authoritative: an
-integral result becomes an Int, so signed zero becomes `0` and infinities
-clamp to the Kotlin Int range; `.pi` does not pass through that Float helper.
+integral result becomes an Int, so signed zero becomes `0` and infinities clamp
+to the Kotlin Int range; `.pi` does not pass through that Float helper.
 
 The independent unit and integration evidence is:
 `scribium-engine/src/builtins.rs::tests::decimal_numeric_surface_matches_upstream_boundaries`,
