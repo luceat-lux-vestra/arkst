@@ -1,15 +1,21 @@
-//! IR (Intermediate Representation) — the bridge between the evaluator and Typst lowering.
+//! IR (Intermediate Representation) — Scribium's one backend-neutral document model.
 //!
-//! The IR is a flat sequence of evaluated nodes. Each node represents an already-resolved
-//! content fragment ready for code generation. Source spans are preserved throughout.
+//! The same `IrDocument` model is used before and after semantic evaluation.
+//! Frontend lowering creates its initial structure, and semantic passes
+//! progressively normalize and resolve it while preserving source spans. An IR
+//! document may therefore contain completed semantic nodes alongside
+//! structurally preserved unresolved invocations. Backend lowering normally
+//! receives normalized IR; its defensive handling of manually constructed or
+//! unresolved IR is a separate concern from semantic evaluation.
 
 use scribium_source::SourceSpan;
 use std::num::NonZeroU32;
 
 /// A compiled document in intermediate representation.
 ///
-/// Produced by the evaluator, consumed by Typst lowering. The IR is serializable
-/// for `scribium inspect --emit ir` output.
+/// Produced initially by frontend-to-IR lowering, progressively normalized by
+/// semantic evaluation, and consumed by backend lowering. The IR is
+/// serializable for `scribium inspect --emit ir` output.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrDocument {
     /// Ordered list of IR nodes.
@@ -218,19 +224,23 @@ pub struct TargetSpecificContent {
     pub span: SourceSpan,
 }
 
-/// A block-level IR node — ready for Typst code generation.
+/// A backend-neutral block-level IR node.
 ///
-/// Unlike AST nodes, IR nodes carry no unresolved references, no directive syntax,
-/// and no parser-specific structure.
+/// Depending on the pipeline stage, a node may contain evaluated semantic
+/// content or a structurally preserved unresolved invocation. IR does not
+/// carry frontend directive syntax or parser-specific AST structure, but
+/// `FunctionCall` and `ChainedFunctionCall` remain explicit compatibility forms
+/// for unresolved structural calls.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrNode {
-    /// A heading with evaluated inline content.
+    /// A heading with structured inline content, progressively normalized by
+    /// semantic evaluation.
     Heading {
         level: usize,
         content: Vec<IrInline>,
         span: SourceSpan,
     },
-    /// A paragraph containing zero or more evaluated inline fragments.
+    /// A paragraph containing zero or more structured inline fragments.
     Paragraph {
         content: Vec<IrInline>,
         span: SourceSpan,
@@ -268,14 +278,17 @@ pub enum IrNode {
     },
     /// Parser-owned raw HTML retained only while a function body can claim it
     /// as an opaque String argument. Ordinary document raw HTML is rejected
-    /// before it reaches evaluated IR.
+    /// before it reaches normalized IR.
     RawHtml { source: String, span: SourceSpan },
     /// Target-specific content retained until backend selection.
     TargetSpecificContent { content: TargetSpecificContent },
-    /// A completed backend-neutral semantic component.
+    /// A completed, typed backend-neutral semantic component.
     Component { component: IrComponent },
-    /// A function/component call that was resolved during evaluation.
-    /// The lowering pass renders this as the corresponding Typst construct.
+    /// A structurally preserved function/component call.
+    ///
+    /// Semantic evaluation normally consumes this form. It may remain in IR as
+    /// an unresolved compatibility form, including when IR is inspected or
+    /// manually constructed for defensive backend handling.
     FunctionCall {
         name: String,
         positional_args: Vec<IrValue>,
@@ -291,10 +304,10 @@ pub enum IrNode {
     /// A structurally preserved `::` call chain.
     ///
     /// The evaluator consumes this representation directly and produces an
-    /// ordinary evaluated IR node when every segment is executable. Keeping
+    /// ordinary normalized IR node when every segment is executable. Keeping
     /// the structural form preserves source provenance and avoids synthetic
-    /// source rewriting; the variant remains available for defensive handling
-    /// of manually constructed unresolved IR.
+    /// source rewriting; the variant remains available for unresolved
+    /// structural compatibility forms and defensive backend handling.
     ChainedFunctionCall {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
@@ -401,7 +414,7 @@ pub enum IrInline {
     TargetSpecificContent { content: TargetSpecificContent },
 }
 
-/// An evaluated list item in the IR.
+/// A list item in the backend-neutral IR.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrListItem {
     pub nodes: Vec<IrNode>,
@@ -528,7 +541,7 @@ pub struct IrTableRow {
     pub span: SourceSpan,
 }
 
-/// A table cell with evaluated inline content and source provenance.
+/// A table cell with structured inline content and source provenance.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrTableCell {
     pub content: Vec<IrInline>,
@@ -545,7 +558,7 @@ pub enum IrTableAlignment {
     None,
 }
 
-/// A resolved value used in function call arguments.
+/// A semantic value used in function call arguments and output materialization.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrValue {
     String(String),
