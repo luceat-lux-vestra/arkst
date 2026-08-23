@@ -327,7 +327,7 @@ Markdown raw HTML and Quarkdown `.html` remain separate at every layer:
 | Source | Owner and meaning |
 |---|---|
 | `<em>x</em>` or `<!-- comment -->` in `.md` | Rushdown-owned Markdown raw HTML; only the bounded Markdown adapter policy applies. |
-| `.html {<em>x</em>}` in `.qd`/`.scrib` | Quarkdown function call; evaluated String becomes target-specific native HTML after the capability gate specified by this ADR. |
+| `.html {<em>x</em>}` in `.qd`/`.scrib` | Quarkdown function call; evaluated String becomes target-specific native HTML only after the future capability gate. |
 | `<em>x</em>` in `.qd`/`.scrib` | Ordinary mixed raw HTML; remains source-backed and fails closed with `E8001`. |
 
 Adding the `.html` builtin must never broaden the Quarkdown frontend's raw
