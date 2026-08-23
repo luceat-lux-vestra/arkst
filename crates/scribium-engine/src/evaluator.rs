@@ -198,6 +198,11 @@ enum CallBody<'a> {
     Inline(&'a [IrInline]),
 }
 
+enum IterationBody<'a> {
+    Block(&'a [IrNode]),
+    Inline(IrCallable),
+}
+
 #[derive(Clone)]
 struct StackedArgument {
     value: InvocationValue,
@@ -3841,16 +3846,6 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        if positional_args.len() != 1 {
-            diagnostics.push(iteration_error(
-                format!(
-                    "`.foreach` requires exactly one positional iterable argument (received {})",
-                    positional_args.len()
-                ),
-                *span,
-            ));
-            return CallOutcome::Failed;
-        }
         if let Some(argument) = named_args.first() {
             diagnostics.push(iteration_error_at(
                 format!("Unknown named argument `{}` for `.foreach`", argument.name),
@@ -3858,30 +3853,27 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        let body = match body {
-            Some(CallBody::Block(nodes)) => nodes,
-            Some(CallBody::Inline(_)) => {
-                diagnostics.push(iteration_error(
-                    "`.foreach` supports only the block lambda form in this slice".to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
-            None => {
-                diagnostics.push(iteration_error(
-                    "`.foreach` requires a block lambda body".to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
+        let (iterable_argument, iteration_body) = match resolve_iteration_operands(
+            ".foreach",
+            positional_args,
+            body,
+            span,
+            diagnostics,
+        ) {
+            Ok(operands) => operands,
+            Err(outcome) => return outcome,
         };
-        if !validate_iteration_lambda(lambda_parameters, ".foreach", true, span, diagnostics) {
+        let callable_parameters = match &iteration_body {
+            IterationBody::Block(_) => lambda_parameters,
+            IterationBody::Inline(callable) => callable.parameters.as_deref(),
+        };
+        if !validate_iteration_lambda(callable_parameters, ".foreach", true, span, diagnostics) {
             return CallOutcome::Failed;
         }
 
         let value = match self
             .evaluate_invocation_values(
-                std::slice::from_ref(&positional_args[0]),
+                std::slice::from_ref(iterable_argument),
                 span,
                 diagnostics,
                 context,
@@ -3896,10 +3888,19 @@ impl Evaluator {
             Ok(elements) => elements,
             Err(outcome) => return outcome,
         };
-        self.map_iteration_values(
-            &elements,
+        let callable = match self.materialize_iteration_callable(
+            iteration_body,
             lambda_parameters,
-            body,
+            *span,
+            diagnostics,
+            context,
+        ) {
+            Ok(callable) => callable,
+            Err(outcome) => return outcome,
+        };
+        self.map_callable_values(
+            &elements,
+            &callable,
             IterationOptions {
                 span: *span,
                 allow_destructuring: true,
@@ -3922,16 +3923,6 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        if positional_args.len() != 1 {
-            diagnostics.push(iteration_error(
-                format!(
-                    "`.repeat` requires exactly one positional count argument (received {})",
-                    positional_args.len()
-                ),
-                *span,
-            ));
-            return CallOutcome::Failed;
-        }
         if let Some(argument) = named_args.first() {
             diagnostics.push(iteration_error_at(
                 format!("Unknown named argument `{}` for `.repeat`", argument.name),
@@ -3939,40 +3930,29 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        let body = match body {
-            Some(CallBody::Block(nodes)) => nodes,
-            Some(CallBody::Inline(_)) => {
-                diagnostics.push(iteration_error(
-                    "`.repeat` supports only the block lambda form in this slice".to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
-            None => {
-                diagnostics.push(iteration_error(
-                    "`.repeat` requires a block lambda body".to_string(),
-                    *span,
-                ));
-                return CallOutcome::Failed;
-            }
+        let (count_argument, iteration_body) =
+            match resolve_iteration_operands(".repeat", positional_args, body, span, diagnostics) {
+                Ok(operands) => operands,
+                Err(outcome) => return outcome,
+            };
+        let callable_parameters = match &iteration_body {
+            IterationBody::Block(_) => lambda_parameters,
+            IterationBody::Inline(callable) => callable.parameters.as_deref(),
         };
-        if !validate_iteration_lambda(lambda_parameters, ".repeat", false, span, diagnostics) {
+        if !validate_iteration_lambda(callable_parameters, ".repeat", false, span, diagnostics) {
             return CallOutcome::Failed;
         }
 
-        let count_value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
+        let count_value = match self.evaluate_value(count_argument, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
-                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
+                match self.preserve_value_expression(count_argument, diagnostics, context) {
                     Ok(value) => value,
                     Err(outcome) => return outcome,
                 }
             }
             CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(
-                    &positional_args[0],
-                    span,
-                )));
+                diagnostics.push(no_value_required(value_source_span(count_argument, span)));
                 return CallOutcome::Failed;
             }
             CallOutcome::Failed => return CallOutcome::Failed,
@@ -3999,10 +3979,19 @@ impl Evaluator {
             Ok(elements) => elements,
             Err(outcome) => return outcome,
         };
-        self.map_iteration_values(
-            &elements,
+        let callable = match self.materialize_iteration_callable(
+            iteration_body,
             lambda_parameters,
-            body,
+            *span,
+            diagnostics,
+            context,
+        ) {
+            Ok(callable) => callable,
+            Err(outcome) => return outcome,
+        };
+        self.map_callable_values(
+            &elements,
+            &callable,
             IterationOptions {
                 span: *span,
                 allow_destructuring: false,
@@ -4374,6 +4363,39 @@ impl Evaluator {
         self.invoke_callable(&callable, vec![value], options, diagnostics, context)
     }
 
+    fn materialize_iteration_callable(
+        &self,
+        body: IterationBody<'_>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<IrCallable, CallOutcome> {
+        match body {
+            IterationBody::Block(nodes) => {
+                Ok(self.make_callable(lambda_parameters, nodes, span, context))
+            }
+            IterationBody::Inline(callable) => {
+                let callable_span = callable.span;
+                match self.evaluate_value(&IrValue::Callable(callable), diagnostics, context) {
+                    CallOutcome::Value(IrValue::Callable(callable)) => Ok(callable),
+                    CallOutcome::Value(_) | CallOutcome::Unresolved => {
+                        diagnostics.push(iteration_error(
+                            "inline iteration body did not resolve to a callable".to_string(),
+                            callable_span,
+                        ));
+                        Err(CallOutcome::Failed)
+                    }
+                    CallOutcome::NoValue => {
+                        diagnostics.push(no_value_required(callable_span));
+                        Err(CallOutcome::Failed)
+                    }
+                    CallOutcome::Failed => Err(CallOutcome::Failed),
+                }
+            }
+        }
+    }
+
     fn make_callable(
         &self,
         parameters: Option<&[IrParameter]>,
@@ -4459,19 +4481,6 @@ impl Evaluator {
             }
         }
         outcome
-    }
-
-    fn map_iteration_values(
-        &self,
-        elements: &[IrValue],
-        lambda_parameters: Option<&[IrParameter]>,
-        body: &[IrNode],
-        options: IterationOptions,
-        diagnostics: &mut Vec<Diagnostic>,
-        context: &mut EvaluationContext<'_>,
-    ) -> CallOutcome {
-        let callable = self.make_callable(lambda_parameters, body, options.span, context);
-        self.map_callable_values(elements, &callable, options, diagnostics, context)
     }
 
     fn map_callable_values(
@@ -7535,6 +7544,68 @@ fn group_collection_values(
     }
     grouped.extend(groups.into_iter().map(IrValue::Collection));
     CallOutcome::Value(IrValue::Collection(grouped))
+}
+
+fn resolve_iteration_operands<'a>(
+    name: &str,
+    positional_args: &'a [IrValue],
+    body: Option<CallBody<'a>>,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(&'a IrValue, IterationBody<'a>), CallOutcome> {
+    match body {
+        Some(CallBody::Block(nodes)) => {
+            if positional_args.len() != 1 {
+                diagnostics.push(iteration_error(
+                    format!(
+                        "`{name}` requires exactly one positional iterable/count argument for a block body (received {})",
+                        positional_args.len()
+                    ),
+                    *span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+            Ok((&positional_args[0], IterationBody::Block(nodes)))
+        }
+        Some(CallBody::Inline(_)) => {
+            diagnostics.push(iteration_error(
+                format!("`{name}` does not accept an ordinary inline content body"),
+                *span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        None if positional_args.len() == 2 => {
+            let Some(callable) = positional_args.get(1).and_then(|value| match value {
+                IrValue::Callable(callable) => Some(callable),
+                _ => None,
+            }) else {
+                let value = &positional_args[1];
+                diagnostics.push(iteration_error(
+                    format!("`{name}` inline body must be a callable"),
+                    value_source_span(value, span),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            Ok((&positional_args[0], IterationBody::Inline(callable.clone())))
+        }
+        None if positional_args.len() != 1 => {
+            diagnostics.push(iteration_error(
+                format!(
+                    "`{name}` requires one positional iterable/count argument and an optional inline callable body (received {})",
+                    positional_args.len()
+                ),
+                *span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+        None => {
+            diagnostics.push(iteration_error(
+                format!("`{name}` requires a block or inline callable body"),
+                *span,
+            ));
+            Err(CallOutcome::Failed)
+        }
+    }
 }
 
 fn validate_iteration_lambda(

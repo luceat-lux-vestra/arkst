@@ -837,6 +837,97 @@ mod tests {
     }
 
     #[test]
+    fn compile_inline_foreach_and_repeat_use_the_shared_callable_path() {
+        let (block, _) = compile_source(".foreach {1..3}\n    .1\n");
+        let (inline, _) = compile_source(".foreach {1..3} {.1}\n");
+        assert!(block.diagnostics.is_empty(), "{block:?}");
+        assert!(inline.diagnostics.is_empty(), "{inline:?}");
+        assert_eq!(output_text(&block), output_text(&inline));
+
+        for (source, expected) in [
+            (".foreach {1..3} {.1}\n", "1\n2\n3"),
+            (".foreach {1..3} {x: .x::sum {1}}::first\n", "2"),
+            (".repeat {3} {item: .item}\n", "1\n2\n3"),
+            (".foreach {1..2} {x: .repeat {2} {.x}}\n", "1\n1\n2\n2"),
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(output_text(&result), expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn compile_inline_foreach_preserves_pair_destructuring() {
+        let source = ".var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n.foreach {.table} {key value: .key}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "a\nb");
+    }
+
+    #[test]
+    fn compile_inline_foreach_reuses_materialization_budget() {
+        let source = ".foreach {1..3} {.1}\n";
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", source)
+            .expect("valid path")
+            .build()
+            .unwrap();
+        let result = super::compile(
+            &project,
+            &CompileOptions {
+                compatibility_profile: None,
+                evaluation_limits: EvaluationLimits {
+                    max_materialized_elements: 2,
+                    max_evaluation_depth: 16,
+                },
+            },
+        );
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3005");
+        assert!(result.ir.nodes.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn compile_inline_foreach_preserves_owner_reassignment_and_parameter_shadowing() {
+        let source = ".var {x} {0}\n.foreach {1..2} {x: .var {x} {.x::sum {1}}.x}\n.x\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2\n3");
+    }
+
+    #[test]
+    fn compile_inline_foreach_keeps_new_variables_invocation_local() {
+        let source = ".foreach {1..2} {x: .var {local} {.x}.x}\n.local\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1\n2");
+        assert!(matches!(
+            result.ir.nodes.last(),
+            Some(IrNode::FunctionCall { name, .. }) if name == "local"
+        ));
+    }
+
+    #[test]
+    fn compile_inline_foreach_failure_is_atomic_and_source_backed() {
+        let source = "prefix\n.foreach {1..3} {x: .sum {.x} {true}}\ntail\n";
+        let (result, source_id) = compile_source(source);
+        let sum_start = source.find(".sum").expect("failing body call");
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                sum_start,
+                sum_start + ".sum {.x} {true}".len()
+            ))
+        );
+        assert_eq!(output_text(&result), "prefix\ntail");
+    }
+
+    #[test]
     fn compile_foreach_repeated_range_results_fail_once_at_output_boundary() {
         let source = ".foreach {1..3}\n    .let {2..4}\n        .1\n";
         let (result, source_id) = compile_source(source);

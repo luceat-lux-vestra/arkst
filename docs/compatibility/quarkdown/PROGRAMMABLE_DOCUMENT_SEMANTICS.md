@@ -6,7 +6,7 @@ implementation plan that changes the current supported surface.
 
 - Tracked upstream: Quarkdown v2.5.1
 - Resolved upstream tag: [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium comparison baseline: `93e8e160a987229a7f5b37ff250dcb4f74fad714`
+- Scribium comparison baseline: `dbabdc09304a3bddaaaf45018b3d681e9570f476`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
 
 ## Findings
@@ -47,6 +47,30 @@ separate output conversion step. `.var` can update an existing variable owner,
 while a new declaration is local to its selected scope.
 
 Source evidence: [`Lambda.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Lambda.kt), [`ScopeContext.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core/context/ScopeContext.kt), [`MutableContext.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core/context/MutableContext.kt), and [`Flow.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt).
+
+### Inline iteration callable bodies (2026-08-23)
+
+The pinned v2.5.1 flow contract accepts the following bounded forms:
+
+- `.foreach {iterable} {parameter: body}`;
+- `.foreach {iterable} {body}` with implicit `.1`, `.2`, and later slots when
+  the lambda header is absent; and
+- `.repeat {count} {body}`, which delegates to the same ordered one-based
+  iteration path as `.foreach`.
+
+The upstream refiner initially represents the inline body as an ordinary raw
+positional argument. The regular binder converts it to a `Lambda` only because
+the target parameter is callable. An indented body remains a distinct lazy
+block-body argument; neither form is reparsed or evaluated as an ordinary
+eager content argument.
+
+Scribium keeps that distinction at the frontend boundary: only the contextual
+callable position of `.foreach`/`.repeat` is adapted to the existing
+source-backed `Value::Lambda`, then to `IrValue::Callable`. Block and inline
+iteration bodies converge on the existing callable capture, parameter binding,
+`invoke_callable()`, ordered result, rollback, and resource-budget paths.
+The bounded slice does not generalize this to arbitrary inline component or
+callback bodies.
 
 ### Component categories
 

@@ -452,7 +452,20 @@ fn parse_inline_lambda_inner(
             (expression, expression_start)
         };
 
-    let Some(colon) = expression.find(':') else {
+    // Quarkdown's lambda grammar attempts the explicit header form first,
+    // then treats the complete expression as an implicit body when no valid
+    // parameter-list/colon prefix exists. This matters for bodies containing
+    // named arguments, such as `.predicate {.1} than:{5}`: the colon belongs
+    // to the nested call, not to the lambda header.
+    let Some(colon) = expression.match_indices(':').find_map(|(colon, _)| {
+        let header = expression[..colon].trim();
+        (!header.is_empty()
+            && header.split_whitespace().all(|token| {
+                let name = token.strip_suffix('?').unwrap_or(token);
+                is_valid_normal_call_name(name)
+            }))
+        .then_some(colon)
+    }) else {
         return Ok(Some(InlineLambda {
             parameters: Vec::new(),
             implicit: true,
@@ -468,13 +481,6 @@ fn parse_inline_lambda_inner(
         .checked_add(colon + 1)
         .and_then(|value| value.checked_add(body_leading))
         .ok_or_else(|| ParseError::new("E9002", "inline lambda span overflowed", span))?;
-    if header.is_empty() {
-        return Err(ParseError::new(
-            "E2005",
-            "inline lambda header must contain at least one parameter",
-            ByteSpan::new(expression_start, body_start),
-        ));
-    }
     let header_leading = expression[..colon].len() - expression[..colon].trim_start().len();
     let header_start = expression_start
         .checked_add(header_leading)
