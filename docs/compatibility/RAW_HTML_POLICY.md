@@ -69,11 +69,13 @@ the capability is checked before node construction and denial raises a typed
 missing-permission error. Scribium's compatibility-default compilation grants
 `NativeContent`; the host/API may explicitly deny it through
 `compile_with_capabilities`, which emits one source-backed `E3004` before
-target-specific node creation. Granting it creates only the closed
-`TargetSpecificContent { target: Html, ... }` value. It must not authorize CSS,
-JavaScript, filesystem/network access, Markdown mixed raw HTML, Typst
-injection, or arbitrary native payloads. `.css` shares the upstream permission
-but remains outside this slice.
+target-specific node creation. When `.html` is authorized, that builtin creates
+only the closed `TargetSpecificContent { target: Html, ... }` value. The
+`NativeContent` capability may also gate separately specified closed
+native-content features; it does not authorize arbitrary target kinds, generic
+native/MIME payloads, CSS, JavaScript, filesystem/network access, Markdown
+mixed raw HTML, or Typst/backend-source injection. `.css` shares the upstream
+permission but remains outside this slice.
 
 The current Typst/PDF behavior is deliberate silent omission after evaluation
 and capability checking: retain the target-specific HTML semantic node until
