@@ -1520,6 +1520,149 @@ mod tests {
     }
 
     #[test]
+    fn docauthor_getter_defaults_to_empty_and_does_not_mutate_state() {
+        let (result, _) = compile_source(".docauthor\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "");
+        assert!(result.ir.metadata.document_state.authors.is_empty());
+    }
+
+    #[test]
+    fn docauthor_setter_appends_and_getter_returns_the_first_author() {
+        let (result, _) =
+            compile_source(".docauthor {Alice}\n.docauthor {Bob}\nThe author is .docauthor.\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "The author is Alice.");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![
+                crate::ir::IrDocumentAuthor {
+                    name: "Alice".to_string(),
+                },
+                crate::ir::IrDocumentAuthor {
+                    name: "Bob".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn docauthor_accepts_the_named_author_argument() {
+        let (result, _) = compile_source(".docauthor author:{Alice}\n.docauthor\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![crate::ir::IrDocumentAuthor {
+                name: "Alice".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn failed_docauthor_invocations_are_atomic_and_source_backed() {
+        let source = ".docauthor {Alice}\n.docauthor {Bob} {Carol}\n.docauthor\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let invalid_call = ".docauthor {Bob} {Carol}";
+        let invalid_start = source.find(invalid_call).expect("invalid docauthor call");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                invalid_start,
+                invalid_start + invalid_call.len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![crate::ir::IrDocumentAuthor {
+                name: "Alice".to_string(),
+            }]
+        );
+
+        let source = ".docauthor {Alice}\n.docauthor foo:{Bob}\n.docauthor\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let invalid_argument = "foo:{Bob}";
+        let invalid_start = source
+            .find(invalid_argument)
+            .expect("invalid named argument");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                invalid_start,
+                invalid_start + invalid_argument.len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![crate::ir::IrDocumentAuthor {
+                name: "Alice".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn docauthor_uses_shared_document_state_inside_callable_scopes() {
+        let source = ".function {set-author}\n    .docauthor {Alice}\n\n.set-author\n.docauthor {Bob}\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Alice");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![
+                crate::ir::IrDocumentAuthor {
+                    name: "Alice".to_string(),
+                },
+                crate::ir::IrDocumentAuthor {
+                    name: "Bob".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn front_matter_author_remains_separate_from_docauthor_state() {
+        let source = "---\nauthor: Front Matter\n---\n.docauthor {Document State}\n.docauthor\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(result.ir.metadata.author.as_deref(), Some("Front Matter"));
+        assert_eq!(output_text(&result), "Document State");
+        assert_eq!(
+            result.ir.metadata.document_state.authors,
+            vec![crate::ir::IrDocumentAuthor {
+                name: "Document State".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn source_defined_docauthor_shadows_the_native_builtin() {
+        let result = compile_source(".function {docauthor}\n    shadowed\n\n.docauthor\n").0;
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "shadowed");
+        assert!(result.ir.metadata.document_state.authors.is_empty());
+    }
+
+    #[test]
+    fn existing_document_state_builtins_keep_native_precedence_over_source_functions() {
+        let source = ".function {docname}\n    shadowed-name\n\n.function {docdescription}\n    shadowed-description\n\n.function {doctype}\n    shadowed-type\n\nValues: [.docname]|[.docdescription]|[.doctype]\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Values: []|[]|[plain]");
+        assert_eq!(result.ir.metadata.document_state.name, "");
+        assert_eq!(result.ir.metadata.document_state.description, "");
+        assert_eq!(
+            result.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Plain
+        );
+    }
+
+    #[test]
     fn doctype_defaults_to_plain_and_writes_return_no_value() {
         let (default, _) = compile_source(".doctype\n");
         assert!(default.diagnostics.is_empty(), "{default:?}");

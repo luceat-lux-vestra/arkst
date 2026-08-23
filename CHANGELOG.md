@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bounded `.docauthor` document state (M3):** `.docauthor` now supports an
+  argumentless first-author getter plus positional and `author:` setters that
+  append ordered backend-neutral author records to the shared evaluator state.
+  The immutable IR snapshot is serde-compatible with older author-less state,
+  invalid invocations are source-backed and atomic, and `.docauthors` plus
+  other document metadata remain deferred.
+
 - **Evaluator resource budgets (R10):** `scribium-engine` now applies typed,
   deterministic per-operation materialization and per-compilation evaluator
   depth limits. Closed-range cardinality is checked before conversion,

@@ -1,0 +1,126 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Default author before setting: [",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 32
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "",
+              "span": {
+                "source_id": 1,
+                "start": 32,
+                "end": 42
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "]",
+              "span": {
+                "source_id": 1,
+                "start": 42,
+                "end": 43
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 43
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Document content survives",
+              "span": {
+                "source_id": 1,
+                "start": 45,
+                "end": 70
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 70,
+                "end": 71
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 45,
+          "end": 71
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "First author after append: ",
+              "span": {
+                "source_id": 1,
+                "start": 117,
+                "end": 144
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "Alice",
+              "span": {
+                "source_id": 1,
+                "start": 144,
+                "end": 154
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 117,
+          "end": 154
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [
+        {
+          "name": "Alice"
+        },
+        {
+          "name": "Bob"
+        }
+      ]
+    }
+  }
+}

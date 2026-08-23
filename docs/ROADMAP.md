@@ -108,8 +108,15 @@ remain compatibility debt for M3+ and later convergence.
 
 ## M3 — Programmable Documents
 
+**Status:** In progress (first bounded document-state slice)
+
 **Objective:** Broader components/style/layout families, remaining data loading,
 and later programmable-document convergence beyond the evidenced M2 slices.
+
+| Item | Status |
+|------|--------|
+| Bounded `.docauthor` document-state semantics | Completed (v2.5.1 evidenced slice) |
+| Broader document metadata and programmable-document convergence | Planned |
 
 ## M4 — Developer Experience
 

@@ -1,0 +1,5 @@
+id = "docauthor-family"
+feature = "document-state-docauthor"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-docauthor"
+description = "Bounded .docauthor getter, append semantics, first-author lookup, and ordinary content coexistence"

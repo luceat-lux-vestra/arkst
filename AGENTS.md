@@ -9,7 +9,7 @@ verified compatibility is partial and evidence-based. Clean-room independence
 is an implementation constraint, not a reason to make public language features
 permanently out of scope.
 
-- **Current milestone:** M2 Core Language + Markdown MVP
+- **Current milestone:** M3 Programmable Documents
 - **Stability:** Pre-alpha, experimental
 - **Backend:** official Typst compiler, through accepted lowering and host
   adapter boundaries
