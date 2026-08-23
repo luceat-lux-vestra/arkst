@@ -1,0 +1,8 @@
+Default author before setting: [.docauthor]
+
+Document content survives.
+
+.docauthor {Alice}
+.docauthor author:{Bob}
+
+First author after append: .docauthor

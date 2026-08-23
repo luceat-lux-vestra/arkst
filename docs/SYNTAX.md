@@ -209,6 +209,25 @@ block-level call. Its body is the indented content that follows:
         Nested body
 ```
 
+### `.docauthor` document state (M3 bounded slice)
+
+`.docauthor` uses the existing document-state read/write convention:
+
+```quarkdown
+.docauthor
+.docauthor {Alice}
+.docauthor author:{Bob}
+The first author remains .docauthor.
+```
+
+An argumentless call returns an empty string when no author has been added;
+otherwise it returns the first author name. A successful positional or named
+setter appends one author to the evaluator-owned document state and emits no
+document content. Insertion order is preserved in the immutable IR snapshot.
+Invalid arity or named arguments fail with a source-backed diagnostic before
+the new author is committed. `.docauthors`, front-matter `author`, and other
+document metadata are separate or deferred contracts.
+
 ### Variable Reference (Implemented)
 
 Variable references use the same parameterless call syntax as function calls.

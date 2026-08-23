@@ -54,10 +54,10 @@ use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
-    IrDocument, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize, IrSizeUnit,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrDocument, IrDocumentAuthor, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent,
+    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize,
+    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+    IrValue, NativeTarget, TargetSpecificContent,
 };
 use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
@@ -326,6 +326,7 @@ struct DocumentState {
     name: String,
     description: String,
     document_type: scribium_ir::IrDocumentType,
+    authors: Vec<IrDocumentAuthor>,
 }
 
 impl DocumentState {
@@ -334,6 +335,7 @@ impl DocumentState {
             name: snapshot.name.clone(),
             description: snapshot.description.clone(),
             document_type: snapshot.document_type,
+            authors: snapshot.authors.clone(),
         }
     }
 
@@ -342,6 +344,7 @@ impl DocumentState {
             name: self.name.clone(),
             description: self.description.clone(),
             document_type: self.document_type,
+            authors: self.authors.clone(),
         }
     }
 }
@@ -992,6 +995,13 @@ impl<'a> EvaluationContext<'a> {
             "docname" => IrValue::String(state.name.clone()),
             "docdescription" => IrValue::String(state.description.clone()),
             "doctype" => IrValue::String(state.document_type.quarkdown_name().to_string()),
+            "docauthor" => IrValue::String(
+                state
+                    .authors
+                    .first()
+                    .map(|author| author.name.clone())
+                    .unwrap_or_default(),
+            ),
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
@@ -1007,6 +1017,13 @@ impl<'a> EvaluationContext<'a> {
 
     fn set_document_type(&self, value: scribium_ir::IrDocumentType) {
         self.document_state.borrow_mut().document_type = value;
+    }
+
+    fn append_document_author(&self, name: String) {
+        self.document_state
+            .borrow_mut()
+            .authors
+            .push(IrDocumentAuthor { name });
     }
 
     /// Gets a variable value if it exists.
@@ -1664,7 +1681,7 @@ impl Evaluator {
             };
         }
 
-        if is_document_state(name) {
+        if is_document_state(name) && context.get_function(name).is_none() {
             return self.evaluate_document_state_builtin(
                 name,
                 positional_args,
@@ -2792,6 +2809,91 @@ impl Evaluator {
 
         if positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value(name));
+        }
+
+        if name == "docauthor" {
+            let invalid_span = if positional_args.len() > 1 {
+                positional_args
+                    .get(1)
+                    .map(|value| value_source_span(value, span))
+                    .unwrap_or(*span)
+            } else if named_args.len() > 1 {
+                named_args
+                    .get(1)
+                    .map(|argument| argument.span)
+                    .unwrap_or(*span)
+            } else {
+                named_args
+                    .first()
+                    .map(|argument| argument.span)
+                    .unwrap_or(*span)
+            };
+
+            let (argument, argument_span) = if positional_args.len() == 1 && named_args.is_empty() {
+                let evaluated = match self.evaluate_invocation_values(
+                    positional_args,
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                ) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.docauthor` requires one author argument".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let argument_span = positional_args
+                    .first()
+                    .map(|value| value_source_span(value, span))
+                    .unwrap_or(*span);
+                (argument, argument_span)
+            } else if positional_args.is_empty()
+                && named_args.len() == 1
+                && named_args[0].name == "author"
+            {
+                let evaluated =
+                    match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                        Ok(values) => values,
+                        Err(outcome) => return outcome,
+                    };
+                let Some(argument) = evaluated.into_iter().next() else {
+                    diagnostics.push(document_state_call_error(
+                        "`.docauthor` requires one author argument".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let argument_span = named_args[0].span;
+                (
+                    InvocationValue {
+                        value: argument.value.clone(),
+                        origin: argument.origin,
+                    },
+                    argument_span,
+                )
+            } else {
+                diagnostics.push(document_state_call_error(
+                    "`.docauthor` accepts exactly one positional or `author` argument".to_string(),
+                    invalid_span,
+                ));
+                return CallOutcome::Failed;
+            };
+
+            let Some(value) = builtins::scalar_string_argument(&argument) else {
+                diagnostics.push(document_state_conversion_error(
+                    "`.docauthor` requires a value that converts to String".to_string(),
+                    argument_span,
+                ));
+                return CallOutcome::Failed;
+            };
+
+            context.append_document_author(value);
+            return CallOutcome::NoValue;
         }
 
         let evaluated_positional = match self.evaluate_invocation_values(
@@ -6068,7 +6170,7 @@ pub(crate) struct NativeOwnerInventory {
 }
 
 const CONDITIONAL_NATIVE_NAMES: &[&str] = &["if", "ifnot"];
-const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &["docname", "docdescription", "doctype"];
+const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &["docname", "docdescription", "doctype", "docauthor"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include"];
@@ -8241,7 +8343,7 @@ fn document_state_call_error(message: String, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec![
-            "Document-state builtins read without arguments and write one validated String argument."
+            "Document-state builtins read without arguments and validate their supported argument before committing state."
                 .to_string(),
         ],
     }

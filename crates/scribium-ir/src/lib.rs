@@ -50,6 +50,18 @@ pub struct IrDocumentState {
     /// The document's current `.doctype`, defaulting to `plain`.
     #[serde(default)]
     pub document_type: IrDocumentType,
+    /// Authors in document-state insertion order.
+    #[serde(default)]
+    pub authors: Vec<IrDocumentAuthor>,
+}
+
+/// A minimal backend-neutral document author.
+///
+/// Additional author information belongs to a future `.docauthors` slice and
+/// is intentionally not modeled here.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrDocumentAuthor {
+    pub name: String,
 }
 
 /// The closed document-type enum exposed by Quarkdown's `.doctype` builtin.
@@ -598,9 +610,10 @@ pub enum IrValue {
 mod tests {
     use super::{
         IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-        IrDictionary, IrDocumentState, IrDocumentType, IrInline, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, TargetSpecificContent,
+        IrDictionary, IrDocumentAuthor, IrDocumentState, IrDocumentType, IrInline,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
+        TargetSpecificContent,
     };
     use scribium_source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
@@ -950,6 +963,14 @@ mod tests {
                 name: "Document".to_string(),
                 description: "Description".to_string(),
                 document_type: IrDocumentType::Paged,
+                authors: vec![
+                    IrDocumentAuthor {
+                        name: "Alice".to_string(),
+                    },
+                    IrDocumentAuthor {
+                        name: "Bob".to_string(),
+                    },
+                ],
             },
             ..IrMetadata::default()
         };
@@ -983,6 +1004,17 @@ mod tests {
                 .expect("old document state remains readable")
                 .document_type,
             IrDocumentType::Plain
+        );
+
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(serde_json::json!({
+                "name": "Document",
+                "description": "Description",
+                "document_type": "Plain"
+            }))
+            .expect("old author-less document state remains readable")
+            .authors,
+            Vec::new()
         );
     }
 }
