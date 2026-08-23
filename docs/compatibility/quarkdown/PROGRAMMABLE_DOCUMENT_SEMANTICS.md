@@ -6,8 +6,18 @@ implementation plan that changes the current supported surface.
 
 - Tracked upstream: Quarkdown v2.5.1
 - Resolved upstream tag: [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium comparison baseline: `dbabdc09304a3bddaaaf45018b3d681e9570f476`
+- Scribium comparison baseline: `3829d847f1b45871b2315d729a1f432cf390e6da`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
+
+## Historical architecture gate and current status
+
+The original architecture gate recorded in ADR-0020 selected the one-IR,
+typed-value, evaluator-owned representation and deliberately deferred deciding
+which concrete component consumers would be implemented. That historical
+decision remains unchanged. The sections below additionally record current
+implementation evidence at `3829d847f1b45871b2315d729a1f432cf390e6da`; they
+are status updates, not a rewrite of the ADR or a claim of complete Quarkdown
+programmable-document compatibility.
 
 ## Findings
 
@@ -82,8 +92,10 @@ Markdown/content values, mutating void functions, custom dynamic results, and
 layout node values. Scribium now provides the typed
 `IrValue::Component` carrier and materializes it into a typed `IrNode` only at
 the document output boundary. `IrValue::Content` remains structured content;
-`IrCallable` remains the language/evaluator carrier; a surviving
-`IrNode::FunctionCall` remains unresolved structural syntax.
+`IrCallable` remains the language/evaluator carrier; surviving
+`IrNode::FunctionCall` or `IrNode::ChainedFunctionCall` values may remain
+unresolved structural compatibility forms rather than being mistaken for
+completed semantic nodes.
 
 The component carrier is backend-neutral. It may contain layout kind,
 validated alignment/gap properties, semantic children, and source spans, but
@@ -316,7 +328,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 
 | Feature | Quarkdown v2.5.1 behavior | Scribium current behavior | Architecture decision | Implementation status | Deferred work |
 |---|---|---|---|---|---|
-| Custom functions | `.function` defines a callable with a signature, lexical definition context, caller propagation, dynamic result, and separate output conversion | Bounded user functions with immutable definition capture, a lookup-only caller overlay, typed values, and isolated invocation child maps | Keep `IrCallable` as evaluator value; compose definition and caller layers without replacing capture | Partial, caller overlay implemented | Broader stdlib/component call surface and owner-mutation parity |
+| Custom functions | `.function` defines a callable with a signature, lexical definition context, caller propagation, dynamic result, and separate output conversion | Bounded user functions with immutable definition capture, a lookup-only caller overlay, typed values, semantic-owner writeback for existing caller-visible variables, and isolated invocation child maps | Keep `IrCallable` as evaluator value; compose definition and caller layers without replacing capture or treating parameters as owners | Partial, caller overlay and scoped writeback implemented | Broader stdlib/component call surface and mutable context/library parity |
 | Lambda explicit parameters | Parameters bind by signature and shadow outer implicit parameters | Explicit lambda parameters and shadowing are supported in the bounded evaluator slice | Parameter installation is last in child scope | Bounded implemented | Broader upstream scope fixtures |
 | Lambda implicit parameters | Headerless parameters are `.1`, `.2`, …; explicit parameters mask them | Headerless invocation scope is nearest-first; a missing local implicit slot can resolve a propagated caller slot, while explicit scope remains a hard mask | Preserve implicit scope as evaluator state, never backend state | Bounded implemented | Broader upstream scope fixtures |
 | Lexical/calling scope | Definition context is retained; mutable calling context can be propagated; nested lookup is nearest-first; `.var` arguments are evaluated using normal call/invocation lookup semantics before mutation resolves the owner | Definition capture remains immutable; caller-visible variables/functions and the visible caller lambda scope are overlaid only for one invocation; local writes remain isolated; the evaluated `.var` value is then written back to the resolved semantic owner | Adopt hybrid target model with explicit definition, caller-overlay, and invocation layers; evaluation scope and mutation owner remain distinct | Bounded compatibility implemented | Definition-capture mutation and broader mutable-scope parity |
@@ -355,16 +367,17 @@ The bounded scope implementation keeps these layers explicit:
     invocation parameters
 
 The caller overlay is a lookup-only invocation layer. It does not replace or
-mutate IrCallableCapture, copy project/source/diagnostic runtime state, or turn
-child variable writes into parent-owner mutation. Document state remains the
+mutate IrCallableCapture, or copy project/source/diagnostic runtime state.
+Invocation parameters and copied capture/overlay bindings are lookup bindings,
+not variable owners. A successful assignment to an existing caller-visible
+semantic owner is explicitly written back after callable completion; newly
+declared variables remain invocation-local. Document state remains the
 explicit shared runtime handle established by the Document State Foundation.
-Parent-owner reassignment and broader mutable-scope parity remain
-partial/deferred.
 
 For this slice, definition capture, caller lookup overlay, invocation
-parameter precedence, and implicit-parameter precedence are implemented.
-Parent-owner reassignment mutation and other mutable scope parity remain
-partial/deferred.
+parameter precedence, implicit-parameter precedence, and scoped owner writeback
+are implemented. Definition-capture mutation and broader mutable scope/library
+parity remain partial/deferred.
 
 `InvocationValue` and `ValueOrigin` from PR #105 remain mandatory. Dynamic
 textual values may use bounded target adapters; static `StringValue` does not
@@ -372,15 +385,65 @@ gain arbitrary typed meaning. In particular, dynamic `"2"` and `"2.0"` can
 continue to satisfy the existing integer rule, dynamic `"1.5"` fails, and
 static `StringValue("2")` fails.
 
-Failures do not publish partial semantic output. Local child bindings remain
-local; parent reassignment and document mutations already committed through a
-shared mutable owner are not promised to roll back. Unverified upstream cases
-remain compatibility gaps rather than invented transactions.
+Failures do not publish partial semantic output or partial callable/iteration
+variable mutation. Local child bindings remain local, and successful owner
+writeback occurs only after the callable completes successfully. Document-state
+commits retain their established shared-runtime semantics. Unverified upstream
+cases remain compatibility gaps rather than invented transactions.
 
 Provenance stays source-backed: argument/conversion failures point to the
 argument expression, body failures to the original body, component properties
 to their property source, and nested children retain their own spans. Typst
 source-map entries are generated during lowering from those original spans.
+
+## R13 / #61 closure audit
+
+At the current main snapshot
+`3829d847f1b45871b2315d729a1f432cf390e6da`, the targeted #61
+programmable-document foundation has no remaining concrete M2 semantic blocker
+requiring evaluator behavior changes. R13 reconciles the record and adds no new
+evaluator semantics.
+
+The currently evidenced foundations are:
+
+- function/callable representation and the `CallOutcome` result boundary;
+- invocation evaluation order, lexical definition capture, caller lookup
+  overlay, and invocation-parameter precedence;
+- scoped mutation/writeback with parameter-as-lookup-binding and new-local
+  isolation;
+- block and native contextual inline iteration through one callable evaluator
+  path, including explicit/implicit parameters and Pair destructuring;
+- typed component/value materialization, including the bounded Row, Column,
+  positive-column Grid, Container, and Landscape slices;
+- deterministic failure behavior, source-backed diagnostics, and R10 resource
+  limits;
+- one backend-neutral IR model, including structurally preserved unresolved
+  calls; and
+- pure Typst lowering plus real Typst/PDF integration for implemented
+  component slices.
+
+| #61 acceptance criterion | Concrete current evidence |
+|---|---|
+| Target behavior is classified against public Quarkdown behavior | `README.md` Feature Matrix, `GAP_INVENTORY.md`, pinned v2.5.1 sources, and `crates/scribium-test-support/src/lib.rs::ConformanceCase::verify` compatibility-level checks |
+| Evaluator contracts are documented | `ADR-0020`, this document's Normative evaluator rules, `crates/scribium-engine/src/evaluator.rs`, and `CallOutcome::{Value, NoValue, Failed, Unresolved}` |
+| Scoping and evaluation order are tested | `crates/scribium-core/src/lib.rs::compile_captured_callable_uses_definition_fallback_and_caller_shadowing`, `compile_invocation_parameters_shadow_caller_and_definition_bindings`, `compile_callable_var_updates_owner_without_overwriting_shadowing_parameter`, and `crates/scribium-engine/src/evaluator.rs::foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local` |
+| Nested and inline/block contexts are covered | `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, and `crates/scribium-markdown/src/parser.rs::iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion` |
+| Diagnostics reference original Scribium spans | `compile_inline_foreach_failure_is_atomic_and_source_backed`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`, stacked invalid-argument/body tests in `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, and source-span assertions in the frontend/AST-to-IR tests |
+| AST → evaluator → IR behavior is deterministic | `crates/scribium-core/src/lib.rs::source_ids_are_independent_of_builder_insertion_order`, `compile_result_is_independent_of_source_insertion_order`, `crates/scribium-engine/src/evaluator.rs::evaluation_is_immutable_and_deterministic`, and `crates/scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels` |
+| Compatibility docs distinguish supported semantics from parsed-only syntax | README compatibility levels and Feature Matrix, `GAP_INVENTORY.md` classification rows, and semantic IR/Typst/diagnostic golden requirements in `fixtures/quarkdown-conformance/README.md` |
+| Implemented component slices cross the backend boundary | `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, `crates/scribium-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, and `crates/scribium-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` |
+
+Closing #61 records completion of the targeted evaluator and
+programmable-document foundation. It does **not** claim complete Quarkdown
+v2.5.1 compatibility.
+
+Major deferred families remain separately tracked: the complete public
+stdlib/component/style/layout surface; generalized DynamicValue conversion and
+arbitrary inline component/callback bodies; `.extend`, `.box`, `.clip`,
+`.figure`, `.float`, `.fullspan`, and broader layout families; remaining
+document-context and data-loading functions; host/process/environment
+semantics; and unrelated M3+ work. Raw HTML policy and behavior in issue #58
+are separate and are not part of this closure audit.
 
 ## Intentionally deferred
 
