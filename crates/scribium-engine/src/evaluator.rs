@@ -1681,7 +1681,8 @@ impl Evaluator {
             };
         }
 
-        if is_document_state(name) && context.get_function(name).is_none() {
+        let source_defined_docauthor = name == "docauthor" && context.get_function(name).is_some();
+        if is_document_state(name) && !source_defined_docauthor {
             return self.evaluate_document_state_builtin(
                 name,
                 positional_args,

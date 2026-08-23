@@ -1649,6 +1649,20 @@ mod tests {
     }
 
     #[test]
+    fn existing_document_state_builtins_keep_native_precedence_over_source_functions() {
+        let source = ".function {docname}\n    shadowed-name\n\n.function {docdescription}\n    shadowed-description\n\n.function {doctype}\n    shadowed-type\n\nValues: [.docname]|[.docdescription]|[.doctype]\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "Values: []|[]|[plain]");
+        assert_eq!(result.ir.metadata.document_state.name, "");
+        assert_eq!(result.ir.metadata.document_state.description, "");
+        assert_eq!(
+            result.ir.metadata.document_state.document_type,
+            crate::ir::IrDocumentType::Plain
+        );
+    }
+
+    #[test]
     fn doctype_defaults_to_plain_and_writes_return_no_value() {
         let (default, _) = compile_source(".doctype\n");
         assert!(default.diagnostics.is_empty(), "{default:?}");
