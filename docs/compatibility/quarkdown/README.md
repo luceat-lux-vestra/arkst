@@ -57,6 +57,14 @@ dynamic/static origin boundary, optionality, collection ordering, binding
 ownership, conversion failures, and state-commit findings; this README keeps
 only the bounded feature-family summary.
 
+The canonical programmable-language semantics inventory is
+[`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md). Its
+`#150` rows are the authoritative reconciliation for variables, scope,
+callables, evaluation order, chaining, conditionals, iteration, collection
+evaluation boundaries, precedence, extension semantics, failure effects, and
+diagnostic/provenance claims. The older bounded family rows below remain useful
+evidence links but must not be read as a complete v2.5.1 support claim.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |

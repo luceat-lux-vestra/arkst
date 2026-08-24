@@ -15,6 +15,11 @@ maintained separately in
 authority for programmable scope/evaluation architecture; it does not repeat
 the #149 conversion matrix.
 
+The complete current v2.5.1 programmable-language re-inventory for #150 is
+maintained in [`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md).
+The historical baseline below remains intentionally fixed to the #61 closure
+record and is not the current #150 support snapshot.
+
 ## Historical architecture gate and current status
 
 The original architecture gate recorded in ADR-0020 selected the one-IR,

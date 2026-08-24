@@ -3333,6 +3333,14 @@ mod tests {
     }
 
     #[test]
+    fn compile_recursive_user_function_uses_shared_callable_path() {
+        let source = ".function {count}\n    n:\n    .if {.n::isgreater than:{0}}\n        .count {.n::subtract {1}}\n    .ifnot {.n::isgreater than:{0}}\n        done\n\n.count {3}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "done");
+    }
+
+    #[test]
     fn compile_user_function_multi_statement_body_preserves_last_semantic_value() {
         let source = ".function {f}\n    .var {x} {2}\n    .sum {.x} {1}\n\n.sum {.f} {1}\n";
         let (result, _) = compile_source(source);
