@@ -8,6 +8,7 @@
 pub mod ast_to_ir;
 pub mod builtins;
 pub mod evaluator;
+pub(crate) mod locale;
 pub(crate) mod value_conversion;
 
 /// Deterministic semantic resource limits for one evaluator compilation.

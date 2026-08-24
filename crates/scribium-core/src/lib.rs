@@ -1809,6 +1809,225 @@ mod tests {
     }
 
     #[test]
+    fn doclang_getter_defaults_to_empty_and_does_not_mutate_state() {
+        let (result, _) = compile_source(".doclang\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "");
+        assert!(result.ir.metadata.document_state.locale.is_none());
+        assert_eq!(result.ir.metadata.document_state.name, "");
+        assert_eq!(result.ir.metadata.document_state.description, "");
+    }
+
+    #[test]
+    fn doclang_resolves_tags_and_english_names_with_canonical_snapshots() {
+        let source = ".doclang {en}\n.doclang\n.doclang {en-US}\n.doclang\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "English\nEnglish (United States)");
+        assert_eq!(
+            result.ir.metadata.document_state.locale,
+            Some(crate::ir::IrDocumentLocale {
+                tag: "en-US".to_string(),
+                localized_name: "English (United States)".to_string(),
+            })
+        );
+
+        let (named, _) = compile_source(
+            ".doclang locale:{eNgLiSh}\n.doclang\n.doclang locale:{English (United States)}\n.doclang\n",
+        );
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        assert_eq!(output_text(&named), "English\nEnglish (United States)");
+    }
+
+    #[test]
+    fn doclang_preserves_localized_name_and_replaces_previous_locale() {
+        let source = ".doclang {Italian}\n.doclang\n.doclang {fr-CA}\n.doclang\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "italiano\nfrançais (Canada)");
+        assert_eq!(
+            result.ir.metadata.document_state.locale,
+            Some(crate::ir::IrDocumentLocale {
+                tag: "fr-CA".to_string(),
+                localized_name: "français (Canada)".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn doclang_none_uses_upstream_nullable_getter_behavior() {
+        let source = ".doclang {en}\n.doclang {.none}\n.doclang locale:{.none}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "English\nEnglish");
+        assert_eq!(
+            result.ir.metadata.document_state.locale,
+            Some(crate::ir::IrDocumentLocale {
+                tag: "en".to_string(),
+                localized_name: "English".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn doclang_setter_emits_no_output_and_preserves_surrounding_content() {
+        let (result, _) = compile_source("before\n.doclang {en}\nafter\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "before\nafter");
+    }
+
+    #[test]
+    fn doclang_state_is_shared_by_nested_callable_scopes() {
+        let source = ".function {setlang}\n    .doclang {it}\n\n.function {outer}\n    .setlang\n\n.outer\n.doclang\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "italiano");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .document_state
+                .locale
+                .as_ref()
+                .unwrap()
+                .tag,
+            "it"
+        );
+    }
+
+    #[test]
+    fn source_defined_doclang_shadows_native_direct_and_chain() {
+        for source in [
+            ".function {doclang}\n    shadowed\n\n.doclang\n",
+            ".function {doclang}\n    shadowed\n\n.doclang::uppercase\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(
+                output_text(&result),
+                if source.contains("::uppercase") {
+                    "SHADOWED"
+                } else {
+                    "shadowed"
+                },
+                "{source:?}"
+            );
+            assert!(result.ir.metadata.document_state.locale.is_none());
+        }
+    }
+
+    #[test]
+    fn invalid_doclang_setters_are_source_backed_and_atomic() {
+        for invalid in [
+            ".doclang {not-a-locale}",
+            ".doclang {   }",
+            ".doclang {.pair {one} {two}}",
+            ".doclang {en} {it}",
+            ".doclang unknown:{it}",
+            ".doclang locale:{en} locale:{it}",
+            ".doclang locale:{en} {it}",
+            ".doclang {en} locale:{it}",
+        ] {
+            let source = format!(".doclang {{en}}\n{invalid}\n.doclang\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert!(
+                matches!(
+                    result.diagnostics[0].code.as_str(),
+                    "E2001" | "E3001" | "E3003"
+                ),
+                "{source:?}: {result:?}"
+            );
+            assert_eq!(
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id),
+                "{source:?}"
+            );
+            assert_eq!(output_text(&result), "English", "{source:?}: {result:?}");
+            assert_eq!(
+                result.ir.metadata.document_state.locale,
+                Some(crate::ir::IrDocumentLocale {
+                    tag: "en".to_string(),
+                    localized_name: "English".to_string(),
+                }),
+                "{source:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn doclang_block_body_is_rejected_before_nested_mutations() {
+        let source =
+            ".doclang {en}\n.doclang\n    .doclang {it}\n    .uppercase {nested}\n.doclang\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert_eq!(output_text(&result), "English");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .document_state
+                .locale
+                .as_ref()
+                .unwrap()
+                .tag,
+            "en"
+        );
+    }
+
+    #[test]
+    fn failed_doclang_resolution_restores_nested_state_mutations() {
+        let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid}}\n.doclang\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(output_text(&result), "English");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .document_state
+                .locale
+                .as_ref()
+                .unwrap()
+                .tag,
+            "en"
+        );
+    }
+
+    #[test]
+    fn doclang_remains_separate_from_front_matter_metadata() {
+        let source = "---\nlocale: front matter\n---\n.doclang {en}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .raw
+                .iter()
+                .find(|(key, _)| key == "locale")
+                .map(|(_, value)| value.as_str()),
+            Some("front matter")
+        );
+        assert_eq!(
+            result
+                .ir
+                .metadata
+                .document_state
+                .locale
+                .as_ref()
+                .unwrap()
+                .tag,
+            "en"
+        );
+    }
+
+    #[test]
     fn docauthor_getter_defaults_to_empty_and_does_not_mutate_state() {
         let (result, _) = compile_source(".docauthor\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");

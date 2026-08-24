@@ -63,6 +63,20 @@ pub struct IrDocumentState {
     /// `.theme` call has committed state.
     #[serde(default)]
     pub theme: Option<IrDocumentTheme>,
+    /// The document locale selected by `.doclang`, if the setter has been
+    /// called. This is plain snapshot data; locale resolution is evaluator
+    /// owned and no runtime resolver crosses the IR boundary.
+    #[serde(default)]
+    pub locale: Option<IrDocumentLocale>,
+}
+
+/// Backend-neutral locale data retained by the bounded `.doclang` slice.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrDocumentLocale {
+    /// Canonical BCP 47-style tag selected by the evaluator.
+    pub tag: String,
+    /// Localized name returned by the `.doclang` getter.
+    pub localized_name: String,
 }
 
 /// Backend-neutral document theme components.
@@ -636,10 +650,10 @@ pub enum IrValue {
 mod tests {
     use super::{
         IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-        IrDictionary, IrDocumentAuthor, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
-        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize,
-        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
-        TargetSpecificContent,
+        IrDictionary, IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme,
+        IrDocumentType, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode,
+        IrPair, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
+        NativeTarget, TargetSpecificContent,
     };
     use scribium_source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
@@ -986,6 +1000,7 @@ mod tests {
     fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
         assert!(IrDocumentState::default().keywords.is_empty());
         assert!(IrDocumentState::default().theme.is_none());
+        assert!(IrDocumentState::default().locale.is_none());
         let metadata = IrMetadata {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
@@ -1008,6 +1023,10 @@ mod tests {
                 theme: Some(IrDocumentTheme {
                     color: Some("dark".to_string()),
                     layout: Some("compact".to_string()),
+                }),
+                locale: Some(IrDocumentLocale {
+                    tag: "en-US".to_string(),
+                    localized_name: "English (United States)".to_string(),
                 }),
             },
             ..IrMetadata::default()
@@ -1055,6 +1074,19 @@ mod tests {
             .theme
             .is_none()
         );
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(serde_json::json!({
+                "name": "Document",
+                "description": "Description",
+                "document_type": "Plain",
+                "authors": [],
+                "keywords": [],
+                "theme": null
+            }))
+            .expect("old locale-less document state remains readable")
+            .locale,
+            None
+        );
 
         assert_eq!(
             serde_json::from_value::<IrDocumentState>(serde_json::json!({
@@ -1101,6 +1133,10 @@ mod tests {
             theme: Some(IrDocumentTheme {
                 color: None,
                 layout: None,
+            }),
+            locale: Some(IrDocumentLocale {
+                tag: "it".to_string(),
+                localized_name: "italiano".to_string(),
             }),
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");

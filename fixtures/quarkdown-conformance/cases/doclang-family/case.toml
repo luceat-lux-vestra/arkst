@@ -1,0 +1,5 @@
+id = "doclang-family"
+feature = "document-state-doclang"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-doclang-document-state"
+description = "Bounded .doclang getter/setter, deterministic tag/name resolution, regional locale, replacement, and ordinary surrounding content"
