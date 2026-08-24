@@ -12,7 +12,6 @@ Ordinary content remains separate from theme state.
 
 The first theme is replaced below.
 
-.theme
-    Body-LaYoUt
+.theme {LiGhT}
 
 Final content remains ordinary document text.

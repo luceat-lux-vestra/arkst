@@ -3531,6 +3531,14 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(document_state_call_error(
+                "`.theme` block-body fallback is deferred because the evaluator does not receive the raw body text".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
         let positional_span = |index: usize| {
             positional_args
                 .get(index)
@@ -3594,14 +3602,6 @@ impl Evaluator {
             }
         }
 
-        if body.is_some() && layout_bound {
-            diagnostics.push(document_state_call_error(
-                "`.theme` received the `layout` argument more than once".to_string(),
-                *span,
-            ));
-            return CallOutcome::Failed;
-        }
-
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>| {
             context.restore_document_state(previous_state.clone());
@@ -3632,10 +3632,10 @@ impl Evaluator {
         let mut positional = evaluated_positional.into_iter();
         let mut color = positional
             .next()
-            .map(|argument| (argument, positional_span(0), false));
+            .map(|argument| (argument, positional_span(0)));
         let mut layout = positional
             .next()
-            .map(|argument| (argument, positional_span(1), false));
+            .map(|argument| (argument, positional_span(1)));
         for argument in evaluated_named {
             let argument_span = argument.span;
             match argument.name.as_str() {
@@ -3646,7 +3646,6 @@ impl Evaluator {
                             origin: argument.origin,
                         },
                         argument_span,
-                        false,
                     ));
                 }
                 "layout" => {
@@ -3656,7 +3655,6 @@ impl Evaluator {
                             origin: argument.origin,
                         },
                         argument_span,
-                        false,
                     ));
                 }
                 _ => {
@@ -3670,68 +3668,51 @@ impl Evaluator {
             }
         }
 
-        if let Some(body) = body {
-            let value = match self.evaluate_call_body(body, span, diagnostics, context) {
-                CallOutcome::Value(value) => value,
-                CallOutcome::Failed | CallOutcome::NoValue | CallOutcome::Unresolved => {
+        let normalize = |argument: InvocationValue, argument_span: SourceSpan| {
+            if matches!(argument.value, IrValue::None) {
+                return Ok(None);
+            }
+            if !matches!(
+                argument.value,
+                IrValue::String(_)
+                    | IrValue::Identifier(_)
+                    | IrValue::Number(_)
+                    | IrValue::Boolean(_)
+            ) {
+                return Err(argument_span);
+            }
+            builtins::scalar_string_argument(&argument)
+                .map(|value| Some(value.to_lowercase()))
+                .ok_or(argument_span)
+        };
+
+        let color = match color {
+            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+                Ok(value) => Some(value),
+                Err(argument_span) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.theme` color requires a bounded scalar String value".to_string(),
+                        argument_span,
+                    ));
                     restore_on_failure(context);
                     return CallOutcome::Failed;
                 }
-            };
-            layout = Some((InvocationValue::dynamic_value(value), *span, true));
-        }
-
-        let normalize =
-            |argument: InvocationValue, argument_span: SourceSpan, allow_plain_content: bool| {
-                if matches!(argument.value, IrValue::None) {
-                    return Ok(None);
-                }
-                if !matches!(
-                    argument.value,
-                    IrValue::String(_)
-                        | IrValue::Identifier(_)
-                        | IrValue::Number(_)
-                        | IrValue::Boolean(_)
-                ) && !(allow_plain_content && matches!(argument.value, IrValue::Content(_)))
-                {
-                    return Err(argument_span);
-                }
-                builtins::scalar_string_argument(&argument)
-                    .map(|value| Some(value.to_lowercase()))
-                    .ok_or(argument_span)
-            };
-
-        let color = match color {
-            Some((argument, argument_span, allow_plain_content)) => {
-                match normalize(argument, argument_span, allow_plain_content) {
-                    Ok(value) => Some(value),
-                    Err(argument_span) => {
-                        diagnostics.push(document_state_conversion_error(
-                            "`.theme` color requires a bounded scalar String value".to_string(),
-                            argument_span,
-                        ));
-                        restore_on_failure(context);
-                        return CallOutcome::Failed;
-                    }
-                }
-            }
+            },
             None => None,
         }
         .flatten();
         let layout = match layout {
-            Some((argument, argument_span, allow_plain_content)) => {
-                match normalize(argument, argument_span, allow_plain_content) {
-                    Ok(value) => Some(value),
-                    Err(argument_span) => {
-                        diagnostics.push(document_state_conversion_error(
-                            "`.theme` layout requires a bounded scalar String value".to_string(),
-                            argument_span,
-                        ));
-                        restore_on_failure(context);
-                        return CallOutcome::Failed;
-                    }
+            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+                Ok(value) => Some(value),
+                Err(argument_span) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.theme` layout requires a bounded scalar String value".to_string(),
+                        argument_span,
+                    ));
+                    restore_on_failure(context);
+                    return CallOutcome::Failed;
                 }
-            }
+            },
             None => None,
         }
         .flatten();

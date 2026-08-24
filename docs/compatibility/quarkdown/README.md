@@ -188,11 +188,14 @@ null, layout: String? = null)` as a setter returning no document value. Both
 regular parameters can bind positionally or by name; `@LikelyNamed` on
 `layout` is metadata and is not a runtime positional restriction. An indented
 body falls back to the final bindable parameter, so it binds `layout` for this
-signature. Scribium implements that fallback for the bounded plain-text body
-conversion path. Supplied string components are lowercased and theme
-existence is left to the rendering boundary. Scribium stores the result as an
-explicit backend-neutral `IrDocumentTheme` in the shared evaluator-owned
-document state.
+signature. Scribium defers that fallback: the existing frontend/IR boundary
+provides parsed body nodes, not the lossless raw `DynamicValue` body text
+required by the String parameter contract. It therefore rejects a `.theme`
+block body before evaluation, preserving the upstream contract as a deferred
+compatibility gap rather than treating body syntax as a runtime signature
+restriction. Supplied string components are lowercased and theme existence is
+left to the rendering boundary. Scribium stores the result as an explicit
+backend-neutral `IrDocumentTheme` in the shared evaluator-owned document state.
 
 Each successful call replaces the complete theme. Therefore a later
 `.theme {Light}` stores `color = "light"` and `layout = null` after an earlier
@@ -207,11 +210,13 @@ resolution and defaults remain outside this bounded contract.
 The existing invocation-time scalar String boundary accepts String,
 Identifier, Number, and Boolean values for each component; `.none` maps to a
 null component. Collections, Dictionary/Pair, Range, Callable, Component,
-rich content, and unresolved values remain rejected outside the explicitly
-bounded plain-text body fallback. Binding, evaluation, conversion,
-normalization, and shape validation complete before one state commit; failures
-retain the old full theme and keep the original argument span in the
-structured diagnostic. Callable child scopes share the state. Source-defined
+rich content, and unresolved values remain outside this bounded component
+conversion. A block body is rejected before its parsed nodes can be evaluated;
+this prevents nested calls or document-state mutations from running. Binding,
+evaluation, conversion, normalization, and shape validation complete before
+one state commit; failures retain the old full theme and keep the original
+argument span in the structured diagnostic. Callable child scopes share the
+state. Source-defined
 `.theme` shadows the native setter under the same bounded policy as the newer
 document-state setters, while `.docname`, `.docdescription`, and `.doctype`
 retain native-first precedence. Front matter remains separate and no
@@ -219,7 +224,7 @@ renderer, theme registry, filesystem lookup, or CSS/Typst integration is
 introduced.
 
 Evidence is in `crates/scribium-core/src/lib.rs::tests::theme_*`, the IR serde
-tests, the pinned [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt), and the independently authored
+tests, the pinned [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt), the pinned [`FunctionCallRefiner.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/parser/FunctionCallRefiner.kt), and the independently authored
 `fixtures/quarkdown-conformance/cases/theme-document-state/` case.
 
 ### Bounded `.container` sizing contract

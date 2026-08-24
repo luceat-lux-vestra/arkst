@@ -70,8 +70,8 @@
               "content": "Final content remains ordinary document text",
               "span": {
                 "source_id": 1,
-                "start": 262,
-                "end": 306
+                "start": 254,
+                "end": 298
               }
             }
           },
@@ -80,16 +80,16 @@
               "content": ".",
               "span": {
                 "source_id": 1,
-                "start": 306,
-                "end": 307
+                "start": 298,
+                "end": 299
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 262,
-          "end": 307
+          "start": 254,
+          "end": 299
         }
       }
     }
@@ -106,8 +106,8 @@
       "authors": [],
       "keywords": [],
       "theme": {
-        "color": null,
-        "layout": "body-layout"
+        "color": "light",
+        "layout": null
       }
     }
   }

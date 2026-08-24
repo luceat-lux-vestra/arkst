@@ -13,12 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lowercase `color` and `layout` components in evaluator-owned shared state
   and the immutable backend-neutral IR snapshot. Both components support
   positional or named binding, nullable `.none`, and the existing bounded
-  scalar String boundary; an indented body falls back to the final `layout`
-  parameter for the bounded plain-text body path. Every successful call
-  replaces the complete theme, including an explicit empty setter, and failed
-  calls preserve the previous state with source-backed diagnostics. Theme
-  resolution, existence validation, defaults, rendering, `.doclang`, and
-  layout metadata remain deferred.
+  scalar String boundary. Upstream regular block-body fallback to the final
+  `layout` parameter is explicitly deferred here because the current
+  frontend/IR boundary exposes parsed body nodes rather than lossless raw
+  DynamicValue text; `.theme` bodies are rejected before evaluation. Every
+  successful call replaces the complete theme, including an explicit empty
+  setter, and failed calls preserve the previous state with source-backed
+  diagnostics. Theme resolution, existence validation, defaults, rendering,
+  `.doclang`, and layout metadata remain deferred.
 
 - **Bounded keyword document state (M3):** `.dockeywords` now provides an
   ordered iterable getter and a validate-then-replace setter for documented

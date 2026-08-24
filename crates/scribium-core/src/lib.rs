@@ -1631,39 +1631,23 @@ mod tests {
     }
 
     #[test]
-    fn theme_body_falls_back_to_nullable_layout_string() {
-        let (body_only, _) = compile_source(".theme\n    Minimal\n");
-        assert!(body_only.diagnostics.is_empty(), "{body_only:?}");
+    fn theme_block_body_is_rejected_before_nested_evaluation() {
+        let source = ".theme {Existing} layout:{Compact}\n.theme\n    .theme {Mutated}\n    .uppercase {Minimal}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
         assert_eq!(
-            body_only.ir.metadata.document_state.theme,
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
             Some(crate::ir::IrDocumentTheme {
-                color: None,
-                layout: Some("minimal".to_string()),
+                color: Some("existing".to_string()),
+                layout: Some("compact".to_string()),
             })
         );
-        assert_eq!(output_text(&body_only), "");
-
-        let (mixed, _) = compile_source(".theme {Dark}\n    Minimal\n");
-        assert!(mixed.diagnostics.is_empty(), "{mixed:?}");
-        assert_eq!(
-            mixed.ir.metadata.document_state.theme,
-            Some(crate::ir::IrDocumentTheme {
-                color: Some("dark".to_string()),
-                layout: Some("minimal".to_string()),
-            })
-        );
-        assert_eq!(output_text(&mixed), "");
-
-        let (named_mixed, _) = compile_source(".theme color:{Dark}\n    Minimal\n");
-        assert!(named_mixed.diagnostics.is_empty(), "{named_mixed:?}");
-        assert_eq!(
-            named_mixed.ir.metadata.document_state.theme,
-            Some(crate::ir::IrDocumentTheme {
-                color: Some("dark".to_string()),
-                layout: Some("minimal".to_string()),
-            })
-        );
-        assert_eq!(output_text(&named_mixed), "");
+        assert_eq!(output_text(&result), "");
     }
 
     #[test]
@@ -1796,7 +1780,6 @@ mod tests {
             ".theme layout:{Compact} {Light}",
             ".theme layout:{one} layout:{two}",
             ".theme color:{one} color:{two}",
-            ".theme {Light} {Compact}\n    Other",
         ] {
             let source = format!(".theme {{Existing}} layout:{{Compact}}\n{invalid}\n");
             let (result, source_id) = compile_source(&source);
