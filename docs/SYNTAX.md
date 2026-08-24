@@ -157,7 +157,10 @@ Call syntax has the following properties:
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`. The shape is documented, but the name
   grammar above describes current Scribium behavior and is not an
-  upstream-compatible claim until #157 is resolved.
+  upstream-compatible claim until #157 is resolved. Pinned v2.5.1 parses the
+  delimiter as adjacent `identifier ":" "{"` tokens with no argument
+  separator; current Scribium skips horizontal whitespace around `:` and `{`.
+  That delimiter-adjacency gap is also tracked by #157.
 - Positional and named arguments may be mixed. Scribium's current parser
   enforces that every argument after a named argument must also be named and
   reports `E2001` for an unnamed argument that follows one. In pinned
@@ -176,12 +179,18 @@ Call syntax has the following properties:
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
-- A trailing backslash immediately before a line ending continues the
-  argument list. The continuation marker and line ending are syntax, not
-  argument content; leading spaces or tabs on the continuation line are
-  ignored for argument recognition.
-- `::` parses and structurally preserves a call chain (`.a {x}::b {y}`),
-  including each segment and argument source span. The evaluator executes
+- Current Scribium consumes a backslash continuation only after an argument
+  has already been parsed; `.foo \\` followed by a first argument stops at
+  `.foo`, and a trailing continuation reports `E2004`. Pinned v2.5.1 places an
+  optional separator before every argument and separately consumes a trailing
+  continuation. The pinned token directly checks backslash + LF, so local
+  CRLF acceptance is recorded separately rather than treated as raw-CRLF
+  upstream conformance. Separator placement is tracked by #164.
+- `::` parses and structurally preserves a direct call chain (`.a {x}::b {y}`),
+  but current Scribium requires `::` immediately at the current call end;
+  whitespace or a line continuation before `::` is the #164 separator gap.
+  The direct form includes each segment and argument source span. The
+  evaluator executes
   supported chain segments directly in strict left-to-right order: the prior
   semantic value is injected as the next segment's first positional argument,
   while explicit positional and named arguments retain their order and names.

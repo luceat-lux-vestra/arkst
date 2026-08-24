@@ -16,6 +16,17 @@ fn first_inline_call(document: &scribium_markdown::Document) -> &Inline {
         .expect("expected inline call")
 }
 
+fn assert_markdown_isolated(source: &str) {
+    let markdown = parse_with_mode(source, Mode::Markdown);
+    assert!(!markdown.document.nodes.iter().any(|node| match node {
+        Block::DirectiveCall { .. } => true,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+        _ => false,
+    }));
+}
+
 #[test]
 fn audit_preserves_multiline_nested_and_named_argument_spans() {
     let source = ".outer {\n  .inner {값}\n} named:{\n  .sum {2} {1}\n}\n";
@@ -284,6 +295,183 @@ fn audit_records_current_named_argument_identifier_lexical_contract() {
             expected_name,
             "{source:?}"
         );
+
+        let markdown = parse_with_mode(source, Mode::Markdown);
+        assert!(!markdown.document.nodes.iter().any(|node| match node {
+            Block::DirectiveCall { .. } => true,
+            Block::Paragraph { content, .. } => content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+            _ => false,
+        }));
+    }
+}
+
+#[test]
+fn audit_records_current_continuation_before_first_argument_gap() {
+    let block_source = concat!(".foo ", "\\", "\nname:{x}\n");
+    let block_output = parse_with_diagnostics(block_source);
+    assert!(block_output.diagnostics.is_empty(), "{block_output:?}");
+    let Block::DirectiveCall {
+        named_args, span, ..
+    } = &block_output.document.nodes[0]
+    else {
+        panic!("expected the current block parser to stop at the call name")
+    };
+    assert!(named_args.is_empty());
+    assert_eq!(
+        source_slice(block_source, *span),
+        concat!(".foo ", "\\", "\n")
+    );
+    assert!(matches!(
+        block_output.document.nodes.get(1),
+        Some(Block::Paragraph { .. })
+    ));
+
+    let inline_source = concat!("prefix .foo ", "\\", "\nname:{x} suffix\n");
+    let inline_output = parse_with_diagnostics(inline_source);
+    assert!(inline_output.diagnostics.is_empty(), "{inline_output:?}");
+    let call = first_inline_call(&inline_output.document);
+    let Inline::DirectiveCall {
+        name,
+        named_args,
+        span,
+        ..
+    } = call
+    else {
+        unreachable!()
+    };
+    assert_eq!(name, "foo");
+    assert!(named_args.is_empty());
+    assert_eq!(source_slice(inline_source, *span), ".foo");
+
+    let crlf_source = ".foo \\\r\nname:{한글}\r\n";
+    let crlf_output = parse_with_diagnostics(crlf_source);
+    assert!(crlf_output.diagnostics.is_empty(), "{crlf_output:?}");
+    let Block::DirectiveCall {
+        named_args, span, ..
+    } = &crlf_output.document.nodes[0]
+    else {
+        panic!("expected the current CRLF parser to stop at the call name")
+    };
+    assert!(named_args.is_empty());
+    assert_eq!(source_slice(crlf_source, *span), ".foo \\\r\n");
+    for source in [block_source, inline_source, crlf_source] {
+        assert_markdown_isolated(source);
+    }
+}
+
+#[test]
+fn audit_records_current_trailing_continuation_gap() {
+    let block_source = concat!(".foo {x} ", "\\", "\n");
+    let block_output = parse_with_diagnostics(block_source);
+    let block_diagnostic = block_output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2004")
+        .expect("expected current trailing-continuation E2004");
+    assert_eq!(source_slice(block_source, block_diagnostic.span), "\\");
+    assert!(matches!(
+        block_output.document.nodes.first(),
+        Some(Block::Unsupported { .. })
+    ));
+
+    let inline_source = concat!("prefix .foo {x} ", "\\", "\n");
+    let inline_output = parse_with_diagnostics(inline_source);
+    let inline_diagnostic = inline_output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2004")
+        .expect("expected current inline trailing-continuation E2004");
+    assert_eq!(source_slice(inline_source, inline_diagnostic.span), "\\");
+    assert!(!inline_output.document.nodes.iter().any(|node| match node {
+        Block::DirectiveCall { .. } => true,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+        _ => false,
+    }));
+    assert_markdown_isolated(block_source);
+    assert_markdown_isolated(inline_source);
+}
+
+#[test]
+fn audit_records_current_chain_separator_placement_gap() {
+    for source in [".a {x} ::b {y}\n", "prefix .a {x} ::b {y} suffix\n"] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let call = first_inline_call(&output.document);
+        let Inline::DirectiveCall { chain, span, .. } = call else {
+            unreachable!()
+        };
+        assert!(chain.is_empty(), "{source:?}");
+        assert_eq!(source_slice(source, *span), ".a {x}");
+    }
+
+    let block_source = concat!(".a {x} ", "\\", "\n::b {y}\n");
+    let block_output = parse_with_diagnostics(block_source);
+    let block_diagnostic = block_output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2004")
+        .expect("expected current block chain-continuation E2004");
+    assert_eq!(source_slice(block_source, block_diagnostic.span), "\\");
+    assert!(matches!(
+        block_output.document.nodes.first(),
+        Some(Block::Unsupported { .. })
+    ));
+
+    let inline_source = concat!("prefix .a {x} ", "\\", "\n::b {y} suffix\n");
+    let inline_output = parse_with_diagnostics(inline_source);
+    let inline_diagnostic = inline_output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2004")
+        .expect("expected current inline chain-continuation E2004");
+    assert_eq!(source_slice(inline_source, inline_diagnostic.span), ":");
+    assert!(!inline_output.document.nodes.iter().any(|node| match node {
+        Block::DirectiveCall { .. } => true,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+        _ => false,
+    }));
+    for source in [
+        ".a {x} ::b {y}\n",
+        "prefix .a {x} ::b {y} suffix\n",
+        block_source,
+        inline_source,
+    ] {
+        assert_markdown_isolated(source);
+    }
+}
+
+#[test]
+fn audit_records_current_named_argument_delimiter_adjacency_gap() {
+    for (source, expected_argument_span) in [
+        (".foo name :{x}\n", "name :{x}"),
+        (".foo name: {x}\n", "name: {x}"),
+        (".foo name : {x}\n", "name : {x}"),
+        (".foo name :{한글}\r\n", "name :{한글}"),
+    ] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            named_args, span, ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected current named-argument acceptance for {source:?}")
+        };
+        assert_eq!(named_args.len(), 1, "{source:?}");
+        assert_eq!(named_args[0].name, "name", "{source:?}");
+        assert_eq!(named_args[0].name_span, ByteSpan::new(5, 9), "{source:?}");
+        assert_eq!(source_slice(source, named_args[0].name_span), "name");
+        assert_eq!(
+            source_slice(source, named_args[0].span),
+            expected_argument_span,
+            "{source:?}"
+        );
+        assert!(source_slice(source, *span).starts_with(".foo name"));
 
         let markdown = parse_with_mode(source, Mode::Markdown);
         assert!(!markdown.document.nodes.iter().any(|node| match node {

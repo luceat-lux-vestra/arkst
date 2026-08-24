@@ -49,16 +49,17 @@ The complete call-grammar/frontend inventory is maintained in
 the current `origin/main` base and keeps parser evidence separate from
 binding, evaluator, IR, and output claims.
 
-The audit classifies ordinary calls, named-argument identifiers, implicit positional references,
+The audit classifies ordinary calls, named-argument identifiers and delimiter
+adjacency, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
-boundaries, and source provenance. It records six bounded production
+boundaries, and source provenance. It records seven bounded production
 follow-ups:
 
 - [#157](https://github.com/luceat-lux-vestra/scribium/issues/157) — align
-  call and named-argument identifier lexing, implicit-reference recognition,
-  and Unicode/ASCII boundaries with pinned v2.5.1 evidence; bounded to
+  call and named-argument identifier/delimiter lexing, implicit-reference
+  recognition, and Unicode/ASCII boundaries with pinned v2.5.1 evidence; bounded to
   `scribium-quarkdown` grammar plus `scribium-markdown` integration, with
   binder semantics excluded;
 - [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) — preserve
@@ -76,6 +77,11 @@ follow-ups:
   unnamed-after-named rejection to the binder; bounded to representation
   ownership in `scribium-quarkdown`/`scribium-markdown`, with semantic rejection
   remaining in #149.
+- [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) — align
+  optional argument-separator placement before the first argument and `::`,
+  plus pinned trailing-continuation consumption; bounded to
+  `scribium-quarkdown` separator scanning and `scribium-markdown` block/inline
+  integration, with LF/CRLF evidence kept separate.
 
 These gaps are not hidden by expected-failure allowlists and are not fixed by
 the audit documentation/test PR.

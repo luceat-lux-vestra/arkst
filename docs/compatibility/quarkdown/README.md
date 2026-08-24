@@ -58,7 +58,7 @@ style, or layout surface to compatibility.
 | Dot-prefixed call              | `.note`                          | Parsed                   | Partial: pinned identifier/boundary reconciliation is tracked by #157 |
 | Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported for the current 1-based slice; binding is separate | Partial: pinned lexical reconciliation is tracked by #157 |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
-| Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: current named-argument name scanning accepts local `_`, `-`, numeric, and hyphenated names; lexical reconciliation is tracked by #157, while binding validity belongs to #149 |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: current named-argument name scanning accepts local `_`, `-`, numeric, and hyphenated names and whitespace around `:`/`{`; lexical/delimiter reconciliation is tracked by #157, while binding validity belongs to #149 |
 | Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163), and named-argument identifier lexical reconciliation is tracked by #157 |
 | Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
@@ -86,8 +86,8 @@ style, or layout surface to compatibility.
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
-| Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Implemented (evidenced slice) |
-| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only grammar evidence |
+| Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; optional whitespace/continuation before `::` remains the grammar gap in #164 |
+| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Partial: after-argument continuation is evidenced, but first-argument, trailing, and chain-separator placement are tracked by #164 |
 | Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Partial: nested tight content is #158 |
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
@@ -753,7 +753,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `scribium-quarkdown/src/lib.rs::parses_normal_call_names_and_spans`, `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
 | Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `implicit_references_do_not_consume_arguments`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
 | Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
-| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract` |
+| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract`, `audit_records_current_named_argument_delimiter_adjacency_gap` |
 | Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract`, `audit_records_current_early_rejection_of_positional_after_named` |
 | Escaped call/argument delimiters | `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
 | Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
@@ -1140,8 +1140,12 @@ accessed dates.
 ## Known Divergences
 
 - The #148 audit found a pinned lexical-contract mismatch for normal names,
-  named-argument names, implicit references, and Unicode/ASCII boundaries; see
-  #157.
+  named-argument names/delimiter adjacency, implicit references, and
+  Unicode/ASCII boundaries; see #157.
+- Pinned v2.5.1 permits optional argument separators before the first argument
+  and before `::`, and consumes a trailing continuation without an argument;
+  current Scribium does not preserve those forms and reports `E2004` in some
+  paths; see #164.
 - Escaped call/argument delimiters are not fully aligned with pinned
   `GrammarUtils.unescapedMatch()` and balanced-brace behavior; the current
   parser can truncate arguments or report `E2003`, while the escaped call
