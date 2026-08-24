@@ -99,7 +99,7 @@ against the existing matrix headings:
 | Source family | Public surface rechecked | Canonical disposition |
 |---|---|---|
 | `Flow.kt` | `.if`, `.ifnot`, `.foreach`, `.repeat`, `.function`, `.extend`, `.var`, `.let`, `.node` | Conditional, iteration, callable, precedence, variable, `.let`, and `.node` rows; `.extend`/`.super` remains `UNSUPPORTED` and #169-owned. |
-| `Optionality.kt` | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | `.none` taxonomy remains #149-owned; the other optionality and callback invocation semantics are one cohesive #150 row. |
+| `Optionality.kt` | `.none`, `.isnone`, `.otherwise`, `.ifpresent`, `.takeif` | `.none` taxonomy remains #149-owned; `.isnone` is a non-callback optionality predicate owned by #151; `.otherwise`, `.ifpresent`, and `.takeif` evaluation and callback flow are covered by the cohesive #150 row. |
 | `Lambda.kt` | Lambda value, capture, caller propagation, explicit/implicit parameters, optionality, destructuring, child scope | No standalone `@QFunction`; covered by scope, callable, parameter, `.let`, optionality, iteration, and collection rows. |
 | `Collection.kt` | Public selectors, aggregation, sorting, distinct/grouping, reversal, and `by` callback | Collection callback boundary is one #150 row; complete builtin enumeration remains #151-owned. `.map`/`.filter` are Scribium extensions, not upstream declarations. |
 | `FunctionExtension.kt` | Extension registration, parent/original `.super`, condition and argument merge helpers | No standalone public `@QFunction`; `.extend`/`.super` is the existing #169 follow-up and has no implementation in this audit. |
@@ -113,7 +113,7 @@ the explicit #152 `NOT_APPLICABLE` boundary. The public `@QFunction` list in
 `GAP_INVENTORY.md` was checked against the pinned stdlib enumeration. In
 addition to `.node`, `.logn` and `.pow` were missing from the existing general
 math classification; they are now included in that bounded math row. The
-The obsolete non-public alias was removed in favor of the pinned `.libexists`
+obsolete non-public alias was removed in favor of the pinned `.libexists`
 alias. These are #151/general stdlib inventory corrections, not new #150
 semantic rows. No new issue was created and no #151 inventory was duplicated.
 
