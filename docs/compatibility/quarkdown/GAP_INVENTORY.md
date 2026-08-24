@@ -42,6 +42,11 @@ Classification index:
 | Scribium extension | `.map` and `.filter` collection transforms; they are tested Scribium behavior but are not v2.5.1 upstream features |
 | Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, remaining container style/layout families, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
 
+The complete value taxonomy, invocation-time binding, target-driven conversion,
+diagnostic/provenance, and state-atomicity review is canonical in
+[`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md). The rows above remain the
+family-level inventory; they do not duplicate that matrix.
+
 ## #148 call-grammar audit
 
 The complete call-grammar/frontend inventory is maintained in
@@ -85,6 +90,31 @@ follow-ups:
 
 These gaps are not hidden by expected-failure allowlists and are not fixed by
 the audit documentation/test PR.
+
+## #149 value-model, binding, and conversion audit
+
+The canonical value/binding/conversion matrix is
+[`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md). Its primary statuses are
+conservative: bounded numeric, Boolean, range, dictionary, dynamic-origin,
+nested-evaluation, and document-state semantics are evidenced at the semantic
+boundary; strings/content, None/defaults, enums, collections, binding, body
+values, diagnostics, and general atomicity remain `PARTIAL` where the public
+v2.5.1 contract is broader than the current slice. The audit does not infer
+generalized coercion.
+
+The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-vestra/scribium/issues/165)
+(central binder validation/parameter metadata),
+[#166](https://github.com/luceat-lux-vestra/scribium/issues/166)
+(dynamic/content target conversion), and
+[#167](https://github.com/luceat-lux-vestra/scribium/issues/167)
+(conversion diagnostics and validate-then-commit atomicity). They are native
+sub-issues of #149. #163 remains the parser/frontend prerequisite for
+positional-after-named shape; #150–#155 remain the broader programmable,
+general-builtin, metadata, layout, content, and resource audits; #156 remains
+the reconciliation gate.
+
+No production fix is selected by #149, and implementation ordering remains
+frozen until #156.
 
 ## v2.5.1 stdlib surface classification
 

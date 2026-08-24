@@ -17,6 +17,10 @@ long-term target remains complete public-language and document-observable
 compatibility, while the verified baseline advances only for reviewed,
 evidence-backed behavior.
 
+Value categories, invocation binding, and conversion semantics are audited in
+the separate canonical [`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md); this
+release-delta report does not duplicate that matrix.
+
 ## Delta matrix
 
 | Delta | Public source | Classification | Affected Scribium surface | Current behavior | Required change | Evidence | Disposition |

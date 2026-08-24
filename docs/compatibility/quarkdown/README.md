@@ -51,6 +51,12 @@ implementation status. The bounded row/column/grid and other component slices
 are documented below; they do not promote the complete public component,
 style, or layout surface to compatibility.
 
+The canonical value, invocation-binding, and target-conversion inventory is
+[`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md). It is the authority for the
+dynamic/static origin boundary, optionality, collection ordering, binding
+ownership, conversion failures, and state-commit findings; this README keeps
+only the bounded feature-family summary.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |

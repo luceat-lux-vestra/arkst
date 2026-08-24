@@ -9,6 +9,12 @@ implementation plan that changes the current supported surface.
 - Scribium comparison baseline: `3829d847f1b45871b2315d729a1f432cf390e6da`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
 
+The value-origin, invocation-binding, conversion, and state-commit audit is
+maintained separately in
+[`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md). This document remains the
+authority for programmable scope/evaluation architecture; it does not repeat
+the #149 conversion matrix.
+
 ## Historical architecture gate and current status
 
 The original architecture gate recorded in ADR-0020 selected the one-IR,
