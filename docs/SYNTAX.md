@@ -149,8 +149,16 @@ Call syntax has the following properties:
   audit gap; do not treat this local rule as an upstream grammar guarantee.
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`.
-- Positional and named arguments may be mixed, but every argument after a
-  named argument must also be named.
+- Positional and named arguments may be mixed. Scribium's current parser
+  enforces that every argument after a named argument must also be named and
+  reports `E2001` for an unnamed argument that follows one. In pinned
+  Quarkdown v2.5.1, `FunctionCallGrammar` preserves the argument sequence and
+  `RegularArgumentsBinder` owns that validity check; ownership alignment is
+  tracked by #163 and is not a parser-level compatibility claim.
+- An escaped call introducer is literal, and escaped `{`/`}` delimiters do not
+  change call-argument depth in pinned v2.5.1. Scribium currently records the
+  introducer boundary but counts escaped argument braces while scanning; the
+  resulting UTF-8/CRLF truncation and malformed behavior are tracked by #162.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
   arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
   The current frontend preserves original text for Markdown inline structure

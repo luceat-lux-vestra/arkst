@@ -132,3 +132,128 @@ fn audit_malformed_braces_are_structured_and_source_backed() {
         .expect("expected unclosed-argument diagnostic");
     assert_eq!(source_slice(source, diagnostic.span), "{unterminated");
 }
+
+#[test]
+fn audit_records_current_escaped_delimiter_gap() {
+    let escaped_introducer = r"\.foo {x}";
+    let output = parse_with_diagnostics(escaped_introducer);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    assert!(!output.document.nodes.iter().any(|node| match node {
+        Block::DirectiveCall { .. } => true,
+        Block::Paragraph { content, .. } => content
+            .iter()
+            .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+        _ => false,
+    }));
+    assert_eq!(
+        output.document.nodes,
+        vec![Block::Paragraph {
+            content: vec![
+                Inline::Text {
+                    content: ".foo ".to_string(),
+                    span: ByteSpan::new(0, 6),
+                },
+                Inline::Text {
+                    content: "{x}".to_string(),
+                    span: ByteSpan::new(6, 9),
+                },
+            ],
+            span: ByteSpan::new(0, 9),
+        }]
+    );
+
+    let escaped_closing = r".foo {a \} b}";
+    let output = parse_with_diagnostics(escaped_closing);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let call = first_inline_call(&output.document);
+    let Inline::DirectiveCall {
+        positional_args,
+        span,
+        ..
+    } = call
+    else {
+        unreachable!()
+    };
+    assert_eq!(source_slice(escaped_closing, *span), r".foo {a \}");
+    assert!(matches!(
+        positional_args.as_slice(),
+        [Value::Content(content)]
+            if content.iter().any(|inline| matches!(
+                inline,
+                Inline::Text { span, .. } if source_slice(escaped_closing, *span) == r"a \"
+            ))
+    ));
+
+    let escaped_opening = r".foo {a \{ b}";
+    let output = parse_with_diagnostics(escaped_opening);
+    assert_eq!(output.diagnostics.len(), 1, "{output:?}");
+    assert_eq!(output.diagnostics[0].code, "E2003");
+    assert_eq!(
+        source_slice(escaped_opening, output.diagnostics[0].span),
+        r"{a \{ b}"
+    );
+
+    let nested_escaped = r".foo {a \{ nested \} b}";
+    let output = parse_with_diagnostics(nested_escaped);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall { span, .. } = &output.document.nodes[0] else {
+        panic!("expected current parser to close the escaped nested-brace probe")
+    };
+    assert_eq!(source_slice(nested_escaped, *span), nested_escaped);
+
+    let utf8 = r".foo {한글 \} text}";
+    let output = parse_with_diagnostics(utf8);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let call = first_inline_call(&output.document);
+    let Inline::DirectiveCall { span, .. } = call else {
+        unreachable!()
+    };
+    assert_eq!(source_slice(utf8, *span), r".foo {한글 \}");
+
+    let crlf = ".foo {a \\}\r\nb}";
+    let output = parse_with_diagnostics(crlf);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall { span, .. } = &output.document.nodes[0] else {
+        panic!("expected current parser to emit the truncated CRLF call")
+    };
+    assert_eq!(source_slice(crlf, *span), ".foo {a \\}");
+    assert!(matches!(output.document.nodes[1], Block::Paragraph { .. }));
+
+    for source in [
+        escaped_introducer,
+        escaped_closing,
+        escaped_opening,
+        nested_escaped,
+        utf8,
+        crlf,
+    ] {
+        let markdown = parse_with_mode(source, Mode::Markdown);
+        assert!(!markdown.document.nodes.iter().any(|node| match node {
+            Block::DirectiveCall { .. } => true,
+            Block::Paragraph { content, .. } => content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+            _ => false,
+        }));
+    }
+}
+
+#[test]
+fn audit_records_current_early_rejection_of_positional_after_named() {
+    let source = ".foo named:{x} {y}";
+    let output = parse_with_diagnostics(source);
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E2001")
+        .expect("current parser must record its early positional-after-named rejection");
+    assert_eq!(
+        diagnostic.message,
+        "positional argument after named argument is not allowed"
+    );
+    assert_eq!(source_slice(source, diagnostic.span), "{");
+    assert!(matches!(
+        output.document.nodes.first(),
+        Some(Block::Unsupported { .. })
+    ));
+}

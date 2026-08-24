@@ -22,17 +22,19 @@ The public v2.5.1 [syntax-of-a-function-call specification](https://quarkdown.co
 is the primary behavior source for dot calls, positional/named arguments,
 multiline arguments, line continuation, nested calls, chains, tight calls,
 inline/block placement, bodies, and nested calls in bodies. The pinned
-v2.5.1 `FunctionCallPatterns.kt`, `FunctionCallGrammar.kt`, and
-`FunctionCallRefiner.kt` records are used only as permitted public behavioral
-and lexical evidence and are listed in `SPEC_SOURCES.md`; no upstream code,
-test, or fixture is copied or translated.
+v2.5.1 `GrammarUtils.kt`, `FunctionCallPatterns.kt`, `FunctionCallGrammar.kt`,
+`FunctionCallRefiner.kt`, and `RegularArgumentsBinder.kt` records are used
+only as permitted public behavioral and lexical evidence and are listed in
+`SPEC_SOURCES.md`; no upstream code, test, or fixture is copied or translated.
 
 The pinned grammar evidence establishes a distinction that matters to this
 audit:
 
-- the function-call walker owns context-free call/argument shape;
+- the function-call walker owns context-free call/argument shape, including
+  escaped delimiter recognition and balanced-brace scanning;
 - regular parameter existence, duplicate/unknown/excess binding, defaults,
-  and target conversion are later binder concerns;
+  target conversion, and unnamed-after-named rejection are later binder
+  concerns;
 - body text is a separate lazy argument boundary in upstream;
 - chain value injection is a later refiner/evaluator transformation.
 
@@ -61,9 +63,9 @@ The #60/#65 slice is still valid for its stated boundary:
 - chain value-flow was explicitly deferred to #61 in that PR and is not a
   #148 grammar claim.
 
-The revalidation also found four current production gaps and one documentation
-overclaim. They are recorded as bounded issues [#157], [#158], [#159], and
-[#160], all native sub-issues of #148:
+The revalidation also found six current production gaps and one documentation
+overclaim. They are recorded as bounded issues [#157], [#158], [#159], [#160],
+[#162], and [#163], all native sub-issues of #148:
 
 | Issue | Finding | Owner |
 |---|---|---|
@@ -71,6 +73,8 @@ overclaim. They are recorded as bounded issues [#157], [#158], [#159], and
 | [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) | A tight call nested inside a braced content argument loses its wrapper structure and exposes wrapper braces as text. | `scribium-markdown` frontend conversion |
 | [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) | Malformed inline call recovery reports `E2003` but drops following source text from the AST. | `scribium-markdown` inline integration |
 | [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Supported Markdown inline structure inside Quarkdown content arguments is currently flattened to text with `E3010`. | `scribium-markdown` content conversion; related to #154 |
+| [#162](https://github.com/luceat-lux-vestra/scribium/issues/162) | Escaped call/argument delimiters are not handled with pinned v2.5.1 `unescapedMatch()` and balanced-brace semantics; escaped braces can truncate or unbalance current calls. | `scribium-quarkdown` grammar; `scribium-markdown` integration if affected |
+| [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) | Scribium rejects positional-after-named in the grammar with `E2001`, while pinned v2.5.1 preserves argument shape and assigns unnamed-after-named rejection to the binder. | `scribium-quarkdown` / `scribium-markdown` representation; semantic rejection remains #149 |
 
 No production fix is included in this audit.
 
@@ -86,7 +90,8 @@ is the conservative canonical status used for #147.
 | Call introducer and normal identifier | Public syntax page; pinned `FunctionCallGrammar.kt` identifier and `FunctionCallPatterns.kt` boundary records | `.foo`, `.foo-bar`, `.foo_bar` | `scribium-quarkdown::parse_segment`; `.foo` parses, while current underscore/hyphen/Unicode contract is not pinned-equivalent | Accepted spans are source-backed; divergent lexical acceptance is recorded | Quarkdown extension is absent in Markdown mode | Existing LF/CRLF span tests pass | `.` and invalid starts are rejected without panic | `public_name_validation_matches_call_name_grammar`, `parses_normal_call_names_and_spans` | No independent pinned-contract fixture yet | `PARTIAL` | #60/#65; #157 | Confirm upstream lexical contract, then correct grammar/docs/tests without binder changes | `scribium-quarkdown` |
 | Implicit positional references | Public lambda documentation; pinned numeric identifier evidence | `.1`, `.2`, `.12`, `.0`, `.01`, `.1abc` | Current special case accepts 1-based digit tokens, does not consume arguments; `.0`/`.01` and some boundary cases are local policy, not verified upstream behavior | Accepted `.1` spans are exact byte spans | `.qd` body path is covered; Markdown mode remains literal | UTF-8/CRLF body span evidence passes | Invalid/word-adjacent forms are deterministic current behavior | `parses_implicit_positional_references_and_boundaries`, `implicit_references_do_not_consume_arguments` | No dedicated lexical conformance fixture | `PARTIAL` | #60/#65; #157; binding in #150 | Separate recognition from #150 lambda binding and align only confirmed syntax | `scribium-quarkdown` |
 | Positional arguments | Public syntax page and pinned grammar | `.foo {a} {b}` | `parse_arguments` and `parse_braced` preserve empty, whitespace, nested, multiline, UTF-8 content as parser values/spans | Argument/content spans are source-backed | `.md` has no Quarkdown extension; `.qd` and body paths are covered | LF/CRLF covered in unit/frontend tests | Unclosed braces produce `E2003` | `parses_positional_named_and_mixed_arguments`, `parses_multiline_nested_arguments_with_original_spans` | `call-positional-basic` is `Parsed` | `PARSED_ONLY` | #60/#65 | No #148 semantic claim; nested Markdown conversion is #160/#154 | `scribium-quarkdown` |
-| Named and mixed argument shape | Public syntax page; binder rules are explicitly #149 | `.foo {a} name:{b}` | Name token, name span, value span, and positional-then-named shape are preserved; positional after named is rejected as syntax shape `E2001` | Name/value/whole-argument spans are exact | Isolation covered by frontend tests | LF/CRLF covered | Missing braced named value is `E2002` | `parses_positional_named_and_mixed_arguments`, malformed argument tests | No semantic conformance claim | `PARSED_ONLY` | #60/#65; binding cases in #149 | Do not classify unknown/duplicate/excess parameter validity here | `scribium-quarkdown` |
+| Escaped call/argument delimiters | Public syntax page; pinned `GrammarUtils.kt::unescapedMatch` / `balancedDelimitersMatch` and `FunctionCallGrammar.kt` | `\.foo {x}`; `.foo {a \} b}`; `.foo {a \{ b}`; nested, UTF-8, and CRLF variants | `scribium-quarkdown::parse_call`, `parse_arguments`, and `parse_braced`; escaped `.` remains literal, but escaped braces are counted as delimiters, causing early close, `E2003`, or source suffix separation | Literal introducer span is source-backed; brace probes retain byte offsets but do not preserve pinned delimiter boundaries; UTF-8/CRLF truncation is recorded | Quarkdown probes are covered; Markdown mode keeps all probes literal and isolated | LF probes plus UTF-8; CRLF truncation is independently asserted | Escaped closing delimiter silently truncates; escaped opening reports `E2003`; nested escaped pair currently closes by incorrect depth accounting | `crates/scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` | No positive pinned conformance fixture; audit evidence only | `PARTIAL` | #162; #60/#65 boundary evidence | Apply pinned escaped-delimiter recognition and depth semantics without synthetic reparsing | `scribium-quarkdown`; `scribium-markdown` integration if affected |
+| Named and mixed argument shape | Public syntax page; pinned `FunctionCallGrammar.kt` optional-name sequence and `RegularArgumentsBinder.kt` binder rule | `.foo named:{x} {y}` | Scribium `parse_arguments` rejects positional-after-named in the grammar layer with `E2001`; pinned v2.5.1 preserves argument sequence and lets the binder reject unnamed-after-named | The `E2001` opening-brace span is source-backed, but the mixed sequence is not preserved to binder ownership | Existing frontend mode-isolation tests pass; the audit probe is Quarkdown-only | Existing LF/CRLF span coverage remains; this ownership probe is LF | Missing braced named value is `E2002`; positional-after-named is currently early `E2001` | `crates/scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_early_rejection_of_positional_after_named`; existing malformed argument tests | No semantic conformance claim | `PARTIAL` | #163; #149 binder/value ownership; #60/#65 | Preserve source-backed positional/named order through grammar/frontend and defer unnamed-after-named validity to binder ownership | `scribium-quarkdown`; `scribium-markdown` representation; #149 semantic owner |
 | Multiline braced arguments | Public syntax page; pinned grammar balanced-delimiter evidence | `.foo {\n  content\n}` | Arbitrary indentation and nested braces are accepted; content remains source-backed | Physical newlines and nested ranges are preserved | `.qd` and body interaction tested; Markdown mode isolated | LF and CRLF tested | Unclosed delimiter is `E2003` at the opening brace | `parses_multiline_nested_arguments_with_original_spans`; frontend multiline regression | Existing fixture family is `Parsed`-level only | `PARSED_ONLY` | #60/#65 | No new production gap found at this boundary | `scribium-quarkdown` |
 | Line continuation | Public syntax page; pinned grammar continuation token | `.foo {a} \\\nname:{b}` | Trailing `\\` + LF/CRLF consumes continuation and optional indentation; block and inline paths preserve the call range | Marker/newline are not included in argument content; source range retains original bytes | Both modes covered through frontend path | LF/CRLF focused tests pass | Missing/malformed following argument is deterministic `E2004`; upstream's tooling-only trailing continuation allowance is not claimed | `parses_line_continuations_without_fixed_indentation`, `qd_multiline_arguments_and_continuations_keep_header_body_boundary` | No separate fixture; #60 regression evidence | `PARSED_ONLY` | #60/#65 | Reassess trailing-continuation/tooling-only range behavior only if document contract requires it | `scribium-quarkdown` |
 | Nested calls in arguments | Public syntax page and pinned refiner expression boundary | `.outer {.inner {value}}` | Ordinary nested calls are structurally found in source-backed content; evaluation is not this audit | Outer, inner, and argument spans are source-backed | `.qd` path covered; `.md` remains literal | UTF-8/CRLF surrounding spans covered | Inner malformed diagnostics retain original offsets | `parses_nested_content_and_scalar_classification`, `nested_content_calls_keep_prefix_suffix_and_original_spans` | No end-to-end claim in #148 | `PARTIAL` | #60/#65; #158/#160 | Tight nested calls and Markdown inline content require bounded follow-ups | `scribium-markdown` |
@@ -105,21 +110,23 @@ is the conservative canonical status used for #147.
 | Documented upstream behavior | The public syntax and Markdown-content pages define the listed call forms and boundaries. |
 | Observed pinned upstream behavior | Pinned lexer/grammar/refiner records confirm identifier, argument, continuation, body, wrapper, and chain implementation boundaries; source evidence is not an implementation recipe. |
 | Scribium parser acceptance | The rows marked `PARSED_ONLY` are covered by source-backed parser/frontend tests. |
-| Source provenance | Accepted call, argument, segment, body, UTF-8, and CRLF spans are verified; malformed inline recovery and nested tight content are not lossless. |
+| Source provenance | Accepted call, argument, segment, body, UTF-8, and CRLF spans are verified; escaped-delimiter truncation, malformed inline recovery, nested tight content, and early mixed-argument rejection are not lossless/pinned-equivalent. |
 | Evaluator semantics | Out of scope for #148. Existing #61/#147 evidence may be linked only at its stated bounded semantic level. |
 | IR preservation | #65 structural chain evidence remains valid; #148 adds no IR schema or semantic claim. |
 | Backend/output equivalence | Not claimed by this audit. |
 
 ## Documentation truthfulness changes
 
-- `docs/SYNTAX.md` now distinguishes Scribium's current local name lexer from
-  the pinned upstream contract and links #157–#160 for known gaps.
+- `docs/SYNTAX.md` now distinguishes Scribium's current local name lexer and
+  mixed-argument parser enforcement from the pinned upstream contract and
+  links #157–#163 for known gaps.
 - `docs/compatibility/quarkdown/README.md` and `GAP_INVENTORY.md` link this
   audit and no longer present the affected parser rows as unqualified complete
   call-grammar support.
-- `SPEC_SOURCES.md` records the pinned `FunctionCallGrammar.kt` evidence used
-  for the lexical/argument audit without duplicating the existing syntax-page
-  record.
+- `SPEC_SOURCES.md` records the pinned `GrammarUtils.kt`,
+  `FunctionCallGrammar.kt`, and `RegularArgumentsBinder.kt` evidence used for
+  escaped-delimiter and argument-ownership findings without duplicating the
+  existing syntax-page record.
 
 ## Explicit deferrals and non-goals
 
@@ -130,11 +137,13 @@ is the conservative canonical status used for #147.
 - #150 owns lambda binding, call evaluation order, chain value flow, and
   semantic body execution.
 - #154 owns broader content/media/Markdown-extension surface follow-up.
-- The four production gaps are tracked as #157–#160; they are not hidden with
-  expected-failure tests or compatibility allowlists in this PR.
+- The six production gaps are tracked as #157–#160 and #162–#163; they are not
+  hidden with expected-failure tests or compatibility allowlists in this PR.
 
 [from #147]: https://github.com/luceat-lux-vestra/scribium/issues/147
 [from #148]: https://github.com/luceat-lux-vestra/scribium/issues/148
 [from #149]: https://github.com/luceat-lux-vestra/scribium/issues/149
 [from #150]: https://github.com/luceat-lux-vestra/scribium/issues/150
 [from #154]: https://github.com/luceat-lux-vestra/scribium/issues/154
+[from #162]: https://github.com/luceat-lux-vestra/scribium/issues/162
+[from #163]: https://github.com/luceat-lux-vestra/scribium/issues/163

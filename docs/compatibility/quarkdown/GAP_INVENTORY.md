@@ -5,7 +5,7 @@
 - **Tracked target:** Quarkdown `v2.5.1`
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
-- **Review date:** 2026-08-23
+- **Review date:** 2026-08-24
 - **Scribium comparison baseline:** `3829d847f1b45871b2315d729a1f432cf390e6da`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
@@ -52,8 +52,9 @@ binding, evaluator, IR, and output claims.
 The audit classifies ordinary calls, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
-Markdown contexts, malformed recovery, and source provenance. It records four
-bounded production follow-ups:
+Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
+boundaries, and source provenance. It records six bounded production
+follow-ups:
 
 - [#157](https://github.com/luceat-lux-vestra/scribium/issues/157) — align
   identifier, implicit-reference, and Unicode/ASCII boundary grammar with
@@ -64,6 +65,15 @@ bounded production follow-ups:
   source after malformed inline-call recovery; and
 - [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) — preserve
   supported Markdown inline structure in Quarkdown content arguments.
+- [#162](https://github.com/luceat-lux-vestra/scribium/issues/162) — align
+  escaped call and argument delimiter recognition/depth handling with pinned
+  `GrammarUtils.kt` and `FunctionCallGrammar.kt`; bounded to
+  `scribium-quarkdown` with frontend integration only if required.
+- [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) — preserve
+  positional/named argument shape through grammar/frontend and defer
+  unnamed-after-named rejection to the binder; bounded to representation
+  ownership in `scribium-quarkdown`/`scribium-markdown`, with semantic rejection
+  remaining in #149.
 
 These gaps are not hidden by expected-failure allowlists and are not fixed by
 the audit documentation/test PR.
