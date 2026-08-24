@@ -1,0 +1,5 @@
+id = "captionposition-document-state"
+feature = "document-state-caption-position"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-captionposition-document-state"
+description = "Bounded caption-position state with preserved overrides and ordinary surrounding text"

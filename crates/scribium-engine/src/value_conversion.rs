@@ -8,8 +8,8 @@
 //! policy.
 
 use scribium_ir::{
-    IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType, IrEnumValue,
-    IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
+    IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType,
+    IrEnumValue, IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
 };
 use scribium_source::SourceSpan;
 use std::ops::Deref;
@@ -124,6 +124,7 @@ pub(crate) enum ScalarValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClosedEnumTarget {
     DocumentType,
+    CaptionPosition,
     StackedMainAxisAlignment,
     StackedCrossAxisAlignment,
     ContainerAlignment,
@@ -191,6 +192,19 @@ static DOCUMENT_TYPE_SPEC: ClosedEnumSpec<'static, IrDocumentType> = ClosedEnumS
         ClosedEnumVariant {
             declaration_name: "DOCS",
             value: IrDocumentType::Docs,
+        },
+    ],
+};
+
+static CAPTION_POSITION_SPEC: ClosedEnumSpec<'static, IrCaptionPosition> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "TOP",
+            value: IrCaptionPosition::Top,
+        },
+        ClosedEnumVariant {
+            declaration_name: "BOTTOM",
+            value: IrCaptionPosition::Bottom,
         },
     ],
 };
@@ -435,6 +449,24 @@ pub(crate) fn convert_domain_with_origin(
                 {
                     parse_document_type(value)
                         .map(|value| DomainValue::Enum(IrEnumValue::DocumentType(value)))
+                        .ok_or(ConversionError::InvalidText {
+                            target: ConversionTarget::Enum,
+                        })
+                }
+                _ => Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::Enum,
+                }),
+            },
+            ClosedEnumTarget::CaptionPosition => match &argument.value {
+                IrValue::Enum(IrEnumValue::CaptionPosition(value)) => {
+                    Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(*value)))
+                }
+                IrValue::String(value) | IrValue::Identifier(value)
+                    if argument.origin == ValueOrigin::Dynamic =>
+                {
+                    CAPTION_POSITION_SPEC
+                        .value_for(value)
+                        .map(|value| DomainValue::Enum(IrEnumValue::CaptionPosition(value)))
                         .ok_or(ConversionError::InvalidText {
                             target: ConversionTarget::Enum,
                         })
@@ -1764,9 +1796,9 @@ mod tests {
         DomainValue, InvocationValue, ScalarTarget, ScalarValue,
     };
     use scribium_ir::{
-        IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType,
-        IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrValue,
+        IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment,
+        IrDocumentType, IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrValue,
     };
     use scribium_source::{SourceId, SourceSpan};
 
@@ -2280,6 +2312,50 @@ mod tests {
             assert_eq!(spec.value_for(text), Some(Alignment::SpaceBetween));
         }
         assert_eq!(spec.value_for("space_between"), None);
+    }
+
+    #[test]
+    fn caption_position_conversion_is_closed_case_insensitive_and_typed() {
+        for (text, expected) in [
+            ("top", IrCaptionPosition::Top),
+            ("TOP", IrCaptionPosition::Top),
+            ("Bottom", IrCaptionPosition::Bottom),
+        ] {
+            assert_eq!(
+                convert_domain_with_origin(
+                    &InvocationValue::dynamic_value(IrValue::Identifier(text.into())),
+                    DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+                ),
+                Ok(DomainValue::Enum(IrEnumValue::CaptionPosition(expected)))
+            );
+        }
+
+        let typed = IrEnumValue::CaptionPosition(IrCaptionPosition::Top);
+        assert_eq!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::Enum(typed)),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+            ),
+            Ok(DomainValue::Enum(typed))
+        );
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("middle".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+            ),
+            Err(ConversionError::InvalidText {
+                target: ConversionTarget::Enum
+            })
+        ));
+        assert!(matches!(
+            convert_domain_with_origin(
+                &InvocationValue::static_value(IrValue::String("top".into())),
+                DomainTarget::ClosedEnum(ClosedEnumTarget::CaptionPosition),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Enum
+            })
+        ));
     }
 
     #[test]

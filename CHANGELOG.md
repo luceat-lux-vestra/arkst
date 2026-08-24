@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bounded `.captionposition` document layout state (M3):** `.captionposition`
+  now stores the closed `top`/`bottom` state for `default`, `figures`,
+  `tables`, and the upstream `code:` alias in evaluator-owned shared state and
+  the immutable backend-neutral IR snapshot. Repeated calls preserve omitted
+  overrides and replace explicit values according to the pinned v2.5.1 merge
+  contract. Positional, named, mixed, nullable `.none`, callable sharing,
+  source-defined shadowing, source-backed binding failures, body rejection,
+  atomic candidate evaluation, and old-IR serde defaults are covered. Actual
+  caption rendering and Typst/HTML placement remain deferred.
+
 - **Bounded `.doclang` document state (M3):** `.doclang` now models upstream's
   general case-insensitive English full-name or IETF BCP 47 tag lookup rather
   than treating the built-in localization table as its API boundary. The

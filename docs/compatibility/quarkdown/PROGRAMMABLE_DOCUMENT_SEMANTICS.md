@@ -505,8 +505,38 @@ checked-in bounded table, `.localize`,
 localization tables, theme resolution/validation/defaults, rendering policy,
 hyphenation, front-matter/document-state merging, generalized DynamicValue
 conversion, and other document metadata remain deferred. `.docauthor`,
-`.docauthors`, `.dockeywords`, `.doclang`, and `.theme` are implemented only
-at their bounded evaluator/IR document-state boundaries.
+`.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and `.captionposition` are
+implemented only at their bounded evaluator/IR document-state boundaries.
+
+### Bounded `.captionposition` state (Issue #145)
+
+The pinned v2.5.1 implementation defines `CaptionPositionInfo` with a
+non-nullable `default` initialized to `BOTTOM` and nullable `figures`, `tables`,
+and `codeBlocks` overrides. `Document.captionPosition` accepts the named
+source alias `code` for `codeBlocks`, constructs a partial state, and calls the
+generated `CaptionPositionInfo.merge(currentPosition)` extension. Amber's
+v2.2.0 merge generator keeps non-nullable receiver properties and uses the
+receiver's nullable properties first, falling back to `other` only when they
+are null. Consequently, default updates preserve existing per-kind overrides,
+while omitted or nullable `.none` overrides preserve their previous values.
+
+Scribium maps that contract to the existing evaluator-owned `DocumentState` and
+immutable `IrDocument.metadata.document_state` snapshot. The representation is
+closed and backend-neutral: `IrCaptionPosition` has only `Top` and `Bottom`,
+and `IrCaptionPositionInfo` retains the explicit-versus-inherited distinction
+for each override. The evaluator validates the raw regular-argument binding
+shape before evaluating candidates, evaluates and converts all bound values,
+restores the complete previous state on any failure, and commits once. Native
+body input is rejected before body nodes can execute. Callable scopes share the
+document state, and source-defined direct/chained `captionposition` calls
+shadow the native setter under the established policy.
+
+This slice returns no document content and stops at the immutable IR snapshot.
+It does not implement caption rendering, Typst/HTML placement, `.figure`,
+`.table`, `.code`, or a generalized layout metadata framework. Independent
+observable evidence is retained in
+`fixtures/quarkdown-conformance/cases/captionposition-document-state/` and the
+focused core/evaluator/IR tests.
 
 The `.br` slice does not promote the broader text/layout family: `.text`,
 `.codespan`, `.clip`, `.float`, and `.fullspan` remain separate deferred work.
