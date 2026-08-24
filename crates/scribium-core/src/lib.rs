@@ -1707,6 +1707,23 @@ mod tests {
     }
 
     #[test]
+    fn captionposition_success_preserves_nested_argument_state_mutation() {
+        let source = ".function {settable}\n    .captionposition tables:{top}\n    .lowercase {BOTTOM}\n\n.captionposition figures:{.settable}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(result.ir.nodes.is_empty());
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Bottom,
+                figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                tables: Some(crate::ir::IrCaptionPosition::Top),
+                code_blocks: None,
+            }
+        );
+    }
+
+    #[test]
     fn captionposition_state_is_shared_by_nested_callables_and_source_functions_shadow_it() {
         let source = ".function {setup}\n    .captionposition figures:{top}\n\n.function {outer}\n    .setup\n\n.outer\n";
         let (result, _) = compile_source(source);

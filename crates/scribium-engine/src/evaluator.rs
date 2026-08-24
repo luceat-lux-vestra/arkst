@@ -3780,7 +3780,12 @@ impl Evaluator {
                 }
             };
 
-        let mut candidate = previous_state.caption_position;
+        // Nested argument evaluation shares the document state handle. Use the
+        // post-evaluation state as the merge base so a successful inner
+        // `.captionposition` mutation is preserved by the outer commit. The
+        // pre-evaluation snapshot above remains the rollback target for any
+        // later conversion failure.
+        let mut candidate = context.document_state.borrow().caption_position;
         for (parameter, location) in [
             (CaptionPositionParameter::Default, bindings.default),
             (CaptionPositionParameter::Figures, bindings.figures),

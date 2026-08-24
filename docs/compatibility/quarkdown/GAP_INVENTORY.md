@@ -60,6 +60,18 @@ to complete compatibility.
 | Intentionally deferred | `.csv`, `.css`, `.cssproperties`, `.env`, `.filename`, `.htmloptions`, `.includeall`, `.listfiles`, `.llmstxt`, `.pathtoroot`, `.subdocument` | Resource families, target-specific options, and process/environment access are explicitly outside this slice or require a separate host/security decision. `.llmstxt` remains deferred per task scope. |
 | Scribium extension | `.map`, `.filter` | Existing typed collection transforms have no corresponding public v2.5.1 `Collection.kt` declarations and are excluded from upstream compatibility counts. |
 
+### `.captionposition` block-body fallback gap
+
+Quarkdown v2.5.1's `RegularArgumentsBinder` permits an indented body after
+regular arguments and, because `codeBlocks` is the final bindable
+`.captionposition` parameter, falls back to that parameter as raw
+`DynamicValue` text. Scribium's current frontend/IR boundary exposes a parsed
+`CallBody` rather than lossless raw body text. Therefore the bounded native
+setter rejects a body before evaluation, exactly as the bounded `.theme` slice
+does. This is an explicit compatibility gap, not an upstream semantic claim
+that bodies are invalid; implementing it requires an accepted frontend/IR raw
+body representation and is outside this PR.
+
 ## R11/R12 current semantic evidence
 
 The R11 and R12 reviews rechecked the three issue-#61 areas against the pinned
