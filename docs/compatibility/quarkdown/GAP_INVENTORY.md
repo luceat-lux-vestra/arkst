@@ -5,8 +5,8 @@
 - **Tracked target:** Quarkdown `v2.5.1`
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
-- **Review date:** 2026-08-24
-- **Scribium comparison baseline:** `3829d847f1b45871b2315d729a1f432cf390e6da`
+- **Review date:** 2026-08-25
+- **Scribium comparison baseline:** `489c7765bc28a74160b354d3237c7710c7eb4294`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
@@ -114,6 +114,31 @@ general-builtin, metadata, layout, content, and resource audits; #156 remains
 the reconciliation gate.
 
 No production fix is selected by #149, and implementation ordering remains
+frozen until #156.
+
+## #150 programmable-language semantics audit
+
+The canonical programmable-language inventory is
+[`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md). It
+reconciles the v2.5.1 observable contracts for variables and mutation owners,
+definition/caller/parameter/iteration scopes, callable definitions and
+recursion, evaluation order and laziness, chain outcomes, conditionals,
+iteration, collection evaluation boundaries, definition precedence, failure
+effects, and source-backed deterministic diagnostics.
+
+The primary #147 statuses are conservative: the bounded callable, scope,
+parameter, evaluation, chain, conditional, iteration, collection, precedence,
+failure, and diagnostic rows are `PARTIAL`; `.extend`/`.super` is
+`UNSUPPORTED`; document-state separation is `NOT_APPLICABLE` to #150. No row
+is promoted to `SUPPORTED_END_TO_END` by this audit. The existing #61/#131
+evidence remains valid for its bounded foundation but does not establish full
+v2.5.1 compatibility.
+
+The audit reuses #148/#157–#164 for grammar/frontend boundaries and
+#149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
+does not create duplicate builtin or test issues. The only new cohesive
+semantic follow-up is [#169](https://github.com/luceat-lux-vestra/scribium/issues/169)
+for engine-owned `.extend`/`.super` semantics; implementation ordering remains
 frozen until #156.
 
 ## v2.5.1 stdlib surface classification
