@@ -124,32 +124,38 @@ implicit-positional-reference:
     .[1-9][0-9]*
 ```
 
-`normal-call-name` may be followed by `{arg}` / `name:{value}` arguments;
-`implicit-positional-reference` is a bare token and does not consume
-arguments. An implicit reference followed by a word character (any Unicode
-letter or digit, or `_`) is not recognized as a reference at all.
+The expression above is Scribium's current lexer contract, not a verified
+claim that the pinned Quarkdown v2.5.1 identifier grammar is identical. The
+#148 audit records the pinned upstream lexical comparison and follow-up in
+#157. `normal-call-name` may be followed by `{arg}` / `name:{value}`
+arguments; `implicit-positional-reference` is a bare token and does not
+consume arguments.
 
 Call syntax has the following properties:
 
-- The function name follows the dot directly: alphanumeric, `_` and `-` are
-  allowed, the first character must be a letter or `_`.
+- The current Scribium function-name contract follows the dot directly:
+  alphanumeric, `_` and `-` are allowed, and the first character must be a
+  letter or `_`. This local contract remains under upstream reconciliation in
+  #157.
 - **Implicit positional references** (`.1`, `.2`, `.12`, ...) are a separate
   grammar case from normal function names: digits only, no leading `0`, and
   a following word character keeps the whole token ordinary text
   (`.1abc` is not a reference; `.1-1` is a `.1` reference followed by `-1`).
   They are bare reference tokens — unlike normal calls they never take
   arguments (`.1 {item}` does not form a call).
-- A call requires a **boundary** on both sides: whitespace, a symbol
-  (including `-`), or the start/end of a line. A word character (any Unicode
-  letter or digit, or `_`) directly before or after the call makes the whole
-  construct ordinary text: `.note {x}suffix` and `word.note {x}` are not
-  calls, while `-.note {x}`, `.note {x}-` and `See .note {x} items` are.
+- The current Scribium call-boundary contract requires whitespace, a symbol
+  (including `-`), or the start/end of a line on both sides. Its Unicode and
+  identifier-boundary equivalence with pinned v2.5.1 remains an explicit #157
+  audit gap; do not treat this local rule as an upstream grammar guarantee.
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`.
 - Positional and named arguments may be mixed, but every argument after a
   named argument must also be named.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
   arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
+  The current frontend preserves original text for Markdown inline structure
+  inside content arguments and reports `E3010`; the bounded preservation gap is
+  tracked by #160.
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
@@ -174,10 +180,14 @@ Call syntax has the following properties:
   source or Markdown/Typst round trip is used.
 - A complete call may be wrapped in braces to lift word-adjacency boundaries,
   for example `H{.text {2}}O`. The wrapper is consumed by the Quarkdown
-  frontend and its source span remains available.
+  frontend and its source span remains available. A tight call nested inside
+  a braced content argument is a known frontend gap tracked by #158.
 - Inline calls appear inside a paragraph: `.strong {bold}` in surrounding
   text. A call that has trailing text after it on the same line is treated
   as an inline call, not a block-level call.
+- Malformed inline calls retain their diagnostic span, but recovery must also
+  retain following source text; the current suffix-loss gap is tracked by
+  #159.
 
 ### Block-level calls with indented body (Implemented)
 

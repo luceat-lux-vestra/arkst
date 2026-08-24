@@ -42,6 +42,32 @@ Classification index:
 | Scribium extension | `.map` and `.filter` collection transforms; they are tested Scribium behavior but are not v2.5.1 upstream features |
 | Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, remaining container style/layout families, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
 
+## #148 call-grammar audit
+
+The complete call-grammar/frontend inventory is maintained in
+[`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md). It revalidates #60/#65 at
+the current `origin/main` base and keeps parser evidence separate from
+binding, evaluator, IR, and output claims.
+
+The audit classifies ordinary calls, implicit positional references,
+positional/named and multiline arguments, continuation, nested calls, chains,
+tight calls, inline/block placement, dynamic body indentation, protected
+Markdown contexts, malformed recovery, and source provenance. It records four
+bounded production follow-ups:
+
+- [#157](https://github.com/luceat-lux-vestra/scribium/issues/157) — align
+  identifier, implicit-reference, and Unicode/ASCII boundary grammar with
+  pinned v2.5.1 evidence;
+- [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) — preserve
+  nested tight-call wrappers inside content arguments;
+- [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) — retain
+  source after malformed inline-call recovery; and
+- [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) — preserve
+  supported Markdown inline structure in Quarkdown content arguments.
+
+These gaps are not hidden by expected-failure allowlists and are not fixed by
+the audit documentation/test PR.
+
 ## v2.5.1 stdlib surface classification
 
 The pinned v2.5.1 stdlib tree at commit

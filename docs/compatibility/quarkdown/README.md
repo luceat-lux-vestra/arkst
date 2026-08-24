@@ -55,16 +55,16 @@ style, or layout surface to compatibility.
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
 |--------------------------------|----------------------------------|--------------------------|------------------|
-| Dot-prefixed call              | `.note`                          | Parsed                   | Implemented      |
-| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
-| Positional arguments           | `.range {1} {10}`                | Parsed                   | Implemented      |
-| Named arguments                | `.panel width:{320}`             | Parsed                   | Implemented      |
-| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Implemented      |
-| Indented body argument         | `.panel {x}` + indent            | Parsed                   | Implemented      |
-| Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Implemented      |
-| Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Implemented      |
-| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Implemented      |
-| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Implemented      |
+| Dot-prefixed call              | `.note`                          | Parsed                   | Partial: pinned identifier/boundary reconciliation is tracked by #157 |
+| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported for the current 1-based slice; binding is separate | Partial: pinned lexical reconciliation is tracked by #157 |
+| Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only grammar evidence; binding validity belongs to #149 |
+| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Parsed-only grammar evidence; positional-after-named shape is parser-owned |
+| Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
+| Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: nested tight/content boundaries are tracked by #158 and #160 |
+| Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
+| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Partial: top-level tight calls pass; nested tight content is #158 |
+| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Partial: inline recovery suffix loss is #159 |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -86,9 +86,9 @@ style, or layout surface to compatibility.
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
 | Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Implemented (evidenced slice) |
-| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Implemented      |
-| Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Implemented      |
-| Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Implemented      |
+| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only grammar evidence |
+| Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Partial: nested tight content is #158 |
+| Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
 | `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
 | `.llmstxt`                     | (candidate name from issue scope) | No `.llmstxt` standard builtin was present in the reviewed Quarkdown v2.5.1 source; Scribium reports an explicit deferred diagnostic | Intentionally deferred |
@@ -784,6 +784,10 @@ leading indentation, parser-preserved `::` chains, tight brace-wrapped calls,
 normal boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd`
 isolation, and the existing dynamic body-indentation lifecycle.
 
+The complete grammar/frontend re-audit, including its conservative status
+matrix and bounded follow-up issues, is recorded in
+[`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md).
+
 The syntax adapter preserves the head, each chain segment, each name span,
 argument spans, and the complete source span without synthetic reparsing. The
 evaluator consumes those segments structurally and applies the documented
@@ -799,11 +803,13 @@ conditional bodies, provenance, failure, and Typst/PDF tests support this
 slice only; complete `DynamicValue` and general programmable document
 compatibility are not claimed here.
 
-The public source for this slice is the Quarkdown wiki's [Syntax of a
+The primary public source for this slice is the Quarkdown wiki's [Syntax of a
 function call](https://quarkdown.com/wiki/syntax-of-a-function-call/) page,
 which documents multiline arguments, line continuation, chaining, and tight
-function calls. Fixtures are independently authored from that public contract;
-no upstream implementation source, test, or fixture was used.
+function calls. Pinned v2.5.1 lexer/grammar/refiner records are listed in
+`SPEC_SOURCES.md` as additional lexical and ownership evidence. Fixtures remain
+independently authored; no upstream implementation code, test, or fixture was
+copied or translated.
 
 ## Compatibility Levels
 
@@ -1131,7 +1137,12 @@ accessed dates.
 
 ## Known Divergences
 
-- (None yet for the currently implemented call-syntax rows)
+- The #148 audit found a pinned lexical-contract mismatch for normal names,
+  implicit references, and Unicode/ASCII boundaries; see #157.
+- Nested tight calls inside content arguments are not yet lossless; see #158.
+- Malformed inline recovery currently drops following source text; see #159.
+- Markdown inline structure inside Quarkdown content arguments remains an
+  explicit `E3010` gap; see #160 and related #154.
 - Scope note: the matrix is an evidence register, not a permanent language
   boundary. Rows marked **Planned** are *not* implemented and must not be
   claimed; any public Quarkdown behavior absent from the matrix is still a gap
