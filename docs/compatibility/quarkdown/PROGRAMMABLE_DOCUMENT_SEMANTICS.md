@@ -144,11 +144,15 @@ nullable `String? = null` path and therefore uses the getter rather than
 clearing state. The IR carries only plain `{ tag, localized_name }` data.
 
 Because upstream delegates lookup to `java.util.Locale`, Scribium does not
-use a JVM, OS, environment, or native locale database. The evaluator uses a
-small checked-in deterministic table containing the six locales named by the
-public localization documentation and the pinned `en-US`/`fr-CA` regional
-examples. This is explicitly partial and bounded; unsupported identifiers
-fail rather than being accepted as compatible. Block-body fallback is also
+use a JVM, OS, environment, or native locale database. The upstream `.doclang`
+input is general case-insensitive English full-name or IETF BCP 47 tag lookup,
+not an API restricted to built-in localization locales. The evaluator uses a
+small checked-in deterministic table containing the ten locales named by the
+public localization documentation (`zh`, `en`, `fr`, `de`, `it`, `ja`, `pl`,
+`pt`, `ru`, `uk`) plus the pinned `LocaleTest` lookup examples `ko`, `en-US`,
+and `fr-CA`. This is explicitly partial and bounded: valid BCP 47/name
+identifiers outside the table fail rather than being accepted as compatible,
+and remain a documented compatibility gap. Block-body fallback is also
 deferred and rejected before nested body evaluation because the current
 frontend/IR cannot provide upstream's lossless raw `DynamicValue` text.
 Binding, candidate evaluation, String conversion, resolution, validation, and
@@ -376,7 +380,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | Inline iteration body | Regular binding first resolves the callee parameter; an inline likely-body becomes a `Lambda` only for a callable target, while an ordinary dynamic parameter receives content | `Value::InlineBody`/`IrValue::InlineBody` preserves structured content and callable metadata until source-defined/native resolution; native iteration adapts it into the shared `IrCallable` path | Keep contextual inline bodies target-sensitive and source-backed | Bounded `.foreach`/`.repeat` support implemented, including direct/chain source-defined shadowing | Generalized inline component/callback bodies |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; upstream block-body fallback remains a documented deferred gap | Unsupported locale records, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; upstream block-body fallback remains a documented deferred gap | Valid BCP 47/name locale records outside the checked-in table, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -496,7 +500,8 @@ necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
 The remaining direct `.container` style parameters and related layout families
-remain deferred. Unsupported `.doclang` locale records, `.localize`,
+remain deferred. Valid BCP 47/name `.doclang` records outside Scribium's
+checked-in bounded table, `.localize`,
 localization tables, theme resolution/validation/defaults, rendering policy,
 hyphenation, front-matter/document-state merging, generalized DynamicValue
 conversion, and other document metadata remain deferred. `.docauthor`,

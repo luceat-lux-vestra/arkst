@@ -191,13 +191,18 @@ before trying a locale tag, replaces the current locale, and returns no
 document value. The bounded IR snapshot stores only the canonical tag and the
 localized getter name.
 
-Scribium uses a checked-in, immutable pure-Rust table of the documented six
-base locales plus the pinned v2.5.1 regional examples (`en-US` and `fr-CA`).
-This avoids OS/JVM locale databases, hidden environment state, and host-
-dependent results while keeping the evaluator WASM-compatible. Identifiers
-outside that evidence-backed table, including blank or malformed tags, fail
-with a source-backed diagnostic; this is a bounded partial compatibility claim,
-not a replacement for the complete JVM/CLDR locale database.
+The upstream `.doclang` input contract is broader than the built-in
+localization table: it accepts a case-insensitive English full name or an IETF
+BCP 47 language tag. Scribium uses a checked-in, immutable pure-Rust table of
+the ten locales listed by the public localization documentation (`zh`, `en`,
+`fr`, `de`, `it`, `ja`, `pl`, `pt`, `ru`, `uk`) plus the pinned v2.5.1
+`LocaleTest` lookup evidence (`ko`, `en-US`, and `fr-CA`). This avoids OS/JVM
+locale databases, hidden environment state, and host-dependent results while
+keeping the evaluator WASM-compatible. Identifiers outside that table,
+including otherwise valid BCP 47 tags or English names, fail with a
+source-backed diagnostic as an explicit bounded compatibility gap; blank or
+malformed identifiers fail as well. This is not a replacement for the
+complete JVM/CLDR locale database.
 
 `.none` follows the pinned nullable `String? = null` path: it invokes the
 getter and does not clear the existing locale. The setter validates argument

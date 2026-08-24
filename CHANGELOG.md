@@ -9,16 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Bounded `.doclang` document state (M3):** `.doclang` now resolves the
-  evidence-backed bounded locale table by case-insensitive English name before
-  canonical tag, returns the locale's localized name as a semantic String, and
-  stores `{ tag, localized_name }` in evaluator-owned shared state and the
-  immutable serde-compatible IR snapshot. Positional/named setters, nullable
-  `.none` getter behavior, callable sharing, source-defined shadowing, body
-  rejection, source-backed failures, and atomic replacement are covered.
-  Resolution is pure Rust and deterministic with no host/JVM locale lookup;
-  localization, hyphenation, locale-aware rendering, and the remaining
-  document metadata family remain deferred.
+- **Bounded `.doclang` document state (M3):** `.doclang` now models upstream's
+  general case-insensitive English full-name or IETF BCP 47 tag lookup rather
+  than treating the built-in localization table as its API boundary. The
+  checked-in deterministic table covers the ten public built-in locales plus
+  the pinned `ko`, `en-US`, and `fr-CA` lookup evidence, returns the locale's
+  localized name as a semantic String, and stores `{ tag, localized_name }` in
+  evaluator-owned shared state and the immutable serde-compatible IR snapshot.
+  Positional/named setters, nullable `.none` getter behavior, callable sharing,
+  source-defined shadowing, body rejection, source-backed failures, and atomic
+  replacement are covered. Resolution is pure Rust with no host/JVM locale
+  lookup; table-outside BCP 47/name records remain an explicit bounded
+  compatibility gap, while localization, hyphenation, locale-aware rendering,
+  and the remaining document metadata family remain deferred.
 
 - **Bounded theme document state (M3):** `.theme` now stores optional
   lowercase `color` and `layout` components in evaluator-owned shared state
