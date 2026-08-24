@@ -257,3 +257,41 @@ fn audit_records_current_early_rejection_of_positional_after_named() {
         Some(Block::Unsupported { .. })
     ));
 }
+
+#[test]
+fn audit_records_current_named_argument_identifier_lexical_contract() {
+    for (source, expected_name, expected_end) in [
+        (".foo _:{x}", "_", 6),
+        (".foo -:{x}", "-", 6),
+        (".foo 1:{x}", "1", 6),
+        (".foo 10:{x}", "10", 7),
+        (".foo name-1:{x}", "name-1", 11),
+    ] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall { named_args, .. } = &output.document.nodes[0] else {
+            panic!("expected named argument call for {source:?}")
+        };
+        assert_eq!(named_args.len(), 1, "{source:?}");
+        assert_eq!(named_args[0].name, expected_name, "{source:?}");
+        assert_eq!(
+            named_args[0].name_span,
+            ByteSpan::new(5, expected_end),
+            "{source:?}"
+        );
+        assert_eq!(
+            source_slice(source, named_args[0].name_span),
+            expected_name,
+            "{source:?}"
+        );
+
+        let markdown = parse_with_mode(source, Mode::Markdown);
+        assert!(!markdown.document.nodes.iter().any(|node| match node {
+            Block::DirectiveCall { .. } => true,
+            Block::Paragraph { content, .. } => content
+                .iter()
+                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
+            _ => false,
+        }));
+    }
+}

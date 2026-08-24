@@ -58,8 +58,8 @@ style, or layout surface to compatibility.
 | Dot-prefixed call              | `.note`                          | Parsed                   | Partial: pinned identifier/boundary reconciliation is tracked by #157 |
 | Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported for the current 1-based slice; binding is separate | Partial: pinned lexical reconciliation is tracked by #157 |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
-| Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only grammar evidence; binding validity belongs to #149 |
-| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163) |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: current named-argument name scanning accepts local `_`, `-`, numeric, and hyphenated names; lexical reconciliation is tracked by #157, while binding validity belongs to #149 |
+| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163), and named-argument identifier lexical reconciliation is tracked by #157 |
 | Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: nested tight/content boundaries are tracked by #158 and #160 |
@@ -753,8 +753,8 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `scribium-quarkdown/src/lib.rs::parses_normal_call_names_and_spans`, `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
 | Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `implicit_references_do_not_consume_arguments`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
 | Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
-| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments` |
-| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_early_rejection_of_positional_after_named` |
+| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract` |
+| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract`, `audit_records_current_early_rejection_of_positional_after_named` |
 | Escaped call/argument delimiters | `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
 | Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
 | Nested calls                    | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
@@ -1140,7 +1140,8 @@ accessed dates.
 ## Known Divergences
 
 - The #148 audit found a pinned lexical-contract mismatch for normal names,
-  implicit references, and Unicode/ASCII boundaries; see #157.
+  named-argument names, implicit references, and Unicode/ASCII boundaries; see
+  #157.
 - Escaped call/argument delimiters are not fully aligned with pinned
   `GrammarUtils.unescapedMatch()` and balanced-brace behavior; the current
   parser can truncate arguments or report `E2003`, while the escaped call

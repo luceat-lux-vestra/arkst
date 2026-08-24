@@ -137,6 +137,13 @@ Call syntax has the following properties:
   alphanumeric, `_` and `-` are allowed, and the first character must be a
   letter or `_`. This local contract remains under upstream reconciliation in
   #157.
+- The `name` in a named argument (`name:{...}`) currently follows a separate
+  Scribium local scanner: it accepts a non-empty run of ASCII alphanumeric,
+  `_`, and `-` bytes, including `_`, `-`, numeric names, and hyphenated names.
+  This is an implementation observation, not an upstream-compatible contract.
+  Pinned Quarkdown v2.5.1's `FunctionCallGrammar` uses the shared
+  `IDENTIFIER_PATTERN` (`[a-zA-Z][a-zA-Z0-9]*|[0-9]+`) for function and
+  optional named-argument identifiers; reconciliation is tracked by #157.
 - **Implicit positional references** (`.1`, `.2`, `.12`, ...) are a separate
   grammar case from normal function names: digits only, no leading `0`, and
   a following word character keeps the whole token ordinary text
@@ -148,7 +155,9 @@ Call syntax has the following properties:
   identifier-boundary equivalence with pinned v2.5.1 remains an explicit #157
   audit gap; do not treat this local rule as an upstream grammar guarantee.
 - Positional arguments are wrapped in curly braces: `{...}`.
-- Named arguments are `name:{...}`.
+- Named arguments are `name:{...}`. The shape is documented, but the name
+  grammar above describes current Scribium behavior and is not an
+  upstream-compatible claim until #157 is resolved.
 - Positional and named arguments may be mixed. Scribium's current parser
   enforces that every argument after a named argument must also be named and
   reports `E2001` for an unnamed argument that follows one. In pinned
