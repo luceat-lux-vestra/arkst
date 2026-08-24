@@ -54,10 +54,10 @@ use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
     IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
     IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
-    IrDocument, IrDocumentAuthor, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent,
-    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize,
-    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrValue, NativeTarget, TargetSpecificContent,
+    IrDocument, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,
+    IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
@@ -328,6 +328,7 @@ struct DocumentState {
     document_type: scribium_ir::IrDocumentType,
     authors: Vec<IrDocumentAuthor>,
     keywords: Vec<String>,
+    theme: Option<IrDocumentTheme>,
 }
 
 impl DocumentState {
@@ -338,6 +339,7 @@ impl DocumentState {
             document_type: snapshot.document_type,
             authors: snapshot.authors.clone(),
             keywords: snapshot.keywords.clone(),
+            theme: snapshot.theme.clone(),
         }
     }
 
@@ -348,6 +350,7 @@ impl DocumentState {
             document_type: self.document_type,
             authors: self.authors.clone(),
             keywords: self.keywords.clone(),
+            theme: self.theme.clone(),
         }
     }
 }
@@ -1052,6 +1055,10 @@ impl<'a> EvaluationContext<'a> {
         self.document_state.borrow_mut().keywords = keywords;
     }
 
+    fn set_document_theme(&self, theme: IrDocumentTheme) {
+        self.document_state.borrow_mut().theme = Some(theme);
+    }
+
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
         let mut state = self.document_state.borrow_mut();
         state
@@ -1718,7 +1725,7 @@ impl Evaluator {
         }
 
         let source_defined_shadowable_document_state =
-            matches!(name, "docauthor" | "docauthors" | "dockeywords")
+            matches!(name, "docauthor" | "docauthors" | "dockeywords" | "theme")
                 && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
@@ -2862,6 +2869,18 @@ impl Evaluator {
             );
         }
 
+        if name == "theme" {
+            return self.evaluate_document_theme_builtin(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if body.is_some() {
             diagnostics.push(document_state_call_error(
                 format!("`.{name}` does not accept a block body"),
@@ -3491,6 +3510,214 @@ impl Evaluator {
             }
         };
         context.replace_document_keywords(keywords);
+        CallOutcome::NoValue
+    }
+
+    /// Implements the bounded `.theme` document-state setter.
+    ///
+    /// Unlike the read/write document metadata builtins, `.theme` is always a
+    /// setter. Every invocation replaces the complete theme, including an
+    /// empty invocation that commits `Some(IrDocumentTheme { color: None,
+    /// layout: None })`. Binding and conversion happen before the single state
+    /// commit; nested argument mutations are restored if the invocation fails.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_document_theme_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(document_state_call_error(
+                "`.theme` block-body fallback is deferred because the evaluator does not receive the raw body text".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let positional_span = |index: usize| {
+            positional_args
+                .get(index)
+                .map(|value| value_source_span(value, span))
+                .unwrap_or(*span)
+        };
+
+        if positional_args.len() > 2 {
+            diagnostics.push(document_state_call_error(
+                "`.theme` accepts at most two positional arguments (color and layout)".to_string(),
+                positional_span(2),
+            ));
+            return CallOutcome::Failed;
+        }
+
+        if let Some(first_named_start) = named_args.iter().map(|argument| argument.span.start).min()
+        {
+            if let Some(value) = positional_args
+                .iter()
+                .find(|value| value_source_span(value, span).start > first_named_start)
+            {
+                diagnostics.push(document_state_call_error(
+                    "`.theme` cannot place an unnamed argument after a named argument".to_string(),
+                    value_source_span(value, span),
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+
+        let mut color_bound = !positional_args.is_empty();
+        let mut layout_bound = positional_args.len() > 1;
+        for argument in named_args {
+            let is_duplicate = match argument.name.as_str() {
+                "color" => {
+                    let duplicate = color_bound;
+                    color_bound = true;
+                    duplicate
+                }
+                "layout" => {
+                    let duplicate = layout_bound;
+                    layout_bound = true;
+                    duplicate
+                }
+                _ => {
+                    diagnostics.push(document_state_call_error(
+                        format!("Unknown named argument `{}` for `.theme`", argument.name),
+                        argument.name_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            if is_duplicate {
+                diagnostics.push(document_state_call_error(
+                    format!(
+                        "`.theme` received the `{}` argument more than once",
+                        argument.name
+                    ),
+                    argument.span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+
+        let previous_state = context.document_state.borrow().clone();
+        let restore_on_failure = |context: &EvaluationContext<'_>| {
+            context.restore_document_state(previous_state.clone());
+        };
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => {
+                restore_on_failure(context);
+                return outcome;
+            }
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => {
+                    restore_on_failure(context);
+                    return outcome;
+                }
+            };
+
+        let mut positional = evaluated_positional.into_iter();
+        let mut color = positional
+            .next()
+            .map(|argument| (argument, positional_span(0)));
+        let mut layout = positional
+            .next()
+            .map(|argument| (argument, positional_span(1)));
+        for argument in evaluated_named {
+            let argument_span = argument.span;
+            match argument.name.as_str() {
+                "color" => {
+                    color = Some((
+                        InvocationValue {
+                            value: argument.value.clone(),
+                            origin: argument.origin,
+                        },
+                        argument_span,
+                    ));
+                }
+                "layout" => {
+                    layout = Some((
+                        InvocationValue {
+                            value: argument.value.clone(),
+                            origin: argument.origin,
+                        },
+                        argument_span,
+                    ));
+                }
+                _ => {
+                    diagnostics.push(document_state_call_error(
+                        format!("Unknown named argument `{}` for `.theme`", argument.name),
+                        argument_span,
+                    ));
+                    restore_on_failure(context);
+                    return CallOutcome::Failed;
+                }
+            }
+        }
+
+        let normalize = |argument: InvocationValue, argument_span: SourceSpan| {
+            if matches!(argument.value, IrValue::None) {
+                return Ok(None);
+            }
+            if !matches!(
+                argument.value,
+                IrValue::String(_)
+                    | IrValue::Identifier(_)
+                    | IrValue::Number(_)
+                    | IrValue::Boolean(_)
+            ) {
+                return Err(argument_span);
+            }
+            builtins::scalar_string_argument(&argument)
+                .map(|value| Some(value.to_lowercase()))
+                .ok_or(argument_span)
+        };
+
+        let color = match color {
+            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+                Ok(value) => Some(value),
+                Err(argument_span) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.theme` color requires a bounded scalar String value".to_string(),
+                        argument_span,
+                    ));
+                    restore_on_failure(context);
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        }
+        .flatten();
+        let layout = match layout {
+            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+                Ok(value) => Some(value),
+                Err(argument_span) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.theme` layout requires a bounded scalar String value".to_string(),
+                        argument_span,
+                    ));
+                    restore_on_failure(context);
+                    return CallOutcome::Failed;
+                }
+            },
+            None => None,
+        }
+        .flatten();
+
+        context.set_document_theme(IrDocumentTheme { color, layout });
         CallOutcome::NoValue
     }
 
@@ -6913,6 +7140,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "docauthor",
     "docauthors",
     "dockeywords",
+    "theme",
 ];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];

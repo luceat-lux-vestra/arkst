@@ -1,0 +1,114 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Ordinary content remains separate from theme state",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 50
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 50,
+                "end": 51
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 51
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "The first theme is replaced below",
+              "span": {
+                "source_id": 1,
+                "start": 202,
+                "end": 235
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 235,
+                "end": 236
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 202,
+          "end": 236
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Final content remains ordinary document text",
+              "span": {
+                "source_id": 1,
+                "start": 254,
+                "end": 298
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 298,
+                "end": 299
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 254,
+          "end": 299
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": {
+        "color": "light",
+        "layout": null
+      }
+    }
+  }
+}

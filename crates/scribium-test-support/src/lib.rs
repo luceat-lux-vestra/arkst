@@ -599,7 +599,7 @@ mod tests {
         );
     }
 
-    const EMPTY_IR: &str = r#"{"nodes":[],"metadata":{"title":null,"author":null,"date":null,"raw":[],"document_state":{"name":"","description":"","document_type":"Plain"}}}"#;
+    const EMPTY_IR: &str = r#"{"nodes":[],"metadata":{"title":null,"author":null,"date":null,"raw":[],"document_state":{"name":"","description":"","document_type":"Plain","authors":[],"keywords":[],"theme":null}}}"#;
 
     fn temporary_case(
         directory_id: &str,
