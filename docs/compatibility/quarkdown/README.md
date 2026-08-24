@@ -81,7 +81,7 @@ style, or layout surface to compatibility.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, `.dockeywords`, and `.theme` are implemented only at bounded evaluator/IR state boundaries; rendering and the remaining metadata surface stay deferred | Partial (bounded) |
+| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` are implemented only at bounded evaluator/IR state boundaries; localization, rendering, and the remaining metadata surface stay deferred | Partial (bounded) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -180,6 +180,42 @@ front-matter merging, or generalized conversion is introduced.
 Evidence is in `crates/scribium-core/src/lib.rs::tests::dockeywords_*`, the IR
 serde test, and the independently authored
 `fixtures/quarkdown-conformance/cases/dockeywords-family/` case.
+
+### Bounded `.doclang` document-state contract
+
+The pinned Quarkdown v2.5.1 contract gives `.doclang` read/write dual
+behavior. With no argument it returns the current locale's `localizedName`,
+or an empty String when no locale is set. A positional `locale` String or
+named `locale:` setter resolves an English locale name case-insensitively
+before trying a locale tag, replaces the current locale, and returns no
+document value. The bounded IR snapshot stores only the canonical tag and the
+localized getter name.
+
+Scribium uses a checked-in, immutable pure-Rust table of the documented six
+base locales plus the pinned v2.5.1 regional examples (`en-US` and `fr-CA`).
+This avoids OS/JVM locale databases, hidden environment state, and host-
+dependent results while keeping the evaluator WASM-compatible. Identifiers
+outside that evidence-backed table, including blank or malformed tags, fail
+with a source-backed diagnostic; this is a bounded partial compatibility claim,
+not a replacement for the complete JVM/CLDR locale database.
+
+`.none` follows the pinned nullable `String? = null` path: it invokes the
+getter and does not clear the existing locale. The setter validates argument
+shape, evaluates and converts the candidate, resolves it, and commits once;
+failed resolution restores the previous locale, including state mutated by a
+nested candidate evaluation. Block bodies are rejected before their parsed
+nodes can execute because the current frontend/IR does not expose upstream's
+lossless raw `DynamicValue` body text. Ordinary callable child scopes share the
+locale state. Source-defined `.doclang` shadows the native builtin, while the
+historical `.docname`, `.docdescription`, and `.doctype` native-first behavior
+is unchanged. No localization tables, `.localize`, hyphenation, Typst/HTML
+language output, or locale-aware rendering is introduced.
+
+Evidence is in `crates/scribium-core/src/lib.rs::tests::doclang_*`,
+`crates/scribium-engine/src/locale.rs`, the IR serde test, the pinned
+`Document.kt`/locale/binder/refiner sources recorded in `SPEC_SOURCES.md`, and
+the independently authored
+`fixtures/quarkdown-conformance/cases/doclang-family/` case.
 
 ### Bounded `.theme` document-state contract
 

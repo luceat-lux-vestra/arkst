@@ -329,6 +329,7 @@ struct DocumentState {
     authors: Vec<IrDocumentAuthor>,
     keywords: Vec<String>,
     theme: Option<IrDocumentTheme>,
+    locale: Option<scribium_ir::IrDocumentLocale>,
 }
 
 impl DocumentState {
@@ -340,6 +341,7 @@ impl DocumentState {
             authors: snapshot.authors.clone(),
             keywords: snapshot.keywords.clone(),
             theme: snapshot.theme.clone(),
+            locale: snapshot.locale.clone(),
         }
     }
 
@@ -351,6 +353,7 @@ impl DocumentState {
             authors: self.authors.clone(),
             keywords: self.keywords.clone(),
             theme: self.theme.clone(),
+            locale: self.locale.clone(),
         }
     }
 }
@@ -1016,6 +1019,13 @@ impl<'a> EvaluationContext<'a> {
                     .map(IrValue::String)
                     .collect(),
             ),
+            "doclang" => IrValue::String(
+                state
+                    .locale
+                    .as_ref()
+                    .map(|locale| locale.localized_name.clone())
+                    .unwrap_or_default(),
+            ),
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
@@ -1057,6 +1067,10 @@ impl<'a> EvaluationContext<'a> {
 
     fn set_document_theme(&self, theme: IrDocumentTheme) {
         self.document_state.borrow_mut().theme = Some(theme);
+    }
+
+    fn set_document_locale(&self, locale: scribium_ir::IrDocumentLocale) {
+        self.document_state.borrow_mut().locale = Some(locale);
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
@@ -1724,9 +1738,10 @@ impl Evaluator {
             };
         }
 
-        let source_defined_shadowable_document_state =
-            matches!(name, "docauthor" | "docauthors" | "dockeywords" | "theme")
-                && context.get_function(name).is_some();
+        let source_defined_shadowable_document_state = matches!(
+            name,
+            "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
+        ) && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
                 name,
@@ -2881,6 +2896,18 @@ impl Evaluator {
             );
         }
 
+        if name == "doclang" {
+            return self.evaluate_document_language_builtin(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if body.is_some() {
             diagnostics.push(document_state_call_error(
                 format!("`.{name}` does not accept a block body"),
@@ -3092,6 +3119,167 @@ impl Evaluator {
         }
 
         context.set_document_state_value(name, value);
+        CallOutcome::NoValue
+    }
+
+    /// Implements the bounded `.doclang` read/write contract.
+    ///
+    /// The evaluator resolves only checked-in locale records. This keeps the
+    /// semantic result deterministic and WASM-compatible instead of consulting
+    /// a host/JVM locale database. Binding, candidate evaluation, conversion,
+    /// resolution, and validation complete before one shared-state commit.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_document_language_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(document_state_call_error(
+                "`.doclang` block-body fallback is deferred because the evaluator does not receive the raw body text"
+                    .to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let positional_span = |index: usize| {
+            positional_args
+                .get(index)
+                .map(|value| value_source_span(value, span))
+                .unwrap_or(*span)
+        };
+
+        if positional_args.len() > 1 {
+            diagnostics.push(document_state_call_error(
+                "`.doclang` accepts at most one positional argument (locale)".to_string(),
+                positional_span(1),
+            ));
+            return CallOutcome::Failed;
+        }
+
+        if named_args.len() > 1 {
+            diagnostics.push(document_state_call_error(
+                "`.doclang` accepts at most one named `locale` argument".to_string(),
+                named_args[1].span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        if let Some(argument) = named_args.first() {
+            if argument.name != "locale" {
+                diagnostics.push(document_state_call_error(
+                    format!("Unknown named argument `{}` for `.doclang`", argument.name),
+                    argument.name_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+
+        if positional_args.len() == 1 && named_args.len() == 1 {
+            if positional_span(0).start > named_args[0].span.start {
+                diagnostics.push(document_state_call_error(
+                    "`.doclang` cannot place an unnamed argument after a named argument"
+                        .to_string(),
+                    positional_span(0),
+                ));
+            } else {
+                diagnostics.push(document_state_call_error(
+                    "`.doclang` received the `locale` argument more than once".to_string(),
+                    named_args[0].span,
+                ));
+            }
+            return CallOutcome::Failed;
+        }
+
+        if positional_args.is_empty() && named_args.is_empty() {
+            return CallOutcome::Value(context.document_state_value("doclang"));
+        }
+
+        let previous_state = context.document_state.borrow().clone();
+        let restore_on_failure = |context: &EvaluationContext<'_>| {
+            context.restore_document_state(previous_state.clone());
+        };
+
+        let (argument, argument_span) = if positional_args.len() == 1 {
+            let evaluated = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(values) => values,
+                Err(outcome) => {
+                    restore_on_failure(context);
+                    return outcome;
+                }
+            };
+            let Some(argument) = evaluated.into_iter().next() else {
+                diagnostics.push(document_state_call_error(
+                    "`.doclang` requires one locale argument".to_string(),
+                    *span,
+                ));
+                restore_on_failure(context);
+                return CallOutcome::Failed;
+            };
+            (argument, positional_span(0))
+        } else {
+            let evaluated =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        restore_on_failure(context);
+                        return outcome;
+                    }
+                };
+            let Some(argument) = evaluated.into_iter().next() else {
+                diagnostics.push(document_state_call_error(
+                    "`.doclang` requires one locale argument".to_string(),
+                    *span,
+                ));
+                restore_on_failure(context);
+                return CallOutcome::Failed;
+            };
+            (
+                InvocationValue {
+                    value: argument.value.clone(),
+                    origin: argument.origin,
+                },
+                named_args[0].span,
+            )
+        };
+
+        // Upstream's nullable String parameter receives `.none` as null, and
+        // the shared modify-or-echo helper therefore takes its getter path.
+        if matches!(&argument.value, IrValue::None) {
+            return CallOutcome::Value(context.document_state_value("doclang"));
+        }
+
+        let Some(identifier) = builtins::scalar_string_argument(&argument) else {
+            diagnostics.push(document_state_conversion_error(
+                "`.doclang` requires a value that converts to String".to_string(),
+                argument_span,
+            ));
+            restore_on_failure(context);
+            return CallOutcome::Failed;
+        };
+
+        let Some(locale) = crate::locale::resolve(&identifier) else {
+            diagnostics.push(document_state_conversion_error(
+                format!("`.doclang` locale `{identifier}` was not found"),
+                argument_span,
+            ));
+            restore_on_failure(context);
+            return CallOutcome::Failed;
+        };
+
+        context.set_document_locale(locale);
         CallOutcome::NoValue
     }
 
@@ -7140,6 +7328,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "docauthor",
     "docauthors",
     "dockeywords",
+    "doclang",
     "theme",
 ];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];

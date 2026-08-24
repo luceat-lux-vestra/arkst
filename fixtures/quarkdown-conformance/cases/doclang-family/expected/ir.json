@@ -1,0 +1,177 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Surrounding content remains ordinary document text",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 50
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 50,
+                "end": 51
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 51
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Initial language: ",
+              "span": {
+                "source_id": 1,
+                "start": 53,
+                "end": 71
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "",
+              "span": {
+                "source_id": 1,
+                "start": 71,
+                "end": 79
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 53,
+          "end": 79
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "After English-name setter: ",
+              "span": {
+                "source_id": 1,
+                "start": 101,
+                "end": 128
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "English",
+              "span": {
+                "source_id": 1,
+                "start": 128,
+                "end": 136
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 101,
+          "end": 136
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "After regional tag replacement: ",
+              "span": {
+                "source_id": 1,
+                "start": 156,
+                "end": 188
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "English (United States)",
+              "span": {
+                "source_id": 1,
+                "start": 188,
+                "end": 196
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 156,
+          "end": 196
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Final localized name: ",
+              "span": {
+                "source_id": 1,
+                "start": 218,
+                "end": 240
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": "italiano",
+              "span": {
+                "source_id": 1,
+                "start": 240,
+                "end": 248
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 218,
+          "end": 248
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": {
+        "tag": "it",
+        "localized_name": "italiano"
+      }
+    }
+  }
+}

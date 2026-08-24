@@ -1,0 +1,15 @@
+Surrounding content remains ordinary document text.
+
+Initial language: .doclang
+
+.doclang {English}
+
+After English-name setter: .doclang
+
+.doclang {en-US}
+
+After regional tag replacement: .doclang
+
+.doclang {Italian}
+
+Final localized name: .doclang
