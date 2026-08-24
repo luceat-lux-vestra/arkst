@@ -1,0 +1,8 @@
+Surrounding content remains ordinary text.
+
+.captionposition default:{top} figures:{bottom}
+.captionposition tables:{top}
+.captionposition code:{bottom}
+.captionposition default:{bottom}
+
+Final content remains ordinary text.

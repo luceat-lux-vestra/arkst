@@ -68,6 +68,11 @@ pub struct IrDocumentState {
     /// owned and no runtime resolver crosses the IR boundary.
     #[serde(default)]
     pub locale: Option<IrDocumentLocale>,
+    /// The backend-neutral caption-position state selected by
+    /// `.captionposition`. The optional overrides distinguish inherited
+    /// positions from explicit values.
+    #[serde(default)]
+    pub caption_position: IrCaptionPositionInfo,
 }
 
 /// Backend-neutral locale data retained by the bounded `.doclang` slice.
@@ -102,6 +107,31 @@ pub struct IrDocumentAuthor {
     /// Additional string information such as `email` or `website`.
     #[serde(default)]
     pub info: Vec<(String, String)>,
+}
+
+/// The closed caption-position enum exposed by Quarkdown's
+/// `.captionposition` builtin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum IrCaptionPosition {
+    Top,
+    #[default]
+    Bottom,
+}
+
+/// Backend-neutral caption-position state retained by the bounded M3 slice.
+///
+/// `None` on an element-specific field means that the element inherits the
+/// current `default`; it is not equivalent to storing `Bottom` explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrCaptionPositionInfo {
+    #[serde(default)]
+    pub default: IrCaptionPosition,
+    #[serde(default)]
+    pub figures: Option<IrCaptionPosition>,
+    #[serde(default)]
+    pub tables: Option<IrCaptionPosition>,
+    #[serde(default)]
+    pub code_blocks: Option<IrCaptionPosition>,
 }
 
 /// The closed document-type enum exposed by Quarkdown's `.doctype` builtin.
@@ -254,6 +284,7 @@ pub enum IrCrossAxisAlignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IrEnumValue {
     DocumentType(IrDocumentType),
+    CaptionPosition(IrCaptionPosition),
     StackedMainAxisAlignment(IrMainAxisAlignment),
     StackedCrossAxisAlignment(IrCrossAxisAlignment),
     ContainerAlignment(IrContainerAlignment),
@@ -649,11 +680,12 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-        IrDictionary, IrDocumentAuthor, IrDocumentLocale, IrDocumentState, IrDocumentTheme,
-        IrDocumentType, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode,
-        IrPair, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
-        NativeTarget, TargetSpecificContent,
+        IrCaptionPosition, IrCaptionPositionInfo, IrComponent, IrContainerAlignment,
+        IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocumentAuthor,
+        IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
+        TargetSpecificContent,
     };
     use scribium_source::{SourceId, SourceSpan};
     use std::num::NonZeroU32;
@@ -1001,6 +1033,10 @@ mod tests {
         assert!(IrDocumentState::default().keywords.is_empty());
         assert!(IrDocumentState::default().theme.is_none());
         assert!(IrDocumentState::default().locale.is_none());
+        assert_eq!(
+            IrDocumentState::default().caption_position,
+            IrCaptionPositionInfo::default()
+        );
         let metadata = IrMetadata {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
@@ -1028,6 +1064,12 @@ mod tests {
                     tag: "en-US".to_string(),
                     localized_name: "English (United States)".to_string(),
                 }),
+                caption_position: IrCaptionPositionInfo {
+                    default: IrCaptionPosition::Top,
+                    figures: Some(IrCaptionPosition::Bottom),
+                    tables: None,
+                    code_blocks: Some(IrCaptionPosition::Top),
+                },
             },
             ..IrMetadata::default()
         };
@@ -1061,6 +1103,15 @@ mod tests {
                 .expect("old document state remains readable")
                 .document_type,
             IrDocumentType::Plain
+        );
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(serde_json::json!({
+                "name": "Document",
+                "description": "Description"
+            }))
+            .expect("old caption-position-less document state remains readable")
+            .caption_position,
+            IrCaptionPositionInfo::default()
         );
         assert!(
             serde_json::from_value::<IrDocumentState>(serde_json::json!({
@@ -1138,6 +1189,12 @@ mod tests {
                 tag: "it".to_string(),
                 localized_name: "italiano".to_string(),
             }),
+            caption_position: IrCaptionPositionInfo {
+                default: IrCaptionPosition::Top,
+                figures: None,
+                tables: Some(IrCaptionPosition::Bottom),
+                code_blocks: None,
+            },
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(

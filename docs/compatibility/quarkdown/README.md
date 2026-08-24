@@ -81,7 +81,7 @@ style, or layout surface to compatibility.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` are implemented only at bounded evaluator/IR state boundaries; localization, rendering, and the remaining metadata surface stay deferred | Partial (bounded) |
+| Metadata                       | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, `.captionposition`, and related document metadata | `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and `.captionposition` are implemented only at bounded evaluator/IR state boundaries; localization, caption/theme rendering, and the remaining metadata surface stay deferred | Partial (bounded) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -267,6 +267,50 @@ introduced.
 Evidence is in `crates/scribium-core/src/lib.rs::tests::theme_*`, the IR serde
 tests, the pinned [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt), the pinned [`FunctionCallRefiner.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/parser/FunctionCallRefiner.kt), and the independently authored
 `fixtures/quarkdown-conformance/cases/theme-document-state/` case.
+
+### Bounded `.captionposition` document-state contract
+
+The pinned Quarkdown v2.5.1 `.captionposition` setter accepts nullable regular
+parameters `default`, `figures`, `tables`, and `codeBlocks`, exposed to source
+as the named alias `code:`. The closed `CaptionPosition` enum accepts `top` and
+`bottom` case-insensitively, and the initial default is `bottom`. The regular
+binder permits positional, named, and positional-then-named forms; its
+`@LikelyNamed` annotation is documentation metadata rather than a named-only
+restriction. Duplicate, unknown, excess, and unnamed-after-named arguments
+remain binding failures.
+
+The upstream regular binder also accepts an indented block body. Because
+`codeBlocks` is the final bindable parameter, upstream falls back from that
+body to `codeBlocks` as a raw `DynamicValue`. Scribium does not claim this
+behavior: the current frontend/IR boundary exposes a parsed `CallBody`, not
+the lossless raw body text needed for that conversion. As with `.theme`, this
+is an explicit compatibility gap; `.captionposition` rejects a body before
+body evaluation rather than executing or silently reinterpreting it.
+
+Each invocation contributes a partial `CaptionPositionInfo` and merges it into
+the current state. A supplied `default` replaces only the default; supplied
+element-specific values replace their own override; omitted or nullable
+`.none` fields preserve the previous value. An explicit override remains
+distinct from inheriting the effective default. Scribium validates binding,
+evaluates every candidate, uses the post-evaluation shared state as the merge
+base, converts through the existing closed-enum boundary, and commits one
+complete `IrCaptionPositionInfo` snapshot. This preserves successful nested
+caption-state mutations while failures still restore the pre-invocation
+state. Body rejection is the explicit raw-body compatibility gap described
+above.
+
+The evaluator-owned state is shared by callable child scopes, while a
+source-defined `.captionposition` shadows the native setter in direct and
+chained calls. Successful calls return no document content. The immutable IR
+contains only `IrCaptionPosition` and `IrCaptionPositionInfo`; Typst/HTML
+caption placement, `.figure`, `.table`, and `.code` rendering remain deferred.
+
+Evidence is in `crates/scribium-core/src/lib.rs::tests::captionposition_*`,
+`crates/scribium-engine/src/value_conversion.rs`, the IR serde tests, the
+pinned `CaptionPosition.kt`, `CaptionPositionInfo.kt`, `Document.kt`,
+`RegularArgumentsBinder.kt`, Amber merge generator, and the independently
+authored `fixtures/quarkdown-conformance/cases/captionposition-document-state/`
+case.
 
 ### Bounded `.container` sizing contract
 

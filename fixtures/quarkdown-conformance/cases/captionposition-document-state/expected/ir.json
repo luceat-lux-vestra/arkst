@@ -1,0 +1,87 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Surrounding content remains ordinary text",
+              "span": {
+                "source_id": 1,
+                "start": 0,
+                "end": 41
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 41,
+                "end": 42
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 0,
+          "end": 42
+        }
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {
+            "Text": {
+              "content": "Final content remains ordinary text",
+              "span": {
+                "source_id": 1,
+                "start": 188,
+                "end": 223
+              }
+            }
+          },
+          {
+            "Text": {
+              "content": ".",
+              "span": {
+                "source_id": 1,
+                "start": 223,
+                "end": 224
+              }
+            }
+          }
+        ],
+        "span": {
+          "source_id": 1,
+          "start": 188,
+          "end": 224
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": null,
+      "caption_position": {
+        "default": "Bottom",
+        "figures": "Bottom",
+        "tables": "Top",
+        "code_blocks": "Bottom"
+      }
+    }
+  }
+}

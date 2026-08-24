@@ -52,12 +52,12 @@ use crate::{
 };
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
-    IrCallSegment, IrCallable, IrCallableCapture, IrCapturedFunction, IrCapturedVariable,
-    IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary,
-    IrDocument, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,
-    IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrCallSegment, IrCallable, IrCallableCapture, IrCaptionPositionInfo, IrCapturedFunction,
+    IrCapturedVariable, IrComponent, IrContainerAlignment, IrContainerComponent,
+    IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentTheme, IrEnumValue,
+    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrPair, IrParameter, IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
@@ -330,6 +330,7 @@ struct DocumentState {
     keywords: Vec<String>,
     theme: Option<IrDocumentTheme>,
     locale: Option<scribium_ir::IrDocumentLocale>,
+    caption_position: IrCaptionPositionInfo,
 }
 
 impl DocumentState {
@@ -342,6 +343,7 @@ impl DocumentState {
             keywords: snapshot.keywords.clone(),
             theme: snapshot.theme.clone(),
             locale: snapshot.locale.clone(),
+            caption_position: snapshot.caption_position,
         }
     }
 
@@ -354,6 +356,7 @@ impl DocumentState {
             keywords: self.keywords.clone(),
             theme: self.theme.clone(),
             locale: self.locale.clone(),
+            caption_position: self.caption_position,
         }
     }
 }
@@ -1073,6 +1076,10 @@ impl<'a> EvaluationContext<'a> {
         self.document_state.borrow_mut().locale = Some(locale);
     }
 
+    fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
+        self.document_state.borrow_mut().caption_position = caption_position;
+    }
+
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
         let mut state = self.document_state.borrow_mut();
         state
@@ -1740,7 +1747,7 @@ impl Evaluator {
 
         let source_defined_shadowable_document_state = matches!(
             name,
-            "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
+            "captionposition" | "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
         ) && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
@@ -2896,6 +2903,18 @@ impl Evaluator {
             );
         }
 
+        if name == "captionposition" {
+            return self.evaluate_caption_position_builtin(
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            );
+        }
+
         if name == "doclang" {
             return self.evaluate_document_language_builtin(
                 positional_args,
@@ -3698,6 +3717,151 @@ impl Evaluator {
             }
         };
         context.replace_document_keywords(keywords);
+        CallOutcome::NoValue
+    }
+
+    /// Implements the bounded `.captionposition` document-state setter.
+    ///
+    /// The upstream function accepts four nullable regular parameters. A
+    /// successful invocation contributes only the parameters that are present
+    /// and merges them into the current state; omitted and nullable `.none`
+    /// values preserve the existing field-specific state. Binding is checked
+    /// before any candidate expression is evaluated, and the complete
+    /// candidate is committed exactly once.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_caption_position_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        if body.is_some() {
+            diagnostics.push(document_state_call_error(
+                "`.captionposition` does not accept a block body".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let bindings =
+            match bind_caption_position_arguments(positional_args, named_args, span, diagnostics) {
+                Ok(bindings) => bindings,
+                Err(outcome) => return outcome,
+            };
+
+        let previous_state = context.document_state.borrow().clone();
+        let restore_on_failure = |context: &EvaluationContext<'_>| {
+            context.restore_document_state(previous_state.clone());
+        };
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => {
+                restore_on_failure(context);
+                return outcome;
+            }
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => {
+                    restore_on_failure(context);
+                    return outcome;
+                }
+            };
+
+        // Nested argument evaluation shares the document state handle. Use the
+        // post-evaluation state as the merge base so a successful inner
+        // `.captionposition` mutation is preserved by the outer commit. The
+        // pre-evaluation snapshot above remains the rollback target for any
+        // later conversion failure.
+        let mut candidate = context.document_state.borrow().caption_position;
+        for (parameter, location) in [
+            (CaptionPositionParameter::Default, bindings.default),
+            (CaptionPositionParameter::Figures, bindings.figures),
+            (CaptionPositionParameter::Tables, bindings.tables),
+            (CaptionPositionParameter::CodeBlocks, bindings.code_blocks),
+        ] {
+            let Some(location) = location else {
+                continue;
+            };
+            let (argument, argument_span) = match location {
+                CaptionPositionArgumentLocation::Positional(index) => (
+                    evaluated_positional[index].clone(),
+                    value_source_span(&positional_args[index], span),
+                ),
+                CaptionPositionArgumentLocation::Named(index) => {
+                    let argument = &evaluated_named[index];
+                    (
+                        InvocationValue {
+                            value: argument.value.clone(),
+                            origin: argument.origin,
+                        },
+                        argument.span,
+                    )
+                }
+            };
+
+            let value = match argument.value {
+                IrValue::None => None,
+                _ => match value_conversion::convert_domain_with_origin(
+                    &argument,
+                    value_conversion::DomainTarget::ClosedEnum(
+                        value_conversion::ClosedEnumTarget::CaptionPosition,
+                    ),
+                ) {
+                    Ok(value_conversion::DomainValue::Enum(IrEnumValue::CaptionPosition(
+                        value,
+                    ))) => Some(value),
+                    Ok(_) | Err(_) => {
+                        diagnostics.push(document_state_conversion_error(
+                            format!(
+                                "`.captionposition` {} must be `top` or `bottom`",
+                                parameter.name()
+                            ),
+                            argument_span,
+                        ));
+                        restore_on_failure(context);
+                        return CallOutcome::Failed;
+                    }
+                },
+            };
+
+            match parameter {
+                CaptionPositionParameter::Default => {
+                    if let Some(value) = value {
+                        candidate.default = value;
+                    }
+                }
+                CaptionPositionParameter::Figures => {
+                    if let Some(value) = value {
+                        candidate.figures = Some(value);
+                    }
+                }
+                CaptionPositionParameter::Tables => {
+                    if let Some(value) = value {
+                        candidate.tables = Some(value);
+                    }
+                }
+                CaptionPositionParameter::CodeBlocks => {
+                    if let Some(value) = value {
+                        candidate.code_blocks = Some(value);
+                    }
+                }
+            }
+        }
+
+        context.set_caption_position(candidate);
         CallOutcome::NoValue
     }
 
@@ -7287,6 +7451,142 @@ impl Evaluator {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionPositionParameter {
+    Default,
+    Figures,
+    Tables,
+    CodeBlocks,
+}
+
+impl CaptionPositionParameter {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Figures => "figures",
+            Self::Tables => "tables",
+            Self::CodeBlocks => "code",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionPositionArgumentLocation {
+    Positional(usize),
+    Named(usize),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CaptionPositionBindings {
+    default: Option<CaptionPositionArgumentLocation>,
+    figures: Option<CaptionPositionArgumentLocation>,
+    tables: Option<CaptionPositionArgumentLocation>,
+    code_blocks: Option<CaptionPositionArgumentLocation>,
+}
+
+impl CaptionPositionBindings {
+    fn slot_mut(
+        &mut self,
+        parameter: CaptionPositionParameter,
+    ) -> &mut Option<CaptionPositionArgumentLocation> {
+        match parameter {
+            CaptionPositionParameter::Default => &mut self.default,
+            CaptionPositionParameter::Figures => &mut self.figures,
+            CaptionPositionParameter::Tables => &mut self.tables,
+            CaptionPositionParameter::CodeBlocks => &mut self.code_blocks,
+        }
+    }
+}
+
+fn bind_caption_position_arguments(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<CaptionPositionBindings, CallOutcome> {
+    let mut bindings = CaptionPositionBindings::default();
+
+    if let Some(first_named_start) = named_args.iter().map(|argument| argument.span.start).min() {
+        if let Some(value) = positional_args
+            .iter()
+            .find(|value| value_source_span(value, span).start > first_named_start)
+        {
+            diagnostics.push(document_state_call_error(
+                "`.captionposition` cannot place an unnamed argument after a named argument"
+                    .to_string(),
+                value_source_span(value, span),
+            ));
+            return Err(CallOutcome::Failed);
+        }
+    }
+
+    if positional_args.len() > 4 {
+        diagnostics.push(document_state_call_error(
+            "`.captionposition` accepts at most four positional arguments".to_string(),
+            value_source_span(&positional_args[4], span),
+        ));
+        return Err(CallOutcome::Failed);
+    }
+
+    for (index, parameter) in [
+        CaptionPositionParameter::Default,
+        CaptionPositionParameter::Figures,
+        CaptionPositionParameter::Tables,
+        CaptionPositionParameter::CodeBlocks,
+    ]
+    .into_iter()
+    .enumerate()
+    .take(positional_args.len())
+    {
+        let slot = bindings.slot_mut(parameter);
+        if slot.is_some() {
+            diagnostics.push(document_state_call_error(
+                format!(
+                    "`.captionposition` received the `{}` argument more than once",
+                    parameter.name()
+                ),
+                value_source_span(&positional_args[index], span),
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(CaptionPositionArgumentLocation::Positional(index));
+    }
+
+    for (index, argument) in named_args.iter().enumerate() {
+        let Some(parameter) = (match argument.name.as_str() {
+            "default" => Some(CaptionPositionParameter::Default),
+            "figures" => Some(CaptionPositionParameter::Figures),
+            "tables" => Some(CaptionPositionParameter::Tables),
+            "code" => Some(CaptionPositionParameter::CodeBlocks),
+            _ => None,
+        }) else {
+            diagnostics.push(document_state_call_error(
+                format!(
+                    "Unknown named argument `{}` for `.captionposition`",
+                    argument.name
+                ),
+                argument.name_span,
+            ));
+            return Err(CallOutcome::Failed);
+        };
+
+        let slot = bindings.slot_mut(parameter);
+        if slot.is_some() {
+            diagnostics.push(document_state_call_error(
+                format!(
+                    "`.captionposition` received the `{}` argument more than once",
+                    parameter.name()
+                ),
+                argument.span,
+            ));
+            return Err(CallOutcome::Failed);
+        }
+        *slot = Some(CaptionPositionArgumentLocation::Named(index));
+    }
+
+    Ok(bindings)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeDispatchOwner {
     #[cfg(test)]
     RegularScalar,
@@ -7330,6 +7630,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "dockeywords",
     "doclang",
     "theme",
+    "captionposition",
 ];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];

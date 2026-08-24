@@ -1521,6 +1521,241 @@ mod tests {
     }
 
     #[test]
+    fn captionposition_initial_state_is_explicitly_bottom_and_emits_no_output() {
+        let (result, _) = compile_source("before\n.captionposition\nafter\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "before\nafter");
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo::default()
+        );
+        assert!(result
+            .ir
+            .metadata
+            .document_state
+            .caption_position
+            .figures
+            .is_none());
+    }
+
+    #[test]
+    fn captionposition_preserves_unrelated_document_state_fields() {
+        let (result, _) = compile_source(
+            ".docname {Existing name}\n.docdescription {Existing description}\n.captionposition figures:{top}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(result.ir.metadata.document_state.name, "Existing name");
+        assert_eq!(
+            result.ir.metadata.document_state.description,
+            "Existing description"
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position.figures,
+            Some(crate::ir::IrCaptionPosition::Top)
+        );
+    }
+
+    #[test]
+    fn captionposition_accepts_all_positional_named_and_mixed_parameter_forms() {
+        let (positional, _) = compile_source(".captionposition {top} {bottom} {TOP} {BoTtOm}\n");
+        assert!(positional.diagnostics.is_empty(), "{positional:?}");
+        assert_eq!(
+            positional.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Top,
+                figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                tables: Some(crate::ir::IrCaptionPosition::Top),
+                code_blocks: Some(crate::ir::IrCaptionPosition::Bottom),
+            }
+        );
+
+        let (named, _) = compile_source(
+            ".captionposition default:{bottom} figures:{TOP} tables:{top} code:{bottom}\n",
+        );
+        assert!(named.diagnostics.is_empty(), "{named:?}");
+        assert_eq!(
+            named.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Bottom,
+                figures: Some(crate::ir::IrCaptionPosition::Top),
+                tables: Some(crate::ir::IrCaptionPosition::Top),
+                code_blocks: Some(crate::ir::IrCaptionPosition::Bottom),
+            }
+        );
+
+        let (mixed, _) = compile_source(".captionposition {top} tables:{bottom} code:{top}\n");
+        assert!(mixed.diagnostics.is_empty(), "{mixed:?}");
+        assert_eq!(
+            mixed.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Top,
+                figures: None,
+                tables: Some(crate::ir::IrCaptionPosition::Bottom),
+                code_blocks: Some(crate::ir::IrCaptionPosition::Top),
+            }
+        );
+        assert!(mixed.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn captionposition_repeated_calls_merge_and_preserve_unmentioned_overrides() {
+        let source = ".captionposition default:{top} figures:{bottom}\n.captionposition tables:{top}\n.captionposition code:{bottom}\n.captionposition default:{bottom}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Bottom,
+                figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                tables: Some(crate::ir::IrCaptionPosition::Top),
+                code_blocks: Some(crate::ir::IrCaptionPosition::Bottom),
+            }
+        );
+
+        let (none, _) =
+            compile_source(".captionposition figures:{top}\n.captionposition figures:{.none}\n");
+        assert!(none.diagnostics.is_empty(), "{none:?}");
+        assert_eq!(
+            none.ir.metadata.document_state.caption_position.figures,
+            Some(crate::ir::IrCaptionPosition::Top)
+        );
+    }
+
+    #[test]
+    fn captionposition_invalid_bindings_and_values_are_source_backed_and_atomic() {
+        for invalid in [
+            ".captionposition default:{top} default:{bottom}",
+            ".captionposition {top} default:{bottom}",
+            ".captionposition unknown:{top}",
+            ".captionposition codeBlocks:{top}",
+            ".captionposition {top} {bottom} {top} {bottom} {top}",
+            ".captionposition tables:{top} {bottom}",
+        ] {
+            let source =
+                format!(".captionposition default:{{top}} figures:{{bottom}}\n{invalid}\n");
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{invalid:?}: {result:?}");
+            assert_eq!(
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id)
+            );
+            assert_eq!(
+                result.ir.metadata.document_state.caption_position,
+                crate::ir::IrCaptionPositionInfo {
+                    default: crate::ir::IrCaptionPosition::Top,
+                    figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                    tables: None,
+                    code_blocks: None,
+                },
+                "{invalid:?}: {result:?}"
+            );
+        }
+
+        let source = ".captionposition default:{top} figures:{bottom}\n.captionposition default:{bottom} figures:{middle}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Top,
+                figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                tables: None,
+                code_blocks: None,
+            }
+        );
+    }
+
+    #[test]
+    fn captionposition_body_is_rejected_before_nested_state_mutation() {
+        let source = ".captionposition default:{top}\n.captionposition\n    .captionposition figures:{bottom}\n    .uppercase {nested}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Top,
+                ..crate::ir::IrCaptionPositionInfo::default()
+            }
+        );
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn captionposition_nested_candidate_failure_restores_nested_state_mutation() {
+        let source = ".captionposition default:{bottom} figures:{top}\n.captionposition default:{top} figures:{.pair {.captionposition tables:{top}} {middle}}\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Bottom,
+                figures: Some(crate::ir::IrCaptionPosition::Top),
+                tables: None,
+                code_blocks: None,
+            }
+        );
+    }
+
+    #[test]
+    fn captionposition_success_preserves_nested_argument_state_mutation() {
+        let source = ".function {settable}\n    .captionposition tables:{top}\n    .lowercase {BOTTOM}\n\n.captionposition figures:{.settable}\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(result.ir.nodes.is_empty());
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position,
+            crate::ir::IrCaptionPositionInfo {
+                default: crate::ir::IrCaptionPosition::Bottom,
+                figures: Some(crate::ir::IrCaptionPosition::Bottom),
+                tables: Some(crate::ir::IrCaptionPosition::Top),
+                code_blocks: None,
+            }
+        );
+    }
+
+    #[test]
+    fn captionposition_state_is_shared_by_nested_callables_and_source_functions_shadow_it() {
+        let source = ".function {setup}\n    .captionposition figures:{top}\n\n.function {outer}\n    .setup\n\n.outer\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.caption_position.figures,
+            Some(crate::ir::IrCaptionPosition::Top)
+        );
+
+        for source in [
+            ".function {captionposition}\n    shadowed\n\n.captionposition\n",
+            ".function {captionposition}\n    .pair {left} {right}\n\n.captionposition::size\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert!(result.diagnostics.is_empty(), "{source:?}: {result:?}");
+            assert_eq!(
+                output_text(&result),
+                if source.contains("::size") {
+                    "2"
+                } else {
+                    "shadowed"
+                },
+                "{source:?}"
+            );
+            assert_eq!(
+                result.ir.metadata.document_state.caption_position,
+                crate::ir::IrCaptionPositionInfo::default()
+            );
+        }
+    }
+
+    #[test]
     fn theme_color_only_is_lowercased_and_emits_no_output() {
         let (result, _) = compile_source(".theme {DaRk}\nSurrounding content\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");

@@ -381,6 +381,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
 | Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; upstream block-body fallback remains a documented deferred gap | Valid BCP 47/name locale records outside the checked-in table, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
+| `.captionposition` document-state | Nullable `default`, `figures`, `tables`, and `@Name("code") codeBlocks`; partial state merged into current document layout state; regular body fallback targets final `codeBlocks` upstream | Typed evaluator-owned caption state uses post-evaluation shared state as the successful merge base, commits one immutable `IrCaptionPositionInfo`, and rejects bodies before evaluation because raw `DynamicValue` text is unavailable | Preserve nested successful mutations and explicit-versus-inherited overrides; keep body fallback separate from parsed `CallBody` semantics | Implemented at bounded evaluator/IR boundary; upstream body-to-final-`codeBlocks` fallback is an explicit compatibility gap | Raw body representation and caption rendering/placement |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -505,8 +506,46 @@ checked-in bounded table, `.localize`,
 localization tables, theme resolution/validation/defaults, rendering policy,
 hyphenation, front-matter/document-state merging, generalized DynamicValue
 conversion, and other document metadata remain deferred. `.docauthor`,
-`.docauthors`, `.dockeywords`, `.doclang`, and `.theme` are implemented only
-at their bounded evaluator/IR document-state boundaries.
+`.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and `.captionposition` are
+implemented only at their bounded evaluator/IR document-state boundaries.
+
+### Bounded `.captionposition` state (Issue #145)
+
+The pinned v2.5.1 implementation defines `CaptionPositionInfo` with a
+non-nullable `default` initialized to `BOTTOM` and nullable `figures`, `tables`,
+and `codeBlocks` overrides. `Document.captionPosition` accepts the named
+source alias `code` for `codeBlocks`, constructs a partial state, and calls the
+generated `CaptionPositionInfo.merge(currentPosition)` extension. Amber's
+v2.2.0 merge generator keeps non-nullable receiver properties and uses the
+receiver's nullable properties first, falling back to `other` only when they
+are null. Consequently, default updates preserve existing per-kind overrides,
+while omitted or nullable `.none` overrides preserve their previous values.
+
+The regular binder also maps an indented body to the final bindable parameter.
+For `.captionposition`, that means upstream's block body falls back to
+`codeBlocks` as raw `DynamicValue` text. Scribium records this as an explicit
+compatibility gap: the current frontend/IR boundary exposes parsed `CallBody`
+nodes rather than lossless raw body text, so the setter rejects a body before
+body evaluation, matching the existing `.theme` boundary.
+
+Scribium maps that contract to the existing evaluator-owned `DocumentState` and
+immutable `IrDocument.metadata.document_state` snapshot. The representation is
+closed and backend-neutral: `IrCaptionPosition` has only `Top` and `Bottom`,
+and `IrCaptionPositionInfo` retains the explicit-versus-inherited distinction
+for each override. The evaluator validates the raw regular-argument binding
+shape before evaluating candidates, evaluates and converts all bound values,
+uses the post-evaluation shared state as the merge base, restores the complete
+pre-invocation state on any failure, and commits once. This preserves successful
+nested caption-state mutations from argument evaluation. Callable scopes share
+the document state, and source-defined direct/chained `captionposition` calls
+shadow the native setter under the established policy.
+
+This slice returns no document content and stops at the immutable IR snapshot.
+It does not implement caption rendering, Typst/HTML placement, `.figure`,
+`.table`, `.code`, or a generalized layout metadata framework. Independent
+observable evidence is retained in
+`fixtures/quarkdown-conformance/cases/captionposition-document-state/` and the
+focused core/evaluator/IR tests.
 
 The `.br` slice does not promote the broader text/layout family: `.text`,
 `.codespan`, `.clip`, `.float`, and `.fullspan` remain separate deferred work.
