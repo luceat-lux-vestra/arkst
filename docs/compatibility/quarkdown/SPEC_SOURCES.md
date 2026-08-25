@@ -564,3 +564,25 @@ provenance additionally covers `Localization.kt`, `Stdlib.kt`, `Context.kt`,
 [`DOCUMENT_STATE_AUDIT_MANIFEST.tsv`](DOCUMENT_STATE_AUDIT_MANIFEST.tsv) and
 offline `document_state_audit` test ensure the 43-name sweep remains complete
 without network access.
+
+## Issue #154 pinned content/media/Markdown-extension sources
+
+Issue #154 uses only Quarkdown v2.5.1 commit
+`107ec3a9482f10d6f90d7580f8409b46a719d18e` as canonical upstream evidence.
+The complete row-level provenance is in
+[`CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv`](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv).
+The source families below are the pinned public-surface sweep used to derive
+that manifest; no implementation or upstream test is copied.
+
+| Pinned source | Observable surface used by #154 |
+|---|---|
+| [`Primitives.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Primitives.kt) | Heading, paragraph, link, image, pagebreak, code, math, and figure signatures, body kinds, captions, refs, and presentation options |
+| [`Layout.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Layout.kt) | Container, alignment, float, row/column/grid, landscape/fullspan, whitespace, clip, box/collapse, numbered, and table content contracts |
+| [`TableComputation.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/TableComputation.kt) | Table sorting/filtering/computation, column extraction, and row-based table generation |
+| [`Text.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Text.kt) and [`Markdown.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Markdown.kt) | Text, line breaks, code spans, inline matching, packaged text, and raw Markdown content |
+| [`Html.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Html.kt) | HTML options, raw HTML, CSS, CSS properties, llms.txt, base URL, and target-specific output behavior |
+| [`Reference.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Reference.kt) | Cross-reference producer and identifier consumer contract |
+| [`Slides.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Slides.kt) | Global slide options as #153 handoff, fragment and speaker-note content as #154 consumers |
+| [`Icon.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Icon.kt), [`Emoji.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Emoji.kt), [`Mermaid.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Mermaid.kt), and [`MiscElements.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/MiscElements.kt) | Icon, emoji, diagram/chart/subdocument graph, and keybinding content producers |
+| Pinned lexer/parser tree at [`107ec3a`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core) | Sized image grammar, inline/display math, explicit page breaks, custom IDs, captions, compact footnotes, cross-reference syntax, raw-content boundaries, and Markdown-vs-Quarkdown parser layers |
+| [`Document.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Document.kt) and [`Data.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Data.kt) | #153 global caption/numbering/page/macro handoffs and #155 resource/data consumer edges |
