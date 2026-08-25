@@ -1,0 +1,51 @@
+# Issue #152 strict inventory of public Quarkdown v2.5.1 document metadata/state surfaces.
+# target_sha=107ec3a9482f10d6f90d7580f8409b46a719d18e
+# audit_base=1bd8cda073be4194ffce8e9e58ef4cfc4d742be1
+# declared_total=43
+# declared_152_owned=8
+# declared_cross_owned=33
+# declared_canonical_handoff=2
+# Columns: kind\tcanonical_name\taliases\townership\tstatus\tpinned_provenance\tscribium_evidence\tfollow_up
+owned	doctype	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L107-L121;DocumentType.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L15-L62	evaluator.rs#L2930-L3035;ir/lib.rs#L40-L75;core-tests::document_state_doctype	#165;#167
+owned	docname	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L142-L155	evaluator.rs#L2930-L3035;core-tests::document_state_name	#166;#167
+owned	docdescription	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L176-L186	evaluator.rs#L2930-L3035;core-tests::document_state_description	#166;#167
+owned	docauthor	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L209-L219	evaluator.rs#L3040-L3141;core-tests::docauthor_*;fixtures/quarkdown-conformance/cases/docauthor-family	#165;#166;#167
+owned	docauthors	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L256-L287;MarkdownListToDictionaryValue.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L39-L86	evaluator.rs#L3305-L3499;core-tests::docauthors_*;fixtures/quarkdown-conformance/cases/docauthors-family	#165;#166;#167
+owned	dockeywords	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L312-L324	evaluator.rs#L3501-L3605;core-tests::dockeywords_*;fixtures/quarkdown-conformance/cases/dockeywords-family	#165;#166;#167
+owned	doclang	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L356-L372;LocaleLoader.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L8-L41;Locale.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L6-L47	evaluator.rs#L3144-L3303;locale.rs#L1-L180;core-tests::doclang_*;fixtures/quarkdown-conformance/cases/doclang-family	#166;#167;#173
+owned	theme	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L389-L405;DocumentTheme.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L3-L30	evaluator.rs#L3900-L4074;ir/lib.rs#L78-L99;core-tests::theme_*;fixtures/quarkdown-conformance/cases/theme-document-state	#166;#167
+canonical-handoff	localization	none	#151	NOT_APPLICABLE	Localization.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L23-L126;Stdlib.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L17-L61;lib/localization.qd@107ec3a9482f10d6f90d7580f8409b46a719d18e#L1-L143	docs/compatibility/quarkdown/STDLIB_BUILTINS_AUDIT_MANIFEST.tsv#L97;core-tests::stdlib_builtin_audit	#151;#156
+canonical-handoff	localize	none	#151	NOT_APPLICABLE	Localization.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L128-L155;Context.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L147-L162;Stdlib.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L51-L61	docs/compatibility/quarkdown/STDLIB_BUILTINS_AUDIT_MANIFEST.tsv#L98;core-tests::stdlib_builtin_audit	#151;#156
+cross-owned	numbering	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L447-L495	evaluator.rs#L7821-L7823	#153
+cross-owned	nonumbering	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L491-L495	evaluator.rs#L7821-L7823	#153
+cross-owned	font	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L529-L551	evaluator.rs#L7821-L7823	#153
+cross-owned	paragraphstyle	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L568-L591	evaluator.rs#L7821-L7823	#153
+cross-owned	captionposition	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L601-L623	evaluator.rs#L3900-L4074;fixtures/quarkdown-conformance/cases/captionposition-document-state	#153
+cross-owned	texmacro	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L637-L651	evaluator.rs#L7821-L7823	#153
+cross-owned	pageformat	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L705-L762	evaluator.rs#L7821-L7823	#153
+cross-owned	pagemargin	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L776-L805	evaluator.rs#L7821-L7823	#153
+cross-owned	footer	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L799-L805	evaluator.rs#L7821-L7823	#153
+cross-owned	currentpage	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L815-L817	evaluator.rs#L7821-L7823	#153
+cross-owned	totalpages	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L817-L829	evaluator.rs#L7821-L7823	#153
+cross-owned	formatpagenumber	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L842-L860	evaluator.rs#L7821-L7823	#153
+cross-owned	resetpagenumber	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L844-L860	evaluator.rs#L7821-L7823	#153
+cross-owned	lastheading	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L917-L929	evaluator.rs#L7821-L7823	#153
+cross-owned	autopagebreak	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L937-L958	evaluator.rs#L7821-L7823	#153
+cross-owned	noautopagebreak	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L958-L974	evaluator.rs#L7821-L7823	#153
+cross-owned	marker	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L974-L998	evaluator.rs#L7821-L7823	#153
+cross-owned	navigation	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L998-L1031	evaluator.rs#L7821-L7823	#153
+cross-owned	tableofcontents	none	#153	NOT_APPLICABLE	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L1031-L1050	evaluator.rs#L7821-L7823	#153
+cross-owned	slides	none	#153	NOT_APPLICABLE	Slides.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L22-L40	evaluator.rs#L7821-L7823	#153
+cross-owned	htmloptions	none	#154	NOT_APPLICABLE	Html.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L41-L49	evaluator.rs#L7821-L7823	#154
+cross-owned	fragment	none	#154	NOT_APPLICABLE	Slides.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L42-L66	evaluator.rs#L7821-L7823	#154
+cross-owned	speakernote	none	#154	NOT_APPLICABLE	Slides.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L68-L92	evaluator.rs#L7821-L7823	#154
+cross-owned	include	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L119-L144	evaluator.rs#L7821-L7823	#155
+cross-owned	includeall	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L145-L160	evaluator.rs#L7821-L7823	#155
+cross-owned	subdocument	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L162-L188	evaluator.rs#L7821-L7823	#155
+cross-owned	read	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L47-L75	evaluator.rs#L7821-L7823	#155
+cross-owned	pathtoroot	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L95-L117	evaluator.rs#L7821-L7823	#155
+cross-owned	listfiles	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L77-L93	evaluator.rs#L7821-L7823	#155
+cross-owned	filename	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L29-L45	evaluator.rs#L7821-L7823	#155
+cross-owned	json	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L190-L225	evaluator.rs#L7821-L7823	#155
+cross-owned	csv	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L227-L258	evaluator.rs#L7821-L7823	#155
+cross-owned	env	none	#155	NOT_APPLICABLE	Data.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L260-L277	evaluator.rs#L7821-L7823	#155

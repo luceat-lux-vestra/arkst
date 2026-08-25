@@ -265,6 +265,14 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .count(),
         1
     );
+    for name in ["localization", "localize"] {
+        let row = owned
+            .iter()
+            .find(|row| row[0] == name)
+            .expect("localization row");
+        assert_eq!(row[3], "#151");
+        assert_eq!(row[4], "UNSUPPORTED");
+    }
     assert_eq!(
         rows.iter()
             .filter(|row| matches!(row[3], "#150" | "#152" | "#153" | "#154" | "#155"))

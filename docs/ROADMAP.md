@@ -121,7 +121,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded `.doclang` document-state semantics | Completed (bounded deterministic evaluator/IR slice; localization and rendering deferred) |
 | Bounded `.theme` document-state semantics | Completed (bounded evaluator/IR boundary; upstream block-body fallback deferred) |
 | Bounded `.captionposition` document-state semantics | Completed (bounded evaluator/IR snapshot; caption rendering deferred) |
-| Broader document metadata and programmable-document convergence | Planned |
+| Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; bounded implementation follow-ups are frozen until #156 reconciliation |
 
 ## M4 — Developer Experience
 

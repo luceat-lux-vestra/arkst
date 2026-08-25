@@ -97,6 +97,14 @@ evidence.
 - Standalone upstream super declaration: 0; it is the implicit extend
   callable described above.
 
+The canonical ownership reconciliation with #152 retains `localization` and
+`localize` in this #151 general stdlib inventory. #152 records both names only
+as `NOT_APPLICABLE` ownership handoffs, so the #151 total remains 60 and its
+10-name `UNSUPPORTED` count remains unchanged. The standard-library initial
+state is also not an empty localization map after registration: `Stdlib` loads
+`/lib/localization.qd`, whose `.localization name:{std}` call seeds the standard
+translation table before user functions execute.
+
 ## Canonical #151 matrix
 
 The manifest gives each row's exact v2.5.1 signature and pinned source
