@@ -89,6 +89,15 @@ caption/numbering/reference consumers, and Typst/output fidelity. Parser
 retention is not treated as semantic or end-to-end support. The audit is
 documentation/guard-only and keeps implementation frozen until #156.
 
+The canonical filesystem, project, data, and resource-backed inventory is
+[`FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md`](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md)
+with its machine-checkable
+[`FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv`](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv).
+It audits the pinned v2.5.1 resource surface, nested/source-relative bases,
+project boundaries, remote/network behavior, deterministic external inputs,
+native/WASM implications, and the current Typst source-context coupling. The
+audit is documentation/guard-only and preserves the #155 → #156 → #187 order.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
