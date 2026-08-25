@@ -6,7 +6,7 @@
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
 - **Review date:** 2026-08-25
-- **Scribium comparison baseline:** `d049c64934bc42b81bd859d0c70667681718afa2`
+- **Scribium comparison baseline:** `4a9112a9ee840374350dd9a90b65f58cce96eb08`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
@@ -25,6 +25,16 @@ rows are `PARTIAL`. `.localization`/`.localize` remain canonical #151-owned
 `NOT_APPLICABLE` ownership handoffs. The broader classification index below
 remains a family implementation index; it does not override the canonical
 #151/#152 rows or promote evaluator/IR state to end-to-end renderer support.
+
+For layout, pagination, style, and document-wide presentation state, the
+canonical per-surface #147 classification is now
+[`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md)
+and its [manifest](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv). The
+historical family rows below intentionally remain an index for cross-audit
+navigation; they do not override the #153 result. In particular, unresolved
+call retention is `PARSED_ONLY` in #153, while component-local `.row`,
+`.column`, `.grid`, `.container`, `.align`, `.center`, `.landscape`, and
+`.whitespace` remain #154 handoffs rather than document state.
 
 Status meanings:
 

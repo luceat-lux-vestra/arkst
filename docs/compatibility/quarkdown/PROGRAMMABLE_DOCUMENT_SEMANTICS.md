@@ -20,6 +20,13 @@ maintained in [`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.m
 The historical baseline below remains intentionally fixed to the #61 closure
 record and is not the current #150 support snapshot.
 
+The layout/document-configuration boundary is audited separately by
+[`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md)
+(#153). That audit owns document-wide numbering, page, font, paragraph,
+caption, pagination, navigation, and slide configuration; this document owns
+the programmable evaluator architecture and does not promote unresolved
+layout calls or component-local layout into `DocumentState`.
+
 ## Historical architecture gate and current status
 
 The original architecture gate recorded in ADR-0020 selected the one-IR,
