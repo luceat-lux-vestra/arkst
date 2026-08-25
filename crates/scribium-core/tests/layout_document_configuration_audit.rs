@@ -179,7 +179,10 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
 #[test]
 fn audit_records_pinned_pagination_renderer_divergences() {
     assert!(AUDIT.contains("does not implement that full grammar"));
-    assert!(AUDIT.contains("only the exact strings `1`, `a`, `A`, `i`, and `I`"));
+    assert!(AUDIT.contains("transforms only the exact strings"));
+    for format in ["`1`", "`a`", "`A`", "`i`", "`I`"] {
+        assert!(AUDIT.contains(format), "missing page-number format: {format}");
+    }
     assert!(AUDIT.contains("Zero or negative values are ignored at render"));
     assert!(AUDIT.contains("performs no range check"));
     assert!(AUDIT.contains("not an upstream call-time validation rule"));
