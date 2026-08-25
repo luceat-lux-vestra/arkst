@@ -244,9 +244,16 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .iter()
             .filter(|row| row[4] == "SUPPORTED_SEMANTICS")
             .count(),
-        43
+        41
     );
-    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 6);
+    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 8);
+    for name in ["capitalize", "startswith"] {
+        assert_eq!(
+            owned.iter().find(|row| row[0] == name).map(|row| row[4]),
+            Some("PARTIAL"),
+            "Unicode contract gap must remain explicit for {name}"
+        );
+    }
     assert_eq!(
         owned.iter().filter(|row| row[4] == "UNSUPPORTED").count(),
         10
@@ -276,6 +283,25 @@ fn representative_scalar_and_optionality_contracts_are_observable() {
     let (result, _) = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(output_text(&result), "3\nHELLO\ntrue");
+}
+
+#[test]
+fn unicode_string_gaps_are_observable_without_production_changes() {
+    // Pinned StringCase.Capitalize uses replaceFirstChar(Char::titlecase),
+    // while the current Scribium path uses Rust char::to_uppercase().
+    let (capitalize, _) = compile_source(".capitalize {ǳabc}\n");
+    assert!(capitalize.diagnostics.is_empty(), "{capitalize:?}");
+    let current_capitalize = output_text(&capitalize);
+    assert_eq!(current_capitalize, "Ǳabc");
+    assert_ne!(current_capitalize, "ǲabc");
+
+    // Pinned Strings.startsWith delegates to Kotlin's ignoreCase comparison;
+    // the current Scribium path lowercases both complete strings first.
+    let (startswith, _) = compile_source(".startswith {Σigma} {ς} ignorecase:{true}\n");
+    assert!(startswith.diagnostics.is_empty(), "{startswith:?}");
+    let current_startswith = output_text(&startswith);
+    assert_eq!(current_startswith, "false");
+    assert_ne!(current_startswith, "true");
 }
 
 #[test]
