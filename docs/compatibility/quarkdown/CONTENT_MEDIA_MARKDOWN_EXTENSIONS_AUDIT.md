@@ -124,6 +124,35 @@ dependency:
 No generic style framework, layout framework, or new semantic layer is
 introduced by this inventory.
 
+The canonical implementation ownership is intentionally split at the
+producer and shared-index boundaries:
+
+- [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) owns
+  structural content plus shared caption, identifier, reference, and index
+  infrastructure. It is not the producer owner for `.code`, `.math`, or the
+  generated/computed table family.
+- [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) owns image,
+  media, icon, diagram, and chart producers; [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
+  remains the resource/environment owner.
+- [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) owns table
+  producers and table computation. It consumes #181 shared caption,
+  identifier, reference, and index infrastructure.
+- [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) owns the
+  component-local producer family `.text`, `.box`, `.todo`, `.collapse`,
+  `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
+  `.speakernote`. The remaining component-local `.container` subcontracts
+  are linked there without transferring document-wide state ownership.
+- [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) owns inline
+  and display math, `.math`, code presentation/captions, `.codespan`, and
+  explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,
+  identifier, reference, and index infrastructure; `.texmacro` remains #180.
+
+The bounded `.align`, `.center`, `.row`, `.column`, `.grid`, `.landscape`,
+`.whitespace`, and `.br` rows have no remaining #154 implementation gap in
+the evidenced contract. They are not assigned to [#175](https://github.com/luceat-lux-vestra/scribium/issues/175):
+#175 remains document-wide only, including `.pageformat.columns` and global
+automatic page-break/numbering policy.
+
 ## Captions, numbering, labels, and references
 
 The audit reconstructs the producer/consumer edges without combining their
@@ -132,6 +161,10 @@ state models:
 - .captionposition is #153-owned global state. Figure, table, code, and
   related caption-producing content is #154-owned. The manifest records the
   handoff and each producer separately.
+- #181 owns the shared caption/identifier/reference/index infrastructure;
+  figure and structural content producers use it, #183 owns table producers,
+  and #185 owns code/math producers. This is a dependency edge, not a second
+  producer implementation in #181.
 - .numbering and .nonumbering are #153-owned policy. Headings, figures,
   tables, equations, code, footnotes, and .numbered are #154 consumers whose
   derived traversal/index behavior is not yet implemented.
@@ -198,7 +231,9 @@ BackendRaw, and equivalent backend-code escape hatches.
 
 ## Math and slide boundaries
 
-The math rows cover inline/display syntax and the .math content consumer only.
+The math rows cover inline/display syntax and the .math producer/consumer;
+their producer implementation is assigned to #185, with #181 retained only as
+the shared caption/identifier/reference/index dependency.
 .texmacro remains the distinct #153/#180 boundary: raw TeX body, document macro
 map, source-order replacement, and math-renderer consumption belong to
 [#180](https://github.com/luceat-lux-vestra/scribium/issues/180). No .texmacro
@@ -216,11 +251,11 @@ reused where it already describes the boundary:
 
 | Follow-up | Cohesive boundary |
 |---|---|
-| [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) | Structural content, captions, identifiers, anchors, references, footnotes, callouts, and ordinary content producers |
+| [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) | Structural content plus shared caption/identifier/reference/index infrastructure; no `.code`/`.math` producer implementation |
 | [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) | Image/media sizing, media storage, icons, diagrams, chart/figure resource and renderer contract |
-| [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) | Callable/generated/computed table representation, traversal, conversion, and output |
-| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | Slide fragments and speaker-note content representation/output |
-| [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) | Math syntax/content, code presentation, captions, and explicit breaks |
+| [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) | Callable/generated/computed table producers, traversal, conversion, and output; consumes #181 shared infrastructure |
+| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | `.text`, `.box`, `.todo`, `.collapse`, `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and `.speakernote`; remaining `.container` subcontracts are linked here |
+| [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) | Inline/display math, `.math`, code presentation/captions, `.codespan`, and explicit breaks; consumes #181 shared infrastructure |
 | [#155](https://github.com/luceat-lux-vestra/scribium/issues/155) | Resource/environment ownership used by media and content consumers |
 | [#149](https://github.com/luceat-lux-vestra/scribium/issues/149), [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
 | [#158](https://github.com/luceat-lux-vestra/scribium/issues/158), [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Nested tight calls and inline Markdown in content arguments |
@@ -243,7 +278,9 @@ checks, without network access:
 - pinned provenance in every row;
 - required Markdown-versus-Quarkdown boundary language;
 - required #153/#155/#180 dependency edges;
-- status-specific evidence and actionable follow-up ownership; and
+- status-specific evidence and exact status-to-gap consistency;
+- representative #181–#185 producer/shared-infrastructure ownership, with no
+  #175 attribution for component-local rows; and
 - no accidental production semantic/state/backend scope in the audit record.
 
 Repository-wide checks are reported separately from this document. A passing

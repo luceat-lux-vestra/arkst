@@ -21,6 +21,69 @@ const STATUSES: &[&str] = &[
     "NOT_APPLICABLE",
     "UNKNOWN",
 ];
+const SUPPORTED_END_TO_END_GAP_PREFIX: &str = "No #154-owned gap";
+const SUPPORTED_SEMANTICS_GAP_MARKERS: &[&str] = &["represented", "rendered", "unavailable"];
+const REPRESENTATIVE_OWNERSHIP: &[(&str, &str)] = &[
+    ("primitive:text", "#184"),
+    ("primitive:box", "#184"),
+    ("primitive:todo", "#184"),
+    ("primitive:collapse", "#184"),
+    ("primitive:textcollapse", "#184"),
+    ("primitive:clip", "#184"),
+    ("primitive:float", "#184"),
+    ("primitive:fullspan", "#184"),
+    ("primitive:fragment", "#184"),
+    ("primitive:speakernote", "#184"),
+    ("syntax:qd-inline-math", "#185"),
+    ("syntax:qd-display-math", "#185"),
+    ("primitive:math", "#185"),
+    ("primitive:code", "#185"),
+    ("syntax:qd-code-caption", "#185"),
+    ("primitive:codespan", "#185"),
+    ("syntax:qd-pagebreak", "#185"),
+    ("primitive:pagebreak", "#185"),
+    ("primitive:heading", "#181"),
+    ("primitive:paragraph", "#181"),
+    ("primitive:figure", "#181"),
+    ("primitive:numbered", "#181"),
+    ("primitive:ref", "#181"),
+    ("syntax:qd-custom-id", "#181"),
+    ("syntax:qd-caption-delimiter", "#181"),
+    ("syntax:qd-cross-reference", "#181"),
+    ("markdown:footnotes", "#181"),
+    ("syntax:qd-image-size", "#182"),
+    ("primitive:image", "#182"),
+    ("primitive:icon", "#182"),
+    ("primitive:mermaid", "#182"),
+    ("primitive:xychart", "#182"),
+    ("primitive:table", "#183"),
+    ("primitive:table-sort", "#183"),
+    ("primitive:table-filter", "#183"),
+    ("primitive:table-compute", "#183"),
+    ("primitive:table-column", "#183"),
+    ("primitive:table-columns", "#183"),
+    ("primitive:table-by-rows", "#183"),
+];
+const COMPONENT_LOCAL_SURFACES: &[&str] = &[
+    "primitive:container",
+    "primitive:align",
+    "primitive:center",
+    "primitive:float",
+    "primitive:row",
+    "primitive:column",
+    "primitive:grid",
+    "primitive:landscape",
+    "primitive:fullspan",
+    "primitive:whitespace",
+    "primitive:clip",
+    "primitive:box",
+    "primitive:collapse",
+    "primitive:textcollapse",
+    "primitive:todo",
+    "primitive:text",
+    "primitive:fragment",
+    "primitive:speakernote",
+];
 const REQUIRED_SURFACES: &[&str] = &[
     "markdown:blocks",
     "markdown:inlines",
@@ -141,6 +204,11 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
             "unpinned provenance: {surface:?}"
         );
         assert!(
+            !surface[28].contains("The pinned contract is not represented at the required semantic and output layers."),
+            "generic remaining gap hides the row contract: {}",
+            surface[1]
+        );
+        assert!(
             STATUSES.contains(&surface[26]),
             "invalid status: {}",
             surface[26]
@@ -163,6 +231,74 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
         } else {
             assert!(surface[0].starts_with("handoff:#"));
             assert_eq!(surface[26], "NOT_APPLICABLE");
+        }
+
+        match surface[26] {
+            "SUPPORTED_END_TO_END" => {
+                assert!(
+                    surface[28].starts_with(SUPPORTED_END_TO_END_GAP_PREFIX),
+                    "end-to-end support needs an exact bounded no-gap statement: {}",
+                    surface[1]
+                );
+                assert!(
+                    surface[15].contains("lowering")
+                        || surface[16].contains("output")
+                        || surface[16].contains("Typst/PDF"),
+                    "end-to-end row lacks output evidence: {}",
+                    surface[1]
+                );
+                assert!(
+                    surface[25].contains("tests"),
+                    "end-to-end row lacks current test evidence: {}",
+                    surface[1]
+                );
+            }
+            "SUPPORTED_SEMANTICS" => {
+                for marker in SUPPORTED_SEMANTICS_GAP_MARKERS {
+                    assert!(
+                        surface[28].contains(marker),
+                        "semantic-support gap lacks {marker:?}: {}",
+                        surface[1]
+                    );
+                }
+                assert!(
+                    surface[16].contains("Semantic support only"),
+                    "semantic-support row overclaims output: {}",
+                    surface[1]
+                );
+            }
+            "PARTIAL" => assert!(
+                surface[28].contains("but")
+                    || surface[28].contains("remains")
+                    || surface[28].contains("remain")
+                    || surface[28].contains("not represented"),
+                "partial row lacks a bounded supported/remaining split: {}",
+                surface[1]
+            ),
+            "UNSUPPORTED" => assert!(
+                surface[28].contains("No ")
+                    || surface[28].contains("not represented")
+                    || surface[28].contains("does not"),
+                "unsupported row lacks an explicit absent contract: {}",
+                surface[1]
+            ),
+            "DEFERRED" => assert!(
+                surface[28].contains("deferred"),
+                "deferred row lacks deferred rationale: {}",
+                surface[1]
+            ),
+            "BLOCKED" => assert!(
+                surface[28].contains("blocked"),
+                "blocked row lacks blocker rationale: {}",
+                surface[1]
+            ),
+            "UNKNOWN" => assert!(
+                surface[28].contains("UNKNOWN") || surface[28].contains("not established"),
+                "unknown row lacks uncertainty rationale: {}",
+                surface[1]
+            ),
+            "PARSED_ONLY" | "NOT_APPLICABLE" => {}
+            _ => unreachable!(),
         }
 
         if surface[2] != "none" {
@@ -244,6 +380,54 @@ fn ownership_handoffs_and_frozen_scope_are_explicit() {
     assert!(AUDIT.contains("No .texmacro"));
     assert!(AUDIT.contains("Production semantic, state, parser"));
     assert!(AUDIT.contains("implementation remains frozen"));
+}
+
+#[test]
+fn canonical_follow_up_ownership_and_producer_boundaries_are_reconciled() {
+    let rows = rows();
+
+    for (surface_name, expected_issue) in REPRESENTATIVE_OWNERSHIP {
+        let surface = row(&rows, surface_name);
+        assert!(
+            surface[27].contains(expected_issue),
+            "wrong canonical follow-up for {surface_name}: expected {expected_issue}, got {}",
+            surface[27]
+        );
+    }
+
+    for surface_name in COMPONENT_LOCAL_SURFACES {
+        let surface = row(&rows, surface_name);
+        assert!(
+            !surface[27].contains("#175"),
+            "document-wide #175 must not own component-local {surface_name}: {}",
+            surface[27]
+        );
+    }
+
+    for (surface_name, producer_issue) in [
+        ("primitive:code", "#185 (producer)"),
+        ("primitive:math", "#185 (producer)"),
+        ("primitive:table", "#183 (producer)"),
+    ] {
+        let surface = row(&rows, surface_name);
+        assert!(
+            surface[27].starts_with(producer_issue),
+            "producer ownership is not canonical for {surface_name}: {}",
+            surface[27]
+        );
+        assert!(
+            surface[27].contains("#181 (shared caption/reference/index)"),
+            "shared caption/reference/index dependency is missing for {surface_name}: {}",
+            surface[27]
+        );
+    }
+
+    assert!(AUDIT.contains("component-local producer family"));
+    assert!(
+        AUDIT.contains("#181 owns the shared caption/identifier/reference/index infrastructure")
+    );
+    assert!(AUDIT.contains("producer implementation is assigned to #185"));
+    assert!(AUDIT.contains("#175 remains document-wide only"));
 }
 
 #[test]
