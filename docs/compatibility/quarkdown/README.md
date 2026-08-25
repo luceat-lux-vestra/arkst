@@ -65,6 +65,11 @@ evaluation boundaries, precedence, extension semantics, failure effects, and
 diagnostic/provenance claims. The older bounded family rows below remain useful
 evidence links but must not be read as a complete v2.5.1 support claim.
 
+The canonical standard-library/general-builtin inventory is
+[`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md). Its pinned manifest
+contains the complete 162-name sweep and separates the 60 #151-owned names
+from the 102 names owned by #150 and #152–#155.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
@@ -84,7 +89,7 @@ evidence links but must not be read as a complete v2.5.1 support claim.
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
 | Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, DynamicValue Number conversion for textual `decimals` followed by Int-only normalization, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
-| String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; Dynamic String → InlineMarkdownContent conversion remains unsupported | Implemented (bounded v2.5.1 slice) |
+| String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; `.capitalize` differs on Unicode titlecase versus uppercase (`ǳ`), and `.startswith(ignorecase:true)` differs on Unicode character-wise case matching versus whole-string lowercasing; Dynamic String → InlineMarkdownContent conversion remains unsupported | Partial (bounded v2.5.1 slice) |
 | Inline hard line break          | `.br` | Argumentless inline `LineBreak` producer represented as the existing `IrInline::HardBreak`; surrounding order, call provenance, source-defined shadowing, atomic invalid forms, `.plaintext`, serde, and existing Typst lowering are covered | Implemented (bounded v2.5.1 slice) |
 | Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
@@ -106,7 +111,7 @@ evidence links but must not be read as a complete v2.5.1 support claim.
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
 | `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
-| `.llmstxt`                     | (candidate name from issue scope) | No `.llmstxt` standard builtin was present in the reviewed Quarkdown v2.5.1 source; Scribium reports an explicit deferred diagnostic | Intentionally deferred |
+| `.llmstxt`                     | `content: String`, `markdownavailable: Boolean` | Pinned `Html.kt` declares public `@QFunction llmstxt`; target-specific output/configuration remains #155-owned and Scribium keeps the explicit deferred boundary | Intentionally deferred |
 
 The v2.5.1 Markdown deltas are recorded in
 [`V2_5_1_IMPACT.md`](V2_5_1_IMPACT.md). D2 link-parenthesis behavior and D3
@@ -430,7 +435,7 @@ host-supplied `VirtualProject`.
 | `.json` | `path`; recursive `IrValue` | UTF-8 JSON object/array/scalar mapping; deterministic insertion order | structured parse and numeric-precision diagnostics | Implemented |
 | `.include` | `path`, optional `sandbox`; evaluated content | parses/evaluates a separate source with its own `SourceId` and working directory | structured missing/boundary diagnostics and active-stack cycle detection | Implemented |
 | `.markdown` | raw `content`; `NativeContent` | preserves content; it does not load a file | native-content capability diagnostic when denied | Implemented |
-| `.llmstxt` | no evidenced v2.5.1 signature | no reviewed standard builtin implementation | explicit deferred diagnostic | Deferred |
+| `.llmstxt` | `content: String`, `markdownavailable: Boolean` | pinned `Html.kt` public declaration; target-specific output/configuration remains outside this slice | explicit deferred diagnostic | Deferred |
 
 Resource paths are logical and source-relative. A nested include changes the
 base for subsequent `.read`/`.json`/`.include` calls to the included source;
@@ -447,8 +452,9 @@ not a file-loading alias. A Markdown source included with `.include` is parsed
 with its own source identity, so relative Markdown images retain the included
 document's resource base. Typst currently omits native Markdown content;
 image alt text and titles remain preserved in the Markdown AST/IR but are not
-emitted as PDF accessibility metadata. `.llmstxt` was not present as a standard
-v2.5.1 builtin in the reviewed source and remains explicitly deferred.
+emitted as PDF accessibility metadata. `.llmstxt` is present as a pinned
+standard builtin; its target-specific output/configuration contract remains
+explicitly deferred to #155.
 
 Issue #57 adds a separate end-to-end Markdown evidence slice for structures
 already preserved by the frontend: blockquotes, single- and double-tilde
@@ -827,6 +833,14 @@ function calls. Pinned v2.5.1 lexer/grammar/refiner records are listed in
 independently authored; no upstream implementation code, test, or fixture was
 copied or translated.
 
+The String/text evidence row includes the currently observable bounded
+implementation, but the canonical #151 classification is now PARTIAL for
+`.capitalize` and `.startswith(ignorecase:true)`: pinned Unicode titlecase and
+Kotlin character-wise case-insensitive matching are not reproduced by the
+current engine. Independent evidence is in
+`crates/scribium-core/tests/stdlib_builtin_audit.rs`; follow-up #172 is frozen
+behind #156.
+
 ## Compatibility Levels
 
 ### User-defined function evidence
@@ -929,12 +943,14 @@ Scribium AST/IR. Multiline braced arguments, line continuations, and tight
 brace-wrapped calls are syntax-supported with source-backed spans. The
 evidenced `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`,
 `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
-`.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`,
+`.lowercase`, `.isempty`, `.isnotempty`,
 `.islower`, `.isgreater`, `.equals`, and `.not` chain forms and their documented
 nested-call equivalents are **Semantically supported** with strict
 left-to-right value flow; an unimplemented chain callee reports a source-backed
 `E3001` evaluation error. The string-family, comparison, and bounded scalar
 conversion contracts are evidenced, not complete DynamicValue compatibility.
+`.capitalize` and `.startswith(ignorecase:true)` remain PARTIAL for the
+Unicode titlecase and character-wise case-matching gaps recorded by #151.
 **User-defined functions are also semantically supported for the evidenced
 slice**: headerless implicit and required/optional explicit-parameter
 declarations, positional/named binding where applicable, block-last-parameter
@@ -1062,13 +1078,17 @@ extensions and are not included in the upstream numeric family.
 
 The v2.5.1 public [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt)
 surface defines scalar `.string`, `.concatenate`, case transforms,
-emptiness predicates, and `.startswith`. Scribium implements the first eight
-of those functions through one explicit invocation-boundary adapter for
+emptiness predicates, and `.startswith`. Scribium implements the bounded
+scalar paths through one explicit invocation-boundary adapter for
 strings, identifiers, numbers, booleans, typed ranges, and bounded plain-text
 content. The results remain typed `IrValue::String` or `IrValue::Boolean`, so
 nested calls, chains, variable bindings, and lazy conditionals share the
 ordinary evaluator path. This is the bounded `String` conversion surface;
 collections, callables, `None`, and rich document values are not stringified.
+`.capitalize` remains PARTIAL because upstream titlecase differs from the
+current uppercase operation on `ǳ`; `.startswith(ignorecase:true)` remains
+PARTIAL because Kotlin character-wise matching differs from whole-string
+lowercasing on Greek `ς`/`Σ`.
 
 Quoted scalar input is classified by the existing Quarkdown grammar, which
 removes only its outer quotes and preserves inner whitespace before the typed
