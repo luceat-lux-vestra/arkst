@@ -39,10 +39,10 @@ Scribium's existing builtin table:
 7. current Scribium evaluator, IR, serde tests, fixtures, renderer, and
    front-matter conversion.
 
-The resulting manifest contains 43 discovered public names: 10 owned by #152
-and 33 retained as explicit handoffs to #153, #154, or #155. A name is not
-omitted because Scribium does not implement it. The manifest is an offline
-completeness artifact and is checked by
+The resulting manifest contains 43 discovered public names: 8 owned by #152,
+33 retained as explicit handoffs to #153, #154, or #155, and 2 retained as
+canonical #151 ownership handoffs. A name is not omitted because Scribium does
+not implement it. The manifest is an offline completeness artifact and is checked by
 [`document_state_audit.rs`](../../../crates/scribium-core/tests/document_state_audit.rs).
 
 The sweep found no upstream front-matter parser or front-matter metadata API
@@ -55,10 +55,12 @@ recorded as a separate boundary, not inferred to be Quarkdown `DocumentInfo`.
 
 The #152-owned surface is the identity and descriptive state represented by
 `DocumentInfo`: `doctype`, `docname`, `docdescription`, `docauthor`,
-`docauthors`, `dockeywords`, `doclang`, and `theme`. The related
-document-scoped localization API, `localization` and `localize`, is also
-owned by this audit because it stores and reads document-scoped language data,
-even though it is not currently represented in Scribium's IR.
+`docauthors`, `dockeywords`, `doclang`, and `theme`. The public
+`localization` and `localize` functions are retained in this sweep but
+remain canonical #151-owned general stdlib functions, as recorded by the
+existing [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv). They are not
+assigned #152 semantics or status. This is the ownership reconciliation:
+localization and localize are retained as #151-owned.
 
 ### #153: layout and document configuration
 
@@ -85,7 +87,9 @@ filesystem, subdocument, or environment capabilities and are handed to #155.
 
 The complete ownership and status record is the manifest. Cross-owned rows
 are retained there to prove that they were seen, but their canonical semantics
-are intentionally not audited by #152.
+are intentionally not audited by #152. The downstream handoff rows use
+`NOT_APPLICABLE` rather than pre-empting #153/#154/#155 semantics with
+`DEFERRED`. The two #151 rows are explicit canonical ownership handoffs.
 
 ## 4. Complete #152 inventory
 
@@ -100,15 +104,9 @@ and conversion details are linked to the canonical [#149 value-model audit](VALU
 | `.docauthor` | `docauthor(author: String? = null)`; no alias | Empty ordered author list; getter is `""` | Getter returns the first author name or empty text. Setter appends one `DocumentAuthor`; duplicates are preserved; setter returns `VoidValue` | Current append path is bounded to scalar conversion and shares state; full upstream body/conversion contract remains open | `PARTIAL` |
 | `.docauthors` | `docauthors(authors: Map<String, DictionaryValue<OutputValue<String>>>? = null)`; no alias | Empty ordered author list | Getter returns an ordered dictionary keyed by author name with nested info. Setter maps entries and appends them; dictionary key collisions cannot represent two entries with the same key | Current validation is pre-commit and ordered, but body/value conversion is bounded; mixed singular/plural append behavior is tested | `PARTIAL` |
 | `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; raw-body and generalized conversion remain gaps | `PARTIAL` |
-| `.doclang` | `doclang(language: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Current deterministic checked-in locale table is narrower than the upstream JVM locale universe; raw-body fallback is rejected | `PARTIAL` |
+| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Current deterministic checked-in locale table is narrower than the upstream JVM locale universe; raw-body fallback is rejected | `PARTIAL` |
 | `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction and rollback are evidenced; raw-body fallback and theme resolution/rendering are not | `PARTIAL` |
-| `.localization` | `localization(name: String, merge: Boolean = false, contents: Map<String, DictionaryValue<OutputValue<String>>>)`; `contents` is `@Body` | No localization tables | Creates a locale-keyed table. Duplicate table names fail unless `merge=true`; merge appends/replaces entries using the upstream table merge behavior; returns `VoidValue` | No evaluator-owned table state or `localize` implementation exists in the current IR/evaluator | `UNSUPPORTED` |
-| `.localize` | `localize(key: String, separator: String = ":")`; no alias | No default table or locale; a lookup is therefore an error | Splits the key at the first separator and returns the localized string; missing locale/table/key fails | No current localization table or renderer-facing localization state | `UNSUPPORTED` |
-
-The two localization rows are distinct: `.localization` mutates a table,
-while `.localize` reads a table using the current document locale. They are
-grouped under one bounded follow-up because neither has a Scribium state or IR
-representation yet.
+| `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `UNSUPPORTED` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; this evidence is retained here without re-auditing #151 semantics | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
 
 ## 5. Family-level semantic analysis
 
@@ -166,7 +164,7 @@ candidate list before one state commit. It does not claim the upstream
 general `DynamicValue`/raw-body conversion surface, so the status remains
 `PARTIAL`.
 
-### Locale and localization
+### Locale and #151-owned localization cross-reference
 
 The initial upstream locale is null. `.doclang` reads the locale's localized
 display name, not its tag. `LocaleLoader.SYSTEM.find` tries a case-insensitive
@@ -174,17 +172,35 @@ English display name and then a language tag. The upstream JVM loader exposes
 the JVM's available locale set, including regional tags; a failed lookup
 throws before `DocumentInfo` is assigned.
 
-The `.localization` table builder resolves each table locale, stores nested
-string values, and rejects duplicate table names unless merge is requested.
-The merge path gives later entries priority while retaining deterministic table
-order. `.localize` requires a current locale unless an explicit locale is
-passed through the core context API, then fails for missing table or key.
+The public `.localization` table builder resolves each table locale, stores
+nested string values, and rejects duplicate table names unless merge is
+requested. The merge path gives later entries priority while retaining
+deterministic table order. These are #151-owned general stdlib semantics and
+are not assigned a #152 canonical status.
+
+The pinned standard-library registration path is observable before any user
+function call: `Stdlib` registers its modules and then loads
+`/lib/localization.qd` through the `afterRegisteringLibraries` hook. That
+resource invokes `.localization name:{std}` and pre-registers the standard
+translations for Chinese, English, French, German, Italian, Japanese, Polish,
+Portuguese, Russian, and Ukrainian, including the default keys used by stdlib
+output. Therefore the standard pipeline's initial localization-table state is
+not an empty map; it contains the seeded `std` table. A raw `BaseContext`
+created without stdlib registration can still expose an empty map, but that is
+not the pinned stdlib-ready initial state.
+
+`.localize` reads the current document locale and the selected table/key;
+without a locale it fails with the upstream locale-not-set diagnostic, and
+missing table/locale/key entries fail as well. This cross-reference proves the
+resource-seeded initial state without reopening #151's canonical semantic
+classification.
 
 Scribium deliberately uses a deterministic checked-in locale table rather than
 an OS/JVM dependency. It stores canonical tag and localized-name data in the
 IR and has no localization-table state. Valid upstream identifiers outside the
-checked-in table, raw-body fallback, locale-aware rendering, `.localization`,
-and `.localize` are therefore not silently treated as supported.
+checked-in table, raw-body fallback, and locale-aware rendering remain #152
+locale gaps; `.localization` and `.localize` remain #151-owned unsupported
+general stdlib gaps.
 
 ### Theme
 
@@ -211,7 +227,7 @@ consumption remain outside the bounded implementation.
 | keywords | empty list | empty `Vec` | Ordered duplicates are retained |
 | locale | null; getter `""` | `None`; getter `""` | Locale universe is bounded in Scribium |
 | theme | null; no getter | `None`; first empty setter becomes `Some(empty)` | Option distinction is serialized |
-| localization tables | empty map | no corresponding state | Unsupported, follow-up #173 |
+| localization tables after stdlib registration | seeded `std` table loaded from `/lib/localization.qd`; not empty | no corresponding state | #151-owned cross-reference; status is `NOT_APPLICABLE` in the #152 manifest |
 
 ## 7. Binding, mutation, return, and failure model
 
@@ -226,8 +242,8 @@ effects:
 | keywords | replace | iterable element conversion | Current Scribium builds the replacement list before assignment; duplicates/order preserved | Ordered strings or `VoidValue` |
 | locale | replace | name/tag lookup | Pinned assignment follows a successful lookup; current Scribium restores old state if a later nested evaluation fails | Localized name or `VoidValue` |
 | theme | replace full object | nullable scalar conversion; upstream render-time existence check | Current Scribium commits one whole object and restores on failure | `VoidValue`; no getter |
-| localization table | create or merge | table locale/value conversion and duplicate-name rule | Upstream duplicate-table check and table build precede table assignment; no cross-call transaction is evidenced | `VoidValue` |
-| localize | none | locale/table/key lookup | No mutation | Localized string |
+| localization table (#151) | create or merge; stdlib starts with the seeded `std` table | table locale/value conversion and duplicate-name rule | Upstream duplicate-table check and table build precede table assignment; no cross-call transaction is evidenced | `VoidValue` |
+| localize (#151) | none | locale/table/key lookup | No mutation | Localized string |
 
 The pinned `FunctionCall.execute` validates, binds, and invokes without an
 observable `DocumentInfo` snapshot/restore wrapper. Consequently, the audit
@@ -294,8 +310,8 @@ explicit empty theme.
 
 Localization tables are not persisted because no Scribium implementation owns
 them. The audit does not add a speculative field or generic serialization
-framework. Any future localization representation must be decided with #173
-and the #156 reconciliation rather than hidden in this document-only change.
+framework. Any future localization representation is a #151/#156
+reconciliation concern rather than a hidden #152 document-only change.
 
 ## 11. Renderer and front-matter boundary
 
@@ -320,16 +336,18 @@ scope when it is evidenced as part of a #152-owned observable contract.
 | `SUPPORTED_SEMANTICS` | 0 |
 | `PARSED_ONLY` | 0 |
 | `PARTIAL` | 8 (`doctype`, `docname`, `docdescription`, `docauthor`, `docauthors`, `dockeywords`, `doclang`, `theme`) |
-| `UNSUPPORTED` | 2 (`localization`, `localize`) |
+| `UNSUPPORTED` | 0 |
 | `DEFERRED` | 0 |
 | `BLOCKED` | 0 |
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
-| **Total #152-owned** | **10** |
+| **Total #152-owned** | **8** |
 
-The 33 cross-owned inventory rows are all `DEFERRED` to their owning
-workstream in the manifest: 20 to #153, 3 to #154, and 10 to #155. They are
-not included in the #152 status counts.
+The 33 downstream cross-owned inventory rows are all `NOT_APPLICABLE` in the
+manifest: 20 handoffs to #153, 3 to #154, and 10 to #155. They are not
+included in the #152 status counts because #152 has not audited their
+semantics. The 2 localization rows are canonical #151 handoffs and are also
+`NOT_APPLICABLE` to #152.
 
 ## 13. Existing evidence and reconciliation
 
@@ -365,8 +383,8 @@ one:
 - [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) owns generic
   conversion diagnostics and commit atomicity and remains frozen until #156;
 - new bounded [#173](https://github.com/luceat-lux-vestra/scribium/issues/173)
-  owns deterministic locale closure plus `.localization`/`.localize` state
-  and lookup semantics; and
+  owns deterministic `.doclang` locale closure only; `.localization` and
+  `.localize` remain #151-owned and are handed to #156 through that audit; and
 - layout, content/media, and resource/environment rows remain explicitly
   handed to [#153](https://github.com/luceat-lux-vestra/scribium/issues/153),
   [#154](https://github.com/luceat-lux-vestra/scribium/issues/154), and
@@ -378,11 +396,12 @@ complete. This audit does not alter #172 or begin any #157+ implementation.
 | Measure | Result |
 |---|---:|
 | Pinned public names discovered in this sweep | 43 |
-| #152-owned | 10 |
-| Cross-owned | 33 |
+| #152-owned | 8 |
+| Downstream cross-owned | 33 |
+| Canonical #151 handoffs | 2 |
 | #153 / #154 / #155 handoffs | 20 / 3 / 10 |
 | #152 `PARTIAL` | 8 |
-| #152 `UNSUPPORTED` | 2 |
+| #152 `UNSUPPORTED` | 0 |
 | Other #152 statuses | 0 |
 | Production semantics changed | No |
 

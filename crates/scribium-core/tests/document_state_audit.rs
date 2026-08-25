@@ -28,8 +28,6 @@ const OWNED_NAMES: &[&str] = &[
     "doclang",
     "docname",
     "doctype",
-    "localization",
-    "localize",
     "theme",
 ];
 
@@ -70,18 +68,22 @@ fn manifest_is_complete_and_machine_checkable() {
     let rows = manifest_rows();
     let declarations = declared_counts();
     assert_eq!(declarations.get("total"), Some(&rows.len()));
-    assert_eq!(declarations.get("152_owned"), Some(&10));
-    assert_eq!(declarations.get("cross_owned"), Some(&(rows.len() - 10)));
+    assert_eq!(declarations.get("152_owned"), Some(&8));
+    assert_eq!(declarations.get("cross_owned"), Some(&33));
+    assert_eq!(declarations.get("canonical_handoff"), Some(&2));
 
     let mut names = BTreeSet::new();
     let mut owned = BTreeSet::new();
     for row in &rows {
         assert_eq!(row.len(), 8, "manifest row has wrong column count: {row:?}");
-        assert!(matches!(row[0], "owned" | "cross-owned"));
+        assert!(matches!(
+            row[0],
+            "owned" | "cross-owned" | "canonical-handoff"
+        ));
         assert!(names.insert(row[1]), "duplicate canonical name: {}", row[1]);
         assert!(STATUSES.contains(&row[4]), "invalid status: {}", row[4]);
         assert!(row[2] == "none" || row[2].split(';').all(|alias| !alias.is_empty()));
-        assert!(matches!(row[3], "#152" | "#153" | "#154" | "#155"));
+        assert!(matches!(row[3], "#151" | "#152" | "#153" | "#154" | "#155"));
         assert!(
             row[5].contains(TARGET_SHA),
             "missing pinned provenance: {row:?}"
@@ -90,16 +92,33 @@ fn manifest_is_complete_and_machine_checkable() {
         if row[3] == "#152" {
             assert_eq!(row[0], "owned");
             assert!(owned.insert(row[1]));
+        } else if row[3] == "#151" {
+            assert_eq!(row[0], "canonical-handoff");
+            assert_eq!(row[4], "NOT_APPLICABLE");
         } else {
             assert_eq!(row[0], "cross-owned");
+            assert_eq!(row[4], "NOT_APPLICABLE");
         }
     }
     assert_eq!(owned.into_iter().collect::<Vec<_>>(), OWNED_NAMES);
     assert_eq!(rows.len(), 43);
+    assert_eq!(rows.iter().filter(|row| row[3] == "#151").count(), 2);
     assert_eq!(rows.iter().filter(|row| row[3] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[3] == "#154").count(), 3);
     assert_eq!(rows.iter().filter(|row| row[3] == "#155").count(), 10);
     assert!(MANIFEST.contains(BASE_SHA));
+    assert!(MANIFEST.contains("localization\tnone\t#151\tNOT_APPLICABLE"));
+    assert!(MANIFEST.contains("localize\tnone\t#151\tNOT_APPLICABLE"));
+    assert!(MANIFEST.contains("lib/localization.qd@"));
+}
+
+#[test]
+fn audit_reconciles_seeded_std_localization_and_doclang_binding() {
+    let audit = include_str!("../../../docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT.md");
+    assert!(audit.contains("localization and localize are retained as #151-owned"));
+    assert!(audit.contains("localization name:{std}"));
+    assert!(audit.contains("doclang(locale: String? = null)"));
+    assert!(!audit.contains("doclang(language: String? = null)"));
 }
 
 #[test]

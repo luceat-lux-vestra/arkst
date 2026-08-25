@@ -101,7 +101,7 @@ from the 102 names owned by #150 and #152–#155.
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
-| Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, `.localization`, `.localize`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`) plus two `UNSUPPORTED` localization rows; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md) |
+| Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned `UNSUPPORTED` general stdlib functions; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md) and [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
@@ -233,8 +233,13 @@ nodes can execute because the current frontend/IR does not expose upstream's
 lossless raw `DynamicValue` body text. Ordinary callable child scopes share the
 locale state. Source-defined `.doclang` shadows the native builtin, while the
 historical `.docname`, `.docdescription`, and `.doctype` native-first behavior
-is unchanged. No localization tables, `.localize`, hyphenation, Typst/HTML
-language output, or locale-aware rendering is introduced.
+is unchanged. Scribium introduces no localization tables, `.localize`
+implementation, hyphenation, Typst/HTML language output, or locale-aware
+rendering. The standard-library
+registration hook separately loads `/lib/localization.qd` before user calls;
+that pinned resource invokes `.localization name:{std}`, so the stdlib-ready
+initial localization table contains the seeded `std` table. Localization table
+mutation and lookup remain canonical #151-owned behavior, not #152 semantics.
 
 Evidence is in `crates/scribium-core/src/lib.rs::tests::doclang_*`,
 `crates/scribium-engine/src/locale.rs`, the IR serde test, the pinned
