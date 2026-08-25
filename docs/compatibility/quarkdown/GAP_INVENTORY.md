@@ -18,6 +18,13 @@ the v2.5.1 tag sources and public documentation/API pages; upstream source and
 tests were inspected as behavioral evidence under the clean-room policy, not
 copied or translated.
 
+For document metadata, the canonical per-surface #147 classification is now
+[`DOCUMENT_STATE_AUDIT.md`](DOCUMENT_STATE_AUDIT.md): eight bounded state rows
+are `PARTIAL` and `.localization`/`.localize` are `UNSUPPORTED`. The broader
+classification index below remains a family implementation index; it does not
+override the canonical #152 rows or promote evaluator/IR state to end-to-end
+renderer support.
+
 Status meanings:
 
 - **Compatible:** the reviewed surface has tested semantic support at the
