@@ -214,6 +214,18 @@ fn audit_records_pinned_pagination_renderer_divergences() {
 }
 
 #[test]
+fn audit_records_texmacro_follow_up_ownership() {
+    let texmacro = rows()
+        .into_iter()
+        .find(|row| row[1] == "texmacro")
+        .expect("texmacro row");
+    assert!(texmacro[11].contains("#180"));
+    assert!(!texmacro[11].contains("#175"));
+    assert!(AUDIT.contains("assigned to #180"));
+    assert!(AUDIT.contains("[#180](https://github.com/luceat-lux-vestra/scribium/issues/180)"));
+}
+
+#[test]
 fn ownership_handoffs_and_prior_corrections_remain_intact() {
     let document_state_manifest =
         include_str!("../../../docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT_MANIFEST.tsv");
