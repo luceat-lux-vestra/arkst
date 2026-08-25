@@ -148,6 +148,31 @@ fn audit_records_pipeline_boundary_and_state_rendering_separation() {
 }
 
 #[test]
+fn audit_records_numbering_extra_and_pageformat_border_contracts() {
+    assert!(AUDIT.contains("every input pair is reparsed into `extra`"));
+    assert!(AUDIT.contains("can be present in both the typed fields and `extra`"));
+    assert!(AUDIT.contains("`hasBorder` is true"));
+    assert!(AUDIT.contains("omitted side fields are"));
+    assert!(AUDIT.contains("explicitly `Size.ZERO`"));
+    assert!(AUDIT.contains("`contentBorderWidth` is null"));
+
+    let rows = rows();
+    let numbering = rows
+        .iter()
+        .find(|row| row[1] == "numbering")
+        .expect("numbering row");
+    assert!(numbering[10].contains("every input key"));
+    assert!(numbering[11].contains("all-input-keys-in-extra"));
+
+    let pageformat = rows
+        .iter()
+        .find(|row| row[1] == "pageformat")
+        .expect("pageformat row");
+    assert!(pageformat[10].contains("border-side contract"));
+    assert!(pageformat[11].contains("border-side-zeroing"));
+}
+
+#[test]
 fn ownership_handoffs_and_prior_corrections_remain_intact() {
     let document_state_manifest =
         include_str!("../../../docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT_MANIFEST.tsv");

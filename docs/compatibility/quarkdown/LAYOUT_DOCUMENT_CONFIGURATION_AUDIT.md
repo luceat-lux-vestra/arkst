@@ -108,8 +108,14 @@ remain the #149 boundary.
 `numbering(merge: Boolean = true, formats: Map<String, Value<String>>)` is a
 document-wide setter with a required body-compatible formats dictionary. The
 format keys are `headings`, `figures`, `tables`, `equations`, `code`, and
-`footnotes`; unknown keys are retained as dynamic/custom numbering keys.
-`none` creates an empty/non-counting `NumberingFormat` for that key. The
+`footnotes`. The typed built-in fields and `DocumentNumbering.extra` are
+populated from the same input map: a built-in key is parsed for its typed
+field and every input pair is reparsed into `extra`. Therefore built-in keys
+can be present in both the typed fields and `extra`; `extra` is not an
+unknown-keys-only map. Whether that duplicate storage is observable at the
+renderer boundary remains an explicit evidence/deferment question and must
+not be normalized away by #175. `none` creates an empty/non-counting
+`NumberingFormat` for that key. The
 format string reserves `1`, `a`, `A`, `i`, and `I` for decimal, lower alpha,
 upper alpha, lower Roman, and upper Roman counters; every other character is
 a fixed symbol and backslash escapes the next character.
@@ -185,8 +191,17 @@ rotated to the selected orientation. Explicit width/height override those
 bounds. Later layers with the same selector override only their non-null
 fields; omitted fields inherit through the selector group. Positive
 `columns` is document-wide multi-column configuration; values below one are
-discarded. Margins, borders, border color, background, and text alignment are
-typed layout domains. Plain and slides documents have documented renderer
+discarded. The public border-side arguments have a cross-field exception to
+that simple omission rule: if any of `bordertop`, `borderright`,
+`borderbottom`, or `borderleft` is supplied, `hasBorder` is true and the new
+`contentBorderWidth` is a non-null `Sizes` whose omitted side fields are
+explicitly `Size.ZERO` (the upstream expressions are `borderTop ?: Size.ZERO`
+and their corresponding side forms). Thus a later layer with only
+`bordertop: 1px` zeroes omitted left/right/bottom widths rather than inheriting
+them. If no border side is supplied, `contentBorderWidth` is null and the
+previous border-width structure can inherit through the layer merge. Border
+color remains a separate nullable field. Margins, borders, border color,
+background, and text alignment are typed layout domains. Plain and slides documents have documented renderer
 limitations, and page-format data is not itself a getter or output node.
 
 The state is genuinely document-scoped and would require backend-neutral
@@ -479,7 +494,7 @@ New cohesive implementation follow-ups were created, but none was started:
 
 | Issue | Exact scope | Owner/layer | Prerequisites and order |
 |---|---|---|---|
-| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak` | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
+| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage and public pageformat border-side zeroing | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
 | [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading` | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
 | [#177](https://github.com/luceat-lux-vestra/scribium/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
 | [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
