@@ -199,10 +199,20 @@ explicitly `Size.ZERO` (the upstream expressions are `borderTop ?: Size.ZERO`
 and their corresponding side forms). Thus a later layer with only
 `bordertop: 1px` zeroes omitted left/right/bottom widths rather than inheriting
 them. If no border side is supplied, `contentBorderWidth` is null and the
-previous border-width structure can inherit through the layer merge. Border
-color remains a separate nullable field. Margins, borders, border color,
-background, and text alignment are typed layout domains. Plain and slides documents have documented renderer
-limitations, and page-format data is not itself a getter or output node.
+previous border-width structure can inherit through the layer merge.
+
+`bordercolor` is independent from that `hasBorder` calculation. A color-only
+call therefore leaves `contentBorderWidth` null while setting
+`contentBorderColor`: for the same selector it can inherit a prior width while
+changing only the color. Without an inherited width, the pinned HTML
+stylesheet still publishes the color and `border-style: solid`, while
+`--qd-page-content-border-width` remains at its renderer/CSS default (`unset`).
+This is the actual v2.5.1 output boundary behind the public KDoc statement
+that a color-only border uses a default width; evaluator/IR work must not
+fabricate a concrete width that the upstream setter never stored. Margins,
+borders, border color, background, and text alignment are typed layout
+domains. Plain and slides documents have documented renderer limitations, and
+page-format data is not itself a getter or output node.
 
 The state is genuinely document-scoped and would require backend-neutral
 `PageFormatInfo`, selector, size, color, closed enum, and merge representation;
@@ -284,27 +294,47 @@ status for both is `PARSED_ONLY` and the grouped pagination follow-up is #176.
 
 `.currentpage()` and `.totalpages()` create typed page-counter nodes. Plain
 documents display `-` at rendering time because they do not support page
-counting. `.formatpagenumber(format: String)` creates an event from its source
-position onward, using the same symbol grammar as numbering. The format is
-ordered with document traversal and is not a mutable global getter.
-`.resetpagenumber(start: Int = 1)` creates an event assigning the current page
-the supplied displayed number, with the `start` alias and the current-page
-position semantics.
+counting.
+
+For `.formatpagenumber(format: String)`, the public `Document.kt` KDoc says
+the format accepts the same syntax as `.numbering`, but pinned v2.5.1 HTML
+output does not implement that full grammar. `page-numbers.ts` processes all
+formatter markers contained in a page before assigning that page's displayed
+number; the last marker on the page wins and its value persists to later
+pages. Its `formatNumber` helper transforms only the exact strings `1`, `a`,
+`A`, `i`, and `I`; any other string is returned literally. The audit therefore
+records this documentation/output divergence instead of promoting the broader
+`NumberingFormat` grammar to actual page-number renderer behavior.
+
+`.resetpagenumber(start: Int = 1)` likewise creates an ordered initializer
+without function-level positivity validation. The pinned HTML page-number
+handler processes every reset marker on the containing page before assigning
+that page's displayed number and applies a marker only when its parsed value is
+finite and greater than zero. Zero or negative values are ignored at render
+time rather than rejected by the function; when multiple valid resets occur on
+a page, the last valid marker wins. The reset is therefore page-level for
+observable HTML numbering rather than an intra-page source-position split.
 
 All four return nodes/no direct output at evaluation time. They need
-backend-neutral typed nodes or an equivalent event representation, integer and
-format validation, deterministic ordering, and PDF/HTML/Typst behavior. No
-such Scribium representation or lowering exists; all four are `PARSED_ONLY`
-under #176.
+backend-neutral typed nodes or an equivalent event representation plus
+backend-specific conformance that preserves these page-level precedence and
+renderer rules. Scribium has no such representation or lowering; all four are
+`PARSED_ONLY` under #176.
 
 #### `.lastheading`
 
 `lastheading(depth: Int)` is unavailable for `plain` documents and creates a
 node that resolves the last heading of the requested depth on the current
 page, searching backwards through pages and resetting when a shallower heading
-is encountered. The documented depth domain is 1–6. It is derived from page
-and heading traversal rather than a generic mutable document field. Scribium
-has no page-aware heading history or node; status is `PARSED_ONLY` under #176.
+is encountered. Upstream documentation describes heading depth as 1–6, but
+the pinned `lastHeading` function performs no range check: it directly creates
+`LastHeading(depth)`. The pinned HTML persistent-heading handler indexes its
+heading history with `depth - 1` and falls back to empty content when no entry
+exists, including out-of-range or non-positive depths. Therefore 1–6 is a
+documented/intended heading range, not an upstream call-time validation rule
+to reproduce. This behavior is derived from page/heading traversal rather than
+a generic mutable document field. Scribium has no page-aware heading history
+or node; status is `PARSED_ONLY` under #176.
 
 #### `.autopagebreak` and `.noautopagebreak`
 
@@ -494,8 +524,8 @@ New cohesive implementation follow-ups were created, but none was started:
 
 | Issue | Exact scope | Owner/layer | Prerequisites and order |
 |---|---|---|---|
-| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage and public pageformat border-side zeroing | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
-| [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading` | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
+| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage plus border-side zeroing and color-only width inheritance | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
+| [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
 | [#177](https://github.com/luceat-lux-vestra/scribium/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
 | [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
 
