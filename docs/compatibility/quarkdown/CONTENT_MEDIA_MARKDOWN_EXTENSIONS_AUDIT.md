@@ -132,7 +132,8 @@ producer and shared-index boundaries:
   infrastructure. It is not the producer owner for `.code`, `.math`, or the
   generated/computed table family.
 - [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) owns image,
-  media, icon, diagram, and chart producers; [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
+  media, named icon/emoji catalog (`.icon`, `.emoji`, `.allemojis`), diagram
+  (`.mermaid`), and chart (`.xychart`) producers; [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
   remains the resource/environment owner.
 - [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) owns table
   producers and table computation. It consumes #181 shared caption,
@@ -141,6 +142,7 @@ producer and shared-index boundaries:
   component-local producer family `.text`, `.box`, `.todo`, `.collapse`,
   `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
   `.speakernote`. The remaining component-local `.container` subcontracts
+  (`float`, `fullspan`, `classname`, `style`, and complete body conversion)
   are linked there without transferring document-wide state ownership.
 - [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and

@@ -54,8 +54,11 @@ const REPRESENTATIVE_OWNERSHIP: &[(&str, &str)] = &[
     ("syntax:qd-image-size", "#182"),
     ("primitive:image", "#182"),
     ("primitive:icon", "#182"),
+    ("primitive:emoji", "#182"),
+    ("primitive:allemojis", "#182"),
     ("primitive:mermaid", "#182"),
     ("primitive:xychart", "#182"),
+    ("primitive:container", "#184"),
     ("primitive:table", "#183"),
     ("primitive:table-sort", "#183"),
     ("primitive:table-filter", "#183"),
@@ -423,6 +426,9 @@ fn canonical_follow_up_ownership_and_producer_boundaries_are_reconciled() {
     }
 
     assert!(AUDIT.contains("component-local producer family"));
+    assert!(AUDIT.contains("icon/emoji catalog"));
+    assert!(AUDIT.contains("diagram") && AUDIT.contains("chart"));
+    assert!(AUDIT.contains("remaining component-local `.container` subcontracts"));
     assert!(
         AUDIT.contains("#181 owns the shared caption/identifier/reference/index infrastructure")
     );
