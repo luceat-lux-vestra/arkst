@@ -6,7 +6,7 @@
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
 - **Review date:** 2026-08-25
-- **Scribium comparison baseline:** `4a9112a9ee840374350dd9a90b65f58cce96eb08`
+- **Scribium comparison baseline:** `7144683346fd6e39c49ef0923733c856a6a55f42`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
@@ -64,6 +64,24 @@ The complete value taxonomy, invocation-time binding, target-driven conversion,
 diagnostic/provenance, and state-atomicity review is canonical in
 [`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md). The rows above remain the
 family-level inventory; they do not duplicate that matrix.
+
+## Issue #154 content/media/Markdown-extension reconciliation
+
+The canonical pinned inventory for content, media, presentation components,
+raw content, references, captions, and Quarkdown-specific Markdown extensions
+is [CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md)
+and its [machine-checkable manifest](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv).
+It starts from Scribium commit 7144683346fd6e39c49ef0923733c856a6a55f42 and
+Quarkdown v2.5.1 commit 107ec3a9482f10d6f90d7580f8409b46a719d18e.
+
+The manifest contains 71 #154-owned rows and 12 explicit handoffs. Its owned
+rows classify 13 bounded end-to-end surfaces, 3 semantic-only surfaces, 1
+parser-only surface, 13 partial surfaces, 37 unsupported surfaces, 2
+deferred surfaces, 1 blocked surface, and 1 unknown surface. The 12
+NOT_APPLICABLE rows preserve #153 global configuration, #155 resource
+environment, #149/#165–#167 binding/conversion/raw-body, #158 nested-call,
+#160 inline-content, and #180 texmacro ownership. This is an audit-only
+reconciliation; no newly discovered implementation is started before #156.
 
 ## #148 call-grammar audit
 

@@ -78,6 +78,17 @@ It re-audits the 20 #152→#153 handoffs and explicitly separates document-wide
 configuration from component-local layout and renderer/output behavior. Its
 per-surface statuses supersede the historical family-level layout rows below.
 
+The canonical content, media, presentation-component, and
+Quarkdown-Markdown-extension inventory is
+[CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md)
+with its machine-checkable
+[CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv).
+It separates ordinary Markdown/CommonMark/GFM behavior from Quarkdown
+extensions, callable content semantics, resource/project ownership,
+caption/numbering/reference consumers, and Typst/output fidelity. Parser
+retention is not treated as semantic or end-to-end support. The audit is
+documentation/guard-only and keeps implementation frozen until #156.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
