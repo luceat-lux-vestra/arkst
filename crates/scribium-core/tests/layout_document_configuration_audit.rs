@@ -155,6 +155,8 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
     assert!(AUDIT.contains("omitted side fields are"));
     assert!(AUDIT.contains("explicitly `Size.ZERO`"));
     assert!(AUDIT.contains("`contentBorderWidth` is null"));
+    assert!(AUDIT.contains("`bordercolor` is independent from that `hasBorder` calculation"));
+    assert!(AUDIT.contains("`--qd-page-content-border-width` remains at its renderer/CSS default"));
 
     let rows = rows();
     let numbering = rows
@@ -168,8 +170,44 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .iter()
         .find(|row| row[1] == "pageformat")
         .expect("pageformat row");
-    assert!(pageformat[10].contains("border-side contract"));
+    assert!(pageformat[10].contains("partial-side input zeroes omitted sides"));
+    assert!(pageformat[10].contains("bordercolor-only"));
     assert!(pageformat[11].contains("border-side-zeroing"));
+    assert!(pageformat[11].contains("bordercolor-only-width-inheritance"));
+}
+
+#[test]
+fn audit_records_pinned_pagination_renderer_divergences() {
+    assert!(AUDIT.contains("does not implement that full grammar"));
+    assert!(AUDIT.contains("only the exact strings `1`, `a`, `A`, `i`, and `I`"));
+    assert!(AUDIT.contains("Zero or negative values are ignored at render"));
+    assert!(AUDIT.contains("performs no range check"));
+    assert!(AUDIT.contains("not an upstream call-time validation rule"));
+
+    let rows = rows();
+    let formatter = rows
+        .iter()
+        .find(|row| row[1] == "formatpagenumber")
+        .expect("formatpagenumber row");
+    assert!(formatter[8].contains("page-numbers.ts@"));
+    assert!(formatter[8].contains("numbering.ts@"));
+    assert!(formatter[10].contains("last-marker-wins"));
+    assert!(formatter[11].contains("page-level-formatter-divergence"));
+
+    let reset = rows
+        .iter()
+        .find(|row| row[1] == "resetpagenumber")
+        .expect("resetpagenumber row");
+    assert!(reset[10].contains("ignores non-positive values"));
+    assert!(reset[11].contains("page-level-reset-filtering"));
+
+    let last_heading = rows
+        .iter()
+        .find(|row| row[1] == "lastheading")
+        .expect("lastheading row");
+    assert!(last_heading[8].contains("persistent-headings.ts@"));
+    assert!(last_heading[10].contains("no call-time depth range validation"));
+    assert!(last_heading[11].contains("documented-vs-runtime-depth"));
 }
 
 #[test]
