@@ -65,6 +65,11 @@ evaluation boundaries, precedence, extension semantics, failure effects, and
 diagnostic/provenance claims. The older bounded family rows below remain useful
 evidence links but must not be read as a complete v2.5.1 support claim.
 
+The canonical standard-library/general-builtin inventory is
+[`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md). Its pinned manifest
+contains the complete 162-name sweep and separates the 60 #151-owned names
+from the 102 names owned by #150 and #152–#155.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
@@ -106,7 +111,7 @@ evidence links but must not be read as a complete v2.5.1 support claim.
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
 | `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
-| `.llmstxt`                     | (candidate name from issue scope) | No `.llmstxt` standard builtin was present in the reviewed Quarkdown v2.5.1 source; Scribium reports an explicit deferred diagnostic | Intentionally deferred |
+| `.llmstxt`                     | `content: String`, `markdownavailable: Boolean` | Pinned `Html.kt` declares public `@QFunction llmstxt`; target-specific output/configuration remains #155-owned and Scribium keeps the explicit deferred boundary | Intentionally deferred |
 
 The v2.5.1 Markdown deltas are recorded in
 [`V2_5_1_IMPACT.md`](V2_5_1_IMPACT.md). D2 link-parenthesis behavior and D3
@@ -430,7 +435,7 @@ host-supplied `VirtualProject`.
 | `.json` | `path`; recursive `IrValue` | UTF-8 JSON object/array/scalar mapping; deterministic insertion order | structured parse and numeric-precision diagnostics | Implemented |
 | `.include` | `path`, optional `sandbox`; evaluated content | parses/evaluates a separate source with its own `SourceId` and working directory | structured missing/boundary diagnostics and active-stack cycle detection | Implemented |
 | `.markdown` | raw `content`; `NativeContent` | preserves content; it does not load a file | native-content capability diagnostic when denied | Implemented |
-| `.llmstxt` | no evidenced v2.5.1 signature | no reviewed standard builtin implementation | explicit deferred diagnostic | Deferred |
+| `.llmstxt` | `content: String`, `markdownavailable: Boolean` | pinned `Html.kt` public declaration; target-specific output/configuration remains outside this slice | explicit deferred diagnostic | Deferred |
 
 Resource paths are logical and source-relative. A nested include changes the
 base for subsequent `.read`/`.json`/`.include` calls to the included source;
@@ -447,8 +452,9 @@ not a file-loading alias. A Markdown source included with `.include` is parsed
 with its own source identity, so relative Markdown images retain the included
 document's resource base. Typst currently omits native Markdown content;
 image alt text and titles remain preserved in the Markdown AST/IR but are not
-emitted as PDF accessibility metadata. `.llmstxt` was not present as a standard
-v2.5.1 builtin in the reviewed source and remains explicitly deferred.
+emitted as PDF accessibility metadata. `.llmstxt` is present as a pinned
+standard builtin; its target-specific output/configuration contract remains
+explicitly deferred to #155.
 
 Issue #57 adds a separate end-to-end Markdown evidence slice for structures
 already preserved by the frontend: blockquotes, single- and double-tilde

@@ -6,7 +6,7 @@
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
 - **Review date:** 2026-08-25
-- **Scribium comparison baseline:** `489c7765bc28a74160b354d3237c7710c7eb4294`
+- **Scribium comparison baseline:** `d049c64934bc42b81bd859d0c70667681718afa2`
 - **Rushdown:** unchanged at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
 
@@ -145,6 +145,14 @@ frozen until #156.
 
 ## v2.5.1 stdlib surface classification
 
+Issue #151 now has a dedicated canonical inventory in
+[`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md), with the exact
+162-name pinned manifest in
+[`STDLIB_BUILTINS_AUDIT_MANIFEST.tsv`](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv).
+The classification below remains a historical family-level seed and is not
+the canonical #151 ownership/status matrix; it intentionally retains the
+broader cross-audit rows for navigation.
+
 The pinned v2.5.1 stdlib tree at commit
 `107ec3a9482f10d6f90d7580f8409b46a719d18e` was re-enumerated on the current
 Scribium head. Names below are the public `@QFunction` names, including
@@ -161,6 +169,11 @@ to complete compatibility.
 | Unsupported (explicit ownership) | `.node` | Public `Flow.kt` `@QFunction`; #150 records only its programmable value-to-content and lazy-body boundary, while Node/Markdown representation, materialization, and backend/output fidelity belong to #154. No Scribium `.node` evaluator path or conformance claim exists. |
 | Intentionally deferred | `.csv`, `.css`, `.cssproperties`, `.env`, `.filename`, `.htmloptions`, `.includeall`, `.listfiles`, `.llmstxt`, `.pathtoroot`, `.subdocument` | Resource families, target-specific options, and process/environment access are explicitly outside this slice or require a separate host/security decision. `.llmstxt` remains deferred per task scope. |
 | Scribium extension | `.map`, `.filter` | Existing typed collection transforms have no corresponding public v2.5.1 `Collection.kt` declarations and are excluded from upstream compatibility counts. |
+
+The pinned source sweep corrected one seed statement: `.llmstxt` is a public
+`@QFunction` in `Html.kt`, with `content: String` and
+`markdownavailable: Boolean`. It remains deferred and #155-owned; see the
+canonical #151 audit for the full source link and ownership disposition.
 
 ### `.captionposition` block-body fallback gap
 
