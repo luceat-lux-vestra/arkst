@@ -273,7 +273,9 @@ adds/replaces the map entry by name, returns no output, and is later consumed
 by math typesetting. The body is not a Markdown body and nested-call execution
 must not be substituted for the upstream raw-body conversion. Scribium has no
 raw body binding, TeX state, math consumer, or renderer-neutral macro model;
-status is `PARSED_ONLY`.
+status is `PARSED_ONLY`. Its distinct raw-string/document-map/math-renderer
+boundary is assigned to #180, with shared binding/conversion prerequisites
+remaining in #149/#165–#167 and math/content coordination in #154.
 
 #### `.pagemargin` and `.footer`
 
@@ -528,12 +530,14 @@ New cohesive implementation follow-ups were created, but none was started:
 | [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
 | [#177](https://github.com/luceat-lux-vestra/scribium/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
 | [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
+| [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
 
 The `.captionposition` raw-body gap is not duplicated into a new issue: it is
 the existing bounded slice with raw-body/content prerequisites in #166/#158/
-#160. No issue is one-function-per-row; each new issue follows a cohesive
-state/node/renderer contract. All implementation ordering remains frozen until
-#156.
+#160. No issue is one-function-per-row by default; #180 is split because raw
+TeX body conversion, macro-map state, and math-renderer consumption form a
+distinct semantic contract from #175 layout state. All implementation ordering
+remains frozen until #156.
 
 ## 8. Audit conclusion
 
