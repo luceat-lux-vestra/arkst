@@ -70,6 +70,14 @@ The canonical standard-library/general-builtin inventory is
 contains the complete 162-name sweep and separates the 60 #151-owned names
 from the 102 names owned by #150 and #152–#155.
 
+The canonical layout, pagination, style, and document-configuration inventory
+is [`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md)
+with its machine-checkable
+[`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv).
+It re-audits the 20 #152→#153 handoffs and explicitly separates document-wide
+configuration from component-local layout and renderer/output behavior. Its
+per-surface statuses supersede the historical family-level layout rows below.
+
 ## Feature Matrix
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
@@ -102,6 +110,7 @@ from the 102 names owned by #150 and #152–#155.
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
 | Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned `UNSUPPORTED` general stdlib functions; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md) and [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) |
+| Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: one `PARTIAL` bounded evaluator/IR `.captionposition` slice and 19 `PARSED_ONLY` unresolved-call rows; no #153 output-equivalence claim | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
