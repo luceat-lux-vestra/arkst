@@ -243,10 +243,11 @@ re-run the graph check, `cargo deny check`, and the complete CI matrix.
 
 ## Platform and WASM findings
 
-The local measurement host is macOS arm64. Separately, PR #202's exact-head
-run [32941470703](https://github.com/luceat-lux-vestra/scribium/actions/runs/32941470703)
-passed the workspace adapter tests on Ubuntu, macOS, and Windows with Typst
-0.15.1. The exact-head CI result is platform evidence, not local execution.
+The local measurement host is macOS arm64. PR #202's final exact-head remote
+CI result passed the workspace adapter tests on Ubuntu, macOS, and Windows
+with Typst 0.15.1. The exact-head CI result is platform evidence, not local
+execution; the authoritative run links are retained in the PR's final
+validation comment.
 The adapter remains intentionally native-only. The cargo-deny policy is
 explicit: actual vulnerability and unsoundness advisories remain hard
 failures; unmaintained advisories fail for direct workspace dependencies while
