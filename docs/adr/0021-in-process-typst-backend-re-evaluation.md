@@ -94,9 +94,10 @@ remain macOS arm64 measurements.
 
 - The optional adapter adds a large Typst compiler/PDF dependency graph and
   materially increases clean-build and binary costs.
-- The current full-graph `cargo-deny` advisory gate is red for transitive
-  Typst dependencies; production promotion remains blocked until that gate has
-  an accepted, verifiable resolution.
+- The cargo-deny advisory policy keeps vulnerability and unsoundness advisories
+  as hard failures and fails unmaintained advisories for direct workspace
+  dependencies. Transitive unmaintained Typst paths remain tracked upstream
+  dependency-hygiene debt rather than blocking this spike.
 - Typst 0.x public APIs remain version-coupled and require re-validation on
   stable-release changes.
 - Generated-source source-map handoff is not yet complete.

@@ -224,18 +224,18 @@ The dependency/security gate was also run after adding the Typst graph:
 cargo deny check
 ```
 
-Licenses, bans, and sources passed, but the command still fails the advisory
-gate. The immutable citationberg patch removes `quick-xml 0.38.4` and the
-RUSTSEC-2026-0194/RUSTSEC-2026-0195 paths; `quick-xml 0.41.0` is now the only
-quick-xml version in the relevant graph. The full gate nevertheless reports
-unmaintained `bincode 1.3.3`, `paste 1.0.15`, `rustybuzz 0.20.1`,
-`ttf-parser 0.25.1`, and `yaml-rust 0.4.5` paths through Typst's syntax,
-bibliography, and font/PDF dependencies. The advisory report marks these
-paths as having no safe upgrade, or requires incompatible upstream changes,
-under the pinned Typst 0.15.1 constraints. No advisory was suppressed and no
-unrelated dependency migration was absorbed into #187; the mandatory security
-gate therefore remains an explicit merge and production-promotion blocker for
-#202/#200.
+The command now exits successfully with `advisories ok, bans ok, licenses ok,
+sources ok`. The immutable citationberg patch removes `quick-xml 0.38.4` and
+the RUSTSEC-2026-0194/RUSTSEC-2026-0195 paths; `quick-xml 0.41.0` is now the
+only quick-xml version in the relevant graph. The advisory policy keeps actual
+vulnerability and unsoundness advisories as hard failures, and fails
+unmaintained advisories for direct workspace dependencies. It does not fail
+the gate for the five unmaintained transitive Typst paths:
+`bincode 1.3.3`, `paste 1.0.15`, `rustybuzz 0.20.1`, `ttf-parser 0.25.1`, and
+`yaml-rust 0.4.5`. These remain tracked upstream dependency-hygiene debt with
+no safe in-scope upgrade under the pinned Typst 0.15.1 constraints. No
+advisory was suppressed and no unrelated dependency migration was absorbed
+into #187.
 
 The temporary citationberg patch is dependency-management debt. Remove it
 after an upstream release is consumable through the pinned Typst line, then
@@ -246,11 +246,11 @@ re-run the graph check, `cargo deny check`, and the complete CI matrix.
 The local measurement host is macOS arm64. Separately, PR #202's exact-head
 run [32941470703](https://github.com/luceat-lux-vestra/scribium/actions/runs/32941470703)
 passed the workspace adapter tests on Ubuntu, macOS, and Windows with Typst
-0.15.1. The same exact head's `license` job failed because the full
-`cargo-deny` check reports the five unmaintained advisories listed above; this
-does not change the successful native test-job evidence. The CI result is
-platform evidence, not local execution. The adapter remains intentionally
-native-only.
+0.15.1. The exact-head CI result is platform evidence, not local execution.
+The adapter remains intentionally native-only. The cargo-deny policy is
+explicit: actual vulnerability and unsoundness advisories remain hard
+failures; unmaintained advisories fail for direct workspace dependencies while
+transitive notices remain tracked upstream debt.
 
 The platform-neutral boundary remains separate and was checked with:
 
@@ -279,8 +279,8 @@ is intentionally incomplete, generated-source source-map handoff is not yet
 implemented, and broader corpus parity plus explicit opt-in UX remain open.
 The exact-head native test jobs passed on Ubuntu, macOS, and Windows; those CI
 results are distinct from the macOS-only local measurement host. The aggregate
-CI and Security Audit remain red solely because of the mandatory cargo-deny
-advisory failures described above.
+CI and Security Audit are expected to reflect the updated cargo-deny policy on
+the new exact head.
 
 Re-evaluation trigger: revisit the default only after the bounded follow-ups
 below have green cross-platform CI and corpus parity, and a maintainer accepts

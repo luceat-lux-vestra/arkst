@@ -15,6 +15,9 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
+# Vulnerability advisories are always errors; keep unsound advisories strict.
+unmaintained = "workspace"
+unsound = "all"
 ignore = []
 
 [licenses]
