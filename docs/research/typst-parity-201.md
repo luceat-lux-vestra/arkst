@@ -1,8 +1,10 @@
 # Issue #201: Native Typst backend parity evidence
 
-Status: final implementation evidence for PR #205. Parity CI run
-32967897182 tested commit `71f6525a649992a12d03bf5842800dc3bfce9c4c`; the
-canonical executable oracle is
+Status: final implementation evidence for PR #205. The code-bearing parity CI
+run 32967897182 tested commit `71f6525a649992a12d03bf5842800dc3bfce9c4c`;
+the final PR HEAD is a documentation-only descendant whose complete CI rerun
+is tracked by [PR #205](https://github.com/luceat-lux-vestra/scribium/pull/205).
+The canonical executable oracle is
 
 ~~~
 SCRIBIUM_REQUIRE_TYPST=1 \
@@ -41,9 +43,9 @@ fail-closed fixes are recorded below.
 ## Fixture matrix
 
 The following values are observed by the named parity target on the local
-macOS arm64 validation host and by the explicit CI step on the PR HEAD. The
-three CI job links below are the cross-platform evidence for the same fixture
-corpus; they are not inferred from the local run.
+macOS arm64 validation host and by the explicit CI step on the PR branch. The
+three CI job links below are the code-bearing cross-platform evidence for the
+same fixture corpus; they are not inferred from the local run.
 
 | Fixture | Subprocess | In-process | Oracle | Divergence |
 |---|---|---|---|---|
@@ -79,8 +81,10 @@ remain a project-owned VirtualProject asset and no system font is required.
 ## Cross-platform and security evidence
 
 The CI workflow installs Typst 0.15.1 on each native matrix job and runs the
-parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The final PR HEAD
-evidence is recorded here from run 32967897182:
+parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The code-bearing
+cross-platform evidence is recorded here from run 32967897182; the final
+documentation-only PR HEAD reruns the same named gate in the workflow linked
+above:
 
 | Platform | Parity suite | Typst |
 |---|---|---|
