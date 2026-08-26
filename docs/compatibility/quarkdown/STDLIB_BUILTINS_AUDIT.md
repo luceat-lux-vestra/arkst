@@ -560,8 +560,8 @@ Reconciliation links:
 ## Backlog and #156 handoff
 
 Issue #172 records the cohesive Unicode string-semantics gap. get and the
-library/localization/logger families are real pinned gaps, but implementation
-ordering is frozen until #156 and no implementation is started here.
+library/localization/logger families are real pinned gaps, and implementation
+order follows the dependency bands in #156; no implementation is started here.
 Existing issues are reused:
 
 - #149 and #165–#167 for value, binding, conversion, diagnostics, and

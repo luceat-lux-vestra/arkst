@@ -10,8 +10,8 @@
 
 This is an evidence and reconciliation record. It does not implement
 Quarkdown resource features, change the compatibility target, redesign the
-Typst backend, or add filesystem/network/process access. Production work stays
-frozen until [#156](https://github.com/luceat-lux-vestra/scribium/issues/156).
+Typst backend, or add filesystem/network/process access. Post-audit production
+ordering is defined by [#156](https://github.com/luceat-lux-vestra/scribium/issues/156).
 
 The manifest is authoritative for the canonical status and ownership of every
 enumerated row. The offline guard derives its row and ownership checks from the

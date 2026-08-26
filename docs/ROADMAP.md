@@ -81,9 +81,12 @@ partial compatibility claims and a growing evidence-backed baseline.
 | Public-language gap inventory and current slice ordering | Completed (see `docs/compatibility/quarkdown/GAP_INVENTORY.md`) |
 
 Public Quarkdown features not yet implemented are tracked compatibility debt;
-they are not permanent product exclusions. Project-backed `.read`, `.json`, and
-`.include` are implemented through `VirtualProject`; remaining data-loading
-families are deferred because they require separate host/resource evidence.
+they are not permanent product exclusions. The VirtualProject/ResourceProvider
+model has `SUPPORTED_SEMANTICS` evidence, while `.read`, `.json`, and `.include`
+are only `PARTIAL` source-relative bounded builtin slices owned by #155 and
+#188. Remaining data-loading families require separate host/resource evidence;
+the complete status and order are in
+[`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).
 The callable/function foundation, iteration slice, document-state foundation,
 and bounded typed layout/component consumers above are implemented and
 evidenced, while broader function-driven metadata, style/layout families,
@@ -121,9 +124,9 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded `.doclang` document-state semantics | Completed (bounded deterministic evaluator/IR slice; localization and rendering deferred) |
 | Bounded `.theme` document-state semantics | Completed (bounded evaluator/IR boundary; upstream block-body fallback deferred) |
 | Bounded `.captionposition` document-state semantics | Completed (bounded evaluator/IR snapshot; caption rendering deferred) |
-| Quarkdown v2.5.1 layout/document-configuration audit (#153) | Completed (20-row canonical inventory; implementation follow-ups #175–#178 frozen until #156) |
-| Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; implementation follow-ups #181–#185 and existing ownership boundaries frozen until #156) |
-| Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; bounded implementation follow-ups are frozen until #156 reconciliation |
+| Quarkdown v2.5.1 layout/document-configuration audit (#153) | Completed (20-row canonical inventory; #175–#178 follow the dependency bands in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
+| Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; #181–#185 follow the shared engine/backend/content prerequisites in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
+| Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; implementation ordering, including #187 as the next technical work, is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md) |
 
 ## M4 — Developer Experience
 

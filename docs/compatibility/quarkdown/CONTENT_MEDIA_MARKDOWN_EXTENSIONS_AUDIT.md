@@ -11,9 +11,9 @@
 
 This is an evidence and backlog-reconciliation record. It does not implement
 newly discovered Quarkdown semantics. Production semantic, state, parser,
-resource, IR, and backend changes are **none**; implementation remains frozen
-until [#156](https://github.com/luceat-lux-vestra/scribium/issues/156)
-reconciles the audit set.
+resource, IR, and backend changes are **none**; post-audit implementation
+ordering is defined by [#156](https://github.com/luceat-lux-vestra/scribium/issues/156)
+and its dependency graph.
 
 The manifest is authoritative for one canonical #147 status per enumerated
 surface. It contains 71 #154-owned rows and 12 explicit handoff rows. The
@@ -243,8 +243,9 @@ implementation is reassigned or added here.
 
 .fragment and .speakernote are #154 slide content producers. Global .slides
 configuration, document type, controls, transitions, and speaker-note options
-remain #153. The content rows are unsupported until a bounded slide
-representation and output contract is reviewed in [#184](https://github.com/luceat-lux-vestra/scribium/issues/184).
+remain #153. The content rows remain `UNSUPPORTED` until a bounded slide
+representation and output contract is reviewed in [#184](https://github.com/luceat-lux-vestra/scribium/issues/184),
+following the order in [`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Follow-up reconciliation
 
@@ -264,8 +265,8 @@ reused where it already describes the boundary:
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | .texmacro and math-renderer dependency |
 
 These follow-ups were created for bounded implementation review only. None
-is started by this audit, and implementation ordering remains provisional
-until #156.
+is started by this audit; implementation ordering is defined by
+[`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Validation and guard obligations
 

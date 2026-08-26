@@ -2,6 +2,11 @@
 
 ## Review snapshot
 
+The cross-audit canonical view, evidence map, and dependency-aware backlog are
+maintained in [`RECONCILIATION.md`](RECONCILIATION.md). This document remains
+the detailed gap index; its family summaries do not override the canonical
+owner/status rows in the audit matrices and manifests.
+
 - **Tracked target:** Quarkdown `v2.5.1`
 - **Resolved tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Repository:** [`iamgio/quarkdown`](https://github.com/iamgio/quarkdown)
@@ -53,7 +58,7 @@ Classification index:
 
 | Classification | Inventory rows |
 |---|---|
-| Compatible at the stated bounded boundary | Logical and comparison operations; optionality callbacks; Collection selector sorting; project-backed `.read`, `.json`, and `.include`; argumentless inline `.br`; bounded `.docauthor`/`.docauthors`; block-only Stacked row/column/grid consumers |
+| Supported at the stated bounded boundary | Logical and comparison operations; optionality callbacks; Collection selector sorting; the VirtualProject/resource model as `SUPPORTED_SEMANTICS`; argumentless inline `.br`; bounded `.docauthor`/`.docauthors`; block-only Stacked row/column/grid consumers |
 | Partially compatible | Function declarations/calls; variables; conditionals; lambdas/callables; iteration; collections; Dictionary/Pair/Range; type/value conversion; strings/text; metadata/document setup; complete public component/style/layout surface; complete error taxonomy |
 | Compatible at the evidenced bounded boundary | Mathematics/numeric operations |
 | Unsupported | Layout/document functions outside the reviewed Stacked, Container, and Landscape slices; unimplemented data-loading families such as `.csv`, `.listfiles`, and `.filename` |
@@ -81,7 +86,7 @@ deferred surfaces, 1 blocked surface, and 1 unknown surface. The 12
 NOT_APPLICABLE rows preserve #153 global configuration, #155 resource
 environment, #149/#165–#167 binding/conversion/raw-body, #158 nested-call,
 #160 inline-content, and #180 texmacro ownership. This is an audit-only
-reconciliation; no newly discovered implementation is started before #156.
+reconciliation; no newly discovered implementation is started by this audit.
 
 ## #148 call-grammar audit
 
@@ -149,8 +154,8 @@ positional-after-named shape; #150–#155 remain the broader programmable,
 general-builtin, metadata, layout, content, and resource audits; #156 remains
 the reconciliation gate.
 
-No production fix is selected by #149, and implementation ordering remains
-frozen until #156.
+No production fix is selected by #149, and implementation ordering follows
+the dependency bands in [#156 reconciliation](RECONCILIATION.md).
 
 ## #150 programmable-language semantics audit
 
@@ -176,8 +181,8 @@ The audit reuses #148/#157–#164 for grammar/frontend boundaries and
 #149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
 does not create duplicate builtin or test issues. The only new cohesive
 semantic follow-up is [#169](https://github.com/luceat-lux-vestra/scribium/issues/169)
-for engine-owned `.extend`/`.super` semantics; implementation ordering remains
-frozen until #156.
+for engine-owned `.extend`/`.super` semantics; implementation ordering follows
+the dependency bands in [#156 reconciliation](RECONCILIATION.md).
 
 ## v2.5.1 stdlib surface classification
 
@@ -198,7 +203,7 @@ to complete compatibility.
 
 | Classification | v2.5.1 functions | Boundary / reason |
 |---|---|---|
-| Implemented (bounded) | `.abs`, `.align`, `.average`, `.br`, `.captionposition`, `.center`, `.column`, `.concatenate`, `.cos`, `.dictionary`, `.distinct`, `.divide`, `.docauthor`, `.docauthors`, `.dockeywords`, `.docdescription`, `.doclang`, `.docname`, `.doctype`, `.equals`, `.first`, `.foreach`, `.function`, `.getat`, `.grid`, `.groupvalues`, `.html`, `.if`, `.ifnot`, `.ifpresent`, `.include`, `.isempty`, `.isgreater`, `.iseven`, `.isnone`, `.islower`, `.isnotempty`, `.json`, `.landscape`, `.last`, `.logn`, `.lowercase`, `.let`, `.markdown`, `.multiply`, `.negate`, `.none`, `.not`, `.otherwise`, `.pair`, `.pi`, `.plaintext`, `.pow`, `.range`, `.read`, `.repeat`, `.rem`, `.reversed`, `.row`, `.round`, `.second`, `.sin`, `.size`, `.sorted`, `.sqrt`, `.string`, `.subtract`, `.sum`, `.sumall`, `.takeif`, `.tan`, `.theme`, `.third`, `.truncate`, `.uppercase`, `.var`, `.whitespace` | Typed evaluator results, shared callable/iterable paths, bounded native-content/resource boundaries, or existing structural document semantics. `.row`, `.column`, and `.grid` are block-only native consumers backed by typed `IrComponent::Stacked`; their exact bounded layout contract is described below and does not promote the full public component/style/layout family. `.br` is an argumentless inline `LineBreak` producer materialized as the existing backend-neutral `IrInline::HardBreak`; it does not imply a generalized inline-component family. `.center` and `.align` are bounded full-width Container block-body consumers; `.landscape` is a required-body typed component consumer with a 90-degree counter-clockwise semantic and Typst `rotate(..., reflow: true)` lowering; `.whitespace` is the bounded inline `Whitespace`/Size consumer described below. `.align` uses positional/named origin-aware closed alignment conversion. `.docauthor` appends minimal ordered author records, returns the first name on read; `.docauthors` appends validated nested dictionaries, returns an ordered typed dictionary view, and shares that author state. `.dockeywords` returns an ordered iterable of bounded scalar strings and replaces the complete keyword list after validation. `.doclang` accepts the upstream general case-insensitive English full-name or IETF BCP 47 tag contract; the checked-in table covers the public ten locales plus pinned `ko`, `en-US`, and `fr-CA`, returns localized names, preserves canonical tag/name data in the shared snapshot, and rejects table-outside or malformed identifiers as a bounded compatibility gap; nullable `.none` follows upstream's getter path. `.theme` accepts up to two positional or named nullable `String` parameters, treats `.none` as a null component, lowercases supplied strings, rejects an indented body before evaluation because the raw `DynamicValue` text is not available at the current evaluator boundary, replaces the complete theme on every successful call, and returns no document output; upstream block-body fallback and theme resolution remain deferred. `.captionposition` accepts the closed `top`/`bottom` enum through positional, named, and mixed regular binding, preserves omitted or nullable override fields across repeated calls using upstream `CaptionPositionInfo.merge`, rejects bodies before evaluation, shares atomic evaluator state across callables, and snapshots only backend-neutral IR; caption rendering remains deferred. `.docname`, `.docdescription`, and `.doctype` use the same evaluator-owned document state and serializable snapshot. `.doctype` is the first closed-enum consumer. `.sorted` is natural-order or `by` selector sorting, not a two-value comparator API. |
+| Bounded semantic evidence (canonical status varies) | `.read`, `.json`, and `.include` | These are `PARTIAL` resource rows; the exact supported subset and missing project/global behavior are in #155 and #188. The remaining names in this historical family index must be read with the #151/#154/#155 manifests, not as a complete implemented list. |
 | Partially implemented (Unicode string semantics) | `.capitalize`, `.startswith` | The pinned `StringCase.Capitalize` uses `Char::titlecase`, while the current engine uses `char::to_uppercase`; pinned Kotlin `String.startsWith(prefix, ignoreCase)` uses character-wise case-insensitive matching, while current Scribium lowercases complete strings. These gaps are independently evidenced with `ǳ`/`ǲ`/`Ǳ` and Greek `ς`/`Σ`; follow-up #172 is bounded to this string-semantics slice. |
 | Partially implemented (bounded) | `.container` | Empty/body-only containers plus `width`, `height`, and `fullwidth` sizing use the typed Container component and Typst block lowering; deferred style/layout parameters remain explicitly unsupported. |
 | Partially implemented | `.autopagebreak`, `.currentpage`, `.font`, `.footer`, `.formatpagenumber`, `.lastheading`, `.marker`, `.navigation`, `.noautopagebreak`, `.nonumbering`, `.numbering`, `.pageformat`, `.pagemargin`, `.paragraphstyle`, `.resetpagenumber`, `.tableofcontents`, `.texmacro`, `.totalpages` | Project/front-matter or IR metadata provides only a different, partial boundary; remaining function-driven document context and observable layout state are not implemented. |

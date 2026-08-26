@@ -357,7 +357,7 @@ fn markdown_and_quarkdown_layers_are_not_promoted() {
 }
 
 #[test]
-fn ownership_handoffs_and_frozen_scope_are_explicit() {
+fn ownership_handoffs_and_sequenced_scope_are_explicit() {
     let rows = rows();
     for (name, owner, dependency) in [
         ("state:captionposition", "handoff:#153", "#153"),
@@ -382,7 +382,8 @@ fn ownership_handoffs_and_frozen_scope_are_explicit() {
     assert!(AUDIT.contains("#155"));
     assert!(AUDIT.contains("No .texmacro"));
     assert!(AUDIT.contains("Production semantic, state, parser"));
-    assert!(AUDIT.contains("implementation remains frozen"));
+    assert!(AUDIT.contains("post-audit implementation"));
+    assert!(AUDIT.contains("dependency graph"));
 }
 
 #[test]

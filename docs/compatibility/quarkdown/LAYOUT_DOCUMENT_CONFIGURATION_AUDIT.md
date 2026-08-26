@@ -505,8 +505,8 @@ or host-owned.
   canonical #153 statuses. #155 rows are not reopened or classified here; the
   existing #152 manifest remains their handoff record.
 - #156 remains the cross-audit reconciliation, conformance, documentation,
-  backlog-freeze, and dependency-order gate. This audit does not reconcile the
-  final global matrix early.
+  backlog, and dependency-order gate. This audit does not reconcile the final
+  global matrix early.
 
 ## 7. Bounded follow-up backlog
 
@@ -517,9 +517,9 @@ Existing issues and evidence reused:
 | #145 / PR #146 | Existing `.captionposition` evaluator/IR slice; no reimplementation |
 | #149; #165–#167 | Shared binder, value conversion, diagnostics, provenance, and atomicity ownership |
 | #150; #169 | Callable scope, lazy body, precedence, and programmable evaluation ownership |
-| #152 / PR #174 | Metadata/document-state ownership and frozen base |
+| #152 / PR #174 | Metadata/document-state ownership and existing state base |
 | #154 | Adjacent content/component/output ownership handoffs only |
-| #156 | Required final reconciliation and implementation-order freeze |
+| #156 | Required final reconciliation and dependency-aware implementation order |
 | #158, #160 | Raw/structured content prerequisites relevant to body fallback |
 
 New cohesive implementation follow-ups were created, but none was started:
@@ -537,7 +537,7 @@ the existing bounded slice with raw-body/content prerequisites in #166/#158/
 #160. No issue is one-function-per-row by default; #180 is split because raw
 TeX body conversion, macro-map state, and math-renderer consumption form a
 distinct semantic contract from #175 layout state. All implementation ordering
-remains frozen until #156.
+follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 
 ## 8. Audit conclusion
 

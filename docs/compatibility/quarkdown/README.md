@@ -27,15 +27,22 @@ not evidence that Scribium supports it, while a feature not yet implemented is
 not thereby outside the long-term language target. The tracked target and
 verified baseline are distinct; see [Upstream Evolution](#upstream-evolution).
 
+Issue #156 is the cross-audit canonical view for the v2.5.1 status, evidence
+layers, ownership handoffs, backlog dependencies, and implementation order:
+[`RECONCILIATION.md`](RECONCILIATION.md). The detailed audit matrices and
+manifests linked below remain the row-level evidence authorities.
+
 “Full compatibility” means public document-language behavior and
 document-observable semantics for the tracked release. It does not require
 Quarkdown implementation identity, private APIs, undocumented bugs, internal
 data structures, private plugin ABI, or internal compiler architecture.
 
-The Quarkdown function-call grammar is implemented clean-room from the public
-documentation, notably *"Syntax of a function call"* on the Quarkdown wiki.
-No Quarkdown source code is copied or translated. See `SPEC_SOURCES.md` for
-provenance records.
+The Quarkdown function-call grammar is audited and implemented only at the
+bounded, partially compatible boundary recorded by #148. The work is
+clean-room from public documentation, notably *"Syntax of a function call"*
+on the Quarkdown wiki. No Quarkdown source code is copied or translated. See
+`SPEC_SOURCES.md` and [`RECONCILIATION.md`](RECONCILIATION.md) for provenance
+and canonical layer status.
 
 The remaining public-language surface is tracked in the
 [`GAP_INVENTORY.md`](GAP_INVENTORY.md). It records upstream evidence, Scribium
@@ -87,7 +94,8 @@ It separates ordinary Markdown/CommonMark/GFM behavior from Quarkdown
 extensions, callable content semantics, resource/project ownership,
 caption/numbering/reference consumers, and Typst/output fidelity. Parser
 retention is not treated as semantic or end-to-end support. The audit is
-documentation/guard-only and keeps implementation frozen until #156.
+documentation/guard-only; implementation sequencing is now defined by
+[`RECONCILIATION.md`](RECONCILIATION.md).
 
 The canonical filesystem, project, data, and resource-backed inventory is
 [`FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md`](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md)
@@ -128,7 +136,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, nested first-seen groups, and stable `by` selector sorting | Implemented (evidenced v2.5.1 slice; table operations remain deferred) |
 | Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
-| Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Implemented (bounded v2.5.1 slice) |
+| Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Partial (bounded subset; #188) |
 | Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned `UNSUPPORTED` general stdlib functions; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md) and [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) |
 | Layout/document configuration | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.captionposition`, `.texmacro`, `.pageformat`, `.pagemargin`, `.footer`, page counters/format/reset, `.lastheading`, automatic page breaks, `.marker`, `.navigation`, `.tableofcontents`, `.slides` | Canonical #153 result: one `PARTIAL` bounded evaluator/IR `.captionposition` slice and 19 `PARSED_ONLY` unresolved-call rows; no #153 output-equivalence claim | [#153 audit](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) |
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
@@ -138,7 +146,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Line continuation (`\`)        | `\` at end of line               | Parsed                   | Partial: after-argument continuation is evidenced, but first-argument, trailing, and chain-separator placement are tracked by #164 |
 | Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Partial: nested tight content is #158 |
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
-| `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Implemented (bounded v2.5.1 slice) |
+| `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Partial (bounded source-relative resource slice; #155/#188) |
 | `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
 | `.llmstxt`                     | `content: String`, `markdownavailable: Boolean` | Pinned `Html.kt` declares public `@QFunction llmstxt`; target-specific output/configuration remains #155-owned and Scribium keeps the explicit deferred boundary | Intentionally deferred |
 
@@ -465,9 +473,9 @@ host-supplied `VirtualProject`.
 
 | Builtin | Arguments / result | Resource semantics | Missing/unsupported behavior | Status |
 |---|---|---|---|---|
-| `.read` | `path`, optional `lines`; `String` | UTF-8 text, normalized line separators, source-relative | structured missing, boundary, URI, and invalid-UTF-8 diagnostics | Implemented |
-| `.json` | `path`; recursive `IrValue` | UTF-8 JSON object/array/scalar mapping; deterministic insertion order | structured parse and numeric-precision diagnostics | Implemented |
-| `.include` | `path`, optional `sandbox`; evaluated content | parses/evaluates a separate source with its own `SourceId` and working directory | structured missing/boundary diagnostics and active-stack cycle detection | Implemented |
+| `.read` | `path`, optional `lines`; `String` | UTF-8 text, normalized line separators, source-relative | structured missing, boundary, URI, and invalid-UTF-8 diagnostics | Partial |
+| `.json` | `path`; recursive `IrValue` | UTF-8 JSON object/array/scalar mapping; deterministic insertion order | structured parse and numeric-precision diagnostics | Partial |
+| `.include` | `path`, optional `sandbox`; evaluated content | parses/evaluates a separate source with its own `SourceId` and working directory | structured missing/boundary diagnostics and active-stack cycle detection | Partial |
 | `.markdown` | raw `content`; `NativeContent` | preserves content; it does not load a file | native-content capability diagnostic when denied | Implemented |
 | `.llmstxt` | `content: String`, `markdownavailable: Boolean` | pinned `Html.kt` public declaration; target-specific output/configuration remains outside this slice | explicit deferred diagnostic | Deferred |
 
@@ -789,12 +797,16 @@ backend-neutral; Typst does not interpret Range semantics.
 and are covered by the listed unit/golden/conformance evidence (see
 [Conformance Evidence](#conformance-evidence)). `Planned` means the behavior is
 not implemented yet, in whole or in part. It must not be assumed to work, and
-its absence is tracked compatibility debt against the complete target.
+its absence is tracked compatibility debt against the complete target. The
+cross-audit status and dependency order are canonical in
+[`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Conformance Evidence
 
-Each `Implemented` row is backed by at least one Scribium conformance test.
-The table maps every `Implemented` feature to the test(s) that verify it;
+Each supported/implemented row is backed by evidence at its stated layer. The
+17-case independent corpus is intentionally bounded and does not imply that
+every public surface is output-equivalent. The table maps the supported
+features to the test(s) that verify them;
 Quarkdown grammar evidence lives in
 `crates/scribium-quarkdown/src/lib.rs`, while frontend integration evidence
 lives in `crates/scribium-markdown/src/parser.rs` and its integration tests. A
@@ -872,8 +884,9 @@ implementation, but the canonical #151 classification is now PARTIAL for
 `.capitalize` and `.startswith(ignorecase:true)`: pinned Unicode titlecase and
 Kotlin character-wise case-insensitive matching are not reproduced by the
 current engine. Independent evidence is in
-`crates/scribium-core/tests/stdlib_builtin_audit.rs`; follow-up #172 is frozen
-behind #156.
+`crates/scribium-core/tests/stdlib_builtin_audit.rs`; follow-up #172 is
+sequenced after the shared engine prerequisites in
+[`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Compatibility Levels
 
