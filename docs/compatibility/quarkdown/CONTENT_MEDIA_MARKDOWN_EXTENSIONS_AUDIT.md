@@ -141,7 +141,8 @@ producer and shared-index boundaries:
 - [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) owns the
   component-local producer family `.text`, `.box`, `.todo`, `.collapse`,
   `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
-  `.speakernote`. The remaining component-local `.container` subcontracts
+  `.speakernote`, plus the bounded `.keybinding` and `.loremipsum` content
+  producer review. The remaining component-local `.container` subcontracts
   (`float`, `fullspan`, `classname`, `style`, and complete body conversion)
   are linked there without transferring document-wide state ownership.
 - [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) owns inline
@@ -208,7 +209,9 @@ network, process, or resource access to a platform-neutral crate.
 
 .read, .json, .csv, .include, .includeall, and .subdocument are explicit #155
 handoffs. #154 records the content/table consumer edge only. It does not
-duplicate a project/resource model.
+duplicate a project/resource model. The `.subdocumentgraph` row is separately
+blocked by the completed resolver handoff now owned by #188 and has producer/
+output ownership in #199.
 
 ## Raw content and escape hatches
 
@@ -221,8 +224,10 @@ interchangeable:
 - .htmloptions is a #154 target-specific content/output configuration consumer,
   not #153 document layout state. Its bounded semantic state does not establish
   an HTML backend.
-- .css and .cssproperties remain unsupported. They do not justify a generic
-  style system.
+- .css and .cssproperties remain unsupported and are explicitly deferred to a
+  future target-specific HTML backend/product contract. They do not justify a
+  generic style system or a raw backend escape hatch; closed historical issue
+  #58 is evidence/history only, not their current owner.
 - .llmstxt is deferred on the base-URL, page-environment, and output boundary.
 
 Unsupported raw or structured content is fail-closed. This audit does not
@@ -257,12 +262,23 @@ reused where it already describes the boundary:
 | [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) | Structural content plus shared caption/identifier/reference/index infrastructure; no `.code`/`.math` producer implementation |
 | [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) | Image/media sizing, media storage, icons, diagrams, chart/figure resource and renderer contract |
 | [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) | Callable/generated/computed table producers, traversal, conversion, and output; consumes #181 shared infrastructure |
-| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | `.text`, `.box`, `.todo`, `.collapse`, `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and `.speakernote`; remaining `.container` subcontracts are linked here |
+| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | `.text`, `.box`, `.todo`, `.collapse`, `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, `.speakernote`, `.keybinding`, and `.loremipsum`; remaining `.container` subcontracts are linked here |
 | [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) | Inline/display math, `.math`, code presentation/captions, `.codespan`, and explicit breaks; consumes #181 shared infrastructure |
+| [#198](https://github.com/luceat-lux-vestra/scribium/issues/198) | `.match` pattern/callback traversal and inline-content replacement semantics; #181 remains shared infrastructure only |
+| [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | `.subdocumentgraph` producer and output contract after #188 logical resource resolution; #181 is coordinated only for shared identifiers/indexing |
 | [#155](https://github.com/luceat-lux-vestra/scribium/issues/155) | Resource/environment ownership used by media and content consumers |
 | [#149](https://github.com/luceat-lux-vestra/scribium/issues/149), [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
 | [#158](https://github.com/luceat-lux-vestra/scribium/issues/158), [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Nested tight calls and inline Markdown in content arguments |
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | .texmacro and math-renderer dependency |
+
+The #154 manifest keeps `.keybinding` as actionable `UNKNOWN` with #184 as
+its bounded review owner, and keeps `.loremipsum` as `UNSUPPORTED` with #184
+as its content-producer owner. `.css` and `.cssproperties` remain
+`UNSUPPORTED` with an explicit `DEFERRED_PRODUCT_SURFACE:html-backend`
+disposition; no closed issue is treated as an implementation owner. The
+`.subdocumentgraph` row remains `BLOCKED` on #188 and follows #199 for graph
+and output semantics. These are canonical issue/defer/blocker links, not
+implementation performed by this audit.
 
 These follow-ups were created for bounded implementation review only. None
 is started by this audit; implementation ordering is defined by

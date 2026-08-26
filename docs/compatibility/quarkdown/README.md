@@ -32,6 +32,19 @@ layers, ownership handoffs, backlog dependencies, and implementation order:
 [`RECONCILIATION.md`](RECONCILIATION.md). The detailed audit matrices and
 manifests linked below remain the row-level evidence authorities.
 
+The remaining #151 `UNSUPPORTED` families have cohesive implementation owners:
+[#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for `.get`,
+[#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for library
+inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196) for
+localization table/lookup, and
+[#197](https://github.com/luceat-lux-vestra/scribium/issues/197) for logger /
+diagnostic builtins. For #154, `.match` is #198-owned,
+`.keybinding`/`.loremipsum` are explicitly within #184, and
+`.subdocumentgraph` is blocked by #188 with producer/output ownership in #199.
+`.css` and `.cssproperties` remain unsupported with an explicit defer until a
+target-specific HTML backend/product contract exists; closed #58 is historical
+evidence only.
+
 “Full compatibility” means public document-language behavior and
 document-observable semantics for the tracked release. It does not require
 Quarkdown implementation identity, private APIs, undocumented bugs, internal

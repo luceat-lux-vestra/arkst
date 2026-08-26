@@ -125,7 +125,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded `.theme` document-state semantics | Completed (bounded evaluator/IR boundary; upstream block-body fallback deferred) |
 | Bounded `.captionposition` document-state semantics | Completed (bounded evaluator/IR snapshot; caption rendering deferred) |
 | Quarkdown v2.5.1 layout/document-configuration audit (#153) | Completed (20-row canonical inventory; #175–#178 follow the dependency bands in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
-| Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; #181–#185 follow the shared engine/backend/content prerequisites in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
+| Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; #181–#185 and the bounded #198–#199 follow the shared engine/backend/content prerequisites in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
 | Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; implementation ordering, including #187 as the next technical work, is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md) |
 
 ## M4 — Developer Experience

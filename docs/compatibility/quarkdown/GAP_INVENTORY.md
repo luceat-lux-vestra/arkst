@@ -27,9 +27,15 @@ For document metadata, the canonical per-surface #147 classification is now
 [`DOCUMENT_STATE_AUDIT.md`](DOCUMENT_STATE_AUDIT.md): eight bounded #152 state
 rows are `PARTIAL`. `.localization`/`.localize` remain canonical #151-owned
 `UNSUPPORTED` general stdlib rows; the #152 manifest retains them only as
-`NOT_APPLICABLE` ownership handoffs. The broader classification index below
-remains a family implementation index; it does not override the canonical
-#151/#152 rows or promote evaluator/IR state to end-to-end renderer support.
+`NOT_APPLICABLE` ownership handoffs. Their bounded implementation owner is
+[#196](https://github.com/luceat-lux-vestra/scribium/issues/196); `.get` is
+owned by [#194](https://github.com/luceat-lux-vestra/scribium/issues/194),
+library inspection by [#195](https://github.com/luceat-lux-vestra/scribium/issues/195),
+and `.log`/`.debug`/`.error` by
+[#197](https://github.com/luceat-lux-vestra/scribium/issues/197). The broader
+classification index below remains a family implementation index; it does not
+override the canonical #151/#152 rows or promote evaluator/IR state to
+end-to-end renderer support.
 
 For layout, pagination, style, and document-wide presentation state, the
 canonical per-surface #147 classification is now
@@ -61,9 +67,9 @@ Classification index:
 | Supported at the stated bounded boundary | Logical and comparison operations; optionality callbacks; Collection selector sorting; the VirtualProject/resource model as `SUPPORTED_SEMANTICS`; argumentless inline `.br`; bounded `.docauthor`/`.docauthors`; block-only Stacked row/column/grid consumers |
 | Partially compatible | Function declarations/calls; variables; conditionals; lambdas/callables; iteration; collections; Dictionary/Pair/Range; type/value conversion; strings/text; metadata/document setup; complete public component/style/layout surface; complete error taxonomy |
 | Compatible at the evidenced bounded boundary | Mathematics/numeric operations |
-| Unsupported | Layout/document functions outside the reviewed Stacked, Container, and Landscape slices; unimplemented data-loading families such as `.csv`, `.listfiles`, and `.filename` |
+| Unsupported | Layout/document functions outside the reviewed Stacked, Container, and Landscape slices; unimplemented data-loading families such as `.csv`, `.listfiles`, and `.filename`; #151 `.get`, library inspection, localization, and logger families; #154 `.match`, `.loremipsum`, and `.subdocumentgraph` pending their explicit owner/blocker |
 | Scribium extension | `.map` and `.filter` collection transforms; they are tested Scribium behavior but are not v2.5.1 upstream features |
-| Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, remaining container style/layout families, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
+| Intentionally deferred | Unimplemented data-loading families, `.llmstxt`, function-driven metadata, remaining container style/layout families, `.css`/`.cssproperties` until a target-specific HTML backend/product contract exists, arbitrary comparator syntax not present in v2.5.1, and generalized DynamicValue conversion |
 
 The complete value taxonomy, invocation-time binding, target-driven conversion,
 diagnostic/provenance, and state-atomicity review is canonical in
@@ -87,6 +93,16 @@ NOT_APPLICABLE rows preserve #153 global configuration, #155 resource
 environment, #149/#165–#167 binding/conversion/raw-body, #158 nested-call,
 #160 inline-content, and #180 texmacro ownership. This is an audit-only
 reconciliation; no newly discovered implementation is started by this audit.
+
+The previously unresolved #154 rows now have explicit dispositions: `.match`
+is owned by [#198](https://github.com/luceat-lux-vestra/scribium/issues/198),
+`.loremipsum` and `.keybinding` are bounded under
+[#184](https://github.com/luceat-lux-vestra/scribium/issues/184), and
+`.subdocumentgraph` is blocked by [#188](https://github.com/luceat-lux-vestra/scribium/issues/188)
+with producer/output ownership in
+[#199](https://github.com/luceat-lux-vestra/scribium/issues/199). `.css` and
+`.cssproperties` remain `UNSUPPORTED` with an explicit product/backend defer;
+closed historical issue #58 is not their current owner.
 
 ## #148 call-grammar audit
 

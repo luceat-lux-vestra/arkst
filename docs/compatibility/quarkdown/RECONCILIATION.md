@@ -92,12 +92,12 @@ status recorded by its owner.
 | Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #149 binding, #150 evaluation, #154 content | Parser tests retain spans, but pinned lexical/recovery gaps are #157–#164. Parser recognition is never a semantic claim. |
 | Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths are evidenced; shared binder/raw-body/diagnostic/atomicity gaps are #165–#167. |
 | Variables, callable scope, lazy evaluation, iteration, optionality, extension, failure, and evaluator provenance | #150; `PARTIAL` except `.node`/`.extend` boundaries | #151 builtin declarations; #154 content results | Current bounded callable paths are tested. `.extend`/`.super` is `UNSUPPORTED` and #169-owned; upstream partial-effects divergence is not fixed here. |
-| General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` remain `PARTIAL` and #172-owned; `.localization`/`.localize` remain #151-owned `UNSUPPORTED`. |
+| General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` remain `PARTIAL` and #172-owned; `.get` is #194-owned, library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
 | `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme` | #152; all eight `PARTIAL` | #149 conversion; #153 layout; #154 output; #173 locale closure | Evaluator/IR state and independent fixtures exist. Rendering, complete locale coverage, raw-body fallback, and broader metadata remain gaps. |
 | `.captionposition` | #153; `PARTIAL` | #152 state snapshot; #154 caption-producing content | Typed evaluator/IR merge and serde evidence exists; caption rendering and raw block-body fallback are not claimed. |
 | Remaining document-wide layout/configuration (`.numbering`, `.pageformat`, `.font`, page counters, navigation, `.slides`, and related rows) | #153; 19 `PARSED_ONLY` rows | #154 component/content consumers; #175–#178 | Parser/retention evidence does not establish state, IR, or output support. Follow-up ownership remains grouped by contract. |
 | Bounded ordinary Markdown block/inline/table/fence/link behavior | #154; `SUPPORTED_END_TO_END` rows | Rushdown frontend and Typst output | Existing parser/IR/Typst/PDF evidence is for the bounded Markdown contract, not Quarkdown callable producers. |
-| Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185. No backend escape hatch is introduced. |
+| Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185, with `.match` in #198, `.subdocumentgraph` in #199 after #188, and `.keybinding`/`.loremipsum` explicitly in #184. CSS rows remain an explicit HTML-backend/product defer. No backend escape hatch is introduced. |
 | `.read` | #155; `PARTIAL` | #188 common logical resolver | Source-relative in-memory text and bounded line selection work. Absolute/global semantics, complete permissions, and full library/project behavior do not. |
 | `.json` | #155; `PARTIAL` | #188 resolver; #149 value conversion | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive/project/permission parity is absent. |
 | `.include` | #155; `PARTIAL` | #188 common resolver and nested identity | Nested source identity, cycle detection, and bounded share/scope behavior are evidenced. Absolute/global/library and complete graph parity are absent. |
@@ -155,12 +155,12 @@ implementation requests created by #156.
 
 | Gap class | Current ownership |
 |---|---|
-| `PRODUCTION_GAP` | #157–#160, #162–#167, #169, #172–#185, #188, and #189 where the required parser, engine, content, layout, or resource behavior is absent. |
+| `PRODUCTION_GAP` | #157–#160, #162–#167, #169, #172–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
 | `BACKEND_GAP` | #187 strategy research and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
 | `PLATFORM_GAP` | #190 explicit host capability/injection boundary and the native/WASM/provider exposure portions of #191. |
-| `DEFERRED_PRODUCT_SURFACE` | #191 WASM resource exposure, plus audit rows explicitly deferred in the #151/#154/#155 manifests. |
+| `DEFERRED_PRODUCT_SURFACE` | #191 WASM resource exposure, `.css`, and `.cssproperties`, plus audit rows explicitly deferred in the #151/#154/#155 manifests. |
 
 Every currently open implementation issue discovered during the audit window
 is represented below. Issue state was checked on 2026-08-26; the listed issue
@@ -179,13 +179,27 @@ numbers are not inferred from a numeric sequence.
 | [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) | #154 / structural content and shared identifiers/references/index | Shared caption, identifier, reference, and index infrastructure. It is consumed by #177, #183, and #185; it does not own their producer semantics. | Shared content infrastructure band. |
 | [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) | #154 / media and image producers | Media sizing, icons, diagrams, and output contract. Hard dependency on #188 for project resources; consumes #160/#166–#167 and backend strategy. | After #188 and content prerequisites. |
 | [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) | #154 / table producers | Table generation/computation and output. Depends on #181 shared identifiers/captions, #165–#167 conversion, and #189 for CSV/data-file input where applicable. | After shared content and data-file prerequisites. |
-| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | #154 / component and slide content | Component-local content, containers, and slide content; no generalized style framework. Depends on #178 for slide configuration and #175 only for document-wide policy. | After layout/content prerequisites. |
+| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | #154 / component and slide content | Component-local content, containers, slide content, plus `.keybinding` and `.loremipsum` content-producer review; no generalized style framework. Depends on #178 for slide configuration and #175 only for document-wide policy. | After layout/content prerequisites. |
 | [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) | #154 / math, code, and explicit breaks | Math/code/break producers and output. Depends on #180 and #181 plus shared conversion/raw-body contracts. | After macro/shared-content prerequisites. |
+| [#194](https://github.com/luceat-lux-vestra/scribium/issues/194) | #151 / dictionary lookup | `.get` lookup, key conversion, missing-key/`orelse` behavior, typed nested values, diagnostics, and atomicity. Depends on #165–#167; it does not duplicate dictionary construction. | After #187; parallel stdlib family band after shared engine prerequisites. |
+| [#195](https://github.com/luceat-lux-vestra/scribium/issues/195) | #151 / library/runtime inspection | `.libexists`, `.functionexists`, `.libraries`, and `.libfunctions` under one deterministic registry view. Depends on #165–#167 and coordinates capability/resource policy with #188/#190; no plugin registry. | After shared engine and #187 strategy; capability/resource coordination band. |
+| [#196](https://github.com/luceat-lux-vestra/scribium/issues/196) | #151 / localization table and lookup | `.localization` mutation and `.localize` lookup, including seeded `std`, merge/replace, separators, typed values, diagnostics, and atomicity. Depends on #165–#167 and coordinates with #173 without moving `.doclang`. | After #187; parallel stdlib/state band after shared engine prerequisites. |
+| [#197](https://github.com/luceat-lux-vestra/scribium/issues/197) | #151 / logger and diagnostic builtins | `.log`, `.debug`, and `.error` severity/return behavior through an explicit sink/capability or deterministic rejection. Depends on #165–#167 and #190; no implicit process streams. | After shared engine and #187/#190 host-boundary decisions; semantic work can be parallel. |
+| [#198](https://github.com/luceat-lux-vestra/scribium/issues/198) | #154 → #150 / `.match` content transformation | Pattern/callback traversal and inline-content replacement; #181 remains shared infrastructure only. Depends on #165–#167 and coordinates output strategy with #187. | After #187 and shared binding/atomicity prerequisites; content/evaluator band. |
+| [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | #154 / subdocument graph producer/output | `.subdocumentgraph` graph/content semantics and output. Hard dependency on #188 logical resolution; coordinates shared identifiers/indexing with #181 and backend strategy with #187. | After #188 and backend/content prerequisites. |
 | [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) | #155 → backend strategy | Re-evaluate in-process Typst against the existing VirtualProject architecture. It is a technical spike, not builtin implementation; preferred native in-process backend requires parity evidence, while subprocess remains fallback/transition until a separate migration decision. | **Immediate next technical work.** |
-| [#188](https://github.com/luceat-lux-vestra/scribium/issues/188) | #155 / logical project resource resolution | Common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity. Hard prerequisite for #189 and resource portions of #182/#183; not a prerequisite to start #187. | After #187; first resource implementation band. |
+| [#188](https://github.com/luceat-lux-vestra/scribium/issues/188) | #155 / logical project resource resolution | Common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity. Hard prerequisite for #189, #199, and resource portions of #182/#183; not a prerequisite to start #187. | After #187; first resource implementation band. |
 | [#189](https://github.com/luceat-lux-vestra/scribium/issues/189) | #155 / project data and file identity | `.listfiles`, `.filename`, `.csv`, `.bibliography`; depends on #188 and coordinates with #181/#183. | After #188; data consumer band. |
 | [#190](https://github.com/luceat-lux-vestra/scribium/issues/190) | #155 / host capability boundary | Deterministic `.env` injection/denial and native/WASM contract; no `std::env`. It can be designed in parallel with #188/#189 after #187, but must precede any environment-dependent exposure. | Parallel platform-contract band after #187. |
 | [#191](https://github.com/luceat-lux-vestra/scribium/issues/191) | #155 / M6 WASM/embedder | WASM VirtualProject/resource boundary, provider exposure, diagnostics, and parity. It remains deferred to the WASM milestone; it is not immediately eligible because #156 completed. | Deferred. |
+
+The remaining #154 rows that are not assigned an implementation issue have an
+explicit product/backend disposition: `.css` and `.cssproperties` remain
+`UNSUPPORTED` and are deferred until a target-specific HTML backend/product
+contract is accepted. Closed [#58](https://github.com/luceat-lux-vestra/scribium/issues/58)
+is retained as the historical raw-HTML-policy tracker only; it is not their
+current owner. The `subdocumentgraph` blocker is no longer #155: #188 is the
+logical-resource prerequisite and #199 owns the graph/content/output contract.
 
 No duplicate issue was created by #156. Historical trackers are retained with
 their historical meaning: [#24](https://github.com/luceat-lux-vestra/scribium/issues/24)
@@ -226,6 +240,11 @@ closed, or treated as proof of complete v2.5.1 compatibility.
              │                  ▲       ▲
              └──────────────────┘       │
                           #180 ─────────┘
+
+  #165/#166/#167 ──► #194 dictionary, #196 localization, #197 logger
+       #190 capability ──► #195 library inspection
+       #188 resolver ──► #199 subdocumentgraph
+       #184 also owns the #154 keybinding/loremipsum producer review
 
   #191: deferred WASM/embedder milestone after logical provider/capability
         contracts and relevant parity evidence.
@@ -319,7 +338,8 @@ The reconciliation supplies evidence for each parent completion criterion:
 - supported claims are tied to the appropriate frontend, evaluator, IR,
   backend/output, fixture, or platform evidence layer;
 - every actionable partial/unsupported/unknown resource and implementation gap
-  points to #157–#191, an explicit defer, or an explicit blocker;
+  points to the listed bounded follow-ups (including #194–#199), an explicit
+  product/backend defer, or an explicit blocker;
 - historical trackers are retained without being mistaken for current
   compatibility proof;
 - the conformance corpus, docs, manifests, and backlog share the same target

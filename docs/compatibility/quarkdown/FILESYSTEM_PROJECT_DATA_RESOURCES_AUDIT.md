@@ -235,8 +235,9 @@ or network access.
   [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) retain their
   established layout, structural/reference, media, table, and Typst/backend
   ownership boundaries; and
-- [#156](https://github.com/luceat-lux-vestra/scribium/issues/156) remains the
-  required cross-audit reconciliation gate.
+- [#156](https://github.com/luceat-lux-vestra/scribium/issues/156) is the
+  completed cross-audit reconciliation record; implementation sequencing now
+  follows its canonical dependency graph.
 
 The [offline guard](../../../crates/scribium-core/tests/filesystem_project_data_resources_audit.rs)
 rejects unpinned provenance, missing schema/evidence, contradictory support
