@@ -683,6 +683,45 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             "```typst\n#import \"@preview/raw-block:1.0.0\": *\n```\n#let text = \"@local/example:1.0.0\"\n#raw(\"#import \\\"@company/example:1.0.0\\\": *\")\n",
             success_expectation(&["@preview/raw-block", "@local/example", "@company/example"]),
         ),
+        typst_override_fixture_with_sources(
+            "nested-local-module-package-preview",
+            "docs/main.qd",
+            "# Nested package denial\n",
+            "#import \"./helper.typ\": *\n",
+            &[(
+                "docs/helper.typ",
+                "#import \"@preview/nested-package:1.0.0\": *\n",
+            )],
+            failure_expectation(OutcomeClass::PackageDenied),
+        ),
+        typst_override_fixture_with_sources(
+            "nested-local-module-package-local",
+            "docs/main.qd",
+            "# Nested package denial\n",
+            "#import \"./helper.typ\": *\n",
+            &[(
+                "docs/helper.typ",
+                "#import \"@local/nested-package:1.0.0\": *\n",
+            )],
+            failure_expectation(OutcomeClass::PackageDenied),
+        ),
+        typst_override_fixture_with_sources(
+            "nested-local-module-inert-package-looking-text",
+            "docs/main.qd",
+            "# Nested inert module\n",
+            "#import \"./helper.typ\": *\n#helper_value\n",
+            &[
+                (
+                    "docs/helper.typ",
+                    "// #import \"@preview/inert:1.0.0\": *\n#let helper_value = \"@local/inert:1.0.0\"\n",
+                ),
+                (
+                    "docs/unused.typ",
+                    "#import \"@company/unused:1.0.0\": *\n",
+                ),
+            ],
+            success_expectation(&[]),
+        ),
         invalid_generated_fixture("invalid-generated", false, false),
         invalid_generated_fixture("mapped-diagnostic", true, false),
         invalid_generated_fixture("ambiguous-diagnostic", true, true),
@@ -722,7 +761,18 @@ fn lowered_fixture(
     assets: &[(&str, &[u8])],
     expectation: ParityExpectation,
 ) -> ParityFixture {
-    let project = project(entry, source, assets, &[]);
+    lowered_fixture_with_sources(name, entry, source, assets, &[], expectation)
+}
+
+fn lowered_fixture_with_sources(
+    name: &'static str,
+    entry: &'static str,
+    source: &str,
+    assets: &[(&str, &[u8])],
+    additional_sources: &[(&str, &str)],
+    expectation: ParityExpectation,
+) -> ParityFixture {
+    let project = project(entry, source, assets, additional_sources);
     let result = compile(&project, &CompileOptions::default());
     assert!(
         result.diagnostics.is_empty(),
@@ -748,9 +798,27 @@ fn typst_override_fixture(
     entry: &'static str,
     source: &str,
     generated_source: &str,
+    expectation: ParityExpectation,
+) -> ParityFixture {
+    typst_override_fixture_with_sources(name, entry, source, generated_source, &[], expectation)
+}
+
+fn typst_override_fixture_with_sources(
+    name: &'static str,
+    entry: &'static str,
+    source: &str,
+    generated_source: &str,
+    additional_sources: &[(&str, &str)],
     mut expectation: ParityExpectation,
 ) -> ParityFixture {
-    let mut fixture = lowered_fixture(name, entry, source, &[], success_expectation(&[]));
+    let mut fixture = lowered_fixture_with_sources(
+        name,
+        entry,
+        source,
+        &[],
+        additional_sources,
+        success_expectation(&[]),
+    );
     expectation.source_markers = &[];
     fixture.input.source = generated_source.to_string();
     fixture.source_map.clear();

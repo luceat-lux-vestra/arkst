@@ -91,11 +91,15 @@ impl TypstBackend for SubprocessBackend {
     fn compile(&self, input: &TypstInput) -> Result<TypstOutput, TypstError> {
         let start = std::time::Instant::now();
         let entry_path = validate_entry_path(&input.entry_path)?;
-        if contains_denied_typst_module_reference(&input.source) {
-            return Err(TypstError::Subprocess(format!(
-                "package resolution is denied by Scribium for {}",
-                entry_path
-            )));
+        let project_root = self
+            .source_context
+            .as_ref()
+            .map(|context| canonical_project_root(&context.project_root))
+            .transpose()?;
+        if let Some(project_root) = &project_root {
+            ensure_reachable_typst_modules_allowed(&input.source, &entry_path, project_root)?;
+        } else if contains_denied_typst_module_reference(&input.source) {
+            return Err(package_resolution_denied(&entry_path));
         }
 
         // Create a unique temporary directory for the generated Typst source,
@@ -104,8 +108,7 @@ impl TypstBackend for SubprocessBackend {
         let temp_dir = tempfile::tempdir().map_err(TypstError::Io)?;
         let pdf_file = temp_dir.path().join("output.pdf");
 
-        let (typst_file, typst_root) = if let Some(source_context) = &self.source_context {
-            let project_root = canonical_project_root(&source_context.project_root)?;
+        let (typst_file, typst_root) = if let Some(project_root) = project_root.as_ref() {
             let mirror_root = temp_dir.path().join("project");
             let mut active_directories = BTreeSet::new();
             copy_project_tree(
@@ -235,7 +238,6 @@ fn validate_entry_path(raw: &str) -> Result<VirtualPathBuf, TypstError> {
 /// This helper is intentionally independent of generated Typst parsing. The
 /// generated source remains Typst source, while native resource access is
 /// bounded by the staged project root and Typst's `--root` option.
-#[cfg(test)]
 fn resolve_logical_resource_path(
     entry_path: &VirtualPathBuf,
     resource: &str,
@@ -258,6 +260,80 @@ fn canonical_project_root(project_root: &Path) -> Result<PathBuf, TypstError> {
         ));
     }
     Ok(canonical)
+}
+
+fn package_resolution_denied(logical_path: &VirtualPathBuf) -> TypstError {
+    TypstError::Subprocess(format!(
+        "package resolution is denied by Scribium for {}",
+        logical_path
+    ))
+}
+
+/// Applies the package policy to the active local Typst module graph rooted at
+/// the generated entry source. The project mirror contains every project file,
+/// but only modules reachable through literal project-relative `import` or
+/// `include` operands are inspected here. This keeps unused files inert while
+/// preventing a reachable helper module from bypassing the entry preflight.
+fn ensure_reachable_typst_modules_allowed(
+    source: &str,
+    logical_path: &VirtualPathBuf,
+    project_root: &Path,
+) -> Result<(), TypstError> {
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    scan_reachable_typst_module(
+        source,
+        logical_path,
+        project_root,
+        &mut visiting,
+        &mut visited,
+    )
+}
+
+fn scan_reachable_typst_module(
+    source: &str,
+    logical_path: &VirtualPathBuf,
+    project_root: &Path,
+    visiting: &mut BTreeSet<VirtualPathBuf>,
+    visited: &mut BTreeSet<VirtualPathBuf>,
+) -> Result<(), TypstError> {
+    if visited.contains(logical_path) || !visiting.insert(logical_path.clone()) {
+        return Ok(());
+    }
+
+    let mut local_modules = Vec::new();
+    if !collect_local_typst_module_references(source, &mut local_modules) {
+        return Err(package_resolution_denied(logical_path));
+    }
+
+    visited.insert(logical_path.clone());
+    for module_reference in local_modules {
+        let module_path = resolve_logical_resource_path(logical_path, &module_reference)?;
+        let native_path = native_path_from_virtual(project_root, &module_path);
+
+        // Let Typst report a normal missing-module error. Existing files are
+        // the only paths that need policy inspection before the subprocess is
+        // spawned.
+        if !native_path.exists() {
+            continue;
+        }
+        let metadata = fs::metadata(&native_path).map_err(TypstError::Io)?;
+        if !metadata.is_file() {
+            continue;
+        }
+        checked_canonical_target(&native_path, project_root, &module_path)?;
+        let module_source = fs::read_to_string(&native_path).map_err(TypstError::Io)?;
+        scan_reachable_typst_module(
+            &module_source,
+            &module_path,
+            project_root,
+            visiting,
+            visited,
+        )?;
+    }
+
+    visiting.remove(logical_path);
+    Ok(())
 }
 
 fn generated_typst_path(
@@ -560,22 +636,41 @@ fn logical_path_from_absolute_token(token: &str) -> Option<String> {
 /// module expressions are rejected because this adapter cannot prove that
 /// they remain project-local without evaluating code.
 fn contains_denied_typst_module_reference(source: &str) -> bool {
-    let root = typst_syntax::parse(source);
-    syntax_node_contains_denied_module(&root)
+    let mut local_modules = Vec::new();
+    !collect_local_typst_module_references(source, &mut local_modules)
 }
 
-fn syntax_node_contains_denied_module(node: &typst_syntax::SyntaxNode) -> bool {
-    let denied = match node.kind() {
+fn collect_local_typst_module_references(source: &str, local_modules: &mut Vec<String>) -> bool {
+    let root = typst_syntax::parse(source);
+    collect_local_typst_module_references_from_node(&root, local_modules)
+}
+
+fn collect_local_typst_module_references_from_node(
+    node: &typst_syntax::SyntaxNode,
+    local_modules: &mut Vec<String>,
+) -> bool {
+    let module_source = match node.kind() {
         typst_syntax::SyntaxKind::ModuleImport => node
             .cast::<typst_syntax::ast::ModuleImport>()
-            .is_some_and(|module| module_source_is_denied(module.source())),
+            .map(|module| module.source()),
         typst_syntax::SyntaxKind::ModuleInclude => node
             .cast::<typst_syntax::ast::ModuleInclude>()
-            .is_some_and(|module| module_source_is_denied(module.source())),
-        _ => false,
+            .map(|module| module.source()),
+        _ => None,
     };
 
-    denied || node.children().any(syntax_node_contains_denied_module)
+    if let Some(module_source) = module_source {
+        if module_source_is_denied(module_source) {
+            return false;
+        }
+        let typst_syntax::ast::Expr::Str(string) = module_source else {
+            return false;
+        };
+        local_modules.push(string.get().to_string());
+    }
+
+    node.children()
+        .all(|child| collect_local_typst_module_references_from_node(child, local_modules))
 }
 
 fn module_source_is_denied(source: typst_syntax::ast::Expr<'_>) -> bool {
@@ -746,6 +841,57 @@ import "@preview/markup-text:1.0.0"
             })
             .expect("inert package-looking text must not be denied");
         assert_eq!(output.pdf.as_deref(), Some(b"%PDF-1.7 inert".as_slice()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_context_preflight_follows_reachable_local_modules() {
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_root = project_parent.path().join("project");
+        fs::create_dir_all(project_root.join("docs")).unwrap();
+        let backend = SubprocessBackend::new("/nonexistent/typst")
+            .with_source_context(TypstSourceContext::new(&project_root));
+
+        for package in [
+            "@preview/nested-package:1.0.0",
+            "@local/nested-package:1.0.0",
+        ] {
+            fs::write(
+                project_root.join("docs/helper.typ"),
+                format!("#import \"{package}\": *\n"),
+            )
+            .unwrap();
+            let error = backend
+                .compile(&TypstInput {
+                    source: "#import \"./helper.typ\": *\n".to_string(),
+                    entry_path: "docs/main.qd".to_string(),
+                })
+                .expect_err("a reachable helper package must be denied");
+            let error = error.to_string();
+            assert!(error.contains("package resolution is denied"), "{error}");
+            assert!(!error.contains("not found at"), "{error}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_context_module_preflight_is_cycle_safe() {
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_root = project_parent.path().join("project");
+        fs::create_dir_all(project_root.join("docs")).unwrap();
+        fs::write(
+            project_root.join("docs/helper.typ"),
+            "#import \"./helper.typ\": *\n",
+        )
+        .unwrap();
+        let project_root = canonical_project_root(&project_root).unwrap();
+
+        ensure_reachable_typst_modules_allowed(
+            "#import \"./helper.typ\": *\n",
+            &VirtualPathBuf::parse("docs/main.qd").unwrap(),
+            &project_root,
+        )
+        .unwrap();
     }
 
     #[test]
