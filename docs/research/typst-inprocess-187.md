@@ -51,6 +51,14 @@ not part of Scribium's `VirtualProject` policy. Package/network access is
 therefore denied in this spike, rather than silently widening the host
 capability model.
 
+Because the pinned Typst 0.15.1 line still resolves `citationberg 0.7.0` from
+crates.io, the workspace temporarily replaces that one package with the
+upstream citationberg PR #44 merge revision
+`06a591e2f237d25e1dfdedac3f3d1494c496c52d`. This is an immutable dependency
+patch, not an advisory suppression or a direct `quick-xml` override. It must
+be removed when an upstream citationberg release containing the fix is
+available to the pinned Typst line.
+
 The adapter does not depend on Typst compiler internals, renderer frames,
 `Content`, or layout objects. Typst types are confined to the native
 `scribium-typst-inprocess` crate. The platform-neutral `scribium-typst` crate
@@ -216,16 +224,22 @@ The dependency/security gate was also run after adding the Typst graph:
 cargo deny check
 ```
 
-Licenses, bans, and sources passed, but the command failed the advisory gate on
-transitive Typst dependencies: `quick-xml 0.38.4` has the current
-RUSTSEC-2026-0194 and RUSTSEC-2026-0195 advisories, and the graph also reports
-unmaintained `paste`, `rustybuzz`, `ttf-parser`, and `yaml-rust` paths. Typst
-0.15.1 is still the current stable release; its `citationberg 0.7.0` path
-requires the incompatible 0.38 line, while the advisory fix is in quick-xml
-0.41+. No safe in-spike upgrade is available without changing the pinned Typst
-release or carrying third-party compatibility patches. No advisory was
-suppressed and no unrelated dependency migration was absorbed into #187; this
-remains an explicit production-promotion blocker for #200.
+Licenses, bans, and sources passed, but the command still fails the advisory
+gate. The immutable citationberg patch removes `quick-xml 0.38.4` and the
+RUSTSEC-2026-0194/RUSTSEC-2026-0195 paths; `quick-xml 0.41.0` is now the only
+quick-xml version in the relevant graph. The full gate nevertheless reports
+unmaintained `bincode 1.3.3`, `paste 1.0.15`, `rustybuzz 0.20.1`,
+`ttf-parser 0.25.1`, and `yaml-rust 0.4.5` paths through Typst's syntax,
+bibliography, and font/PDF dependencies. The advisory report marks these
+paths as having no safe upgrade, or requires incompatible upstream changes,
+under the pinned Typst 0.15.1 constraints. No advisory was suppressed and no
+unrelated dependency migration was absorbed into #187; the mandatory security
+gate therefore remains an explicit merge and production-promotion blocker for
+#202/#200.
+
+The temporary citationberg patch is dependency-management debt. Remove it
+after an upstream release is consumable through the pinned Typst line, then
+re-run the graph check, `cargo deny check`, and the complete CI matrix.
 
 ## Platform and WASM findings
 

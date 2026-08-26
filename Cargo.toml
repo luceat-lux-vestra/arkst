@@ -71,3 +71,12 @@ typst-pdf = "0.15.1"
 opt-level = 2
 debug = 1
 strip = "symbols"
+
+[patch.crates-io]
+# citationberg has merged the quick-xml 0.41 security fix, but has not yet
+# published a release containing it. Pin the merged upstream commit until a
+# crates.io release can replace this patch.
+citationberg = {
+    git = "https://github.com/typst/citationberg.git",
+    rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d",
+}

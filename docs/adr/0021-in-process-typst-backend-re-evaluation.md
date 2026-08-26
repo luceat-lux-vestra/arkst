@@ -53,6 +53,13 @@ denial, fail-closed date behavior, repeated reads, and structured failure
 diagnostics were exercised. A subprocess parity test covered generated
 multi-page success and invalid-source failure classification.
 
+The workspace temporarily pins citationberg's upstream PR #44 merge revision
+`06a591e2f237d25e1dfdedac3f3d1494c496c52d` because the crates.io `0.7.0`
+release still selects vulnerable quick-xml 0.38.x. This exact immutable patch
+resolves quick-xml 0.41.0 without suppressing the advisory or changing the
+Typst release line. It is to be removed when a fixed citationberg release is
+available.
+
 The assumptions that changed since #12 are:
 
 1. `VirtualProject` now provides an established immutable source/asset model
