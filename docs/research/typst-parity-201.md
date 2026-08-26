@@ -1,10 +1,12 @@
 # Issue #201: Native Typst backend parity evidence
 
-Status: implementation and parity evidence for PR #205. The original
-code-bearing parity CI run 32967897182 tested commit
-`71f6525a649992a12d03bf5842800dc3bfce9c4c`; subsequent strict review found
-two boundary defects, which the corrective implementation and its CI rerun
-must close on [PR #205](https://github.com/luceat-lux-vestra/scribium/pull/205).
+Status: implementation and parity evidence for PR #205. The current
+code-bearing corrective implementation is commit
+`4d29f1a452531221f3ed519673eaef15762e1e0f`. Its exact-head native matrix
+evidence is CI run [33023853364](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364),
+which passed the named parity step on Linux, macOS, and Windows. A later
+documentation-only follow-up may change the PR head without changing this
+backend implementation or its evidence.
 The canonical executable oracle is
 
 ~~~
@@ -38,8 +40,13 @@ serialization are intentionally outside the oracle.
 
 The test-only OutcomeClass normalizes subprocess text only at the oracle
 boundary. The subprocess adapter retains its existing error type/API and does
-not require backend-specific diagnostic wording to match; its two minimal
-fail-closed fixes are recorded below.
+not require backend-specific diagnostic wording to match. Before subprocess
+execution, its package policy walks the active AST import/include graph from
+the generated entry: static package specifications in any namespace and
+dynamic module operands are denied; static project-relative local modules are
+resolved within the canonical project root and scanned recursively with
+cycle protection. Unreachable project files and package-looking text in
+comments, raw blocks, code blocks, and strings remain inert.
 
 ## Fixture matrix
 
@@ -62,7 +69,13 @@ same fixture corpus; they are not inferred from the local run.
 | project-font | PASS | PASS | project-supplied font policy, valid PDF | no Scribium font semantic yet |
 | missing-resource | FAIL | FAIL | resource failure, logical missing path | error wording may differ |
 | traversal | FAIL | FAIL | project boundary denial | error wording may differ |
-| package-denial-all-namespaces | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| package-denial-preview | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| package-denial-local | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| package-denial-arbitrary-namespace | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| package-looking-inert-text | PASS | PASS | inert package-looking text, valid PDF | none observed |
+| nested-local-module-package-preview | FAIL | FAIL | reachable local package denied | error wording may differ |
+| nested-local-module-package-local | FAIL | FAIL | reachable local package denied | error wording may differ |
+| nested-local-module-inert-package-looking-text | PASS | PASS | reachable inert module and unused file, valid PDF | none observed |
 | invalid-generated | FAIL | FAIL | generated Typst compile failure | subprocess text versus structured in-process diagnostic |
 | mapped-diagnostic | FAIL | FAIL | logical path plus original span in-process | subprocess has no structured span |
 | ambiguous-diagnostic | FAIL | FAIL | logical path, no fabricated in-process span | subprocess has no structured span |
@@ -83,15 +96,13 @@ remain a project-owned VirtualProject asset and no system font is required.
 
 The CI workflow installs Typst 0.15.1 on each native matrix job and runs the
 parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The code-bearing
-cross-platform evidence is recorded here from run 32967897182; the final
-documentation-only PR HEAD reruns the same named gate in the workflow linked
-above:
+exact-head evidence is recorded here from run 33023853364:
 
 | Platform | Parity suite | Typst |
 |---|---|---|
-| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502626) | 0.15.1 required |
-| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502487) | 0.15.1 required |
-| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502658) | 0.15.1 required |
+| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439482) | 0.15.1 required |
+| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439404) | 0.15.1 required |
+| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439590) | 0.15.1 required |
 
 The corpus exercises:
 
@@ -101,7 +112,9 @@ The corpus exercises:
 - missing project-relative resources;
 - ../../outside.svg traversal denial;
 - @preview, @local, and arbitrary-namespace package denial without URL
-  leakage, while package-looking comments/raw/code/string text remains inert;
+  leakage, including packages reached through a project-local module, while
+  package-looking comments/raw/code/string text and unused project files
+  remain inert;
 - logical generated/source paths and mapped/unmapped/ambiguous source spans;
   and
 - rejection of temporary, runner, Unix absolute, Windows drive, UNC-like, or
@@ -113,11 +126,12 @@ normalizes native, slash, backslash, and extended-prefix forms and redacts
 remaining absolute runner/temp tokens while retaining logical project paths.
 The first complete parity run also showed that Typst CLI package resolution
 could reach its network resolver. Static `import`/`include` package operands
-for every namespace are now rejected before subprocess execution, while the
-syntax parser ignores comments, raw text, and inert strings. Dynamic module
-operands are also rejected because the adapter cannot prove they are
-project-local without evaluating code; ordinary literal relative imports remain
-supported.
+for every namespace are now rejected before subprocess execution, including
+when reached through a recursively scanned project-local module. The syntax
+parser ignores comments, raw text, and inert strings, and the scanner is
+cycle-safe without scanning unused files. Dynamic module operands are also
+rejected because the adapter cannot prove they are project-local without
+evaluating code; ordinary literal relative imports remain supported.
 The diagnostic retains the logical entry path. The sanitizer and parity oracle
 treat relative components such as `target/` and `Users/` as ordinary logical
 path components; only absolute/native/temporary path tokens are redacted.
