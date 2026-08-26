@@ -28,6 +28,14 @@ Typst release is already compatible. The generated-source corpus and compiler
 adapter behavior are the evidence that must advance when the verified version
 changes.
 
+Issue #187 also demonstrated an optional native in-process adapter over
+`VirtualProject` and Typst 0.15.1's public `World`/compile/PDF APIs. It is not
+the default backend, is not part of the WASM lowering boundary, and is not a
+verified replacement for the subprocess path. See
+[`docs/research/typst-inprocess-187.md`](../../research/typst-inprocess-187.md)
+and [ADR-0021](../../adr/0021-in-process-typst-backend-re-evaluation.md) for
+the bounded evidence and promotion gates.
+
 ## Source/project context contract
 
 The native subprocess adapter preserves the Scribium source context without

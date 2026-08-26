@@ -34,5 +34,6 @@ This directory contains Architecture Decision Records (ADRs) for Scribium.
 | 0018 | Quarkdown target-specific native content       | Accepted  |
 | 0019 | Typst source and resource context              | Accepted  |
 | 0020 | Programmable document semantic model           | Accepted  |
+| 0021 | Optional in-process Typst backend after #187  | Accepted  |
 
 Template: `0000-template.md`
