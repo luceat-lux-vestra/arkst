@@ -442,7 +442,71 @@ fn sanitize_typst_diagnostic(stderr: &[u8], temporary_root: &Path) -> String {
         offset = path_end;
     }
     normalized.push_str(&diagnostic[offset..]);
-    normalized
+    sanitize_absolute_path_tokens(&normalized)
+}
+
+fn sanitize_absolute_path_tokens(diagnostic: &str) -> String {
+    let mut starts = BTreeSet::new();
+    let bytes = diagnostic.as_bytes();
+    for (index, window) in bytes.windows(3).enumerate() {
+        let preceded_by_token = index > 0 && bytes[index - 1].is_ascii_alphanumeric();
+        if !preceded_by_token
+            && window[0].is_ascii_alphabetic()
+            && window[1] == b':'
+            && matches!(window[2], b'/' | b'\\')
+        {
+            starts.insert(index);
+        }
+    }
+    for (index, _) in diagnostic.match_indices("\\\\") {
+        starts.insert(index);
+    }
+    for marker in [
+        "/tmp/",
+        "/private/var/",
+        "/var/folders/",
+        "/Users/",
+        "\\tmp\\",
+        "\\Users\\",
+        "/home/runner/",
+        "\\home\\runner\\",
+        "runner.workspace",
+        "github.workspace",
+        "target/",
+        "\\target\\",
+    ] {
+        for (index, _) in diagnostic.match_indices(marker) {
+            starts.insert(index);
+        }
+    }
+
+    let mut sanitized = String::with_capacity(diagnostic.len());
+    let mut offset = 0;
+    for start in starts {
+        if start < offset {
+            continue;
+        }
+        sanitized.push_str(&diagnostic[offset..start]);
+        let end = start
+            + diagnostic[start..]
+                .find(char::is_whitespace)
+                .unwrap_or(diagnostic.len() - start);
+        let token = &diagnostic[start..end];
+        if let Some(logical_path) = logical_path_from_absolute_token(token) {
+            sanitized.push_str(&logical_path);
+        } else {
+            sanitized.push_str("<host-path>");
+        }
+        offset = end;
+    }
+    sanitized.push_str(&diagnostic[offset..]);
+    sanitized
+}
+
+fn logical_path_from_absolute_token(token: &str) -> Option<String> {
+    let normalized = token.replace('\\', "/");
+    let (_, logical_path) = normalized.split_once("/project/")?;
+    Some(format!("/{logical_path}"))
 }
 
 #[cfg(test)]
@@ -560,7 +624,8 @@ mod tests {
     fn typst_diagnostics_sanitize_native_and_slash_temp_paths() {
         let temporary_root = Path::new("D:\\a\\_temp\\scribium");
         let stderr = "error: D:/a/_temp/scribium/project/docs/main.typ:1:1\n".to_string()
-            + "error: \\\\?\\D:\\a\\_temp\\scribium\\project\\docs\\main.typ:2:1\n";
+            + "error: \\\\?\\D:\\a\\_temp\\scribium\\project\\docs\\main.typ:2:1\n"
+            + "error: C:/Users/runneradmin/AppData/Temp/project/docs/main.typ:3:1\n";
 
         let sanitized = sanitize_typst_diagnostic(stderr.as_bytes(), temporary_root);
 
@@ -568,9 +633,11 @@ mod tests {
             sanitized,
             "error: <typst-build>/project/docs/main.typ:1:1\n".to_string()
                 + "error: <typst-build>/project/docs/main.typ:2:1\n"
+                + "error: /docs/main.typ:3:1\n"
         );
         assert!(!sanitized.contains("D:/a/"));
         assert!(!sanitized.contains("D:\\a\\"));
+        assert!(!sanitized.contains("C:/Users/"));
         assert!(!sanitized.contains("\\\\?\\"));
     }
 
