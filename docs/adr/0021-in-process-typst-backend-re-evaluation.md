@@ -125,8 +125,13 @@ authorize automatic migration or auto-removal.
 
 The production follow-up keeps the decision above unchanged. The trusted
 native CLI now accepts `--backend subprocess|in-process`, with subprocess as
-the default. Explicit in-process selection invokes `InProcessBackend` directly
-and returns its typed adapter error without fallback. The selection enum lives
+the default. `scribium-cli` keeps `scribium-typst-inprocess` behind the empty-by-
+default Cargo feature `typst-inprocess`; an in-process CLI build therefore
+requires both that feature and explicit runtime selection. Without the feature,
+`--backend in-process` fails deterministically with rebuild guidance and never
+falls back to subprocess. With the feature, explicit in-process selection
+invokes `InProcessBackend` directly and returns its typed adapter error without
+fallback. The selection enum lives
 at the native host boundary; neither `scribium-core` nor the platform-neutral
 `scribium-typst` lowering crate selects a native backend.
 

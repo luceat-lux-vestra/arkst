@@ -34,7 +34,7 @@ enum Commands {
         /// Output file path (defaults to .typ for typst and .pdf for pdf)
         #[arg(long)]
         output: Option<PathBuf>,
-        /// Native PDF backend: subprocess (default) or in-process (explicit native-only opt-in; not browser/WASM rendering)
+        /// Native PDF backend: subprocess (default) or in-process (explicit native-only opt-in; requires Cargo feature `typst-inprocess`; not browser/WASM rendering)
         #[arg(long, value_enum, default_value = "subprocess")]
         backend: commands::BackendSelection,
         /// Path to the Typst executable used by the subprocess PDF backend (defaults to `typst` on PATH)
@@ -126,5 +126,6 @@ mod tests {
         assert!(help.contains("subprocess"));
         assert!(help.contains("in-process"));
         assert!(help.contains("default"));
+        assert!(help.contains("typst-inprocess"));
     }
 }

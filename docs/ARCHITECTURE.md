@@ -884,9 +884,12 @@ filesystem/package discovery. Typst compiler types remain inside this crate.
 The subprocess adapter remains the default and rollback path. The optional
 adapter and its evidence are recorded in ADR-0021 and
 `docs/research/typst-inprocess-187.md`. The trusted native CLI exposes the
-selection as `--backend subprocess|in-process`; omission selects subprocess,
-and an explicitly selected in-process failure is returned to the caller rather
-than silently falling back.
+selection as `--backend subprocess|in-process`; omission selects subprocess.
+The CLI's default Cargo feature set does not include
+`scribium-typst-inprocess`; native consumers must opt in at build/package time
+with the `typst-inprocess` feature and then explicitly select
+`--backend in-process`. A feature-disabled explicit selection fails
+deterministically with rebuild guidance rather than silently falling back.
 
 ```text
 scribium-typst
@@ -1127,10 +1130,13 @@ frozen here.
 
 The current CLI-level backend override is `scribium build ... --backend
 subprocess|in-process`. `subprocess` is the default and requires the configured
-Typst executable. `in-process` is a native-only trusted-host opt-in; it is not
-a browser/WASM renderer and does not fall back to subprocess after a failed
-explicit selection. The illustrative `[typst] backend` configuration above is
-not a claim that `scribium.toml` backend parsing is already implemented.
+Typst executable; it is included in the default CLI build. `in-process` is a
+native-only trusted-host opt-in that requires both the
+`typst-inprocess` Cargo feature and explicit runtime selection. It is not a
+browser/WASM renderer. A feature-disabled explicit selection fails with
+rebuild guidance and does not fall back to subprocess. The illustrative
+`[typst] backend` configuration above is not a claim that `scribium.toml`
+backend parsing is already implemented.
 
 ```text
 scribium.toml + CLI flags

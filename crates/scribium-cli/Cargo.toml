@@ -8,6 +8,10 @@ repository.workspace = true
 authors.workspace = true
 description = "Scribium CLI — build, check, inspect, and watch commands"
 
+[features]
+default = []
+typst-inprocess = ["dep:scribium-typst-inprocess"]
+
 [[bin]]
 name = "scribium"
 path = "src/main.rs"
@@ -16,7 +20,7 @@ path = "src/main.rs"
 scribium-core.workspace = true
 scribium-project.workspace = true
 scribium-typst.workspace = true
-scribium-typst-inprocess.workspace = true
+scribium-typst-inprocess = { workspace = true, optional = true }
 scribium-typst-subprocess.workspace = true
 clap.workspace = true
 anyhow.workspace = true
