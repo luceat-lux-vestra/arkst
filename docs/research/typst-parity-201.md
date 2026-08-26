@@ -1,7 +1,8 @@
 # Issue #201: Native Typst backend parity evidence
 
-Status: implementation evidence on the #201 branch. The canonical executable
-oracle is
+Status: final implementation evidence for PR #205. Parity CI run
+32967897182 tested commit `71f6525a649992a12d03bf5842800dc3bfce9c4c`; the
+canonical executable oracle is
 
 ~~~
 SCRIBIUM_REQUIRE_TYPST=1 \
@@ -33,15 +34,16 @@ PDF byte identity, metadata, object ordering, compression, and exporter
 serialization are intentionally outside the oracle.
 
 The test-only OutcomeClass normalizes subprocess text only at the oracle
-boundary. It does not change the subprocess production error API or require
-backend-specific diagnostic wording to match.
+boundary. The subprocess adapter retains its existing error type/API and does
+not require backend-specific diagnostic wording to match; its two minimal
+fail-closed fixes are recorded below.
 
 ## Fixture matrix
 
 The following values are observed by the named parity target on the local
-macOS arm64 validation host at the current pinned base. Native Linux and
-Windows results are supplied by the explicit CI step on the PR HEAD; they are
-not inferred from this local run.
+macOS arm64 validation host and by the explicit CI step on the PR HEAD. The
+three CI job links below are the cross-platform evidence for the same fixture
+corpus; they are not inferred from the local run.
 
 | Fixture | Subprocess | In-process | Oracle | Divergence |
 |---|---|---|---|---|
@@ -78,13 +80,13 @@ remain a project-owned VirtualProject asset and no system font is required.
 
 The CI workflow installs Typst 0.15.1 on each native matrix job and runs the
 parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The final PR HEAD
-evidence is recorded here after that run completes:
+evidence is recorded here from run 32967897182:
 
 | Platform | Parity suite | Typst |
 |---|---|---|
-| Linux | pending PR CI | 0.15.1 required |
-| macOS | pending PR CI | 0.15.1 required |
-| Windows | pending PR CI | 0.15.1 required |
+| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502626) | 0.15.1 required |
+| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502487) | 0.15.1 required |
+| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/32967897182/job/98174502658) | 0.15.1 required |
 
 The corpus exercises:
 
@@ -98,6 +100,15 @@ The corpus exercises:
   and
 - rejection of temporary, runner, Unix absolute, Windows drive, UNC-like, or
   backslash path leakage in observed diagnostics.
+
+The first Windows run exposed a native path spelling that the original
+temporary-root replacement did not cover. The subprocess boundary now
+normalizes native, slash, backslash, and extended-prefix forms and redacts
+remaining absolute runner/target tokens while retaining logical project paths.
+The first complete parity run also showed that Typst CLI package resolution
+could reach its network resolver; `@preview/` references are now rejected
+before subprocess execution, with the logical entry path retained in the
+denial diagnostic.
 
 ## Intentional divergences and scope
 
