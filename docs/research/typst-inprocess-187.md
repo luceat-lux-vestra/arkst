@@ -243,11 +243,14 @@ re-run the graph check, `cargo deny check`, and the complete CI matrix.
 
 ## Platform and WASM findings
 
-The local measurement host is macOS arm64. Separately, PR #202's completed
-native CI matrix passed the workspace adapter tests on Ubuntu, macOS, and
-Windows with Typst 0.15.1 in [CI run 32928274603](https://github.com/luceat-lux-vestra/scribium/actions/runs/32928274603).
-The CI result is platform evidence; it is not being misreported as local
-execution. The adapter remains intentionally native-only.
+The local measurement host is macOS arm64. Separately, PR #202's exact-head
+run [32941470703](https://github.com/luceat-lux-vestra/scribium/actions/runs/32941470703)
+passed the workspace adapter tests on Ubuntu, macOS, and Windows with Typst
+0.15.1. The same exact head's `license` job failed because the full
+`cargo-deny` check reports the five unmaintained advisories listed above; this
+does not change the successful native test-job evidence. The CI result is
+platform evidence, not local execution. The adapter remains intentionally
+native-only.
 
 The platform-neutral boundary remains separate and was checked with:
 
@@ -274,8 +277,10 @@ The subprocess backend remains the default because the current adapter has a
 large dependency/build/binary footprint, package/date/font capability policy
 is intentionally incomplete, generated-source source-map handoff is not yet
 implemented, and broader corpus parity plus explicit opt-in UX remain open.
-The native CI matrix has passed on Ubuntu, macOS, and Windows; those CI results
-are distinct from the macOS-only local measurement host.
+The exact-head native test jobs passed on Ubuntu, macOS, and Windows; those CI
+results are distinct from the macOS-only local measurement host. The aggregate
+CI and Security Audit remain red solely because of the mandatory cargo-deny
+advisory failures described above.
 
 Re-evaluation trigger: revisit the default only after the bounded follow-ups
 below have green cross-platform CI and corpus parity, and a maintainer accepts
