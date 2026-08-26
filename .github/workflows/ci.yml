@@ -56,6 +56,10 @@ jobs:
         run: cargo test --workspace --all-targets --all-features
         env:
           SCRIBIUM_REQUIRE_TYPST: "1"
+      - name: Test Typst backend parity
+        run: cargo test -p scribium-typst-inprocess --test backend_parity --all-features -- --nocapture
+        env:
+          SCRIBIUM_REQUIRE_TYPST: "1"
       - name: Verify CLI dependency feature boundary
         if: matrix.os == 'ubuntu-latest'
         shell: bash

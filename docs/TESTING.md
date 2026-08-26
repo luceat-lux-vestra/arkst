@@ -108,6 +108,25 @@ tests cover the subprocess default, explicit values, invalid values, and an
 explicit in-process PDF build; cross-platform parity corpus expansion remains
 tracked by issue #201.
 
+Issue #201's fixture-level semantic oracle is an independent test target:
+
+~~~
+SCRIBIUM_REQUIRE_TYPST=1 \
+  cargo test -p scribium-typst-inprocess \
+  --test backend_parity --all-features -- --nocapture
+~~~
+
+The target requires Typst 0.15.1, runs the generated Scribium source through
+both native adapters, compares outcome classification and document-observable
+PDF structure/page count, and checks logical diagnostics, source-map
+availability, resource/font policy, traversal/package denial, and host-path
+leakage. It does not compare PDF bytes. The CI native OS matrix runs this
+target as a named step, in addition to the general workspace test, with the
+Typst requirement enabled so a missing executable cannot produce a false
+green result. See
+[docs/research/typst-parity-201.md](research/typst-parity-201.md) for the
+fixture matrix and intentional divergences.
+
 ## Property Tests
 
 Invariants:
