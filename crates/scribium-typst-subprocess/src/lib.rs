@@ -91,6 +91,11 @@ impl TypstBackend for SubprocessBackend {
     fn compile(&self, input: &TypstInput) -> Result<TypstOutput, TypstError> {
         let start = std::time::Instant::now();
         let entry_path = validate_entry_path(&input.entry_path)?;
+        if input.source.contains("@preview/") {
+            return Err(TypstError::Subprocess(
+                "package resolution is denied by Scribium".into(),
+            ));
+        }
 
         // Create a unique temporary directory for the generated Typst source,
         // any source-context mirror, and the output. The returned PDF is the
@@ -618,6 +623,22 @@ mod tests {
             "error must name the configured path: {}",
             err
         );
+    }
+
+    #[test]
+    fn subprocess_backend_denies_preview_packages_before_execution() {
+        let backend = SubprocessBackend::new("/nonexistent/typst");
+        let result = backend.compile(&TypstInput {
+            source: "#import \"@preview/not-present:1.0.0\": *\n".to_string(),
+            entry_path: "docs/main.qd".to_string(),
+        });
+
+        let error = result
+            .expect_err("package access must be denied")
+            .to_string();
+        assert!(error.contains("package resolution is denied"));
+        assert!(!error.contains("http://") && !error.contains("https://"));
+        assert!(!error.contains("not found at"));
     }
 
     #[test]
