@@ -12,6 +12,7 @@ members = [
     "crates/scribium-markdown",
     "crates/scribium-typst",
     "crates/scribium-typst-subprocess",
+    "crates/scribium-typst-inprocess",
     "crates/scribium-cli",
     "crates/scribium-test-support",
     "tools/markdown-compat",
@@ -43,6 +44,7 @@ scribium-quarkdown = { path = "crates/scribium-quarkdown" }
 scribium-markdown = { path = "crates/scribium-markdown" }
 scribium-typst = { path = "crates/scribium-typst" }
 scribium-typst-subprocess = { path = "crates/scribium-typst-subprocess" }
+scribium-typst-inprocess = { path = "crates/scribium-typst-inprocess" }
 scribium-cli = { path = "crates/scribium-cli" }
 scribium-test-support = { path = "crates/scribium-test-support" }
 
@@ -60,8 +62,21 @@ insta = "1"
 tempfile = "3"
 rushdown = { git = "https://github.com/yuin/rushdown.git", rev = "e5eb4e4446541ea0ed53111c1b37e779283ff57c", default-features = false, features = ["std", "html-entities"] }
 libm = { version = "0.2.16", default-features = false }
+typst = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
+typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
 
 [profile.release]
 opt-level = 2
 debug = 1
 strip = "symbols"
+
+[patch.crates-io]
+# citationberg has merged the quick-xml 0.41 security fix, but has not yet
+# published a release containing it. Pin the merged upstream commit until a
+# crates.io release can replace this patch.
+citationberg = {
+    git = "https://github.com/typst/citationberg.git",
+    rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d",
+}

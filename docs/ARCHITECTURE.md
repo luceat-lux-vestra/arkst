@@ -48,8 +48,12 @@ scribium-cli
     |         +---- lowering diagnostics
     |
     +----> scribium-typst-subprocess
+    |         |
+    |         +---- current/default native Typst execution
+    |
+    +----> scribium-typst-inprocess
               |
-              +---- optional native Typst execution
+              +---- optional native VirtualProject-backed Typst execution
 
 Shared lower-level target crates:
   scribium-source       source identity, spans, source-map representation
@@ -237,6 +241,7 @@ Rushdown frontend migration completed. Markdown behavior belongs in
 | scribium-core            | public facade and compiler orchestration                                 | Yes  |
 | scribium-typst           | pure IR→Typst lowering, source-map generation, and platform-neutral compiler contract | Yes  |
 | scribium-typst-subprocess | native Typst subprocess adapter                                          | No   |
+| scribium-typst-inprocess  | optional native Typst adapter over `VirtualProject` and public `World`    | No   |
 | scribium-cli             | native host, filesystem/config/output composition                         | No   |
 | scribium-test-support    | fixtures/test utilities                                                   | No   |
 
@@ -247,10 +252,15 @@ These are the physical architectural boundaries after R8. `scribium-source`,
 platform-neutral IR-to-Typst lowering and its contract, while
 `scribium-typst-subprocess` is native-only and owns Typst CLI execution,
 filesystem staging, and security-boundary enforcement. `scribium-core` remains
-the orchestration and facade layer.
+the orchestration and facade layer. `scribium-typst-inprocess` is also
+native-only; it owns the optional public-API `World` mapping over an existing
+`VirtualProject` and PDF export without adding host filesystem or network
+capabilities. It is not the default backend and does not make the lowering
+crate depend on Typst compiler types.
 
-The native adapter API (`SubprocessBackend`, `TypstSourceContext`, and
-`TypstError`) is intentionally imported from `scribium-typst-subprocess`.
+The native adapter APIs (`SubprocessBackend`, `TypstSourceContext`, and
+`TypstError`, plus the optional `InProcessBackend` and `InProcessError`) are
+intentionally imported from their concrete native adapter crates.
 The former `scribium_typst::backend` native paths are not retained as
 re-exports, because doing so would reverse the accepted pure-lowering to
 native-adapter dependency direction.
@@ -265,6 +275,7 @@ Native host/adapter crates such as:
 
 - `scribium-cli`
 - `scribium-typst-subprocess`
+- `scribium-typst-inprocess`
 - `scribium-test-support`
 
 are not subject to that requirement.
@@ -854,6 +865,34 @@ scribium-typst-subprocess
 installed Typst executable
 ```
 
+### Optional in-process adapter
+
+`scribium-typst-inprocess` implements the optional native in-process adapter.
+It maps an existing `VirtualProject` to Typst's public `World` contract,
+compiles the generated source to a paged document, and exports PDF through the
+public `typst-pdf` API. Its project, asset, font, package, date, and traversal
+policies remain bounded by `VirtualProject`; it does not use `typst-kit` host
+filesystem/package discovery. Typst compiler types remain inside this crate.
+
+The subprocess adapter remains the default and rollback path. The optional
+adapter and its evidence are recorded in ADR-0021 and
+`docs/research/typst-inprocess-187.md`; production CLI selection is a separate
+follow-up.
+
+```text
+scribium-typst
+        |
+        | platform-neutral backend contract + generated source
+        +--------------------+
+        |                    |
+        v                    v
+scribium-typst-subprocess  scribium-typst-inprocess
+        |                    |
+        | native process     | VirtualProject-backed World
+        v                    v
+installed Typst executable  typst::compile -> typst-pdf
+```
+
 The CLI/host performs composition. `scribium-typst` must not depend on
 `scribium-project`, `scribium-core`, `scribium-engine`, Markdown or Quarkdown
 frontends, or `scribium-html`:
@@ -941,7 +980,8 @@ Typst code generation / lowering
     -> scribium-typst
 Typst compiler execution
     -> concrete Typst backend adapter
-       (`scribium-typst-subprocess` for the current native adapter)
+       (`scribium-typst-subprocess` by default, or the optional
+        `scribium-typst-inprocess` adapter)
 project-model validation
     -> scribium-project
 native filesystem/config/host failures
@@ -1001,9 +1041,10 @@ Typst compiler execution failure
 
 Native subprocess errors belong to `scribium-typst-subprocess`, including
 executable-not-found, process-spawn, process-exit, and temporary-file or
-adapter-filesystem failures. They must not force native OS or process error
-types into the platform-neutral Typst backend contract. Exact conversion APIs
-are not defined here.
+adapter-filesystem failures. In-process compile and PDF-export errors belong
+to `scribium-typst-inprocess` and are converted there into stable Scribium
+diagnostics. Neither adapter forces native OS/process or Typst compiler error
+types into the platform-neutral Typst backend contract.
 
 ADR-0009 requires source locations to be preserved. When a diagnostic
 originates from source content and a reliable original-source location exists,

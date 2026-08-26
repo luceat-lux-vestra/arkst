@@ -1,0 +1,23 @@
+[package]
+name = "scribium-typst-inprocess"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Architecture spike for an in-process Typst backend over VirtualProject"
+
+[dependencies]
+scribium-diagnostics.workspace = true
+scribium-project.workspace = true
+scribium-source.workspace = true
+scribium-typst.workspace = true
+typst.workspace = true
+typst-assets.workspace = true
+typst-layout.workspace = true
+typst-pdf.workspace = true
+
+[dev-dependencies]
+scribium-core.workspace = true
+scribium-typst-subprocess.workspace = true
