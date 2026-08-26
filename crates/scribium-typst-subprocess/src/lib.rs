@@ -112,9 +112,9 @@ impl TypstBackend for SubprocessBackend {
             let mirror_root = temp_dir.path().join("project");
             let mut active_directories = BTreeSet::new();
             copy_project_tree(
-                &project_root,
+                project_root,
                 &mirror_root,
-                &project_root,
+                project_root,
                 &VirtualPathBuf::root(),
                 &mut active_directories,
             )?;
