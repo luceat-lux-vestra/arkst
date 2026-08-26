@@ -28,10 +28,14 @@ Typst release is already compatible. The generated-source corpus and compiler
 adapter behavior are the evidence that must advance when the verified version
 changes.
 
-Issue #187 also demonstrated an optional native in-process adapter over
-`VirtualProject` and Typst 0.15.1's public `World`/compile/PDF APIs. It is not
-the default backend, is not part of the WASM lowering boundary, and is not a
-verified replacement for the subprocess path. See
+Issue #200 promotes the optional native in-process adapter demonstrated by
+#187 over `VirtualProject` and Typst 0.15.1's public `World`/compile/PDF APIs.
+It is not the default backend: `scribium-cli` includes it only when built with
+the `typst-inprocess` Cargo feature, and it is then selected explicitly with
+the native CLI's `--backend in-process`. It is not part of the WASM lowering
+boundary and is not a browser renderer. It uses `VirtualProject`-only
+resources and does not silently fall back to subprocess when explicitly
+selected. See
 [`docs/research/typst-inprocess-187.md`](../../research/typst-inprocess-187.md)
 and [ADR-0021](../../adr/0021-in-process-typst-backend-re-evaluation.md) for
 the bounded evidence and promotion gates.
@@ -87,7 +91,7 @@ Tracking must cover at least:
 - changed or deprecated constructs used by lowering;
 - compiler CLI behavior used by the subprocess adapter;
 - output capabilities relevant to Scribium;
-- compiler/backend APIs if a future in-process adapter is accepted; and
+- compiler/backend APIs used by the optional in-process adapter; and
 - diagnostic and source-map implications where relevant.
 
 The intended future pipeline is:

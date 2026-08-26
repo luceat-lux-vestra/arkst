@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Explicit native Typst backend selection (#200):** PDF builds continue to
+  use the subprocess adapter by default, and the default CLI build does not
+  include the in-process Typst compiler graph. Trusted native hosts may opt in
+  at build time with the `typst-inprocess` Cargo feature and at runtime with
+  `--backend in-process`; feature-disabled selection fails without subprocess
+  fallback. The adapter uses the existing `VirtualProject` resource boundary.
+  Generated Typst diagnostics use validated lowerer source-map entries for
+  original spans when available and never fabricate provenance.
+  Cross-platform parity corpus expansion remains in #201; the temporary
+  citationberg dependency pin remains in #203.
+
 - **Bounded `.captionposition` document layout state (M3):** `.captionposition`
   now stores the closed `top`/`bottom` state for `default`, `figures`,
   `tables`, and the upstream `code:` alias in evaluator-owned shared state and

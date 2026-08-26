@@ -1,4 +1,5 @@
 use anyhow::Context;
+use clap::ValueEnum;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -6,7 +7,58 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use scribium_project::{VirtualPathBuf, VirtualProject, VirtualProjectBuilder};
 use scribium_typst::{TypstBackend, TypstInput};
+#[cfg(feature = "typst-inprocess")]
+use scribium_typst_inprocess::InProcessBackend;
 use scribium_typst_subprocess::{SubprocessBackend, TypstSourceContext};
+
+/// Native backend selected by the trusted CLI host for PDF compilation.
+///
+/// The subprocess backend is the supported default. In-process compilation is
+/// deliberately an explicit native-only opt-in because it links the Typst
+/// compiler into the Scribium process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum BackendSelection {
+    /// Invoke the configured Typst executable (the default).
+    #[value(name = "subprocess")]
+    Subprocess,
+    /// Compile through the native in-process Typst adapter (requires the
+    /// `typst-inprocess` Cargo feature).
+    #[value(name = "in-process")]
+    InProcess,
+}
+
+impl BackendSelection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Subprocess => "subprocess",
+            Self::InProcess => "in-process",
+        }
+    }
+}
+
+impl std::fmt::Display for BackendSelection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+fn ensure_backend_available(backend: BackendSelection) -> anyhow::Result<()> {
+    match backend {
+        BackendSelection::Subprocess => Ok(()),
+        BackendSelection::InProcess => {
+            #[cfg(feature = "typst-inprocess")]
+            {
+                Ok(())
+            }
+            #[cfg(not(feature = "typst-inprocess"))]
+            {
+                anyhow::bail!(
+                    "in-process backend support is not enabled in this build; rebuild with feature `typst-inprocess`"
+                )
+            }
+        }
+    }
+}
 
 /// Represents a loaded project with both physical and virtual paths.
 struct LoadedProject {
@@ -253,11 +305,29 @@ fn ensure_no_errors(diagnostics: &[scribium_core::Diagnostic]) -> anyhow::Result
 /// `typst_path` selects the Typst executable used for PDF output. It is only
 /// consulted when a `pdf` format is requested; a `typst`-only build never
 /// spawns a subprocess.
-pub fn build(
+#[cfg(test)]
+fn build(
     input: &str,
     formats: &[String],
     output: Option<&Path>,
     typst_path: &Path,
+) -> anyhow::Result<()> {
+    build_with_backend(
+        input,
+        formats,
+        output,
+        typst_path,
+        BackendSelection::Subprocess,
+    )
+}
+
+/// Execute the `build` command with an explicitly selected native backend.
+pub fn build_with_backend(
+    input: &str,
+    formats: &[String],
+    output: Option<&Path>,
+    typst_path: &Path,
+    backend: BackendSelection,
 ) -> anyhow::Result<()> {
     const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
 
@@ -274,6 +344,12 @@ pub fn build(
     if formats.is_empty() {
         anyhow::bail!("no output format requested");
     }
+    ensure_backend_available(backend)?;
+    if backend == BackendSelection::InProcess && !formats.iter().any(|f| f == "pdf") {
+        anyhow::bail!(
+            "--backend in-process only applies to PDF output; omit it for typst-only output"
+        );
+    }
 
     let input_path = Path::new(input);
     let loaded = load_single_file_project(input_path)?;
@@ -287,7 +363,7 @@ pub fn build(
     // Fail on error diagnostics before writing output
     ensure_no_errors(&result.diagnostics)?;
 
-    let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+    let (typst_code, _source_map) = scribium_typst::lowering::lower_to_typst(&result.ir);
 
     // Determine output paths for each requested format
     let mut output_paths = Vec::new();
@@ -336,11 +412,22 @@ pub fn build(
                     source: typst_code.clone(),
                     entry_path: loaded.project.entry().as_str().to_string(),
                 };
-                let backend = SubprocessBackend::new(typst_path)
-                    .with_source_context(loaded.source_context.clone());
-                let typst_output = backend
-                    .compile(&typst_input)
-                    .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?;
+                let typst_output = match backend {
+                    BackendSelection::Subprocess => SubprocessBackend::new(typst_path)
+                        .with_source_context(loaded.source_context.clone())
+                        .compile(&typst_input)
+                        .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?,
+                    #[cfg(feature = "typst-inprocess")]
+                    BackendSelection::InProcess => InProcessBackend::new(&loaded.project)
+                        .compile_with_source_map(&typst_input, &_source_map)
+                        .map_err(|e| anyhow::anyhow!("PDF compilation failed: {}", e))?,
+                    #[cfg(not(feature = "typst-inprocess"))]
+                    BackendSelection::InProcess => {
+                        return Err(anyhow::anyhow!(
+                            "in-process backend support is not enabled in this build; rebuild with feature `typst-inprocess`"
+                        ));
+                    }
+                };
                 if let Some(pdf_bytes) = typst_output.pdf {
                     write_output_atomically(&resolved_out_path, &pdf_bytes)?;
                     eprintln!("Wrote PDF to {}", resolved_out_path.display());
@@ -2311,6 +2398,47 @@ mod tests {
         assert!(dir.path().join("document.typ").exists());
     }
 
+    #[cfg(feature = "typst-inprocess")]
+    #[test]
+    fn in_process_backend_rejects_typst_only_output_explicitly() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = super::build_with_backend(
+            &input.to_string_lossy(),
+            &["typst".to_string()],
+            None,
+            Path::new("/nonexistent/typst"),
+            BackendSelection::InProcess,
+        );
+        let error = result.expect_err("in-process selection must apply to PDF output");
+        assert!(error.to_string().contains("only applies to PDF output"));
+        assert!(!dir.path().join("document.typ").exists());
+    }
+
+    #[cfg(not(feature = "typst-inprocess"))]
+    #[test]
+    fn explicit_in_process_backend_without_feature_fails_without_fallback() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello\n").unwrap();
+
+        let result = super::build_with_backend(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            None,
+            Path::new("/nonexistent/typst"),
+            BackendSelection::InProcess,
+        );
+        let error = result.expect_err("feature-disabled in-process selection must fail");
+        assert_eq!(
+            error.to_string(),
+            "in-process backend support is not enabled in this build; rebuild with feature `typst-inprocess`"
+        );
+        assert!(!dir.path().join("document.pdf").exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn pdf_build_respects_custom_typst_path() {
@@ -2320,13 +2448,38 @@ mod tests {
         fs::write(&input, "# Hello\n").unwrap();
         let fake = write_fake_typst(dir.path(), "%PDF-1.7 fake");
 
-        let result = super::build(&input.to_string_lossy(), &["pdf".to_string()], None, &fake);
+        let result = super::build_with_backend(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            None,
+            &fake,
+            BackendSelection::Subprocess,
+        );
         assert!(result.is_ok(), "pdf build failed: {:?}", result);
         let output = dir.path().join("document.pdf");
         assert!(output.exists(), "pdf output must exist");
         let pdf = fs::read(&output).unwrap();
         assert!(pdf.starts_with(b"%PDF-"), "pdf header was: {:?}", pdf);
         assert_eq!(pdf, b"%PDF-1.7 fake");
+    }
+
+    #[cfg(feature = "typst-inprocess")]
+    #[test]
+    fn explicit_in_process_backend_builds_pdf_without_typst_executable() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.qd");
+        fs::write(&input, "# Hello from in-process\n").unwrap();
+        let output = dir.path().join("document.pdf");
+
+        let result = super::build_with_backend(
+            &input.to_string_lossy(),
+            &["pdf".to_string()],
+            Some(&output),
+            Path::new("/nonexistent/typst"),
+            BackendSelection::InProcess,
+        );
+        assert!(result.is_ok(), "in-process PDF build failed: {:?}", result);
+        assert!(fs::read(&output).unwrap().starts_with(b"%PDF-"));
     }
 
     #[test]

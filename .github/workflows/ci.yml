@@ -50,10 +50,27 @@ jobs:
         uses: typst-community/setup-typst@v5
         with:
           typst-version: 0.15.1
+      - name: Test default CLI feature boundary
+        run: cargo test -p scribium-cli --no-default-features
       - name: Test (Typst required)
         run: cargo test --workspace --all-targets --all-features
         env:
           SCRIBIUM_REQUIRE_TYPST: "1"
+      - name: Verify CLI dependency feature boundary
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          default_tree="$(mktemp)"
+          feature_tree="$(mktemp)"
+          cargo tree -p scribium-cli --no-default-features > "$default_tree"
+          if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|scribium-typst-inprocess' "$default_tree"; then
+            echo "default scribium-cli unexpectedly contains the in-process Typst graph"
+            sed -n '1,240p' "$default_tree"
+            exit 1
+          fi
+          cargo tree -p scribium-cli --no-default-features --features typst-inprocess > "$feature_tree"
+          grep -Eq 'scribium-typst-inprocess' "$feature_tree"
+          grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
       - name: Smoke-test public examples
         if: matrix.os == 'ubuntu-latest'
         shell: bash

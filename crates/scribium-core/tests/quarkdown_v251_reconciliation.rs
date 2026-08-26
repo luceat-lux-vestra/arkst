@@ -169,13 +169,15 @@ fn reconciliation_assigns_actionable_content_gaps_without_closed_owner_links() {
 
 #[test]
 fn reconciliation_records_order_without_making_188_a_187_blocker() {
-    assert!(RECONCILIATION.contains("**Immediate next technical work.**"));
+    assert!(RECONCILIATION.contains("#187's strategy decision is complete"));
+    assert!(RECONCILIATION.contains("#200 is the explicit-selection follow-up"));
     assert!(RECONCILIATION.contains("not a prerequisite to start #187"));
     assert!(RECONCILIATION.contains("#188 is **after #187**"));
     assert!(RECONCILIATION.contains("#189 is **after #188**"));
     assert!(RECONCILIATION.contains("#190 is a parallel"));
     assert!(RECONCILIATION.contains("#191 is **deferred/milestone-blocked**"));
-    assert!(RECONCILIATION.contains("Removing subprocess execution is not decided"));
+    assert!(RECONCILIATION
+        .contains("Removing subprocess execution or changing the default is not decided"));
 }
 
 #[test]

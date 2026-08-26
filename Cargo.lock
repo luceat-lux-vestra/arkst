@@ -2058,6 +2058,7 @@ dependencies = [
  "scribium-core",
  "scribium-project",
  "scribium-typst",
+ "scribium-typst-inprocess",
  "scribium-typst-subprocess",
  "serde",
  "serde_json",

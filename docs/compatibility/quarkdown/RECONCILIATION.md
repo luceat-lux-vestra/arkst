@@ -102,7 +102,7 @@ status recorded by its owner.
 | `.json` | #155; `PARTIAL` | #188 resolver; #149 value conversion | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive/project/permission parity is absent. |
 | `.include` | #155; `PARTIAL` | #188 common resolver and nested identity | Nested source identity, cycle detection, and bounded share/scope behavior are evidenced. Absolute/global/library and complete graph parity are absent. |
 | VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | #187 backend strategy; #188–#191 consumers | In-memory logical paths, source identity, project boundaries, and deterministic provider contracts are evidenced; language-facing breadth remains bounded. |
-| Typst entry/source-context contract | #155; `PARTIAL` | #187 backend-strategy spike | Current source context is coupled to subprocess staging/adapter behavior; #187 evaluates in-process integration against the existing VirtualProject. This is not an in-process implementation. |
+| Typst entry/source-context contract | #155; `PARTIAL` | #187 strategy; #200 explicit selection; #201 parity | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; broader cross-platform parity remains in #201. |
 | WASM resource boundary | #155; `DEFERRED` | #191 M6/embedder boundary | Core/provider ideas are portable, but no public WASM resource API or native/WASM end-to-end equivalence exists. |
 
 Thus, for example, evaluator support for `.captionposition` does not make
@@ -158,7 +158,7 @@ implementation requests created by #156.
 | `PRODUCTION_GAP` | #157–#160, #162–#167, #169, #172–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
-| `BACKEND_GAP` | #187 strategy research and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
+| `BACKEND_GAP` | #201 parity evidence and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
 | `PLATFORM_GAP` | #190 explicit host capability/injection boundary and the native/WASM/provider exposure portions of #191. |
 | `DEFERRED_PRODUCT_SURFACE` | #191 WASM resource exposure, `.css`, and `.cssproperties`, plus audit rows explicitly deferred in the #151/#154/#155 manifests. |
 
@@ -187,7 +187,7 @@ numbers are not inferred from a numeric sequence.
 | [#197](https://github.com/luceat-lux-vestra/scribium/issues/197) | #151 / logger and diagnostic builtins | `.log`, `.debug`, and `.error` severity/return behavior through an explicit sink/capability or deterministic rejection. Depends on #165–#167 and #190; no implicit process streams. | After shared engine and #187/#190 host-boundary decisions; semantic work can be parallel. |
 | [#198](https://github.com/luceat-lux-vestra/scribium/issues/198) | #154 → #150 / `.match` content transformation | Pattern/callback traversal and inline-content replacement; #181 remains shared infrastructure only. Depends on #165–#167 and coordinates output strategy with #187. | After #187 and shared binding/atomicity prerequisites; content/evaluator band. |
 | [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | #154 / subdocument graph producer/output | `.subdocumentgraph` graph/content semantics and output. Hard dependency on #188 logical resolution; coordinates shared identifiers/indexing with #181 and backend strategy with #187. | After #188 and backend/content prerequisites. |
-| [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) | #155 → backend strategy | Re-evaluate in-process Typst against the existing VirtualProject architecture. It is a technical spike, not builtin implementation; preferred native in-process backend requires parity evidence, while subprocess remains fallback/transition until a separate migration decision. | **Immediate next technical work.** |
+| [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) | #155 → backend strategy | Completed re-evaluation: native in-process Typst is accepted as an optional adapter over `VirtualProject`; subprocess remains the default. Issue #200 adds explicit native selection and #201 owns broader parity evidence. | #200 implemented; #201 remains the companion parity follow-up. |
 | [#188](https://github.com/luceat-lux-vestra/scribium/issues/188) | #155 / logical project resource resolution | Common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity. Hard prerequisite for #189, #199, and resource portions of #182/#183; not a prerequisite to start #187. | After #187; first resource implementation band. |
 | [#189](https://github.com/luceat-lux-vestra/scribium/issues/189) | #155 / project data and file identity | `.listfiles`, `.filename`, `.csv`, `.bibliography`; depends on #188 and coordinates with #181/#183. | After #188; data consumer band. |
 | [#190](https://github.com/luceat-lux-vestra/scribium/issues/190) | #155 / host capability boundary | Deterministic `.env` injection/denial and native/WASM contract; no `std::env`. It can be designed in parallel with #188/#189 after #187, but must precede any environment-dependent exposure. | Parallel platform-contract band after #187. |
@@ -217,8 +217,8 @@ closed, or treated as proof of complete v2.5.1 compatibility.
 
 ```text
                          ┌───────────────┐
-                         │ #187 backend  │  immediate next
-                         │ strategy      │
+                         │ #187 backend  │  completed strategy
+                         │ → #200/#201  │  selection and parity
                          └───────┬───────┘
                                  │ sequencing preference; no hard #188 edge
         ┌────────────────────────┼────────────────────────┐
@@ -263,34 +263,34 @@ The graph distinguishes three relationships:
   band; #190 can proceed alongside the resolver after #187, while #191 is
   deferred by the M6 platform milestone.
 
-### Immediate next: #187
+### Backend strategy closure: #187 → #200
 
-**BLOCKER:** none found during reconciliation.
+**STATUS:** #187's strategy decision is complete; #200 is the production
+selection follow-up and #201 owns broader parity evidence.
 
-**WHY IT BLOCKS #187:** not applicable; no blocker is present.
+**OWNER ISSUE:** #200 owns explicit backend selection and adapter promotion;
+#201 owns cross-platform parity.
 
-**OWNER ISSUE:** #187 owns the backend-strategy question.
-
-**WHY THAT ISSUE MUST PRECEDE #187:** not applicable; #187 is the next work.
+**WHY THAT ISSUE MUST PRECEDE #187:** not applicable; the strategy decision is
+complete and #200 is the explicit-selection follow-up.
 
 **EVIDENCE:** #155 records the current VirtualProject/ResourceProvider logical
 model as `SUPPORTED_SEMANTICS` and the Typst source-context contract as
-`PARTIAL`; #187’s issue body explicitly evaluates in-process Typst against
-that current architecture. The richer logical resolver in #188 is not needed
-to start this spike: #187 can evaluate the existing provider contract. If the
-spike later proves that a richer World/resource mapping is structurally
-required, that is a new evidence-backed dependency decision, not an assumption
-made by #156.
+`PARTIAL`; #187 evaluated in-process Typst against that current architecture,
+and #200 exposes the resulting adapter only through explicit native selection.
+The richer logical resolver in #188 is not needed for this bounded adapter. If
+a richer World/resource mapping is later required, that is a new
+evidence-backed dependency decision, not an assumption made by #156.
 
-The intended backend direction is:
+The resulting backend direction is:
 
 ```text
-InProcessBackend  -> preferred default native backend if parity evidence passes
-SubprocessBackend -> fallback / transition path initially
+SubprocessBackend -> default and supported baseline
+InProcessBackend  -> explicit native-only opt-in
 ```
 
-Removing subprocess execution is not decided by #156 or automatically by
-#187; it requires separate parity and migration evidence.
+Removing subprocess execution or changing the default is not decided by #156,
+#187, or #200; it requires separate parity and migration evidence.
 
 ### Resource ordering: #188–#191
 
@@ -315,7 +315,8 @@ The pre-reconciliation freeze is replaced by the order above. The earlier
 freeze wording is no longer a complete status. After
 #156 is merged, issues are eligible only in their dependency band:
 
-- #187 is **now eligible as the immediate next technical spike**;
+- #187 is **completed as the backend-strategy re-evaluation** and #200 is the
+  explicit-selection follow-up;
 - #157–#185 are **sequenced after the relevant shared engine/backend/content
   prerequisites**, with parallel work only where the graph permits it;
 - #188 is **after #187**, #189 is **after #188**, and #190 is a parallel

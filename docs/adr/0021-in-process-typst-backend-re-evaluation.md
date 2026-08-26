@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-26
 - **Owners:** Scribium maintainers
-- **Related issues:** #187, #12, #188, #190, #191
+- **Related issues:** #187, #200, #201, #12, #188, #190, #191
 - **Supersedes:** the in-process decision and re-evaluation timing in
   ADR-0011; refines the future-in-process portion of ADR-0005
 
@@ -120,6 +120,32 @@ evidence. The subprocess backend remains the rollback path. A default
 migration requires a separate maintainer decision after the re-evaluation
 trigger in the issue #187 evidence document is satisfied; this ADR does not
 authorize automatic migration or auto-removal.
+
+## Implementation status addendum (2026-08-26, issue #200)
+
+The production follow-up keeps the decision above unchanged. The trusted
+native CLI now accepts `--backend subprocess|in-process`, with subprocess as
+the default. `scribium-cli` keeps `scribium-typst-inprocess` behind the empty-by-
+default Cargo feature `typst-inprocess`; an in-process CLI build therefore
+requires both that feature and explicit runtime selection. Without the feature,
+`--backend in-process` fails deterministically with rebuild guidance and never
+falls back to subprocess. With the feature, explicit in-process selection
+invokes `InProcessBackend` directly and returns its typed adapter error without
+fallback. The selection enum lives
+at the native host boundary; neither `scribium-core` nor the platform-neutral
+`scribium-typst` lowering crate selects a native backend.
+
+The in-process adapter now accepts the lowering-owned source map through its
+adapter API. It maps a complete generated Typst diagnostic range to a unique,
+validated original `SourceSpan` when possible and omits the span otherwise.
+Diagnostic display paths are logical project paths; temporary/native paths and
+Typst compiler types do not cross the adapter boundary. The adapter remains
+`wasm32`-unavailable, uses only `VirtualProject` resources, and keeps package,
+network, and date/environment capabilities fail-closed.
+
+Issue #201 remains the companion work for cross-platform parity corpus and
+fixture-level semantic-oracle expansion. Issue #203's citationberg pin and
+the related `deny.toml` policy were not changed by this implementation.
 
 ## References
 

@@ -99,6 +99,15 @@ explicitly (see `.github/workflows/ci.yml`) and runs the suite with
 that produce and validate a real `%PDF-` PDF always run in CI without relying
 on the runner image.
 
+The native in-process adapter is covered by
+`crates/scribium-typst-inprocess/tests/backend_integration.rs`. Its focused
+suite validates generated Scribium Typst, multi-page PDFs, VirtualProject
+images and fonts, repeated loads, missing/traversal/package denial, invalid
+entry paths, deterministic diagnostics, and source-map handoff. CLI selection
+tests cover the subprocess default, explicit values, invalid values, and an
+explicit in-process PDF build; cross-platform parity corpus expansion remains
+tracked by issue #201.
+
 ## Property Tests
 
 Invariants:

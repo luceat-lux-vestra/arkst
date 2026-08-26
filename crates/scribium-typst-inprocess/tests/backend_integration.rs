@@ -1,4 +1,5 @@
 use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
+use scribium_source::{SourceMapEntry, SourceSpan};
 use scribium_typst::{TypstBackend, TypstInput};
 use scribium_typst_inprocess::{InProcessBackend, InProcessError};
 use scribium_typst_subprocess::SubprocessBackend;
@@ -315,4 +316,153 @@ fn entry_mismatch_is_rejected_before_typst_execution() {
         })
         .expect_err("mismatched entry must fail");
     assert!(matches!(error, InProcessError::InvalidInput(_)));
+}
+
+#[test]
+fn invalid_entry_path_is_rejected_before_typst_execution() {
+    let project = project("valid Scribium input");
+    let error = InProcessBackend::new(&project)
+        .compile(&TypstInput {
+            source: "Hello\n".to_string(),
+            entry_path: "../docs/main.qd".to_string(),
+        })
+        .expect_err("root-escaping entry must fail");
+    assert!(matches!(error, InProcessError::InvalidInput(_)));
+    assert!(error.to_string().contains("entry path"));
+}
+
+#[test]
+fn repeated_resource_loads_use_the_same_virtual_project_boundary() {
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>"#;
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("entry")
+        .add_source("docs/main.qd", "repeated resources")
+        .expect("source")
+        .add_asset("docs/assets/logo.svg", svg.to_vec())
+        .expect("asset")
+        .build()
+        .expect("project");
+    let output = InProcessBackend::new(&project)
+        .compile(&TypstInput {
+            source: "#image(\"./assets/logo.svg\")\n#image(\"./assets/logo.svg\")\n".to_string(),
+            entry_path: "docs/main.qd".to_string(),
+        })
+        .expect("repeated AssetStore loads must compile");
+    assert!(output.pdf.expect("PDF output").starts_with(b"%PDF-"));
+}
+
+#[test]
+fn source_map_handoff_preserves_a_reliable_original_span() {
+    let project_source = "valid Scribium input";
+    let project = project(project_source);
+    let generated = "#unknown-function()\n";
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let original = SourceSpan::new(source_id, 0, project_source.len());
+    let source_map = [SourceMapEntry {
+        generated_start: 0,
+        generated_end: generated.len(),
+        original,
+    }];
+
+    let error = InProcessBackend::new(&project)
+        .compile_with_source_map(
+            &TypstInput {
+                source: generated.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            },
+            &source_map,
+        )
+        .expect_err("invalid generated Typst must fail");
+    let diagnostic = error.diagnostics().first().expect("diagnostic");
+    assert_eq!(diagnostic.primary, Some(original));
+    assert!(diagnostic.message.contains("/docs/main.qd"));
+    assert!(!diagnostic.message.contains("/docs/main.typ"));
+    assert!(!diagnostic.message.contains("/tmp/"));
+}
+
+#[test]
+fn incomplete_source_map_does_not_fabricate_a_span() {
+    let project_source = "valid Scribium input";
+    let project = project(project_source);
+    let generated = "#unknown-function()\n";
+    let source_id = project
+        .sources()
+        .get_id(project.entry())
+        .expect("entry source id");
+    let source_map = [SourceMapEntry {
+        generated_start: generated.len(),
+        generated_end: generated.len() + 1,
+        original: SourceSpan::new(source_id, 0, project_source.len()),
+    }];
+
+    let error = InProcessBackend::new(&project)
+        .compile_with_source_map(
+            &TypstInput {
+                source: generated.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            },
+            &source_map,
+        )
+        .expect_err("invalid generated Typst must fail");
+    assert!(error
+        .diagnostics()
+        .first()
+        .expect("diagnostic")
+        .primary
+        .is_none());
+}
+
+#[test]
+fn ambiguous_source_map_does_not_fabricate_a_span() {
+    let project_source = "valid Scribium input";
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("entry")
+        .add_source("docs/main.qd", project_source)
+        .expect("source")
+        .add_source("docs/other.qd", "another valid source")
+        .expect("other source")
+        .build()
+        .expect("project");
+    let generated = "#unknown-function()\n";
+    let main_id = project
+        .sources()
+        .get_id(&scribium_project::VirtualPathBuf::parse("docs/main.qd").expect("path"))
+        .expect("main source id");
+    let other_id = project
+        .sources()
+        .get_id(&scribium_project::VirtualPathBuf::parse("docs/other.qd").expect("path"))
+        .expect("other source id");
+    let source_map = [
+        SourceMapEntry {
+            generated_start: 0,
+            generated_end: generated.len(),
+            original: SourceSpan::new(main_id, 0, project_source.len()),
+        },
+        SourceMapEntry {
+            generated_start: 0,
+            generated_end: generated.len(),
+            original: SourceSpan::new(other_id, 0, "another valid source".len()),
+        },
+    ];
+
+    let error = InProcessBackend::new(&project)
+        .compile_with_source_map(
+            &TypstInput {
+                source: generated.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            },
+            &source_map,
+        )
+        .expect_err("invalid generated Typst must fail");
+    assert!(error
+        .diagnostics()
+        .first()
+        .expect("diagnostic")
+        .primary
+        .is_none());
 }
