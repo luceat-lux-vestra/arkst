@@ -719,7 +719,7 @@ functions. Dynamic
 bounds are evaluated normally and truncated to signed integer endpoints using
 the verified upstream Number-to-Int behavior.
 
-### Include / Read (Implemented bounded)
+### Include / Read (Partial; bounded VirtualProject subset)
 
 `.include`, `.read`, and `.json` are evaluated by `scribium-engine` through its
 engine-neutral `ResourceProvider` interface. `scribium-core` owns the adapter
@@ -728,6 +728,12 @@ depend directly on the project model. Paths are logical and source-relative;
 normalization rejects traversal outside the project boundary, and nested
 includes retain source identity for subsequent relative resources. The
 compiler does not access the host filesystem or network from this boundary.
+
+The three builtin rows are canonical `PARTIAL` resource support, not complete
+Quarkdown compatibility. The common logical resolver is #188; the
+VirtualProject/ResourceProvider contract is a separate `SUPPORTED_SEMANTICS`
+row, and Typst source context is `PARTIAL` pending #187. See the cross-audit
+decision in [`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).
 
 See [`docs/compatibility/quarkdown/README.md`](compatibility/quarkdown/README.md),
 [`docs/compatibility/quarkdown/GAP_INVENTORY.md`](compatibility/quarkdown/GAP_INVENTORY.md),

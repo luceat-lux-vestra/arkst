@@ -376,12 +376,13 @@ Actionable gaps were searched against existing issues before creating a new
 one:
 
 - [#165](https://github.com/luceat-lux-vestra/scribium/issues/165) owns generic
-  binder validation and remains frozen until #156;
+  binder validation and follows the engine prerequisite band in #156;
 - [#166](https://github.com/luceat-lux-vestra/scribium/issues/166) owns the
-  lossless dynamic/raw-body representation prerequisite and remains frozen
-  until #156;
+  lossless dynamic/raw-body representation prerequisite and follows the
+  engine prerequisite band in #156;
 - [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) owns generic
-  conversion diagnostics and commit atomicity and remains frozen until #156;
+  conversion diagnostics and commit atomicity and follows the engine
+  prerequisite band in #156;
 - new bounded [#173](https://github.com/luceat-lux-vestra/scribium/issues/173)
   owns deterministic `.doclang` locale closure only; `.localization` and
   `.localize` remain #151-owned and are handed to #156 through that audit; and
@@ -390,8 +391,8 @@ one:
   [#154](https://github.com/luceat-lux-vestra/scribium/issues/154), and
   [#155](https://github.com/luceat-lux-vestra/scribium/issues/155).
 
-Every implementation follow-up is frozen until the #156 reconciliation is
-complete. This audit does not alter #172 or begin any #157+ implementation.
+Implementation follow-ups now follow the dependency-aware order in #156. This
+audit does not alter #172 or begin any #157+ implementation.
 
 | Measure | Result |
 |---|---:|

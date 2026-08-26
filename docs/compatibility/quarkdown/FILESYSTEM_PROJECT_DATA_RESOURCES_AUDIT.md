@@ -10,8 +10,8 @@
 
 This is an evidence and reconciliation record. It does not implement
 Quarkdown resource features, change the compatibility target, redesign the
-Typst backend, or add filesystem/network/process access. Production work stays
-frozen until [#156](https://github.com/luceat-lux-vestra/scribium/issues/156).
+Typst backend, or add filesystem/network/process access. Post-audit production
+ordering is defined by [#156](https://github.com/luceat-lux-vestra/scribium/issues/156).
 
 The manifest is authoritative for the canonical status and ownership of every
 enumerated row. The offline guard derives its row and ownership checks from the
@@ -235,8 +235,9 @@ or network access.
   [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) retain their
   established layout, structural/reference, media, table, and Typst/backend
   ownership boundaries; and
-- [#156](https://github.com/luceat-lux-vestra/scribium/issues/156) remains the
-  required cross-audit reconciliation gate.
+- [#156](https://github.com/luceat-lux-vestra/scribium/issues/156) is the
+  completed cross-audit reconciliation record; implementation sequencing now
+  follows its canonical dependency graph.
 
 The [offline guard](../../../crates/scribium-core/tests/filesystem_project_data_resources_audit.rs)
 rejects unpinned provenance, missing schema/evidence, contradictory support

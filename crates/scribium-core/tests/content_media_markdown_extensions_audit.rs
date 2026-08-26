@@ -23,6 +23,17 @@ const STATUSES: &[&str] = &[
 ];
 const SUPPORTED_END_TO_END_GAP_PREFIX: &str = "No #154-owned gap";
 const SUPPORTED_SEMANTICS_GAP_MARKERS: &[&str] = &["represented", "rendered", "unavailable"];
+
+fn has_bounded_disposition(surface: &[&str]) -> bool {
+    surface[27].contains('#')
+        || (surface[27].starts_with("DEFERRED_PRODUCT_SURFACE:")
+            && surface[28].contains("explicitly deferred"))
+}
+
+fn says_ownership_is_unestablished(gap: &str) -> bool {
+    let gap = gap.to_ascii_lowercase();
+    gap.contains("ownership") && gap.contains("not established")
+}
 const REPRESENTATIVE_OWNERSHIP: &[(&str, &str)] = &[
     ("primitive:text", "#184"),
     ("primitive:box", "#184"),
@@ -221,13 +232,18 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
 
         if surface[0] == "owned" {
             assert_ne!(surface[26], "NOT_APPLICABLE");
+            assert!(
+                !(surface[26] == "UNKNOWN" && says_ownership_is_unestablished(surface[28])),
+                "actionable UNKNOWN row leaves ownership unestablished: {}",
+                surface[1]
+            );
             if matches!(
                 surface[26],
                 "PARTIAL" | "UNSUPPORTED" | "DEFERRED" | "BLOCKED" | "UNKNOWN"
             ) {
                 assert!(
-                    surface[27].contains('#'),
-                    "actionable row has no bounded follow-up: {}",
+                    has_bounded_disposition(surface),
+                    "actionable row has no bounded follow-up, defer, or blocker: {}",
                     surface[1]
                 );
             }
@@ -291,12 +307,12 @@ fn manifest_is_complete_pinned_and_machine_checkable() {
                 surface[1]
             ),
             "BLOCKED" => assert!(
-                surface[28].contains("blocked"),
+                surface[28].contains("blocked") && !surface[27].contains("#155"),
                 "blocked row lacks blocker rationale: {}",
                 surface[1]
             ),
             "UNKNOWN" => assert!(
-                surface[28].contains("UNKNOWN") || surface[28].contains("not established"),
+                surface[28].contains("UNKNOWN") || surface[28].contains("unverified"),
                 "unknown row lacks uncertainty rationale: {}",
                 surface[1]
             ),
@@ -357,7 +373,7 @@ fn markdown_and_quarkdown_layers_are_not_promoted() {
 }
 
 #[test]
-fn ownership_handoffs_and_frozen_scope_are_explicit() {
+fn ownership_handoffs_and_sequenced_scope_are_explicit() {
     let rows = rows();
     for (name, owner, dependency) in [
         ("state:captionposition", "handoff:#153", "#153"),
@@ -382,7 +398,8 @@ fn ownership_handoffs_and_frozen_scope_are_explicit() {
     assert!(AUDIT.contains("#155"));
     assert!(AUDIT.contains("No .texmacro"));
     assert!(AUDIT.contains("Production semantic, state, parser"));
-    assert!(AUDIT.contains("implementation remains frozen"));
+    assert!(AUDIT.contains("post-audit implementation"));
+    assert!(AUDIT.contains("dependency graph"));
 }
 
 #[test]
@@ -445,8 +462,8 @@ fn actionable_rows_are_grouped_into_bounded_follow_ups() {
             "PARTIAL" | "UNSUPPORTED" | "DEFERRED" | "BLOCKED" | "UNKNOWN"
         ) {
             assert!(
-                surface[27].contains('#'),
-                "missing issue linkage: {}",
+                has_bounded_disposition(surface),
+                "missing issue linkage, defer, or blocker: {}",
                 surface[1]
             );
         }

@@ -153,7 +153,8 @@ Three bounded follow-ups are required by the actionable gaps in this matrix:
    document/layout state consumers.
 
 These are backlog records only. No production implementation is selected by
-#149, and implementation ordering remains frozen until #156 reconciliation.
+#149, and implementation ordering follows the dependency bands in
+[`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Evidence index
 

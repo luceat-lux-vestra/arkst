@@ -350,7 +350,8 @@ and the Pair declaration in
   constructors with existing tests and are SUPPORTED_SEMANTICS. get is
   UNSUPPORTED: the pinned declaration exists, but the current evaluator
   dictionary native-owner inventory contains construction and has no get
-  dispatch. This is an audit finding, not an implementation in this PR.
+  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/scribium/issues/194);
+  this audit records the gap and does not implement it.
 
 ### Library inspection, localization, and logger utilities
 
@@ -372,8 +373,11 @@ include context/library lookup, localization table mutation/read, and
 host/logging side effects. Scribium has no approved equivalent native owner
 for these names in the current engine. No evaluator, host capability,
 logging, or localization implementation was added. Status: UNSUPPORTED for
-all 9 names; the exact gap is recorded for #156 rather than converted into a
-speculative subsystem.
+all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/scribium/issues/195)
+owns library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
+owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
+owns logger/diagnostic behavior. Host/resource policy is coordinated through
+#188/#190; these are real production gaps, not evidence-only omissions.
 
 ## Cross-owned public surface
 
@@ -431,7 +435,7 @@ scribium-markdown/scribium-quarkdown frontend
   collection access, selector transforms, Pair/Dictionary construction,
   optionality callbacks, resource boundaries, document state, and source
   precedence. The current Dictionary native-owner list has dictionary but not
-  get, which is why get remains UNSUPPORTED.
+  get, which is why get remains UNSUPPORTED and is assigned to #194.
 - Return representation: current paths use IrValue Number, String, Boolean,
   None, Range, Collection, Pair, and Dictionary rather than backend-specific
   strings. Content-producing and component-producing functions are not
@@ -455,10 +459,10 @@ checked against pinned declarations and current pipeline evidence:
 | missing required, excess, or invalid named argument | binder rejects the call; no silent default unless optional | regular scalar and bounded native paths reject with source-backed diagnostics; generalized binder gap remains #149 |
 | invalid scalar/number/Boolean/String conversion | invocation-time conversion fails at conversion layer | shared bounded conversion fails closed; broad target conversion remains #149 |
 | wrong value shape or rich content used as scalar | typed target conversion does not fabricate debug text | current scalar helpers reject collections/ranges/components; content projection is explicit |
-| empty iterable, out-of-range index, or missing dictionary key | access returns the declared None/fallback shape; other operations retain operation-specific empty behavior | access/fallback and empty aggregate cases are tested; get has no current owner |
+| empty iterable, out-of-range index, or missing dictionary key | access returns the declared None/fallback shape; other operations retain operation-specific empty behavior | access/fallback and empty aggregate cases are tested; #194 owns the missing `.get` lookup contract |
 | incompatible comparison or unsupported natural order | comparison/sort fails rather than inventing an order | typed comparisons and sorted key checks fail with source spans |
 | callback or nested callback failure | failure propagates; callback state must not partially commit | existing evaluator callback/sort snapshots cover bounded paths; canonical flow is #150 |
-| unknown library/function lookup | lookup failure is observable, not an empty successful result | #151 library inspection functions remain UNSUPPORTED; no fake result is added |
+| unknown library/function lookup | lookup failure is observable, not an empty successful result | #195 owns the UNSUPPORTED library-inspection family; no fake result is added |
 | arithmetic domain/error condition | numeric operation behavior is retained per operation | existing numeric tests cover bounded f64 behavior; no universal error rewrite is claimed |
 | invalid selector result | selector result must be comparable and conversion-valid | sorted rejects None, unsupported, and heterogeneous keys and restores state |
 
@@ -485,8 +489,9 @@ materialization E3005 where applicable.
   selector sorting and callback failure/atomicity, optionality callback
   behavior, and source-backed diagnostics.
 - The guard does not assert support merely because a public name occurs in the
-  manifest. get, library/localization/logger, plaintext, range, sorted, and
-  callback dispositions are separate claim checks.
+  manifest. get (#194), library inspection (#195), localization (#196),
+  logger/diagnostic builtins (#197), plaintext, range, sorted, and callback
+  dispositions are separate claim checks.
 
 ## Canonical classification summary
 
@@ -527,7 +532,7 @@ Important corrections:
   recorded under #155 and remains outside #151 implementation.
 - get is a pinned public Dictionary callable, but Scribium currently has no
   evaluator native owner for it; it is UNSUPPORTED, not inferred from
-  dictionary.
+  dictionary, and its bounded owner is #194.
 - isnone is explicitly recovered into the #151 general inventory. none
   remains a #149 value-model boundary, and callback optionality remains #150.
 - sorted is selector/key-based with stable ordering evidence; it is not an
@@ -559,9 +564,14 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 records the cohesive Unicode string-semantics gap. get and the
-library/localization/logger families are real pinned gaps, but implementation
-ordering is frozen until #156 and no implementation is started here.
+Issue #172 records the cohesive Unicode string-semantics gap. The four
+remaining #151 unsupported families are real pinned gaps with bounded owners:
+[#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for dictionary
+lookup, [#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for
+library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
+for localization, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
+for logger/diagnostic builtins. Implementation order follows the dependency
+bands in #156; no implementation is started here.
 Existing issues are reused:
 
 - #149 and #165–#167 for value, binding, conversion, diagnostics, and
@@ -570,11 +580,13 @@ Existing issues are reused:
 - #152, #153, #154, and #155 for the cross-owned public surface.
 - #172 for Unicode titlecase and case-insensitive prefix semantics.
 
-Open reconciliation questions for #156 are the full DynamicValue conversion
+Remaining implementation questions are the full DynamicValue conversion
 matrix, exact diagnostics/atomicity deltas for currently bounded semantics,
-remaining sorted selector/conversion edge cases, Dictionary lookup ownership,
-and host/resource policy for library/localization/logger functions. This audit
-does not select the next implementation or alter the #157–#169 order.
+and sorted selector/conversion edge cases. Dictionary lookup, library
+inspection, localization, and logger ownership are no longer open
+reconciliation questions; #194–#197 own those bounded contracts and their
+host/resource coordination is explicit. This audit does not select the next
+implementation or alter the #157–#169 order.
 
 For #156, the usable reconciliation input is:
 
