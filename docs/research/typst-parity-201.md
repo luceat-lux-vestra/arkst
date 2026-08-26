@@ -4,9 +4,10 @@ Status: implementation and parity evidence for PR #205. The current
 code-bearing corrective implementation is commit
 `4d29f1a452531221f3ed519673eaef15762e1e0f`. Its exact-head native matrix
 evidence is CI run [33023853364](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364),
-which passed the named parity step on Linux, macOS, and Windows. A later
-documentation-only follow-up may change the PR head without changing this
-backend implementation or its evidence.
+which passed the named parity step on Linux, macOS, and Windows. This evidence
+record is a documentation-only follow-up to that code-bearing commit; it
+changes the PR head without changing the backend implementation or its
+evidence.
 The canonical executable oracle is
 
 ~~~
