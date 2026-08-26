@@ -66,6 +66,12 @@ cannot escape the staged project boundary. A symlink is allowed only when its
 final canonical target remains inside the explicit source root; both file and
 directory symlink escapes are rejected.
 
+The optional in-process path has no host filesystem mirror or network/package
+resolver: its Typst `World` is populated only from the already constructed
+`VirtualProject`, embedded/project-supplied fonts, and generated source. It is
+available only to a trusted native host through explicit backend selection and
+does not provide browser/WASM rendering.
+
 ## Configurable Resource Limits
 
 | Limit                    | Default        | Max        |

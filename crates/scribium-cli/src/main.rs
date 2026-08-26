@@ -34,7 +34,10 @@ enum Commands {
         /// Output file path (defaults to .typ for typst and .pdf for pdf)
         #[arg(long)]
         output: Option<PathBuf>,
-        /// Path to the Typst executable used for PDF output (defaults to `typst` on PATH)
+        /// Native PDF backend: subprocess (default) or in-process (explicit native-only opt-in; not browser/WASM rendering)
+        #[arg(long, value_enum, default_value = "subprocess")]
+        backend: commands::BackendSelection,
+        /// Path to the Typst executable used by the subprocess PDF backend (defaults to `typst` on PATH)
         #[arg(long, default_value = "typst")]
         typst_path: PathBuf,
     },
@@ -62,9 +65,66 @@ fn main() -> anyhow::Result<()> {
             input,
             format,
             output,
+            backend,
             typst_path,
-        } => commands::build(&input, &format, output.as_deref(), &typst_path),
+        } => commands::build_with_backend(&input, &format, output.as_deref(), &typst_path, backend),
         Commands::Check { input } => commands::check(&input),
         Commands::Inspect { input, emit } => commands::inspect(&input, &emit),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_defaults_to_subprocess() {
+        let cli = Cli::try_parse_from(["scribium", "build", "document.qd"]).expect("parse");
+        let Commands::Build { backend, .. } = cli.command else {
+            panic!("expected build command");
+        };
+        assert_eq!(backend, commands::BackendSelection::Subprocess);
+    }
+
+    #[test]
+    fn backend_accepts_explicit_values() {
+        for (value, expected) in [
+            ("subprocess", commands::BackendSelection::Subprocess),
+            ("in-process", commands::BackendSelection::InProcess),
+        ] {
+            let cli = Cli::try_parse_from(["scribium", "build", "document.qd", "--backend", value])
+                .expect("parse");
+            let Commands::Build { backend, .. } = cli.command else {
+                panic!("expected build command");
+            };
+            assert_eq!(backend, expected);
+        }
+    }
+
+    #[test]
+    fn backend_rejects_unknown_values() {
+        let error =
+            match Cli::try_parse_from(["scribium", "build", "document.qd", "--backend", "unknown"])
+            {
+                Ok(_) => panic!("unknown backend must be rejected"),
+                Err(error) => error,
+            };
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn help_describes_backend_choices_and_default() {
+        use clap::CommandFactory;
+
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("build")
+            .expect("build subcommand")
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("--backend"));
+        assert!(help.contains("subprocess"));
+        assert!(help.contains("in-process"));
+        assert!(help.contains("default"));
     }
 }

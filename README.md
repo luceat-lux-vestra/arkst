@@ -44,7 +44,7 @@ and lowered through the explicit Typst source-context/resource boundary.
 Absolute paths, remote/network loading, and a general resource registry remain
 unsupported or deferred.
 
-**HTML, SVG, and PNG output backends are not implemented yet.** PDF output through the external Typst executable is experimental; generating `.typ` does not require Typst to be installed.
+**HTML, SVG, and PNG output backends are not implemented yet.** PDF output is experimental. The subprocess Typst backend is the default and requires an installed Typst executable; trusted native hosts may explicitly opt in to the optional in-process backend. In-process compilation is native-only and is unrelated to browser/WASM rendering. Generating `.typ` does not require Typst to be installed.
 
 Detailed Markdown evidence and the accepted mismatch inventory live in [`docs/compatibility/markdown/`](docs/compatibility/markdown/).
 
@@ -64,6 +64,10 @@ cargo run -p scribium-cli -- build examples/markdown/basic.md \
 cargo run -p scribium-cli -- build examples/markdown/basic.md \
   --format pdf --output target/examples/basic.pdf
 
+# Optional native in-process PDF backend (does not use --typst-path)
+cargo run -p scribium-cli -- build examples/markdown/basic.md \
+  --format pdf --backend in-process --output target/examples/basic.pdf
+
 # Quarkdown-compatible example
 cargo run -p scribium-cli -- check examples/hello/main.qd
 cargo run -p scribium-cli -- build examples/hello/main.qd \
@@ -72,7 +76,7 @@ cargo run -p scribium-cli -- build examples/hello/main.qd \
 
 Supported input extensions are `.md`, `.qd`, and `.scrib` (case-insensitive). Files without an extension are rejected. Native `.typ` passthrough is not implemented yet.
 
-`--output` can override the destination. Missing output directories are created automatically, input files cannot be overwritten through aliases/symlinks/hard links, and output replacement is atomic on normal error-return paths. PDF builds invoke the configured Typst executable directly rather than through a shell; use `--typst-path <PATH>` to select a specific binary.
+`--output` can override the destination. Missing output directories are created automatically, input files cannot be overwritten through aliases/symlinks/hard links, and output replacement is atomic on normal error-return paths. PDF builds use `--backend subprocess` by default and invoke the configured Typst executable directly rather than through a shell; use `--typst-path <PATH>` to select a specific binary. `--backend in-process` is an explicit native-only opt-in over the bounded `VirtualProject` resource model; it does not silently fall back to subprocess when it fails and does not enable browser/WASM rendering.
 
 ## Runnable examples
 

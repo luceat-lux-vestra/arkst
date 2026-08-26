@@ -16,9 +16,12 @@ The native GitHub sub-issue hierarchy for #147 was re-read in both directions:
 all nine children are completed. #147 was then closed as completed. No
 compatibility classification was changed to close either tracker.
 
-Issue #187 remains open as the technical-spike tracker. This document records
-the implementation and evidence attached to its PR; it does not make the
-subprocess backend removable or make in-process compilation the CLI default.
+At the time of this report, issue #187 was the technical-spike tracker. PR
+#202 subsequently closed that re-evaluation with the decision recorded above;
+issue #200 is the production follow-up for explicit native selection. This
+document remains the implementation/evidence record for #187 and does not make
+the subprocess backend removable or make in-process compilation the CLI
+default.
 
 ## Current Typst API and dependency findings
 

@@ -1,13 +1,17 @@
-//! In-process Typst backend spike for issue #187.
+#![cfg(not(target_arch = "wasm32"))]
+
+//! Native in-process Typst backend for trusted hosts.
 //!
 //! This adapter intentionally sits after the scribium-typst lowering. It maps a
 //! completed VirtualProject to Typst's public World contract, compiles the
 //! generated Typst source, and exports a PDF. Typst types stay inside this
 //! native adapter; Scribium semantic IR and the platform-neutral lowering
-//! crate never depend on them.
+//! crate never depend on them. The crate is not part of the WASM/browser
+//! rendering path.
 
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_project::{VirtualPathBuf, VirtualProject};
+use scribium_source::{SourceMapEntry, SourceSpan};
 use scribium_typst::{TypstBackend, TypstInput, TypstOutput};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -43,14 +47,21 @@ impl<'a> InProcessBackend<'a> {
     pub fn project(&self) -> &'a VirtualProject {
         self.project
     }
-}
 
-impl TypstBackend for InProcessBackend<'_> {
-    type Error = InProcessError;
-
-    fn compile(&self, input: &TypstInput) -> Result<TypstOutput, Self::Error> {
+    /// Compiles generated Typst and uses reliable lowering mappings when
+    /// converting compiler diagnostics back to Scribium source spans.
+    ///
+    /// The map is borrowed only for the duration of this compilation. An
+    /// adapter consumer that does not have a lowering map can use the
+    /// [`TypstBackend::compile`] method; diagnostics then retain a logical
+    /// generated-Typst path without fabricating an original span.
+    pub fn compile_with_source_map(
+        &self,
+        input: &TypstInput,
+        source_map: &[SourceMapEntry],
+    ) -> Result<TypstOutput, InProcessError> {
         let start = Instant::now();
-        let world = ProjectWorld::new(self.project, input)?;
+        let world = ProjectWorld::new(self.project, input, source_map)?;
         let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             typst::compile::<PagedDocument>(&world)
         }))
@@ -98,6 +109,14 @@ impl TypstBackend for InProcessBackend<'_> {
             diagnostics: warnings,
             duration: start.elapsed(),
         })
+    }
+}
+
+impl TypstBackend for InProcessBackend<'_> {
+    type Error = InProcessError;
+
+    fn compile(&self, input: &TypstInput) -> Result<TypstOutput, Self::Error> {
+        self.compile_with_source_map(input, &[])
     }
 
     fn version(&self) -> Result<String, Self::Error> {
@@ -156,8 +175,9 @@ impl std::error::Error for InProcessError {}
 /// VirtualProject remains the source of truth. The maps are immutable for a
 /// compile, which gives repeated source/resource loads stable identity and
 /// deterministic results without a global cache.
-struct ProjectWorld<'a> {
-    project: &'a VirtualProject,
+struct ProjectWorld<'project, 'map> {
+    project: &'project VirtualProject,
+    source_map: &'map [SourceMapEntry],
     library: LazyHash<Library>,
     font_book: LazyHash<FontBook>,
     fonts: Vec<Font>,
@@ -168,8 +188,12 @@ struct ProjectWorld<'a> {
     files: BTreeMap<String, Bytes>,
 }
 
-impl<'a> ProjectWorld<'a> {
-    fn new(project: &'a VirtualProject, input: &TypstInput) -> Result<Self, InProcessError> {
+impl<'project, 'map> ProjectWorld<'project, 'map> {
+    fn new(
+        project: &'project VirtualProject,
+        input: &TypstInput,
+        source_map: &'map [SourceMapEntry],
+    ) -> Result<Self, InProcessError> {
         let requested_entry = parse_document_path(&input.entry_path)?;
         if requested_entry != *project.entry() {
             return Err(InProcessError::InvalidInput(format!(
@@ -214,6 +238,7 @@ impl<'a> ProjectWorld<'a> {
 
         Ok(Self {
             project,
+            source_map,
             library: LazyHash::new(Library::default()),
             font_book,
             fonts,
@@ -244,7 +269,7 @@ impl<'a> ProjectWorld<'a> {
     }
 }
 
-impl World for ProjectWorld<'_> {
+impl World for ProjectWorld<'_, '_> {
     fn library(&self) -> &LazyHash<Library> {
         &self.library
     }
@@ -295,8 +320,8 @@ impl World for ProjectWorld<'_> {
 
     fn today(&self, _offset: Option<Duration>) -> Option<typst::foundations::Datetime> {
         // Date/environment capabilities are intentionally unavailable in this
-        // spike. Returning None is Typst's fail-closed contract; inventing a
-        // fixed date or adding an offset to it would not implement timezone
+        // adapter. Returning None is Typst's fail-closed contract; inventing
+        // a fixed date or adding an offset to it would not implement timezone
         // semantics.
         None
     }
@@ -384,8 +409,25 @@ fn is_font_path(path: &str) -> bool {
     )
 }
 
-fn to_scribium_diagnostic(world: &ProjectWorld<'_>, diagnostic: &SourceDiagnostic) -> Diagnostic {
-    let (location, range) = diagnostic_location(world, diagnostic);
+fn to_scribium_diagnostic(
+    world: &ProjectWorld<'_, '_>,
+    diagnostic: &SourceDiagnostic,
+) -> Diagnostic {
+    let generated_location = diagnostic_location(world, diagnostic);
+    let primary = diagnostic_primary(world, diagnostic, generated_location.1.as_ref());
+    let (location, range) = if let Some(primary) = primary {
+        let source_path = world
+            .project
+            .sources()
+            .path_by_id(primary.source_id)
+            .map(|path| format!("/{}", path.as_str()));
+        (
+            source_path.or_else(|| generated_location.0.clone()),
+            Some(primary.start..primary.end),
+        )
+    } else {
+        generated_location
+    };
     let message = match (&location, &range) {
         (Some(path), Some(range)) => {
             format!(
@@ -395,17 +437,6 @@ fn to_scribium_diagnostic(world: &ProjectWorld<'_>, diagnostic: &SourceDiagnosti
         }
         (Some(path), None) => format!("{path}: {}", diagnostic.message),
         (None, _) => diagnostic.message.to_string(),
-    };
-
-    let primary = match (diagnostic.span.id(), range) {
-        (Some(id), Some(range)) if id.root() == &VirtualRoot::Project => {
-            let path = VirtualPathBuf::parse(id.vpath().get_without_slash()).ok();
-            path.and_then(|path| world.project.sources().get_id(&path))
-                .map(|source_id| {
-                    scribium_source::SourceSpan::new(source_id, range.start, range.end)
-                })
-        }
-        _ => None,
     };
 
     Diagnostic {
@@ -426,7 +457,7 @@ fn to_scribium_diagnostic(world: &ProjectWorld<'_>, diagnostic: &SourceDiagnosti
 }
 
 fn diagnostic_location(
-    world: &ProjectWorld<'_>,
+    world: &ProjectWorld<'_, '_>,
     diagnostic: &SourceDiagnostic,
 ) -> (Option<String>, Option<std::ops::Range<usize>>) {
     let Some(id) = diagnostic.span.id() else {
@@ -440,7 +471,80 @@ fn diagnostic_location(
     (Some(location), range)
 }
 
-fn render_diagnostic(world: &ProjectWorld<'_>, diagnostic: &SourceDiagnostic) -> String {
+/// Converts a Typst diagnostic span to an original Scribium span only when a
+/// unique, validated lowering entry contains the complete generated range.
+/// Overlapping or incomplete mappings are intentionally treated as unknown.
+fn diagnostic_primary(
+    world: &ProjectWorld<'_, '_>,
+    diagnostic: &SourceDiagnostic,
+    generated_range: Option<&std::ops::Range<usize>>,
+) -> Option<SourceSpan> {
+    let id = diagnostic.span.id()?;
+    if id == world.main_id {
+        return generated_range.and_then(|range| world.map_generated_range(range));
+    }
+    if id.root() != &VirtualRoot::Project {
+        return None;
+    }
+
+    let path = VirtualPathBuf::parse(id.vpath().get_without_slash()).ok()?;
+    let source_id = world.project.sources().get_id(&path)?;
+    let source = world.project.sources().get_by_id(source_id)?;
+    let range = generated_range?;
+    (range.start <= range.end
+        && range.end <= source.len()
+        && source.is_char_boundary(range.start)
+        && source.is_char_boundary(range.end))
+    .then_some(SourceSpan::new(source_id, range.start, range.end))
+}
+
+impl ProjectWorld<'_, '_> {
+    fn map_generated_range(&self, range: &std::ops::Range<usize>) -> Option<SourceSpan> {
+        if range.start >= range.end || range.end > self.main_source.len() {
+            return None;
+        }
+
+        let mut best_length = None;
+        let mut best_span = None;
+        let mut ambiguous = false;
+        for entry in self.source_map.iter().filter(|entry| {
+            entry.generated_start <= range.start
+                && range.end <= entry.generated_end
+                && entry.generated_start < entry.generated_end
+                && entry.generated_end <= self.main_source.len()
+        }) {
+            let Some(source) = self.project.sources().get_by_id(entry.original.source_id) else {
+                continue;
+            };
+            if !entry.original.byte_span().is_valid_for(source) {
+                continue;
+            }
+            let generated_length = entry.generated_end - entry.generated_start;
+            match best_length {
+                None => {
+                    best_length = Some(generated_length);
+                    best_span = Some(entry.original);
+                    ambiguous = false;
+                }
+                Some(length) if generated_length < length => {
+                    best_length = Some(generated_length);
+                    best_span = Some(entry.original);
+                    ambiguous = false;
+                }
+                Some(length) if generated_length == length => {
+                    if best_span != Some(entry.original) {
+                        ambiguous = true;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+
+        (!ambiguous).then_some(best_span).flatten()
+    }
+}
+
+fn render_diagnostic(world: &ProjectWorld<'_, '_>, diagnostic: &SourceDiagnostic) -> String {
     to_scribium_diagnostic(world, diagnostic).to_string()
 }
 
