@@ -1,9 +1,10 @@
 # Issue #201: Native Typst backend parity evidence
 
-Status: final implementation evidence for PR #205. The code-bearing parity CI
-run 32967897182 tested commit `71f6525a649992a12d03bf5842800dc3bfce9c4c`;
-the final PR HEAD is a documentation-only descendant whose complete CI rerun
-is tracked by [PR #205](https://github.com/luceat-lux-vestra/scribium/pull/205).
+Status: implementation and parity evidence for PR #205. The original
+code-bearing parity CI run 32967897182 tested commit
+`71f6525a649992a12d03bf5842800dc3bfce9c4c`; subsequent strict review found
+two boundary defects, which the corrective implementation and its CI rerun
+must close on [PR #205](https://github.com/luceat-lux-vestra/scribium/pull/205).
 The canonical executable oracle is
 
 ~~~
@@ -61,7 +62,7 @@ same fixture corpus; they are not inferred from the local run.
 | project-font | PASS | PASS | project-supplied font policy, valid PDF | no Scribium font semantic yet |
 | missing-resource | FAIL | FAIL | resource failure, logical missing path | error wording may differ |
 | traversal | FAIL | FAIL | project boundary denial | error wording may differ |
-| package-denial | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| package-denial-all-namespaces | FAIL | FAIL | package/network fail-closed | error wording may differ |
 | invalid-generated | FAIL | FAIL | generated Typst compile failure | subprocess text versus structured in-process diagnostic |
 | mapped-diagnostic | FAIL | FAIL | logical path plus original span in-process | subprocess has no structured span |
 | ambiguous-diagnostic | FAIL | FAIL | logical path, no fabricated in-process span | subprocess has no structured span |
@@ -99,7 +100,8 @@ The corpus exercises:
 - a project-supplied font fixture without system-font discovery assumptions;
 - missing project-relative resources;
 - ../../outside.svg traversal denial;
-- @preview/not-present:1.0.0 package denial without URL leakage;
+- @preview, @local, and arbitrary-namespace package denial without URL
+  leakage, while package-looking comments/raw/code/string text remains inert;
 - logical generated/source paths and mapped/unmapped/ambiguous source spans;
   and
 - rejection of temporary, runner, Unix absolute, Windows drive, UNC-like, or
@@ -108,11 +110,17 @@ The corpus exercises:
 The first Windows run exposed a native path spelling that the original
 temporary-root replacement did not cover. The subprocess boundary now
 normalizes native, slash, backslash, and extended-prefix forms and redacts
-remaining absolute runner/target tokens while retaining logical project paths.
+remaining absolute runner/temp tokens while retaining logical project paths.
 The first complete parity run also showed that Typst CLI package resolution
-could reach its network resolver; `@preview/` references are now rejected
-before subprocess execution, with the logical entry path retained in the
-denial diagnostic.
+could reach its network resolver. Static `import`/`include` package operands
+for every namespace are now rejected before subprocess execution, while the
+syntax parser ignores comments, raw text, and inert strings. Dynamic module
+operands are also rejected because the adapter cannot prove they are
+project-local without evaluating code; ordinary literal relative imports remain
+supported.
+The diagnostic retains the logical entry path. The sanitizer and parity oracle
+treat relative components such as `target/` and `Users/` as ordinary logical
+path components; only absolute/native/temporary path tokens are redacted.
 
 ## Intentional divergences and scope
 

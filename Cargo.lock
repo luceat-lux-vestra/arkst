@@ -2219,6 +2219,7 @@ dependencies = [
  "scribium-project",
  "scribium-typst",
  "tempfile",
+ "typst-syntax",
 ]
 
 [[package]]

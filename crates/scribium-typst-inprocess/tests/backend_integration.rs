@@ -255,10 +255,7 @@ fn missing_resources_fail_closed_with_virtual_paths() {
     let rendered = error.to_string();
     assert!(rendered.contains("compilation failed") || rendered.contains("PDF export failed"));
     assert!(rendered.contains("missing.svg"), "{rendered}");
-    assert!(
-        !rendered.contains("/tmp/") && !rendered.contains("target/"),
-        "{rendered}"
-    );
+    assert!(!rendered.contains("/tmp/"), "{rendered}");
     assert!(!error.diagnostics().is_empty());
 }
 
@@ -274,7 +271,7 @@ fn package_resolution_is_explicitly_denied_without_network_access() {
     let rendered = error.to_string();
     assert!(rendered.contains("compilation failed"));
     assert!(!rendered.contains("http://") && !rendered.contains("https://"));
-    assert!(!rendered.contains("/tmp/") && !rendered.contains("target/"));
+    assert!(!rendered.contains("/tmp/"));
 }
 
 #[test]

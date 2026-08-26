@@ -91,7 +91,7 @@ impl TypstBackend for SubprocessBackend {
     fn compile(&self, input: &TypstInput) -> Result<TypstOutput, TypstError> {
         let start = std::time::Instant::now();
         let entry_path = validate_entry_path(&input.entry_path)?;
-        if input.source.contains("@preview/") {
+        if contains_denied_typst_module_reference(&input.source) {
             return Err(TypstError::Subprocess(format!(
                 "package resolution is denied by Scribium for {}",
                 entry_path
@@ -452,67 +452,140 @@ fn sanitize_typst_diagnostic(stderr: &[u8], temporary_root: &Path) -> String {
 }
 
 fn sanitize_absolute_path_tokens(diagnostic: &str) -> String {
-    let mut starts = BTreeSet::new();
-    let bytes = diagnostic.as_bytes();
-    for (index, window) in bytes.windows(3).enumerate() {
-        let preceded_by_token = index > 0 && bytes[index - 1].is_ascii_alphanumeric();
-        if !preceded_by_token
-            && window[0].is_ascii_alphabetic()
-            && window[1] == b':'
-            && matches!(window[2], b'/' | b'\\')
-        {
-            starts.insert(index);
-        }
-    }
-    for (index, _) in diagnostic.match_indices("\\\\") {
-        starts.insert(index);
-    }
-    for marker in [
-        "/tmp/",
-        "/private/var/",
-        "/var/folders/",
-        "/Users/",
-        "\\tmp\\",
-        "\\Users\\",
-        "/home/runner/",
-        "\\home\\runner\\",
-        "runner.workspace",
-        "github.workspace",
-        "target/",
-        "\\target\\",
-    ] {
-        for (index, _) in diagnostic.match_indices(marker) {
-            starts.insert(index);
-        }
-    }
-
     let mut sanitized = String::with_capacity(diagnostic.len());
     let mut offset = 0;
-    for start in starts {
-        if start < offset {
-            continue;
-        }
+    while let Some(relative_start) = next_absolute_path_start(&diagnostic[offset..]) {
+        let start = offset + relative_start;
         sanitized.push_str(&diagnostic[offset..start]);
         let end = start
             + diagnostic[start..]
                 .find(char::is_whitespace)
                 .unwrap_or(diagnostic.len() - start);
         let token = &diagnostic[start..end];
-        if let Some(logical_path) = logical_path_from_absolute_token(token) {
+        let (path, location) = split_diagnostic_location(token);
+        if let Some(logical_path) = logical_path_from_absolute_token(path) {
             sanitized.push_str(&logical_path);
         } else {
             sanitized.push_str("<host-path>");
         }
+        sanitized.push_str(location);
         offset = end;
     }
     sanitized.push_str(&diagnostic[offset..]);
     sanitized
 }
 
+fn split_diagnostic_location(token: &str) -> (&str, &str) {
+    let Some(last_colon) = token.rfind(':') else {
+        return (token, "");
+    };
+    if !token[last_colon + 1..]
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+    {
+        return (token, "");
+    }
+
+    let Some(line_colon) = token[..last_colon].rfind(':') else {
+        return (token, "");
+    };
+    if token[line_colon + 1..last_colon]
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+    {
+        return (&token[..line_colon], &token[line_colon..]);
+    }
+
+    (&token[..last_colon], &token[last_colon..])
+}
+
+fn next_absolute_path_start(diagnostic: &str) -> Option<usize> {
+    let bytes = diagnostic.as_bytes();
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if !path_token_boundary(bytes, index) {
+            continue;
+        }
+
+        if index + 2 < bytes.len()
+            && byte.is_ascii_alphabetic()
+            && bytes[index + 1] == b':'
+            && matches!(bytes[index + 2], b'/' | b'\\')
+        {
+            return Some(index);
+        }
+
+        if index + 1 < bytes.len() && matches!(byte, b'/' | b'\\') && bytes[index + 1] == byte {
+            return Some(index);
+        }
+
+        // A single leading backslash is a rooted Windows path. Relative
+        // components such as `target\\main.typ` do not reach this branch.
+        if byte == b'\\' && bytes.get(index + 1).is_some_and(|next| *next != b'\\') {
+            return Some(index);
+        }
+
+        // A Unix absolute path. `//...` was handled as UNC above, while
+        // `<typst-build>/project/...` is intentionally not a token boundary
+        // at the slash after the synthetic marker.
+        if byte == b'/'
+            && bytes
+                .get(index + 1)
+                .is_some_and(|next| !next.is_ascii_whitespace())
+        {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn path_token_boundary(bytes: &[u8], index: usize) -> bool {
+    index == 0
+        || bytes[index - 1].is_ascii_whitespace()
+        || matches!(
+            bytes[index - 1],
+            b'(' | b'[' | b'{' | b'<' | b':' | b'=' | b'"' | b'\''
+        )
+}
+
 fn logical_path_from_absolute_token(token: &str) -> Option<String> {
     let normalized = token.replace('\\', "/");
     let (_, logical_path) = normalized.split_once("/project/")?;
     Some(format!("/{logical_path}"))
+}
+
+/// Detects Typst package access without embedding the compiler or evaluator.
+/// The syntax-only parser identifies active `import`/`include` nodes, so
+/// comments, raw text, and ordinary strings are not mistaken for module
+/// sources. Literal package specifications use Typst's own grammar; dynamic
+/// module expressions are rejected because this adapter cannot prove that
+/// they remain project-local without evaluating code.
+fn contains_denied_typst_module_reference(source: &str) -> bool {
+    let root = typst_syntax::parse(source);
+    syntax_node_contains_denied_module(&root)
+}
+
+fn syntax_node_contains_denied_module(node: &typst_syntax::SyntaxNode) -> bool {
+    let denied = match node.kind() {
+        typst_syntax::SyntaxKind::ModuleImport => node
+            .cast::<typst_syntax::ast::ModuleImport>()
+            .is_some_and(|module| module_source_is_denied(module.source())),
+        typst_syntax::SyntaxKind::ModuleInclude => node
+            .cast::<typst_syntax::ast::ModuleInclude>()
+            .is_some_and(|module| module_source_is_denied(module.source())),
+        _ => false,
+    };
+
+    denied || node.children().any(syntax_node_contains_denied_module)
+}
+
+fn module_source_is_denied(source: typst_syntax::ast::Expr<'_>) -> bool {
+    match source {
+        typst_syntax::ast::Expr::Str(string) => string
+            .get()
+            .parse::<typst_syntax::package::PackageSpec>()
+            .is_ok(),
+        _ => true,
+    }
 }
 
 #[cfg(test)]
@@ -627,19 +700,52 @@ mod tests {
     }
 
     #[test]
-    fn subprocess_backend_denies_preview_packages_before_execution() {
+    fn subprocess_backend_denies_all_static_package_namespaces_before_execution() {
         let backend = SubprocessBackend::new("/nonexistent/typst");
-        let result = backend.compile(&TypstInput {
-            source: "#import \"@preview/not-present:1.0.0\": *\n".to_string(),
-            entry_path: "docs/main.qd".to_string(),
-        });
+        for source in [
+            "#import \"@preview/not-present:1.0.0\": *\n",
+            "#import \"@local/company-package:1.0.0\": *\n",
+            "#include \"@company/internal-package:2.3.4\"\n",
+            "#{ import \"@workspace/private-package:0.1.0\" }\n",
+        ] {
+            let result = backend.compile(&TypstInput {
+                source: source.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            });
 
-        let error = result
-            .expect_err("package access must be denied")
-            .to_string();
-        assert!(error.contains("package resolution is denied"));
-        assert!(!error.contains("http://") && !error.contains("https://"));
-        assert!(!error.contains("not found at"));
+            let error = result
+                .expect_err("package access must be denied")
+                .to_string();
+            assert!(error.contains("package resolution is denied"));
+            assert!(!error.contains("http://") && !error.contains("https://"));
+            assert!(!error.contains("not found at"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn subprocess_backend_ignores_package_looking_inert_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 inert", "", 0);
+        let source = r###"// #import "@preview/comment:1.0.0": *
+/* nested /* #include "@local/comment:1.0.0" */ comment */
+`#import "@preview/inline-raw:1.0.0": *`
+```typst
+#import "@workspace/raw-block:1.0.0": *
+```
+#let example = "@company/example:1.0.0"
+#raw("#import \"@preview/raw-string:1.0.0\": *")
+\#import "@preview/escaped-hash:1.0.0": *
+import "@preview/markup-text:1.0.0"
+"###;
+        let output = SubprocessBackend::new(fake)
+            .compile(&TypstInput {
+                source: source.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("inert package-looking text must not be denied");
+        assert_eq!(output.pdf.as_deref(), Some(b"%PDF-1.7 inert".as_slice()));
     }
 
     #[test]
@@ -647,7 +753,10 @@ mod tests {
         let temporary_root = Path::new("D:\\a\\_temp\\scribium");
         let stderr = "error: D:/a/_temp/scribium/project/docs/main.typ:1:1\n".to_string()
             + "error: \\\\?\\D:\\a\\_temp\\scribium\\project\\docs\\main.typ:2:1\n"
-            + "error: C:/Users/runneradmin/AppData/Temp/project/docs/main.typ:3:1\n";
+            + "error: C:/Users/runneradmin/AppData/Temp/project/docs/target/Users/main.typ:3:1\n"
+            + "error: <typst-build>/project/docs/target/Users/main.typ:4:1\n"
+            + "error: \\\\server\\share\\outside\\main.typ:5:1\n"
+            + "error: \\\\server\\share\\project\\docs\\target\\Users\\main.typ:6:1\n";
 
         let sanitized = sanitize_typst_diagnostic(stderr.as_bytes(), temporary_root);
 
@@ -655,12 +764,69 @@ mod tests {
             sanitized,
             "error: <typst-build>/project/docs/main.typ:1:1\n".to_string()
                 + "error: <typst-build>/project/docs/main.typ:2:1\n"
-                + "error: /docs/main.typ:3:1\n"
+                + "error: /docs/target/Users/main.typ:3:1\n"
+                + "error: <typst-build>/project/docs/target/Users/main.typ:4:1\n"
+                + "error: <host-path>:5:1\n"
+                + "error: /docs/target/Users/main.typ:6:1\n"
         );
         assert!(!sanitized.contains("D:/a/"));
         assert!(!sanitized.contains("D:\\a\\"));
         assert!(!sanitized.contains("C:/Users/"));
         assert!(!sanitized.contains("\\\\?\\"));
+    }
+
+    #[test]
+    fn package_parser_only_matches_active_module_operands() {
+        assert!(contains_denied_typst_module_reference(
+            "#import \"@preview/pkg:1.0.0\": *"
+        ));
+        assert!(contains_denied_typst_module_reference(
+            "#include \"@local/pkg:1.0.0\""
+        ));
+        assert!(contains_denied_typst_module_reference(
+            "#{ import \"@company/pkg:1.0.0\" }"
+        ));
+        assert!(contains_denied_typst_module_reference(
+            "#let module = { import \"@workspace/pkg:1.0.0\" }"
+        ));
+        assert!(contains_denied_typst_module_reference(
+            "#let package = \"@local/pkg:1.0.0\"\n#import package"
+        ));
+
+        for source in [
+            "// #import \"@preview/pkg:1.0.0\": *",
+            "/* #include \"@local/pkg:1.0.0\" */",
+            "`#import \"@company/pkg:1.0.0\"`",
+            "```typst\n#import \"@company/pkg:1.0.0\"\n```",
+            "#let text = \"@preview/pkg:1.0.0\"",
+            "#raw(\"#import \\\"@preview/pkg:1.0.0\\\": *\")",
+            "\\#import \"@preview/pkg:1.0.0\"",
+            "import \"@preview/pkg:1.0.0\"",
+            "text { import \"@preview/pkg:1.0.0\" }",
+        ] {
+            assert!(
+                !contains_denied_typst_module_reference(source),
+                "inert text was classified as a package reference: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn logical_path_components_are_not_host_path_markers() {
+        let diagnostic = "<typst-build>/project/docs/target/Users/main.typ:1:1";
+        assert_eq!(sanitize_absolute_path_tokens(diagnostic), diagnostic);
+        assert_eq!(
+            sanitize_absolute_path_tokens("/tmp/build/project/docs/target/Users/main.typ:1:1"),
+            "/docs/target/Users/main.typ:1:1"
+        );
+        assert_eq!(
+            sanitize_absolute_path_tokens("relative/target/Users/main.typ:1:1"),
+            "relative/target/Users/main.typ:1:1"
+        );
+        assert_eq!(
+            sanitize_absolute_path_tokens(r"relative\target\Users\main.typ:1:1"),
+            r"relative\target\Users\main.typ:1:1"
+        );
     }
 
     #[cfg(unix)]

@@ -288,26 +288,51 @@ fn contains_host_path(text: &str) -> bool {
         "\\Users\\",
         "/home/runner/",
         "\\home\\runner\\",
-        "runner.workspace",
-        "github.workspace",
-        "target/",
-        "\\target\\",
-        "\\\\",
     ]
     .iter()
-    .any(|marker| text.contains(marker))
-        || contains_windows_drive_path(text)
+    .any(|marker| {
+        text.match_indices(marker)
+            .any(|(index, _)| path_token_boundary(text.as_bytes(), index))
+    }) || contains_windows_drive_path(text)
+        || contains_unc_path(text)
 }
 
 fn contains_windows_drive_path(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.windows(3).enumerate().any(|(index, window)| {
-        let preceded_by_token = index > 0 && bytes[index - 1].is_ascii_alphanumeric();
-        !preceded_by_token
+        path_token_boundary(bytes, index)
             && window[0].is_ascii_alphabetic()
             && window[1] == b':'
             && matches!(window[2], b'/' | b'\\')
     })
+}
+
+fn contains_unc_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.windows(2).enumerate().any(|(index, window)| {
+        path_token_boundary(bytes, index) && matches!(window, [b'\\', b'\\'] | [b'/', b'/'])
+    })
+}
+
+fn path_token_boundary(bytes: &[u8], index: usize) -> bool {
+    index == 0
+        || bytes[index - 1].is_ascii_whitespace()
+        || matches!(
+            bytes[index - 1],
+            b'(' | b'[' | b'{' | b'<' | b':' | b'=' | b'"' | b'\''
+        )
+}
+
+#[test]
+fn parity_path_oracle_distinguishes_logical_components_from_native_paths() {
+    assert!(!contains_host_path(
+        "<typst-build>/project/docs/target/Users/main.typ:1:1"
+    ));
+    assert!(!contains_host_path("/docs/target/Users/main.typ:1:1"));
+    assert!(!contains_host_path("docs/target/Users/main.typ:1:1"));
+    assert!(contains_host_path("/tmp/build/project/docs/main.typ:1:1"));
+    assert!(contains_host_path("C:/Users/runner/main.typ:1:1"));
+    assert!(contains_host_path(r"\\server\share\main.typ:1:1"));
 }
 
 fn assert_fixture_expectation(fixture: &ParityFixture, observation: &ParityObservation) {
@@ -631,11 +656,32 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             failure_expectation(OutcomeClass::TraversalDenied),
         ),
         typst_override_fixture(
-            "package-denial",
+            "package-denial-preview",
             "docs/main.qd",
             "# Package denial\n",
             "#import \"@preview/not-present:1.0.0\": *\n",
             failure_expectation(OutcomeClass::PackageDenied),
+        ),
+        typst_override_fixture(
+            "package-denial-local",
+            "docs/main.qd",
+            "# Package denial\n",
+            "#import \"@local/company-package:1.0.0\": *\n",
+            failure_expectation(OutcomeClass::PackageDenied),
+        ),
+        typst_override_fixture(
+            "package-denial-arbitrary-namespace",
+            "docs/main.qd",
+            "# Package denial\n",
+            "#include \"@company/internal-package:2.3.4\"\n",
+            failure_expectation(OutcomeClass::PackageDenied),
+        ),
+        typst_override_fixture(
+            "package-looking-inert-text",
+            "docs/main.qd",
+            "# Package-looking inert text\n",
+            "```typst\n#import \"@preview/raw-block:1.0.0\": *\n```\n#let text = \"@local/example:1.0.0\"\n#raw(\"#import \\\"@company/example:1.0.0\\\": *\")\n",
+            success_expectation(&["@preview/raw-block", "@local/example", "@company/example"]),
         ),
         invalid_generated_fixture("invalid-generated", false, false),
         invalid_generated_fixture("mapped-diagnostic", true, false),
@@ -716,7 +762,7 @@ fn invalid_generated_fixture(name: &'static str, mapped: bool, ambiguous: bool) 
     let source = "# Diagnostic source\n\nThis is a valid Scribium source.\n";
     let mut fixture = lowered_fixture(
         name,
-        "docs/main.qd",
+        "docs/target/Users/main.qd",
         source,
         &[],
         failure_expectation(OutcomeClass::CompilationFailure),
@@ -739,14 +785,17 @@ fn invalid_generated_fixture(name: &'static str, mapped: bool, ambiguous: bool) 
 
         if ambiguous {
             let project = project(
-                "docs/main.qd",
+                "docs/target/Users/main.qd",
                 source,
                 &[],
-                &[("docs/other.qd", "another valid source")],
+                &[("docs/target/Users/other.qd", "another valid source")],
             );
             let other_id = project
                 .sources()
-                .get_id(&scribium_project::VirtualPathBuf::parse("docs/other.qd").expect("path"))
+                .get_id(
+                    &scribium_project::VirtualPathBuf::parse("docs/target/Users/other.qd")
+                        .expect("path"),
+                )
                 .expect("other source id");
             fixture.project = project;
             fixture.source_map.push(SourceMapEntry {
