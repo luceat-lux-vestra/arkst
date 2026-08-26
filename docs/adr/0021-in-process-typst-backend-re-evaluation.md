@@ -49,7 +49,7 @@ not approval for browser/WASM rendering.
 The current public Typst 0.15.1 compile and PDF APIs were sufficient to build a
 `ProjectWorld` over `VirtualProject`. Real generated Scribium source compiled
 to valid PDFs. Images, project fonts, missing resources, traversal, package
-denial, deterministic date behavior, repeated reads, and structured failure
+denial, fail-closed date behavior, repeated reads, and structured failure
 diagnostics were exercised. A subprocess parity test covered generated
 multi-page success and invalid-source failure classification.
 
@@ -68,8 +68,10 @@ The assumptions that changed since #12 are:
    the measured macOS arm64 host.
 
 These results establish viability, not default suitability. The adapter's
-source-map handoff, package/date policy, broader corpus parity, and
-cross-platform native CI evidence remain production gates.
+source-map handoff, package/date policy, broader corpus parity, and production
+opt-in review remain production gates. The native CI matrix has passed on
+Ubuntu, macOS, and Windows for the spike; the local performance measurements
+remain macOS arm64 measurements.
 
 ## Consequences
 
@@ -85,11 +87,14 @@ cross-platform native CI evidence remain production gates.
 
 - The optional adapter adds a large Typst compiler/PDF dependency graph and
   materially increases clean-build and binary costs.
+- The current full-graph `cargo-deny` advisory gate is red for transitive
+  Typst dependencies; production promotion remains blocked until that gate has
+  an accepted, verifiable resolution.
 - Typst 0.x public APIs remain version-coupled and require re-validation on
   stable-release changes.
 - Generated-source source-map handoff is not yet complete.
-- Native Linux/Windows evidence and broader corpus parity are still required
-  before production opt-in.
+- Native Linux/macOS/Windows CI evidence has passed for the spike; broader
+  corpus parity and production opt-in review are still required.
 
 ### Explicitly not decided
 

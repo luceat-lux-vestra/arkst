@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use typst::diag::{FileError, FileResult, PackageError, SourceDiagnostic};
-use typst::foundations::{Bytes, Datetime, Duration};
+use typst::foundations::{Bytes, Duration};
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
@@ -166,7 +166,6 @@ struct ProjectWorld<'a> {
     main_source: Arc<str>,
     sources: BTreeMap<String, Source>,
     files: BTreeMap<String, Bytes>,
-    today: Datetime,
 }
 
 impl<'a> ProjectWorld<'a> {
@@ -213,12 +212,6 @@ impl<'a> ProjectWorld<'a> {
             .collect::<Vec<_>>();
         let font_book = LazyHash::new(FontBook::from_fonts(fonts.iter()));
 
-        // The spike deliberately does not read the host clock. A future host
-        // capability can replace this with an explicit project option.
-        let today = Datetime::from_ymd(1970, 1, 1).ok_or_else(|| {
-            InProcessError::InvalidInput("fixed deterministic date is invalid".to_string())
-        })?;
-
         Ok(Self {
             project,
             library: LazyHash::new(Library::default()),
@@ -229,7 +222,6 @@ impl<'a> ProjectWorld<'a> {
             main_source,
             sources,
             files,
-            today,
         })
     }
 
@@ -301,8 +293,12 @@ impl World for ProjectWorld<'_> {
         self.fonts.get(index).cloned()
     }
 
-    fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
-        offset.map_or(Some(self.today), |offset| Some(self.today + offset))
+    fn today(&self, _offset: Option<Duration>) -> Option<typst::foundations::Datetime> {
+        // Date/environment capabilities are intentionally unavailable in this
+        // spike. Returning None is Typst's fail-closed contract; inventing a
+        // fixed date or adding an offset to it would not implement timezone
+        // semantics.
+        None
     }
 }
 

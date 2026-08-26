@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
+const PARAGRAPHS: usize = 100;
+const MULTI_DOCUMENTS: usize = 4;
+
 fn find_typst() -> PathBuf {
     if let Some(path) = std::env::var_os("SCRIBIUM_TYPST_PATH") {
         let path = PathBuf::from(path);
@@ -35,23 +38,7 @@ fn main() {
         .unwrap_or(8);
     assert!(runs >= 2, "run count must be at least two");
 
-    let source = format!(
-        "# Benchmark\n\n{}",
-        "A repeated paragraph exercises the same generated Typst workload.\n\n".repeat(100)
-    );
-    let project = VirtualProjectBuilder::new()
-        .entry("docs/main.qd")
-        .expect("entry")
-        .add_source("docs/main.qd", source)
-        .expect("source")
-        .build()
-        .expect("project");
-    let result = compile(&project, &CompileOptions::default());
-    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let input = TypstInput {
-        source: scribium_typst::lowering::lower_to_typst_code(&result.ir),
-        entry_path: "docs/main.qd".to_string(),
-    };
+    let input = document(0);
 
     let backend = SubprocessBackend::new(find_typst());
     let durations = (0..runs)
@@ -67,8 +54,54 @@ fn main() {
         .collect::<Vec<_>>();
 
     println!("runs={}", durations.len());
-    println!("workload=generated Scribium Typst, 100 paragraphs");
+    println!("workload=generated Scribium Typst, {PARAGRAPHS} paragraphs");
     println!("subprocess_ms={:?}", millis(&durations));
+
+    let documents = (0..MULTI_DOCUMENTS).map(document).collect::<Vec<_>>();
+    let first_pass = multi_document_pass(&documents, &backend);
+    let second_pass = multi_document_pass(&documents, &backend);
+    println!("multi_document_count={MULTI_DOCUMENTS}");
+    println!("multi_document_first_pass_ms={:?}", millis(&first_pass));
+    println!("multi_document_second_pass_ms={:?}", millis(&second_pass));
+}
+
+fn document(index: usize) -> TypstInput {
+    let source = format!(
+        "# Benchmark {index}\n\n{}",
+        format!("Document {index} repeats a paragraph to exercise a multi-document workload.\n\n")
+            .repeat(PARAGRAPHS)
+    );
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .expect("entry")
+        .add_source("docs/main.qd", source)
+        .expect("source")
+        .build()
+        .expect("project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    TypstInput {
+        source: scribium_typst::lowering::lower_to_typst_code(&result.ir),
+        entry_path: "docs/main.qd".to_string(),
+    }
+}
+
+fn multi_document_pass(
+    documents: &[TypstInput],
+    backend: &SubprocessBackend,
+) -> Vec<std::time::Duration> {
+    documents
+        .iter()
+        .map(|input| {
+            let start = Instant::now();
+            backend
+                .compile(input)
+                .expect("subprocess multi-document compile")
+                .pdf
+                .expect("subprocess multi-document PDF");
+            start.elapsed()
+        })
+        .collect()
 }
 
 fn millis(durations: &[std::time::Duration]) -> Vec<u128> {

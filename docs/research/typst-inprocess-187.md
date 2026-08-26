@@ -68,7 +68,7 @@ continues to lower `IrDocument` to generated Typst source only.
 | Missing/inaccessible files | `FileError` using synthetic logical paths | No host/native temporary path is exposed |
 | Fonts | Embedded `typst-assets` fonts plus project font assets (`otf`, `ttf`, `otc`, `ttc`) | Deterministic `FontBook`; no system-font discovery |
 | Packages | `VirtualRoot::Package` policy | Explicit `PackageError::NotFound`; no network or package cache |
-| Date/environment | Explicit fixed date `1970-01-01` | No process-clock nondeterminism; future host capability is deferred |
+| Date/environment | No date capability is exposed | `World::today` returns `None`; `datetime.today()` fails closed for default, positive, negative, and sub-hour offsets |
 | Repeated loads/caching | Per-compile immutable `BTreeMap`/font vectors | Stable repeated reads without global mutable cache |
 
 This preserves `VirtualProject` as the semantic resource source of truth. The
@@ -96,6 +96,8 @@ Focused tests cover:
 - missing resources and project-boundary traversal;
 - package denial without network access;
 - generated-source diagnostics with `/docs/main.typ` and no fabricated span;
+- fail-closed `datetime.today()` behavior for the default, positive, negative,
+  and sub-hour offset forms;
 - generated-entry collision with an existing project `.typ` source; and
 - subprocess parity for the existing `examples/hello/main.qd` Quarkdown
   fixture, a real generated multi-page workload, and an invalid generated
@@ -105,7 +107,7 @@ The focused command passed:
 
 ```text
 cargo test --jobs 2 -p scribium-typst-inprocess --all-features -- --nocapture
-11 integration tests and 2 unit tests passed; 0 failed
+12 integration tests and 2 unit tests passed; 0 failed
 ```
 
 ## Diagnostic comparison
@@ -140,6 +142,10 @@ identity:
 4. an invalid generated document must produce structured in-process diagnostics
    and the existing subprocess compilation-failure classification.
 
+Date/environment is not part of the success parity claim: both the default
+and explicit-offset `datetime.today()` forms fail closed because this spike
+does not expose a clock or timezone capability.
+
 The parity tests passed on macOS arm64 with local Typst 0.15.1. Byte-identical
 PDFs are not used as an oracle: exporter metadata and font/resource ordering
 are not a stable contract. Resource ownership is additionally tested directly
@@ -150,23 +156,32 @@ an explicit native source context rather than a `VirtualProject`.
 ## Measurements
 
 Machine: macOS arm64, 2026-08-26. Profile: Cargo `--release` (`opt-level = 2`,
-workspace profile reported as optimized + debuginfo). The workload was the
-same generated Scribium Typst source containing 100 paragraphs. Eight runs
-were performed in one process per adapter; the first run is cold within that
-process and the remaining runs are repeated/warm. `/usr/bin/time -l` measured
-the adapter-specific benchmark process. These are current spike measurements,
-not the historical #12 numbers or acceptance thresholds.
+workspace profile reported as optimized + debuginfo). The single-document rows
+use the same generated Scribium Typst source containing 100 paragraphs. Eight
+runs were performed in one process per adapter; the first run is cold within
+that process and the remaining runs are repeated/warm. The multi-document rows
+use four distinct, same-sized generated documents and two sequential passes.
+`/usr/bin/time -l` measured the adapter-specific benchmark process. These are
+current spike measurements, not the historical #12 numbers or acceptance
+thresholds.
 
 | Measurement | In-process | Subprocess |
 |---|---:|---:|
-| First compile in process | 19 ms | 1,121 ms |
-| Repeated compile range (runs 2–8) | 3–4 ms | 1,072–1,096 ms |
-| Benchmark-process peak RSS | 20,299,776 bytes | 56,328,192 bytes |
+| First compile in process | 8 ms | 1,070 ms |
+| Repeated compile range (runs 2–8) | 3 ms | 1,026–1,063 ms |
+| Four-document first pass | 3, 7, 7, 7 ms | 1,029, 1,044, 1,021, 1,048 ms |
+| Four-document second pass | 3, 3, 3, 3 ms | 1,038, 1,022, 1,038, 1,032 ms |
+| Benchmark-process peak RSS | 25,362,432 bytes | 55,951,360 bytes |
 | Clean release build of adapter example | 154.95 s | 12.58 s |
-| Release example binary | 45,630,304 bytes | 2,010,704 bytes |
-| `strip -S` output | 45,630,336 bytes | 2,010,752 bytes |
+| Workspace-profile release binary (`debug = 1`, `strip = "symbols"`) | 45,630,304 bytes | 2,010,736 bytes |
 
-The clean builds used separate fresh target directories:
+The clean builds used separate fresh target directories. The benchmark now
+also creates four distinct `VirtualProject`/document inputs and runs two
+sequential passes over them, so the multi-document rows exercise document
+transitions rather than reusing one project/input. The adapter constructs a
+fresh `ProjectWorld` per compile; no global cache is claimed.
+
+The clean-build commands were:
 
 ```text
 CARGO_TARGET_DIR=/tmp/scribium-187-clean-inprocess \
@@ -174,6 +189,19 @@ CARGO_TARGET_DIR=/tmp/scribium-187-clean-inprocess \
 CARGO_TARGET_DIR=/tmp/scribium-187-clean-subprocess \
   cargo build -q --release -p scribium-typst-subprocess --example measure_subprocess
 ```
+
+Incremental build methodology was separate from the clean-build rows: after
+an up-to-date release build, one source comment line in each adapter example
+was changed, the same target directory was rebuilt, and the temporary line
+change was reverted before committing. The measured rebuilds were **2.36 s
+in-process** and **0.72 s subprocess**. They are not inferred from the
+clean-build times.
+
+The workspace release profile already applies `strip = "symbols"`, so the
+binary row is explicitly a stripped workspace-profile measurement. The
+previous `strip -S` comparison was removed: it was not a valid unstripped vs
+stripped experiment and is not used as evidence here. An unstripped comparison
+is deferred until a dedicated profile is needed.
 
 The in-process graph contains **373** unique normal dependency-tree lines in
 `cargo tree`; the subprocess graph contains **29**. The in-process dependency
@@ -191,18 +219,21 @@ cargo deny check
 Licenses, bans, and sources passed, but the command failed the advisory gate on
 transitive Typst dependencies: `quick-xml 0.38.4` has the current
 RUSTSEC-2026-0194 and RUSTSEC-2026-0195 advisories, and the graph also reports
-unmaintained `paste`, `rustybuzz`, `ttf-parser`, and `yaml-rust` paths. The
-current Typst 0.15.1 dependency constraints do not provide a safe in-spike
-upgrade for those paths. No advisory was suppressed and no unrelated
-dependency migration was absorbed into #187; this is an explicit production
-promotion risk for #200.
+unmaintained `paste`, `rustybuzz`, `ttf-parser`, and `yaml-rust` paths. Typst
+0.15.1 is still the current stable release; its `citationberg 0.7.0` path
+requires the incompatible 0.38 line, while the advisory fix is in quick-xml
+0.41+. No safe in-spike upgrade is available without changing the pinned Typst
+release or carrying third-party compatibility patches. No advisory was
+suppressed and no unrelated dependency migration was absorbed into #187; this
+remains an explicit production-promotion blocker for #200.
 
 ## Platform and WASM findings
 
-The local native evidence is macOS arm64 only. Linux and Windows were not
-executed locally; the repository's Linux, macOS, and Windows native CI matrix
-must provide the supported-platform evidence for this optional adapter before
-production use. The adapter is intentionally native-only.
+The local measurement host is macOS arm64. Separately, PR #202's completed
+native CI matrix passed the workspace adapter tests on Ubuntu, macOS, and
+Windows with Typst 0.15.1 in [CI run 32928274603](https://github.com/luceat-lux-vestra/scribium/actions/runs/32928274603).
+The CI result is platform evidence; it is not being misreported as local
+execution. The adapter remains intentionally native-only.
 
 The platform-neutral boundary remains separate and was checked with:
 
@@ -228,10 +259,9 @@ oracle, and diagnostics are at least as structured for the exercised failures.
 The subprocess backend remains the default because the current adapter has a
 large dependency/build/binary footprint, package/date/font capability policy
 is intentionally incomplete, generated-source source-map handoff is not yet
-implemented, and only macOS native execution was available locally. The
-optional path must not be exposed as a production default until Linux/Windows
-CI, broader corpus parity, source-map handoff, and an explicit opt-in UX are
-reviewed.
+implemented, and broader corpus parity plus explicit opt-in UX remain open.
+The native CI matrix has passed on Ubuntu, macOS, and Windows; those CI results
+are distinct from the macOS-only local measurement host.
 
 Re-evaluation trigger: revisit the default only after the bounded follow-ups
 below have green cross-platform CI and corpus parity, and a maintainer accepts

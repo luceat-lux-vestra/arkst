@@ -180,6 +180,26 @@ fn generated_typst_failure_has_equivalent_classification_and_better_structure() 
 }
 
 #[test]
+fn datetime_today_is_fail_closed_for_default_and_explicit_offsets() {
+    let project = project("valid Scribium input");
+    for source in [
+        "#datetime.today()\n",
+        "#datetime.today(offset: 9)\n",
+        "#datetime.today(offset: -8)\n",
+        "#datetime.today(offset: duration(minutes: 30))\n",
+    ] {
+        let error = InProcessBackend::new(&project)
+            .compile(&TypstInput {
+                source: source.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect_err("unavailable date capability must fail closed");
+        assert!(error.to_string().contains("current date"), "{error}");
+        assert!(!error.to_string().contains("1970"), "{error}");
+    }
+}
+
+#[test]
 fn asset_store_images_are_loaded_without_host_filesystem_access() {
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>"#;
     let project = VirtualProjectBuilder::new()
