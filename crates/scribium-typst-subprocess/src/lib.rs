@@ -407,9 +407,42 @@ fn checked_canonical_target(
 }
 
 fn sanitize_typst_diagnostic(stderr: &[u8], temporary_root: &Path) -> String {
-    let diagnostic = String::from_utf8_lossy(stderr);
+    let mut diagnostic = String::from_utf8_lossy(stderr).into_owned();
     let temporary_root = temporary_root.to_string_lossy();
-    diagnostic.replace(temporary_root.as_ref(), "<typst-build>")
+    let native_root = temporary_root.to_string();
+    let forward_slash_root = temporary_root.replace('\\', "/");
+    let backslash_root = temporary_root.replace('/', "\\");
+    let root_variants = [
+        format!(r"\\?\{native_root}"),
+        format!(r"\\?\{forward_slash_root}"),
+        format!("//?/{native_root}"),
+        format!("//?/{forward_slash_root}"),
+        native_root,
+        forward_slash_root,
+        backslash_root,
+    ];
+
+    for root in root_variants {
+        diagnostic = diagnostic.replace(&root, "<typst-build>");
+    }
+
+    let marker = "<typst-build>";
+    let mut normalized = String::with_capacity(diagnostic.len());
+    let mut offset = 0;
+    while let Some(relative_start) = diagnostic[offset..].find(marker) {
+        let marker_start = offset + relative_start;
+        normalized.push_str(&diagnostic[offset..marker_start]);
+        normalized.push_str(marker);
+        let path_start = marker_start + marker.len();
+        let path_end = path_start
+            + diagnostic[path_start..]
+                .find(char::is_whitespace)
+                .unwrap_or(diagnostic.len() - path_start);
+        normalized.push_str(&diagnostic[path_start..path_end].replace('\\', "/"));
+        offset = path_end;
+    }
+    normalized.push_str(&diagnostic[offset..]);
+    normalized
 }
 
 #[cfg(test)]
@@ -521,6 +554,24 @@ mod tests {
             "error must name the configured path: {}",
             err
         );
+    }
+
+    #[test]
+    fn typst_diagnostics_sanitize_native_and_slash_temp_paths() {
+        let temporary_root = Path::new("D:\\a\\_temp\\scribium");
+        let stderr = "error: D:/a/_temp/scribium/project/docs/main.typ:1:1\n".to_string()
+            + "error: \\\\?\\D:\\a\\_temp\\scribium\\project\\docs\\main.typ:2:1\n";
+
+        let sanitized = sanitize_typst_diagnostic(stderr.as_bytes(), temporary_root);
+
+        assert_eq!(
+            sanitized,
+            "error: <typst-build>/project/docs/main.typ:1:1\n".to_string()
+                + "error: <typst-build>/project/docs/main.typ:2:1\n"
+        );
+        assert!(!sanitized.contains("D:/a/"));
+        assert!(!sanitized.contains("D:\\a\\"));
+        assert!(!sanitized.contains("\\\\?\\"));
     }
 
     #[cfg(unix)]
