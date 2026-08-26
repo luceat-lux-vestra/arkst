@@ -92,9 +92,10 @@ impl TypstBackend for SubprocessBackend {
         let start = std::time::Instant::now();
         let entry_path = validate_entry_path(&input.entry_path)?;
         if input.source.contains("@preview/") {
-            return Err(TypstError::Subprocess(
-                "package resolution is denied by Scribium".into(),
-            ));
+            return Err(TypstError::Subprocess(format!(
+                "package resolution is denied by Scribium for {}",
+                entry_path
+            )));
         }
 
         // Create a unique temporary directory for the generated Typst source,
