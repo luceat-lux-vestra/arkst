@@ -28,7 +28,7 @@ vulnerabilities (report to Typst GmbH).
 | T16 | Generated file overwrite    | Filesystem           | Malicious doc     | CLI / backend  | Atomic output, overwrite protection | Low           |
 | T17 | Terminal escape injection   | Display              | Malicious doc     | Diagnostics    | Diagnostic output sanitization      | Low           |
 | T18 | Generated Typst injection   | Output               | Malicious doc     | Lowering       | Typst escape proper escaping        | Low           |
-| T19 | Generated Typst reads outside root | Filesystem       | Malicious doc     | Typst backend  | Explicit root, temporary mirror, Typst `--root`, fail-closed traversal | Low |
+| T19 | Generated Typst reads outside staged project-resource root | Filesystem       | Malicious doc     | Typst backend  | Explicit source root, temporary mirror, Typst `--root`, and fail-closed project-relative traversal; package resolver is outside this boundary and tracked in T14 | Low for staged project resources; see T14 for package resolver |
 
 ## Default Security Policy
 
@@ -36,7 +36,7 @@ vulnerabilities (report to Typst GmbH).
 network:          denied in core and InProcess World; subprocess resolver capability is not hard-denied by static analysis
 shell:            denied
 environment:      denied
-filesystem:       explicit project-root scoped; temporary mirror for Typst reads
+filesystem:       project-relative source/resource reads are explicit project-root scoped; temporary mirror; package resolver is a separate T14 capability
 symlink escape:   denied (final canonical target outside root is rejected)
 absolute include: denied by default
 ```
@@ -46,7 +46,8 @@ absolute include: denied by default
 Core uses `VirtualPath` (logical path strings) exclusively. The native CLI
 adapter translates VirtualPath → `PathBuf` at the boundary, applying:
 
-- Root-scoping (no path leaves project root)
+- Project-resource root-scoping (no project-relative resource path leaves the
+  project root)
 - Canonicalization (no `..` segments)
 - Symlink resolution (which VirtualPath itself does not model)
 
@@ -62,7 +63,7 @@ mirror, while the PDF is written to a separate temporary output location.
 The source tree is therefore a read-only resource context and never a write
 location for generated Typst, PDF, or temporary metadata. Typst is invoked with
 `--root` pointing at the mirror, so parent traversal and absolute host paths
-are constrained by the staged project boundary. A symlink is allowed only
+are constrained by the staged project-resource boundary. A symlink is allowed only
 when its final canonical target remains inside the explicit source root; both
 file and directory symlink escapes are rejected. This filesystem staging and
 path sanitization do not deny the subprocess-owned package resolver or prove

@@ -14,10 +14,12 @@ use std::process::Command;
 
 /// Filesystem context for a native Typst compilation.
 ///
-/// `project_root` is an explicit read boundary. It is not inferred from the
-/// process current directory. The subprocess adapter mirrors this directory
-/// into its per-compilation temporary build directory before invoking Typst;
-/// the original tree is never used as a write location.
+/// `project_root` identifies the explicit project-resource read root used to
+/// stage Scribium source and assets. It is not an OS-wide filesystem or
+/// package-resolver boundary, and it is not inferred from the process current
+/// directory. The subprocess adapter mirrors this directory into its
+/// per-compilation temporary build directory before invoking Typst; the
+/// original tree is never used as a write location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypstSourceContext {
     pub project_root: PathBuf,
@@ -64,7 +66,7 @@ impl std::error::Error for TypstError {}
 /// Subprocess backend — calls `typst compile` via CLI.
 pub struct SubprocessBackend {
     pub typst_path: PathBuf,
-    /// Optional explicit source/read context. `None` keeps self-contained
+    /// Optional explicit project-resource context. `None` keeps self-contained
     /// compilation available and never turns the temporary directory into a
     /// source root implicitly.
     pub source_context: Option<TypstSourceContext>,
@@ -78,8 +80,8 @@ impl SubprocessBackend {
         }
     }
 
-    /// Uses an explicit project root as the source/read context for future
-    /// compilations by this backend.
+    /// Uses an explicit project-resource root for future compilations by this
+    /// backend.
     pub fn with_source_context(mut self, source_context: TypstSourceContext) -> Self {
         self.source_context = Some(source_context);
         self
@@ -238,7 +240,9 @@ fn validate_entry_path(raw: &str) -> Result<VirtualPathBuf, TypstError> {
 ///
 /// This helper is intentionally independent of generated Typst parsing. The
 /// generated source remains Typst source, while native resource access is
-/// bounded by the staged project root and Typst's `--root` option.
+/// bounded by the staged project root and Typst's `--root` option. This
+/// applies to project-relative resources; it does not constrain the
+/// subprocess-owned package resolver.
 fn resolve_logical_resource_path(
     entry_path: &VirtualPathBuf,
     resource: &str,

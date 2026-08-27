@@ -251,7 +251,7 @@ These are the physical architectural boundaries after R8. `scribium-source`,
 `scribium-engine` own their extracted domains. `scribium-typst` owns only pure,
 platform-neutral IR-to-Typst lowering and its contract, while
 `scribium-typst-subprocess` is native-only and owns Typst CLI execution,
-filesystem staging, and security-boundary enforcement. `scribium-core` remains
+filesystem staging, and project-resource boundary enforcement. `scribium-core` remains
 the orchestration and facade layer. `scribium-typst-inprocess` is also
 native-only; it owns the optional public-API `World` mapping over an existing
 `VirtualProject` and PDF export without adding host filesystem or network
@@ -463,14 +463,17 @@ This design ensures:
 
 ### Native Typst source context
 
-The native Typst subprocess adapter has a second, explicit filesystem context
-in addition to the in-memory `VirtualProject`:
+The native Typst subprocess adapter has a second, explicit context for staged
+project resources in addition to the in-memory `VirtualProject`:
 
 - `TypstInput.entry_path` is the normalized, project-root-relative logical path
   of the Scribium source entry. It is not display metadata and is never an OS
   absolute path.
-- `TypstSourceContext.project_root` is an explicit physical read boundary. The
-  adapter does not use `std::env::current_dir()` as an implicit resource root.
+- `TypstSourceContext.project_root` identifies the explicit physical root for
+  staged project-resource reads. This boundary covers project-relative source
+  and asset reads only; it does not constrain the subprocess-owned Typst
+  package resolver. The adapter does not use `std::env::current_dir()` as an
+  implicit resource root.
 - With a source context, the adapter creates a unique temporary mirror of the
   project tree, canonicalizes every source and symlink target, and rejects any
   final target outside the canonical project root. Symlinks that remain inside
@@ -485,7 +488,8 @@ in addition to the in-memory `VirtualProject`:
   `typst compile --root <temporary-mirror> <temporary-mirror>/<entry>.typ
   <temporary-build>/output.pdf`. This makes relative Typst resources resolve
   from the Scribium logical entry directory while keeping the source tree
-  read-only.
+  read-only. The project-resource boundary does not turn subprocess package
+  resolution into a Scribium-controlled capability.
 
 The backend without a `TypstSourceContext` remains a self-contained compilation
 mode. It can compile generated Typst that does not need filesystem resources,
@@ -499,9 +503,10 @@ Markdown frontend and backend-neutral IR retain the source destination rather
 than injecting an OS path. For a local relative image, Typst lowering emits
 `#image("...")`, so the source-context entry directory determines the
 resolution base. The native mirror and `--root` boundary reject project-root
-escapes and symlink escapes. Absolute filesystem paths and URI schemes,
-including `http`, `https`, and `data`, are rejected before Typst; Scribium does
-not fetch network images. Image alt content and titles remain in AST/IR, while
+escapes and symlink escapes for project-relative resources. Absolute filesystem
+paths and URI schemes, including `http`, `https`, and `data`, are rejected
+before Typst; Scribium does not fetch network images. Image alt content and
+titles remain in AST/IR, while
 the current Typst backend does not emit PDF accessibility metadata for them.
 
 ### Synchronous Core, Async Host
