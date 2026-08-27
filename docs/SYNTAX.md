@@ -117,50 +117,44 @@ a `.` followed by a function name:
 ### Function-name grammar
 
 ```text
-normal-call-name:
-    [A-Za-z_][A-Za-z0-9_-]*
+call-identifier:
+    [A-Za-z][A-Za-z0-9]* | [0-9]+
 
 implicit-positional-reference:
-    .[1-9][0-9]*
+    .[0-9]+
 ```
 
-The expression above is Scribium's current lexer contract, not a verified
-claim that the pinned Quarkdown v2.5.1 identifier grammar is identical. The
-#148 audit records the pinned upstream lexical comparison and follow-up in
-#157. `normal-call-name` may be followed by `{arg}` / `name:{value}`
-arguments; `implicit-positional-reference` is a bare token and does not
-consume arguments.
+The call lexer uses the pinned Quarkdown v2.5.1 identifier alternatives. An
+alphabetic identifier consumes only ASCII letters and digits; a numeric
+identifier consumes ASCII digits, including `0` and leading zeros. A numeric
+token followed immediately by an ASCII alphanumeric byte is not recognized as
+a complete token (`.1abc` remains source text). Numeric call identifiers use
+the same argument grammar as other call identifiers; interpreting `.1`, `.01`,
+and related tokens as implicit references remains an evaluator concern owned by
+#150.
 
 Call syntax has the following properties:
 
-- The current Scribium function-name contract follows the dot directly:
-  alphanumeric, `_` and `-` are allowed, and the first character must be a
-  letter or `_`. This local contract remains under upstream reconciliation in
-  #157.
-- The `name` in a named argument (`name:{...}`) currently follows a separate
-  Scribium local scanner: it accepts a non-empty run of ASCII alphanumeric,
-  `_`, and `-` bytes, including `_`, `-`, numeric names, and hyphenated names.
-  This is an implementation observation, not an upstream-compatible contract.
-  Pinned Quarkdown v2.5.1's `FunctionCallGrammar` uses the shared
-  `IDENTIFIER_PATTERN` (`[a-zA-Z][a-zA-Z0-9]*|[0-9]+`) for function and
-  optional named-argument identifiers; reconciliation is tracked by #157.
-- **Implicit positional references** (`.1`, `.2`, `.12`, ...) are a separate
-  grammar case from normal function names: digits only, no leading `0`, and
-  a following word character keeps the whole token ordinary text
-  (`.1abc` is not a reference; `.1-1` is a `.1` reference followed by `-1`).
-  They are bare reference tokens — unlike normal calls they never take
-  arguments (`.1 {item}` does not form a call).
-- The current Scribium call-boundary contract requires whitespace, a symbol
-  (including `-`), or the start/end of a line on both sides. Its Unicode and
-  identifier-boundary equivalence with pinned v2.5.1 remains an explicit #157
-  audit gap; do not treat this local rule as an upstream grammar guarantee.
+- The same `call-identifier` scanner is used for function-call names and named
+  argument candidates. `_`, `-`, and hyphenated forms are not part of a call or
+  named-argument identifier; nonmatching suffixes remain source text rather
+  than being folded into the identifier.
+- **Implicit positional references** (`.1`, `.2`, `.12`, `.0`, `.01`, ...) are
+  numeric call identifiers at the grammar boundary. `.1abc` is not a complete
+  numeric token, while `.1-1` is the `.1` token followed by ordinary source.
+  Binding and evaluation of these references remain separate from lexical
+  recognition.
+- A call introducer may begin at source start or after a byte other than ASCII
+  alphanumeric, `.`, or `\\`, matching the pinned call-pattern evidence. This
+  permits UTF-8 surroundings and symbol/underscore surroundings while keeping
+  `word.foo` and `..foo` outside the call. Source following a parsed call, such
+  as `.foo {x}한글`, remains available to the frontend placement layer.
 - Positional arguments are wrapped in curly braces: `{...}`.
-- Named arguments are `name:{...}`. The shape is documented, but the name
-  grammar above describes current Scribium behavior and is not an
-  upstream-compatible claim until #157 is resolved. Pinned v2.5.1 parses the
-  delimiter as adjacent `identifier ":" "{"` tokens with no argument
-  separator; current Scribium skips horizontal whitespace around `:` and `{`.
-  That delimiter-adjacency gap is also tracked by #157.
+- Named arguments are `name:{...}`. The identifier, `:`, and `{` must be
+  adjacent; `name :{...}`, `name: {...}`, and `name : {...}` do not create a
+  named argument. The existing structured diagnostic for an immediately
+  recognized `name:` without an adjacent braced value remains distinct from
+  named-argument recognition.
 - Positional and named arguments may be mixed. Scribium's current parser
   enforces that every argument after a named argument must also be named and
   reports `E2001` for an unnamed argument that follows one. In pinned
@@ -275,7 +269,8 @@ A variable must be declared with `.var` before it can be referenced.
 .name {new-value}           // reassignment (only if `name` is a variable)
 ```
 
-- Variable names follow `normal-call-name` grammar: `[A-Za-z_][A-Za-z0-9_-]*`
+- Variable declaration names follow the evaluator-owned declaration grammar:
+  `[A-Za-z_][A-Za-z0-9_-]*`; this is distinct from call-token lexing.
 - Declarations accept scalar values, boolean identifiers, rich/content values (e.g., `**bold**`), or indented block content
 - References in conditionals (`.if {.name}`) resolve to the variable's boolean value
 - Unknown parameterless calls are preserved as function calls, not variable errors
@@ -324,7 +319,8 @@ Conditional integration:
 Boolean identifiers: `true` / `false` / `yes` / `no` (case-insensitive).
 
 Malformed `.var` declarations (missing name or value) produce `E3002`.
-Invalid variable names (not matching `normal-call-name` grammar) produce `E3002`.
+Invalid variable names (not matching the declaration-name grammar) produce
+`E3002`.
 
 > **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
 
