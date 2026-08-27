@@ -2,9 +2,10 @@
 
 Status: corrective backend-contract work for PR #205. The subprocess and
 in-process adapters intentionally do not provide the same package/network
-capability contract. Exact-head implementation and CI evidence are recorded
-after the corrective commit and must not be inferred from an earlier green
-run.
+capability contract. Exact-head implementation is commit
+`94b9a38e7317ac8608d40573ef04edd53891c152`; its cross-platform CI evidence is
+run [33034946513](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513).
+This evidence must not be inferred from an earlier green run.
 The canonical executable oracle is
 
 ~~~
@@ -104,13 +105,14 @@ resolver.
 
 The CI workflow installs Typst 0.15.1 on each native matrix job and runs the
 parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The code-bearing
-exact-head evidence is recorded here from run 33023853364:
+exact-head evidence is recorded here from run 33034946513 for commit
+`94b9a38e7317ac8608d40573ef04edd53891c152`:
 
 | Platform | Parity suite | Typst |
 |---|---|---|
-| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439482) | 0.15.1 required |
-| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439404) | 0.15.1 required |
-| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364/job/98360439590) | 0.15.1 required |
+| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525597) | 0.15.1 required |
+| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525656) | 0.15.1 required |
+| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525579) | 0.15.1 required |
 
 The corpus exercises:
 
