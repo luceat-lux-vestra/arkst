@@ -11,7 +11,7 @@ use scribium_ir::{
     IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
 };
 use scribium_markdown::ast::{
-    Block, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
+    Block, CallArgument, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
 };
 use scribium_markdown::Mode;
 use scribium_source::{ByteSpan, SourceId, SourceSpan};
@@ -173,26 +173,14 @@ fn block_to_ir(
             name,
             name_span,
             head_span,
-            positional_args,
-            named_args,
+            arguments,
             chain,
             body,
             lambda_header,
             span,
         } => {
-            let ir_positional: Vec<_> = positional_args
-                .iter()
-                .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
-                .collect();
-            let ir_named: Vec<_> = named_args
-                .iter()
-                .map(|arg| IrNamedArg {
-                    name: arg.name.clone(),
-                    name_span: byte_to_source_span(&arg.name_span, source_id),
-                    value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
-                    span: byte_to_source_span(&arg.span, source_id),
-                })
-                .collect();
+            let (ir_positional, ir_named) =
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
                     .iter()
@@ -200,7 +188,7 @@ fn block_to_ir(
                     .collect::<Vec<_>>()
             });
             if name == "function" {
-                if positional_args.len() != 1 || !named_args.is_empty() || !chain.is_empty() {
+                if ir_positional.len() != 1 || !ir_named.is_empty() || !chain.is_empty() {
                     diagnostics.push(invalid_function_declaration(
                         "`.function` requires exactly one positional name argument, no named arguments, and no chain",
                         span,
@@ -368,26 +356,42 @@ fn call_segment_to_ir(
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
 ) -> IrCallSegment {
+    let (positional_args, named_args) =
+        call_arguments_to_ir(&segment.arguments, source_id, diagnostics, source_mode);
     IrCallSegment {
         name: segment.name.clone(),
         name_span: byte_to_source_span(&segment.name_span, source_id),
-        positional_args: segment
-            .positional_args
-            .iter()
-            .map(|value| value_to_ir(value, source_id, diagnostics, source_mode))
-            .collect(),
-        named_args: segment
-            .named_args
-            .iter()
-            .map(|arg| IrNamedArg {
-                name: arg.name.clone(),
-                name_span: byte_to_source_span(&arg.name_span, source_id),
-                value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
-                span: byte_to_source_span(&arg.span, source_id),
-            })
-            .collect(),
+        positional_args,
+        named_args,
         span: byte_to_source_span(&segment.span, source_id),
     }
+}
+
+/// The current IR still exposes separate positional/named projections. Derive
+/// them from the frontend's single ordered argument sequence at this existing
+/// boundary; binder-owned ordering semantics remain deferred to #165.
+fn call_arguments_to_ir(
+    arguments: &[CallArgument],
+    source_id: SourceId,
+    diagnostics: &mut Vec<Diagnostic>,
+    source_mode: Mode,
+) -> (Vec<scribium_ir::IrValue>, Vec<IrNamedArg>) {
+    let mut positional_args = Vec::new();
+    let mut named_args = Vec::new();
+    for argument in arguments {
+        match argument {
+            CallArgument::Positional { value, .. } => {
+                positional_args.push(value_to_ir(value, source_id, diagnostics, source_mode));
+            }
+            CallArgument::Named(argument) => named_args.push(IrNamedArg {
+                name: argument.name.clone(),
+                name_span: byte_to_source_span(&argument.name_span, source_id),
+                value: value_to_ir(&argument.value, source_id, diagnostics, source_mode),
+                span: byte_to_source_span(&argument.span, source_id),
+            }),
+        }
+    }
+    (positional_args, named_args)
 }
 
 fn inlines_to_ir(
@@ -664,25 +668,13 @@ fn inline_to_ir(
             name,
             name_span,
             head_span,
-            positional_args,
-            named_args,
+            arguments,
             chain,
             body,
             span,
         } => {
-            let ir_positional: Vec<_> = positional_args
-                .iter()
-                .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
-                .collect();
-            let ir_named: Vec<_> = named_args
-                .iter()
-                .map(|arg| IrNamedArg {
-                    name: arg.name.clone(),
-                    name_span: byte_to_source_span(&arg.name_span, source_id),
-                    value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
-                    span: byte_to_source_span(&arg.span, source_id),
-                })
-                .collect();
+            let (ir_positional, ir_named) =
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
             let ir_body = body
                 .as_ref()
                 .map(|b| inlines_to_ir(b, source_id, diagnostics, source_mode, function_body));
@@ -837,26 +829,14 @@ fn content_value_to_ir(
         name,
         name_span,
         head_span,
-        positional_args,
-        named_args,
+        arguments,
         chain,
         body,
         span,
     }] = inlines
     {
-        let ir_positional: Vec<_> = positional_args
-            .iter()
-            .map(|v| value_to_ir(v, source_id, diagnostics, source_mode))
-            .collect();
-        let ir_named: Vec<_> = named_args
-            .iter()
-            .map(|arg| IrNamedArg {
-                name: arg.name.clone(),
-                name_span: byte_to_source_span(&arg.name_span, source_id),
-                value: value_to_ir(&arg.value, source_id, diagnostics, source_mode),
-                span: byte_to_source_span(&arg.span, source_id),
-            })
-            .collect();
+        let (ir_positional, ir_named) =
+            call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
         let ir_body = body.as_ref().map(|b| {
             vec![IrNode::Paragraph {
                 content: inlines_to_ir(b, source_id, diagnostics, source_mode, false),
@@ -913,25 +893,13 @@ fn inline_lambda_body_to_ir(
             name,
             name_span,
             head_span,
-            positional_args,
-            named_args,
+            arguments,
             chain,
             body,
             span,
         }] => {
-            let positional_args = positional_args
-                .iter()
-                .map(|value| value_to_ir(value, source_id, diagnostics, source_mode))
-                .collect();
-            let named_args = named_args
-                .iter()
-                .map(|argument| IrNamedArg {
-                    name: argument.name.clone(),
-                    name_span: byte_to_source_span(&argument.name_span, source_id),
-                    value: value_to_ir(&argument.value, source_id, diagnostics, source_mode),
-                    span: byte_to_source_span(&argument.span, source_id),
-                })
-                .collect();
+            let (positional_args, named_args) =
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
             let body = body.as_ref().map(|inlines| {
                 vec![IrNode::Paragraph {
                     content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
@@ -1332,20 +1300,23 @@ mod tests {
         fn ast_range_span(document: &Document) -> ByteSpan {
             for block in &document.nodes {
                 match block {
-                    Block::DirectiveCall {
-                        positional_args, ..
-                    } => {
-                        if let Some(Value::Range(range)) = positional_args.first() {
+                    Block::DirectiveCall { arguments, .. } => {
+                        if let Some(CallArgument::Positional {
+                            value: Value::Range(range),
+                            ..
+                        }) = arguments.first()
+                        {
                             return range.span;
                         }
                     }
                     Block::Paragraph { content, .. } => {
                         for inline in content {
-                            if let Inline::DirectiveCall {
-                                positional_args, ..
-                            } = inline
-                            {
-                                if let Some(Value::Range(range)) = positional_args.first() {
+                            if let Inline::DirectiveCall { arguments, .. } = inline {
+                                if let Some(CallArgument::Positional {
+                                    value: Value::Range(range),
+                                    ..
+                                }) = arguments.first()
+                                {
                                     return range.span;
                                 }
                             }

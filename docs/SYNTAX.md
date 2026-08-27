@@ -155,12 +155,13 @@ Call syntax has the following properties:
   at the call prefix and leaves the candidate as source remainder; malformed
   braced values that do match the `name:{` boundary retain their structured
   diagnostic path.
-- Positional and named arguments may be mixed. Scribium's current parser
-  enforces that every argument after a named argument must also be named and
-  reports `E2001` for an unnamed argument that follows one. In pinned
-  Quarkdown v2.5.1, `FunctionCallGrammar` preserves the argument sequence and
-  `RegularArgumentsBinder` owns that validity check; ownership alignment is
-  tracked by #163 and is not a parser-level compatibility claim.
+- Positional and named arguments may be mixed. Scribium's grammar/frontend
+  preserves the complete source-ordered argument sequence, including an
+  unnamed argument after a named argument, and does not report parser `E2001`
+  for that shape. In pinned Quarkdown v2.5.1, `FunctionCallGrammar` preserves
+  the sequence and `RegularArgumentsBinder` owns validity checking. Complete
+  semantic binding remains #149/#165 work; #163 is only the
+  grammar/frontend representation boundary.
 - An escaped call introducer is literal, and escaped `{`/`}` delimiters do not
   change call-argument depth in pinned v2.5.1. Scribium currently records the
   introducer boundary but counts escaped argument braces while scanning; the

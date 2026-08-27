@@ -1,4 +1,4 @@
-use scribium_markdown::ast::{Block, Document, Inline, ListItem};
+use scribium_markdown::ast::{Block, CallArgument, Document, Inline, ListItem};
 use scribium_markdown::{parse_md, parse_qd, parse_with_mode, Mode};
 use scribium_source::ByteSpan;
 
@@ -66,22 +66,27 @@ fn assert_block_spans(block: &Block, source: &str) {
             }
         }
         Block::DirectiveCall {
-            body,
-            positional_args,
-            named_args,
-            ..
+            body, arguments, ..
         } => {
-            for argument in positional_args {
-                if let scribium_markdown::ast::Value::Content(content) = argument {
-                    for inline in content {
-                        assert_inline_spans(inline, source);
+            for argument in arguments {
+                match argument {
+                    CallArgument::Positional { value, span } => {
+                        assert_valid_span(*span, source);
+                        if let scribium_markdown::ast::Value::Content(content) = value {
+                            for inline in content {
+                                assert_inline_spans(inline, source);
+                            }
+                        }
                     }
-                }
-            }
-            for argument in named_args {
-                if let scribium_markdown::ast::Value::Content(content) = &argument.value {
-                    for inline in content {
-                        assert_inline_spans(inline, source);
+                    CallArgument::Named(argument) => {
+                        assert_valid_span(argument.name_span, source);
+                        assert_valid_span(argument.value_span, source);
+                        assert_valid_span(argument.span, source);
+                        if let scribium_markdown::ast::Value::Content(content) = &argument.value {
+                            for inline in content {
+                                assert_inline_spans(inline, source);
+                            }
+                        }
                     }
                 }
             }
@@ -123,22 +128,27 @@ fn assert_inline_spans(inline: &Inline, source: &str) {
             }
         }
         Inline::DirectiveCall {
-            body,
-            positional_args,
-            named_args,
-            ..
+            body, arguments, ..
         } => {
-            for argument in positional_args {
-                if let scribium_markdown::ast::Value::Content(content) = argument {
-                    for child in content {
-                        assert_inline_spans(child, source);
+            for argument in arguments {
+                match argument {
+                    CallArgument::Positional { value, span } => {
+                        assert_valid_span(*span, source);
+                        if let scribium_markdown::ast::Value::Content(content) = value {
+                            for child in content {
+                                assert_inline_spans(child, source);
+                            }
+                        }
                     }
-                }
-            }
-            for argument in named_args {
-                if let scribium_markdown::ast::Value::Content(content) = &argument.value {
-                    for child in content {
-                        assert_inline_spans(child, source);
+                    CallArgument::Named(argument) => {
+                        assert_valid_span(argument.name_span, source);
+                        assert_valid_span(argument.value_span, source);
+                        assert_valid_span(argument.span, source);
+                        if let scribium_markdown::ast::Value::Content(content) = &argument.value {
+                            for child in content {
+                                assert_inline_spans(child, source);
+                            }
+                        }
                     }
                 }
             }
@@ -602,7 +612,7 @@ fn qd251_logical_comparison_expression_remains_structural_and_source_backed() {
     let document = parse_without_diagnostics(source, Mode::Quarkdown);
     let Block::DirectiveCall {
         name,
-        positional_args,
+        arguments,
         body: Some(body),
         span,
         ..
@@ -615,8 +625,12 @@ fn qd251_logical_comparison_expression_remains_structural_and_source_backed() {
         &source[span.start..span.end],
         ".if {.islower {2} than:{3}}\r\n    result"
     );
-    let Some(scribium_markdown::ast::Value::Content(condition)) = positional_args.first() else {
-        panic!("expected content condition, got {positional_args:?}");
+    let Some(CallArgument::Positional {
+        value: scribium_markdown::ast::Value::Content(condition),
+        ..
+    }) = arguments.first()
+    else {
+        panic!("expected content condition, got {arguments:?}");
     };
     assert!(matches!(
         condition.first(),
@@ -651,7 +665,7 @@ fn qd251_plaintext_keeps_existing_scalar_and_content_argument_classification() {
         assert_document_spans(&document, source);
         let Block::DirectiveCall {
             name,
-            positional_args,
+            arguments,
             span,
             ..
         } = &document.nodes[0]
@@ -660,7 +674,12 @@ fn qd251_plaintext_keeps_existing_scalar_and_content_argument_classification() {
         };
         assert_eq!(name, "plaintext");
         assert_eq!(&source[span.start..span.end], source.trim_end());
-        let argument = positional_args.first().expect("plaintext argument");
+        let CallArgument::Positional {
+            value: argument, ..
+        } = arguments.first().expect("plaintext argument")
+        else {
+            panic!("expected positional plaintext argument")
+        };
         assert_eq!(
             matches!(argument, scribium_markdown::ast::Value::Content(_)),
             expect_content

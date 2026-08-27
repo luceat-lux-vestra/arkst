@@ -8,8 +8,8 @@ mod parser;
 pub mod ast;
 
 pub use ast::{
-    Block, CallSegment, Document, FrontMatter, Inline, ListItem, TableAlignment, TableCell,
-    TableRow, TaskStatus, Value,
+    Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, TableAlignment,
+    TableCell, TableRow, TaskStatus, Value,
 };
 pub use parser::{
     parse, parse_md, parse_qd, parse_with_diagnostics, parse_with_markdown_profile,

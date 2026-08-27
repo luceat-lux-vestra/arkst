@@ -11,8 +11,12 @@ pub struct QuarkdownCall {
     pub name_span: ByteSpan,
     /// The exact span of the first call segment, excluding any `::` suffix.
     pub head_span: ByteSpan,
-    pub positional_args: Vec<Arg>,
-    pub named_args: Vec<NamedArg>,
+    /// Arguments in their original source order.
+    ///
+    /// The grammar deliberately does not validate positional/named ordering;
+    /// that is a binder concern. Keeping one sequence here prevents the
+    /// frontend from losing the shape needed by that later validation.
+    pub arguments: Vec<CallArgument>,
     /// Subsequent `::name` segments, in source order.
     ///
     /// The grammar crate deliberately preserves the chain structure without
@@ -31,9 +35,68 @@ pub struct QuarkdownCall {
 pub struct CallSegment {
     pub name: String,
     pub name_span: ByteSpan,
-    pub positional_args: Vec<Arg>,
-    pub named_args: Vec<NamedArg>,
+    /// Arguments in their original source order.
+    pub arguments: Vec<CallArgument>,
     pub span: ByteSpan,
+}
+
+impl QuarkdownCall {
+    /// Returns the positional subset as a derived compatibility projection.
+    /// The ordered [`Self::arguments`] sequence remains canonical.
+    pub fn positional_args(&self) -> Vec<&Arg> {
+        self.arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional(argument) => Some(argument),
+                CallArgument::Named(_) => None,
+            })
+            .collect()
+    }
+
+    /// Returns the named subset as a derived compatibility projection.
+    /// The ordered [`Self::arguments`] sequence remains canonical.
+    pub fn named_args(&self) -> Vec<&NamedArg> {
+        self.arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional(_) => None,
+                CallArgument::Named(argument) => Some(argument),
+            })
+            .collect()
+    }
+}
+
+impl CallSegment {
+    /// Returns the positional subset as a derived compatibility projection.
+    /// The ordered [`Self::arguments`] sequence remains canonical.
+    pub fn positional_args(&self) -> Vec<&Arg> {
+        self.arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional(argument) => Some(argument),
+                CallArgument::Named(_) => None,
+            })
+            .collect()
+    }
+
+    /// Returns the named subset as a derived compatibility projection.
+    /// The ordered [`Self::arguments`] sequence remains canonical.
+    pub fn named_args(&self) -> Vec<&NamedArg> {
+        self.arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional(_) => None,
+                CallArgument::Named(argument) => Some(argument),
+            })
+            .collect()
+    }
+}
+
+/// One source-backed argument in a call, retained in source order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallArgument {
+    Positional(Arg),
+    Named(NamedArg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,8 +246,7 @@ pub fn parse_directive_at(
             name: first.name,
             name_span: first.name_span,
             head_span,
-            positional_args: first.positional_args,
-            named_args: first.named_args,
+            arguments: first.arguments,
             chain,
             span,
             inner_span: span,
@@ -542,8 +604,7 @@ fn parse_segment(
                 CallSegment {
                     name: String::new(),
                     name_span: ByteSpan::new(start, start),
-                    positional_args: Vec::new(),
-                    named_args: Vec::new(),
+                    arguments: Vec::new(),
                     span: ByteSpan::new(start, start),
                 },
                 start,
@@ -559,8 +620,7 @@ fn parse_segment(
                 CallSegment {
                     name: String::new(),
                     name_span: ByteSpan::new(start, start),
-                    positional_args: Vec::new(),
-                    named_args: Vec::new(),
+                    arguments: Vec::new(),
                     span: ByteSpan::new(start, start),
                 },
                 start,
@@ -579,8 +639,7 @@ fn parse_segment(
                 CallSegment {
                     name: String::new(),
                     name_span: ByteSpan::new(start, start),
-                    positional_args: Vec::new(),
-                    named_args: Vec::new(),
+                    arguments: Vec::new(),
                     span: ByteSpan::new(start, start),
                 },
                 start,
@@ -598,8 +657,7 @@ fn parse_segment(
         CallSegment {
             name: source[name_start..name_end].to_string(),
             name_span: ByteSpan::new(if dotted { start } else { name_start }, name_end),
-            positional_args: parsed.positional_args,
-            named_args: parsed.named_args,
+            arguments: parsed.arguments,
             span,
         },
         parsed.cursor,
@@ -607,8 +665,7 @@ fn parse_segment(
 }
 
 struct ParsedArguments {
-    positional_args: Vec<Arg>,
-    named_args: Vec<NamedArg>,
+    arguments: Vec<CallArgument>,
     end: usize,
     cursor: usize,
 }
@@ -617,8 +674,7 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
     let bytes = source.as_bytes();
     let mut cursor = skip_horizontal(bytes, after_name);
     let mut end = after_name;
-    let mut positional_args = Vec::new();
-    let mut named_args = Vec::new();
+    let mut arguments = Vec::new();
     let mut require_argument = false;
 
     loop {
@@ -633,17 +689,10 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
             break;
         };
         if byte == b'{' {
-            if !named_args.is_empty() {
-                return Err(ParseError::new(
-                    "E2001",
-                    "positional argument after named argument is not allowed",
-                    ByteSpan::new(cursor, cursor + 1),
-                ));
-            }
             let arg = parse_braced(source, cursor)?;
             end = arg.span.end;
             cursor = arg.span.end;
-            positional_args.push(arg);
+            arguments.push(CallArgument::Positional(arg));
         } else {
             let arg_name_start = cursor;
             let Some(arg_name_end) = scan_identifier(bytes, arg_name_start) else {
@@ -677,12 +726,12 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
             }
             let value = parse_braced(source, open)?;
             end = value.span.end;
-            named_args.push(NamedArg {
+            arguments.push(CallArgument::Named(NamedArg {
                 name: source[arg_name_start..arg_name_end].to_string(),
                 name_span: ByteSpan::new(arg_name_start, arg_name_end),
                 value,
                 span: ByteSpan::new(arg_name_start, end),
-            });
+            }));
             cursor = end;
         }
 
@@ -708,8 +757,7 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
     }
 
     Ok(ParsedArguments {
-        positional_args,
-        named_args,
+        arguments,
         end,
         cursor,
     })
@@ -979,8 +1027,8 @@ mod tests {
             assert_eq!(call.name, expected);
             assert_eq!(call.name_span, ByteSpan::new(0, source.len()));
             assert_eq!(call.span, ByteSpan::new(0, source.len()));
-            assert!(call.positional_args.is_empty());
-            assert!(call.named_args.is_empty());
+            assert!(call.positional_args().is_empty());
+            assert!(call.named_args().is_empty());
             assert_eq!(end, source.len());
         }
 
@@ -1003,8 +1051,8 @@ mod tests {
     fn numeric_identifiers_share_the_argument_grammar() {
         let (call, end) = parse_call(".1 {item}").unwrap().unwrap();
         assert_eq!(call.name, "1");
-        assert_eq!(call.positional_args.len(), 1);
-        assert!(call.named_args.is_empty());
+        assert_eq!(call.positional_args().len(), 1);
+        assert!(call.named_args().is_empty());
         assert_eq!(call.span, ByteSpan::new(0, 9));
         assert_eq!(end, 9);
     }
@@ -1014,17 +1062,17 @@ mod tests {
         let (call, end) = parse_call(".multiply {.1} {3}").unwrap().unwrap();
         assert_eq!(end, ".multiply {.1} {3}".len());
         assert!(matches!(
-            call.positional_args.first().map(|argument| &argument.content),
+            call.positional_args().first().map(|argument| &argument.content),
             Some(ArgContent::Content(span)) if *span == ByteSpan::new(11, 13)
         ));
         assert!(matches!(
-            call.positional_args.get(1).map(|argument| &argument.content),
+            call.positional_args().get(1).map(|argument| &argument.content),
             Some(ArgContent::Scalar(Value::Number(value))) if *value == 3.0
         ));
 
         let (call, _) = parse_call(".multiply {.01}").unwrap().unwrap();
         assert!(matches!(
-            call.positional_args.first().map(|argument| &argument.content),
+            call.positional_args().first().map(|argument| &argument.content),
             Some(ArgContent::Content(span)) if *span == ByteSpan::new(11, 14)
         ));
     }
@@ -1072,8 +1120,8 @@ mod tests {
         let (call, end) = parse_call(source).unwrap().unwrap();
         assert_eq!(end, source.len());
         assert_eq!(call.name, "panel");
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.named_args[0].name, "width");
+        assert_eq!(call.positional_args().len(), 1);
+        assert_eq!(call.named_args()[0].name, "width");
         assert_eq!(call.name_span, ByteSpan::new(0, 6));
         assert_eq!(call.span, ByteSpan::new(0, source.len()));
         assert_eq!(parse_call(".note").unwrap().unwrap().0.name, "note");
@@ -1097,7 +1145,7 @@ mod tests {
         for source in [".foo _:{x}", ".foo -:{x}", ".foo name-1:{x}"] {
             let (call, end) = parse_call(source).unwrap().unwrap();
             assert_eq!(call.name, "foo", "{source:?}");
-            assert!(call.named_args.is_empty(), "{source:?}");
+            assert!(call.named_args().is_empty(), "{source:?}");
             assert_eq!(call.span, ByteSpan::new(0, 4), "{source:?}");
             assert_eq!(&source[end..], &source[4..], "{source:?}");
         }
@@ -1107,10 +1155,11 @@ mod tests {
             (".foo 10:{x}", "10", ByteSpan::new(5, 7)),
         ] {
             let call = parse_call(source).unwrap().unwrap().0;
-            assert_eq!(call.named_args.len(), 1, "{source:?}");
-            assert_eq!(call.named_args[0].name, expected_name, "{source:?}");
+            assert_eq!(call.named_args().len(), 1, "{source:?}");
+            assert_eq!(call.named_args()[0].name, expected_name, "{source:?}");
             assert_eq!(
-                call.named_args[0].name_span, expected_name_span,
+                call.named_args()[0].name_span,
+                expected_name_span,
                 "{source:?}"
             );
         }
@@ -1129,23 +1178,23 @@ mod tests {
     #[test]
     fn parses_positional_named_and_mixed_arguments() {
         let call = parse_call(".range {1} {10}").unwrap().unwrap().0;
-        assert_eq!(call.positional_args.len(), 2);
-        assert_eq!(call.named_args.len(), 0);
-        assert_eq!(scalar(&call.positional_args[0]), Value::Number(1.0));
-        assert_eq!(scalar(&call.positional_args[1]), Value::Number(10.0));
+        assert_eq!(call.positional_args().len(), 2);
+        assert_eq!(call.named_args().len(), 0);
+        assert_eq!(scalar(call.positional_args()[0]), Value::Number(1.0));
+        assert_eq!(scalar(call.positional_args()[1]), Value::Number(10.0));
 
         let call = parse_call(".panel width:{320} align:{center}")
             .unwrap()
             .unwrap()
             .0;
-        assert!(call.positional_args.is_empty());
-        assert_eq!(call.named_args.len(), 2);
-        assert_eq!(call.named_args[0].name, "width");
-        assert_eq!(call.named_args[0].name_span, ByteSpan::new(7, 12));
-        assert_eq!(call.named_args[0].span, ByteSpan::new(7, 18));
-        assert_eq!(scalar(&call.named_args[0].value), Value::Number(320.0));
+        assert!(call.positional_args().is_empty());
+        assert_eq!(call.named_args().len(), 2);
+        assert_eq!(call.named_args()[0].name, "width");
+        assert_eq!(call.named_args()[0].name_span, ByteSpan::new(7, 12));
+        assert_eq!(call.named_args()[0].span, ByteSpan::new(7, 18));
+        assert_eq!(scalar(&call.named_args()[0].value), Value::Number(320.0));
         assert_eq!(
-            scalar(&call.named_args[1].value),
+            scalar(&call.named_args()[1].value),
             Value::Identifier("center".into())
         );
 
@@ -1153,16 +1202,16 @@ mod tests {
             .unwrap()
             .unwrap()
             .0;
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(call.positional_args().len(), 1);
+        assert_eq!(call.named_args().len(), 1);
         assert_eq!(
-            scalar(&call.positional_args[0]),
+            scalar(call.positional_args()[0]),
             Value::Identifier("Introduction".into())
         );
 
         for source in [".range {1}    {2}", ".range{1}{ 14}"] {
             let call = parse_call(source).unwrap().unwrap().0;
-            assert_eq!(call.positional_args.len(), 2, "{source:?}");
+            assert_eq!(call.positional_args().len(), 2, "{source:?}");
         }
         let (call, end) = parse_call(".note and more text").unwrap().unwrap();
         assert_eq!(call.name, "note");
@@ -1173,7 +1222,7 @@ mod tests {
     fn parses_nested_content_and_scalar_classification() {
         let nested = parse_call(".outer {.nested {x}}").unwrap().unwrap().0;
         assert!(matches!(
-            nested.positional_args[0].content,
+            nested.positional_args()[0].content,
             ArgContent::Content(_)
         ));
 
@@ -1195,14 +1244,14 @@ mod tests {
         ];
         for (source, expected) in cases {
             let call = parse_call(source).unwrap().unwrap().0;
-            assert_eq!(scalar(&call.positional_args[0]), expected, "{source:?}");
+            assert_eq!(scalar(call.positional_args()[0]), expected, "{source:?}");
         }
         let call = parse_call(".fn {\"hello \\\"world\\\"\"}")
             .unwrap()
             .unwrap()
             .0;
         assert_eq!(
-            scalar(&call.positional_args[0]),
+            scalar(call.positional_args()[0]),
             Value::String("hello \"world\"".into())
         );
         for source in [
@@ -1212,7 +1261,7 @@ mod tests {
         ] {
             let call = parse_call(source).unwrap().unwrap().0;
             assert!(
-                matches!(call.positional_args[0].content, ArgContent::Content(_)),
+                matches!(call.positional_args()[0].content, ArgContent::Content(_)),
                 "{source:?}"
             );
         }
@@ -1229,7 +1278,7 @@ mod tests {
         ] {
             let call = parse_call(source).unwrap().unwrap().0;
             assert_eq!(
-                scalar(&call.positional_args[0]),
+                scalar(call.positional_args()[0]),
                 Value::Range(RangeValue {
                     start,
                     end,
@@ -1251,7 +1300,7 @@ mod tests {
             let call = parse_call(source).unwrap().unwrap().0;
             assert!(
                 !matches!(
-                    call.positional_args[0].content,
+                    call.positional_args()[0].content,
                     ArgContent::Scalar(Value::Range(_))
                 ),
                 "{source:?}"
@@ -1264,7 +1313,7 @@ mod tests {
         let source = "한글\r\n.foo { 2..4 }\r\n";
         let start = source.find(".foo").expect("directive start");
         let (call, _) = parse_inline_call(source, start).unwrap().unwrap();
-        let Value::Range(range) = scalar(&call.positional_args[0]) else {
+        let Value::Range(range) = scalar(call.positional_args()[0]) else {
             panic!("expected typed range")
         };
         assert_eq!(range.span, ByteSpan::new(start + 7, start + 11));
@@ -1276,27 +1325,32 @@ mod tests {
         let source = ".divide {\n  .cos {.pi}\n} by:{\n  .sum {2} {1}\n}";
         let (call, end) = parse_call(source).unwrap().unwrap();
         assert_eq!(end, source.len());
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(call.positional_args().len(), 1);
+        assert_eq!(call.named_args().len(), 1);
         assert_eq!(call.span, ByteSpan::new(0, source.len()));
-        let ArgContent::Content(content) = call.positional_args[0].content else {
+        let ArgContent::Content(content) = call.positional_args()[0].content else {
             panic!("expected multiline content argument")
         };
         assert_eq!(&source[content.start..content.end], "\n  .cos {.pi}\n");
         assert_eq!(
-            &source[call.named_args[0].value.span.start..call.named_args[0].value.span.end],
+            &source[call.named_args()[0].value.span.start..call.named_args()[0].value.span.end],
             "{\n  .sum {2} {1}\n}"
         );
-        for span in [call.span, call.name_span, content, call.named_args[0].span] {
+        for span in [
+            call.span,
+            call.name_span,
+            content,
+            call.named_args()[0].span,
+        ] {
             assert!(span.is_valid_for(source));
         }
 
         let crlf = concat!(".call {\r\n  한글\r\n} \\", "\r\n  next:{값}");
         let (call, end) = parse_call(crlf).unwrap().unwrap();
         assert_eq!(end, crlf.len());
-        assert_eq!(call.named_args.len(), 1);
+        assert_eq!(call.named_args().len(), 1);
         assert!(call.span.is_valid_for(crlf));
-        let ArgContent::Content(content) = call.positional_args[0].content else {
+        let ArgContent::Content(content) = call.positional_args()[0].content else {
             panic!("expected CRLF content argument")
         };
         assert_eq!(&crlf[content.start..content.end], "\r\n  한글\r\n");
@@ -1314,8 +1368,8 @@ mod tests {
         ] {
             let (call, end) = parse_call(source).unwrap().unwrap();
             assert_eq!(end, source.len(), "{source:?}");
-            assert_eq!(call.positional_args.len(), positional, "{source:?}");
-            assert_eq!(call.named_args.len(), named, "{source:?}");
+            assert_eq!(call.positional_args().len(), positional, "{source:?}");
+            assert_eq!(call.named_args().len(), named, "{source:?}");
             assert!(call.span.is_valid_for(source), "{source:?}");
         }
     }
@@ -1347,8 +1401,8 @@ mod tests {
         );
         assert_eq!(call.chain[0].name, "b");
         assert_eq!(call.chain[0].span, ByteSpan::new(8, 13));
-        assert_eq!(call.positional_args.len(), 1);
-        assert_eq!(call.chain[0].positional_args.len(), 1);
+        assert_eq!(call.positional_args().len(), 1);
+        assert_eq!(call.chain[0].positional_args().len(), 1);
     }
 
     #[test]
@@ -1408,7 +1462,7 @@ mod tests {
             let (call, end) = parse_call(source).unwrap().unwrap();
             assert_eq!(call.name, "foo");
             assert_eq!(
-                call.positional_args.len(),
+                call.positional_args().len(),
                 if source.contains("{a}") { 1 } else { 0 }
             );
             assert_eq!(end, if source.starts_with(".foo ") { 8 } else { 4 });
@@ -1416,7 +1470,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_and_ordered_arguments_without_panicking() {
+    fn rejects_malformed_arguments_and_preserves_unmatched_named_candidates() {
         for source in [
             ".panel {unterminated",
             ".foo {",
@@ -1430,13 +1484,20 @@ mod tests {
         for source in [".foo key:", ".foo key: value", ".foo key: {value}"] {
             let (call, end) = parse_call(source).unwrap().unwrap();
             assert_eq!(call.name, "foo", "{source:?}");
-            assert!(call.named_args.is_empty(), "{source:?}");
+            assert!(call.named_args().is_empty(), "{source:?}");
             assert_eq!(call.span, ByteSpan::new(0, 4), "{source:?}");
             assert_eq!(end, 4, "{source:?}");
             assert_eq!(&source[end..], &source[4..], "{source:?}");
         }
-        let error = parse_call(".foo width:{\"x\"} {y}").unwrap_err();
-        assert_eq!(error.code, "E2001");
+        let (call, end) = parse_call(".foo width:{\"x\"} {y}").unwrap().unwrap();
+        assert_eq!(end, ".foo width:{\"x\"} {y}".len());
+        assert!(matches!(
+            call.arguments.as_slice(),
+            [
+                CallArgument::Named(NamedArg { name, .. }),
+                CallArgument::Positional(Arg { .. }),
+            ] if name == "width"
+        ));
     }
 
     #[test]

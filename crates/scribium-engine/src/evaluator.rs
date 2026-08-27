@@ -6363,8 +6363,9 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         // Caller arguments are evaluated before any callee scope is created.
-        // The parser guarantees that positional arguments precede named ones,
-        // so these two passes preserve source order for the supported grammar.
+        // The current IR exposes positional and named projections; the
+        // grammar/frontend source order is preserved before this existing
+        // boundary, while shared binder ordering validation remains #165 work.
         let positional = match self.evaluate_values(positional_args, span, diagnostics, context) {
             Ok(values) => values,
             Err(outcome) => return outcome,

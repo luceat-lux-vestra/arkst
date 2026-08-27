@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use scribium_markdown::ast::{Block, Document, Inline, Value};
+use scribium_markdown::ast::{Block, CallArgument, Document, Inline, Value};
 use scribium_markdown::{parse_with_mode, Mode};
 use scribium_source::ByteSpan;
 
@@ -48,18 +48,21 @@ fn check_inline(inline: &Inline, source: &str) {
             }
         }
         Inline::DirectiveCall {
-            positional_args,
-            named_args,
-            body,
-            ..
+            arguments, body, ..
         } => {
-            for value in positional_args {
-                check_value(value, source);
-            }
-            for argument in named_args {
-                assert!(valid(argument.name_span, source));
-                assert!(valid(argument.span, source));
-                check_value(&argument.value, source);
+            for argument in arguments {
+                match argument {
+                    CallArgument::Positional { value, span } => {
+                        assert!(valid(*span, source));
+                        check_value(value, source);
+                    }
+                    CallArgument::Named(argument) => {
+                        assert!(valid(argument.name_span, source));
+                        assert!(valid(argument.value_span, source));
+                        assert!(valid(argument.span, source));
+                        check_value(&argument.value, source);
+                    }
+                }
             }
             if let Some(body) = body {
                 for child in body {
@@ -116,19 +119,24 @@ fn check_block(block: &Block, source: &str) {
             }
         }
         Block::DirectiveCall {
-            positional_args,
-            named_args,
+            arguments,
             body,
             lambda_header,
             ..
         } => {
-            for value in positional_args {
-                check_value(value, source);
-            }
-            for argument in named_args {
-                assert!(valid(argument.name_span, source));
-                assert!(valid(argument.span, source));
-                check_value(&argument.value, source);
+            for argument in arguments {
+                match argument {
+                    CallArgument::Positional { value, span } => {
+                        assert!(valid(*span, source));
+                        check_value(value, source);
+                    }
+                    CallArgument::Named(argument) => {
+                        assert!(valid(argument.name_span, source));
+                        assert!(valid(argument.value_span, source));
+                        assert!(valid(argument.span, source));
+                        check_value(&argument.value, source);
+                    }
+                }
             }
             if let Some(header) = lambda_header {
                 assert!(valid(header.span, source));
