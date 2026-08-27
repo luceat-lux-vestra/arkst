@@ -677,9 +677,78 @@ mod tests {
             assert_eq!(result.ir.nodes.len(), 0, "input {input:?}");
         }
 
-        let (result, _) = compile_source(".foo width:{x} {y}");
-        assert!(result.diagnostics.is_empty());
-        assert_eq!(result.ir.nodes.len(), 1);
+        let (result, source_id) = compile_source(".foo width:{x} {y}");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_rejects_positional_after_named_at_engine_handoff() {
+        for source in [
+            ".theme layout:{Compact} {Light}\n",
+            ".captionposition tables:{top} {bottom}\n",
+            ".sum {1}::multiply first:{2} {3}\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E3003", "{source:?}: {result:?}");
+            assert_eq!(
+                diagnostic.message, "positional argument after named argument is not allowed",
+                "{source:?}: {result:?}"
+            );
+            let positional_start = source.rfind('{').expect("positional argument");
+            let positional_end = source.rfind('}').expect("positional argument end") + 1;
+            assert_eq!(
+                diagnostic.primary,
+                Some(scribium_source::SourceSpan::new(
+                    source_id,
+                    positional_start,
+                    positional_end,
+                )),
+                "{source:?}: {result:?}"
+            );
+            let named_start = source.find("first:").unwrap_or_else(|| {
+                source
+                    .find("layout:")
+                    .unwrap_or_else(|| source.find("tables:").expect("named argument"))
+            });
+            let named_end = source[named_start..]
+                .find('}')
+                .map(|offset| named_start + offset + 1)
+                .expect("named argument end");
+            assert_eq!(
+                diagnostic.secondary,
+                vec![scribium_source::SourceSpan::new(
+                    source_id,
+                    named_start,
+                    named_end,
+                )],
+                "{source:?}: {result:?}"
+            );
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+
+        let source =
+            ".function {needs}\n    first:\n    .uppercase {ran}\n\n.needs first:{one} {two}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        let positional_start = source.rfind("{two}").expect("positional argument");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                positional_start,
+                positional_start + "{two}".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "");
     }
 
     #[test]
@@ -1630,6 +1699,7 @@ mod tests {
             ".captionposition unknown:{top}",
             ".captionposition codeBlocks:{top}",
             ".captionposition {top} {bottom} {top} {bottom} {top}",
+            ".captionposition tables:{top} {bottom}",
         ] {
             let source =
                 format!(".captionposition default:{{top}} figures:{{bottom}}\n{invalid}\n");
@@ -2012,6 +2082,7 @@ mod tests {
             ".theme unknown:{Light}",
             ".theme {Light} color:{Other}",
             ".theme {Light} {Compact} layout:{Other}",
+            ".theme layout:{Compact} {Light}",
             ".theme layout:{one} layout:{two}",
             ".theme color:{one} color:{two}",
         ] {

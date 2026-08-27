@@ -130,8 +130,8 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Dot-prefixed call              | `.note`                          | Parsed                   | Parsed-only: pinned identifier and call-start lexical boundaries are aligned by #157; separator and recovery gaps remain |
 | Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported numeric identifiers; binding is separate | Parsed-only lexical recognition, including `.0`/`.01` and `.1abc` as `.1` plus remainder; implicit-reference evaluation remains #150-owned |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
-| Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only: identifier and `:{` adjacency are aligned by #157; source-ordered mixed shape is retained by #163 and binding validity belongs to #149/#165 |
-| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Parsed-only: frontend retains the complete source-ordered sequence, including positional-after-named; no complete binder compatibility claim is made (#163, #165) |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only: identifier and `:{` adjacency are aligned by #157; source-ordered mixed shape is retained by #163 and the transitional engine handoff guard precedes #149/#165 binding |
+| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Parsed-only: frontend retains the complete source-ordered sequence, including positional-after-named; the engine rejects invalid ordering with source-backed `E3003` before split IR; no complete binder compatibility claim is made (#163, #165) |
 | Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: nested tight/content boundaries are tracked by #158 and #160 |
@@ -871,7 +871,9 @@ indentation, parser-preserved `::` chains, tight brace-wrapped calls, normal
 boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd` isolation,
 and the existing dynamic body-indentation lifecycle. Malformed recovery,
 separator placement, and escaped delimiters remain their separately owned
-gaps; binder validation remains outside this grammar/frontend evidence.
+gaps. The AST-to-IR handoff has a bounded source-span-based `E3003` safety guard
+for positional-after-named; shared binder validation remains outside this
+grammar/frontend evidence.
 
 The complete grammar/frontend re-audit, including its conservative status
 matrix and bounded follow-up issues, is recorded in
@@ -1257,9 +1259,10 @@ accessed dates.
   parser can truncate arguments or report `E2003`, while the escaped call
   introducer remains literal; see #162.
 - Scribium's grammar/frontend now preserves positional-after-named in the
-  source-ordered argument shape without parser `E2001`; pinned v2.5.1 assigns
-  the validity check to binder semantics. Complete binding remains #149/#165
-  work; see #163.
+  source-ordered argument shape without parser `E2001`. The engine handoff
+  rejects that invalid shape with source-backed `E3003` before split IR, while
+  pinned v2.5.1 assigns the complete validity contract to binder semantics.
+  Complete binding remains #149/#165 work; see #163.
 - Nested tight calls inside content arguments are not yet lossless; see #158.
 - Malformed inline recovery currently drops following source text; see #159.
 - Markdown inline structure inside Quarkdown content arguments remains an

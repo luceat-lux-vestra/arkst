@@ -180,7 +180,7 @@ fn block_to_ir(
             span,
         } => {
             let (ir_positional, ir_named) =
-                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
                     .iter()
@@ -233,7 +233,7 @@ fn block_to_ir(
                         .map(|segment| {
                             call_segment_to_ir(segment, source_id, diagnostics, source_mode)
                         })
-                        .collect(),
+                        .collect::<Option<Vec<_>>>()?,
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
                 })
@@ -355,43 +355,53 @@ fn call_segment_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
-) -> IrCallSegment {
+) -> Option<IrCallSegment> {
     let (positional_args, named_args) =
-        call_arguments_to_ir(&segment.arguments, source_id, diagnostics, source_mode);
-    IrCallSegment {
+        call_arguments_to_ir(&segment.arguments, source_id, diagnostics, source_mode)?;
+    Some(IrCallSegment {
         name: segment.name.clone(),
         name_span: byte_to_source_span(&segment.name_span, source_id),
         positional_args,
         named_args,
         span: byte_to_source_span(&segment.span, source_id),
-    }
+    })
 }
 
 /// The current IR still exposes separate positional/named projections. Derive
 /// them from the frontend's single ordered argument sequence at this existing
-/// boundary; binder-owned ordering semantics remain deferred to #165.
+/// boundary, but reject the one ordering rule that cannot safely survive the
+/// projection. The eventual shared binder in #165 should absorb this guard.
 fn call_arguments_to_ir(
     arguments: &[CallArgument],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
-) -> (Vec<scribium_ir::IrValue>, Vec<IrNamedArg>) {
+) -> Option<(Vec<scribium_ir::IrValue>, Vec<IrNamedArg>)> {
+    if let Some((positional_span, named_span)) = positional_after_named(arguments) {
+        diagnostics.push(positional_after_named_error(
+            positional_span,
+            named_span,
+            source_id,
+        ));
+        return None;
+    }
+
     let mut positional_args = Vec::new();
     let mut named_args = Vec::new();
     for argument in arguments {
         match argument {
             CallArgument::Positional { value, .. } => {
-                positional_args.push(value_to_ir(value, source_id, diagnostics, source_mode));
+                positional_args.push(value_to_ir(value, source_id, diagnostics, source_mode)?);
             }
             CallArgument::Named(argument) => named_args.push(IrNamedArg {
                 name: argument.name.clone(),
                 name_span: byte_to_source_span(&argument.name_span, source_id),
-                value: value_to_ir(&argument.value, source_id, diagnostics, source_mode),
+                value: value_to_ir(&argument.value, source_id, diagnostics, source_mode)?,
                 span: byte_to_source_span(&argument.span, source_id),
             }),
         }
     }
-    (positional_args, named_args)
+    Some((positional_args, named_args))
 }
 
 fn inlines_to_ir(
@@ -674,7 +684,7 @@ fn inline_to_ir(
             span,
         } => {
             let (ir_positional, ir_named) =
-                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let ir_body = body
                 .as_ref()
                 .map(|b| inlines_to_ir(b, source_id, diagnostics, source_mode, function_body));
@@ -700,7 +710,7 @@ fn inline_to_ir(
                         .map(|segment| {
                             call_segment_to_ir(segment, source_id, diagnostics, source_mode)
                         })
-                        .collect(),
+                        .collect::<Option<Vec<_>>>()?,
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
                 })
@@ -767,13 +777,13 @@ fn value_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
-) -> scribium_ir::IrValue {
+) -> Option<scribium_ir::IrValue> {
     match value {
-        Value::String(s) => scribium_ir::IrValue::String(s.clone()),
-        Value::Number(n) => scribium_ir::IrValue::Number(*n),
-        Value::Boolean(b) => scribium_ir::IrValue::Boolean(*b),
-        Value::Identifier(id) => scribium_ir::IrValue::Identifier(id.clone()),
-        Value::Range(range) => {
+        Value::String(s) => Some(scribium_ir::IrValue::String(s.clone())),
+        Value::Number(n) => Some(scribium_ir::IrValue::Number(*n)),
+        Value::Boolean(b) => Some(scribium_ir::IrValue::Boolean(*b)),
+        Value::Identifier(id) => Some(scribium_ir::IrValue::Identifier(id.clone())),
+        Value::Range(range) => Some({
             // The literal grammar intentionally accepts only non-negative
             // decimal endpoints. Quarkdown's v2.5.1 Range factory stores
             // endpoints through `toIntOrNull`: an out-of-domain literal does
@@ -784,38 +794,38 @@ fn value_to_ir(
                 end: range.end.and_then(|value| i32::try_from(value).ok()),
                 span: byte_to_source_span(&range.span, source_id),
             })
-        }
+        }),
         Value::Lambda {
             parameters,
             body,
             span,
-        } => scribium_ir::IrValue::Callable(scribium_ir::IrCallable {
+        } => Some(scribium_ir::IrValue::Callable(scribium_ir::IrCallable {
             parameters: parameters
                 .as_ref()
                 .map(|header| lambda_parameters_to_ir(header, source_id)),
-            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span),
+            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span)?,
             span: byte_to_source_span(span, source_id),
             capture: None,
-        }),
+        })),
         Value::InlineBody {
             content,
             parameters,
             body,
             span,
-        } => scribium_ir::IrValue::InlineBody(IrInlineBody {
-            content: content_value_to_ir(content, source_id, diagnostics, source_mode),
+        } => Some(scribium_ir::IrValue::InlineBody(IrInlineBody {
+            content: content_value_to_ir(content, source_id, diagnostics, source_mode)?,
             parameters: parameters
                 .as_ref()
                 .map(|header| lambda_parameters_to_ir(header, source_id)),
-            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span),
+            body: inline_lambda_body_to_ir(body, source_id, diagnostics, source_mode, *span)?,
             span: byte_to_source_span(span, source_id),
-        }),
-        Value::Content(inlines) => scribium_ir::IrValue::Content(content_value_to_ir(
+        })),
+        Value::Content(inlines) => Some(scribium_ir::IrValue::Content(content_value_to_ir(
             inlines,
             source_id,
             diagnostics,
             source_mode,
-        )),
+        )?)),
     }
 }
 
@@ -824,7 +834,7 @@ fn content_value_to_ir(
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
-) -> Vec<IrNode> {
+) -> Option<Vec<IrNode>> {
     if let [Inline::DirectiveCall {
         name,
         name_span,
@@ -836,7 +846,7 @@ fn content_value_to_ir(
     }] = inlines
     {
         let (ir_positional, ir_named) =
-            call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
+            call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
         let ir_body = body.as_ref().map(|b| {
             vec![IrNode::Paragraph {
                 content: inlines_to_ir(b, source_id, diagnostics, source_mode, false),
@@ -844,16 +854,16 @@ fn content_value_to_ir(
             }]
         });
         if chain.is_empty() {
-            vec![IrNode::FunctionCall {
+            Some(vec![IrNode::FunctionCall {
                 name: name.clone(),
                 positional_args: ir_positional,
                 named_args: ir_named,
                 lambda_parameters: None,
                 body: ir_body,
                 span: byte_to_source_span(span, source_id),
-            }]
+            }])
         } else {
-            vec![IrNode::ChainedFunctionCall {
+            Some(vec![IrNode::ChainedFunctionCall {
                 head: IrCallSegment {
                     name: name.clone(),
                     name_span: byte_to_source_span(name_span, source_id),
@@ -864,19 +874,19 @@ fn content_value_to_ir(
                 chain: chain
                     .iter()
                     .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
-                    .collect(),
+                    .collect::<Option<Vec<_>>>()?,
                 body: ir_body,
                 span: byte_to_source_span(span, source_id),
-            }]
+            }])
         }
     } else {
         let start = inlines.first().map(inline_span_start);
         let end = inlines.last().map(inline_span_end);
         let span = scribium_source::ByteSpan::new(start.unwrap_or(0), end.unwrap_or(0));
-        vec![IrNode::Paragraph {
+        Some(vec![IrNode::Paragraph {
             content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
             span: byte_to_source_span(&span, source_id),
-        }]
+        }])
     }
 }
 
@@ -886,9 +896,9 @@ fn inline_lambda_body_to_ir(
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
     fallback_span: ByteSpan,
-) -> Vec<IrNode> {
+) -> Option<Vec<IrNode>> {
     match body {
-        [] => Vec::new(),
+        [] => Some(Vec::new()),
         [Inline::DirectiveCall {
             name,
             name_span,
@@ -899,7 +909,7 @@ fn inline_lambda_body_to_ir(
             span,
         }] => {
             let (positional_args, named_args) =
-                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode);
+                call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let body = body.as_ref().map(|inlines| {
                 vec![IrNode::Paragraph {
                     content: inlines_to_ir(inlines, source_id, diagnostics, source_mode, false),
@@ -907,16 +917,16 @@ fn inline_lambda_body_to_ir(
                 }]
             });
             if chain.is_empty() {
-                vec![IrNode::FunctionCall {
+                Some(vec![IrNode::FunctionCall {
                     name: name.clone(),
                     positional_args,
                     named_args,
                     lambda_parameters: None,
                     body,
                     span: byte_to_source_span(span, source_id),
-                }]
+                }])
             } else {
-                vec![IrNode::ChainedFunctionCall {
+                Some(vec![IrNode::ChainedFunctionCall {
                     head: IrCallSegment {
                         name: name.clone(),
                         name_span: byte_to_source_span(name_span, source_id),
@@ -929,16 +939,16 @@ fn inline_lambda_body_to_ir(
                         .map(|segment| {
                             call_segment_to_ir(segment, source_id, diagnostics, source_mode)
                         })
-                        .collect(),
+                        .collect::<Option<Vec<_>>>()?,
                     body,
                     span: byte_to_source_span(span, source_id),
-                }]
+                }])
             }
         }
-        _ => vec![IrNode::Paragraph {
+        _ => Some(vec![IrNode::Paragraph {
             content: inlines_to_ir(body, source_id, diagnostics, source_mode, false),
             span: byte_to_source_span(&fallback_span, source_id),
-        }],
+        }]),
     }
 }
 
@@ -1030,6 +1040,40 @@ fn invalid_function_declaration(
         primary: Some(byte_to_source_span(span, source_id)),
         secondary: Vec::new(),
         hints: vec!["A user-defined function needs one positional name argument.".to_string()],
+    }
+}
+
+fn positional_after_named(arguments: &[CallArgument]) -> Option<(ByteSpan, ByteSpan)> {
+    let mut first_named_span = None;
+    for argument in arguments {
+        match argument {
+            CallArgument::Named(argument) => {
+                first_named_span.get_or_insert(argument.span);
+            }
+            CallArgument::Positional { span, .. } => {
+                if let Some(named_span) = first_named_span {
+                    return Some((*span, named_span));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn positional_after_named_error(
+    positional_span: ByteSpan,
+    named_span: ByteSpan,
+    source_id: SourceId,
+) -> Diagnostic {
+    Diagnostic {
+        code: "E3003".to_string(),
+        severity: Severity::Error,
+        message: "positional argument after named argument is not allowed".to_string(),
+        primary: Some(byte_to_source_span(&positional_span, source_id)),
+        secondary: vec![byte_to_source_span(&named_span, source_id)],
+        hints: vec![
+            "Positional arguments must precede named arguments; shared binder validation remains the future #165 replacement for this handoff guard.".to_string(),
+        ],
     }
 }
 
