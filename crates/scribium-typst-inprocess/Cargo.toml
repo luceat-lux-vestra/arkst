@@ -21,3 +21,4 @@ typst-pdf.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 scribium-core.workspace = true
 scribium-typst-subprocess.workspace = true
+tempfile.workspace = true

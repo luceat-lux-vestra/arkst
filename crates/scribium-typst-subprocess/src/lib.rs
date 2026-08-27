@@ -1,8 +1,9 @@
 //! Native Typst CLI subprocess adapter for Scribium.
 //!
 //! This crate owns process execution, temporary staging, and the explicit
-//! project-root security boundary. Pure IR-to-Typst lowering lives in
-//! `scribium-typst`.
+//! project-root staging boundary. Static Typst module preflight is a
+//! best-effort validation aid, not a package or network security boundary.
+//! Pure IR-to-Typst lowering lives in `scribium-typst`.
 
 use scribium_project::VirtualPathBuf;
 use scribium_typst::{TypstBackend, TypstInput, TypstOutput};
@@ -13,10 +14,12 @@ use std::process::Command;
 
 /// Filesystem context for a native Typst compilation.
 ///
-/// `project_root` is an explicit read boundary. It is not inferred from the
-/// process current directory. The subprocess adapter mirrors this directory
-/// into its per-compilation temporary build directory before invoking Typst;
-/// the original tree is never used as a write location.
+/// `project_root` identifies the explicit project-resource read root used to
+/// stage Scribium source and assets. It is not an OS-wide filesystem or
+/// package-resolver boundary, and it is not inferred from the process current
+/// directory. The subprocess adapter mirrors this directory into its
+/// per-compilation temporary build directory before invoking Typst; the
+/// original tree is never used as a write location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypstSourceContext {
     pub project_root: PathBuf,
@@ -63,7 +66,7 @@ impl std::error::Error for TypstError {}
 /// Subprocess backend — calls `typst compile` via CLI.
 pub struct SubprocessBackend {
     pub typst_path: PathBuf,
-    /// Optional explicit source/read context. `None` keeps self-contained
+    /// Optional explicit project-resource context. `None` keeps self-contained
     /// compilation available and never turns the temporary directory into a
     /// source root implicitly.
     pub source_context: Option<TypstSourceContext>,
@@ -77,8 +80,8 @@ impl SubprocessBackend {
         }
     }
 
-    /// Uses an explicit project root as the source/read context for future
-    /// compilations by this backend.
+    /// Uses an explicit project-resource root for future compilations by this
+    /// backend.
     pub fn with_source_context(mut self, source_context: TypstSourceContext) -> Self {
         self.source_context = Some(source_context);
         self
@@ -91,6 +94,16 @@ impl TypstBackend for SubprocessBackend {
     fn compile(&self, input: &TypstInput) -> Result<TypstOutput, TypstError> {
         let start = std::time::Instant::now();
         let entry_path = validate_entry_path(&input.entry_path)?;
+        let project_root = self
+            .source_context
+            .as_ref()
+            .map(|context| canonical_project_root(&context.project_root))
+            .transpose()?;
+        if let Some(project_root) = &project_root {
+            validate_reachable_typst_modules(&input.source, &entry_path, project_root)?;
+        } else if contains_static_typst_preflight_violation(&input.source) {
+            return Err(static_module_preflight_rejected(&entry_path));
+        }
 
         // Create a unique temporary directory for the generated Typst source,
         // any source-context mirror, and the output. The returned PDF is the
@@ -98,14 +111,13 @@ impl TypstBackend for SubprocessBackend {
         let temp_dir = tempfile::tempdir().map_err(TypstError::Io)?;
         let pdf_file = temp_dir.path().join("output.pdf");
 
-        let (typst_file, typst_root) = if let Some(source_context) = &self.source_context {
-            let project_root = canonical_project_root(&source_context.project_root)?;
+        let (typst_file, typst_root) = if let Some(project_root) = project_root.as_ref() {
             let mirror_root = temp_dir.path().join("project");
             let mut active_directories = BTreeSet::new();
             copy_project_tree(
-                &project_root,
+                project_root,
                 &mirror_root,
-                &project_root,
+                project_root,
                 &VirtualPathBuf::root(),
                 &mut active_directories,
             )?;
@@ -228,8 +240,9 @@ fn validate_entry_path(raw: &str) -> Result<VirtualPathBuf, TypstError> {
 ///
 /// This helper is intentionally independent of generated Typst parsing. The
 /// generated source remains Typst source, while native resource access is
-/// bounded by the staged project root and Typst's `--root` option.
-#[cfg(test)]
+/// bounded by the staged project root and Typst's `--root` option. This
+/// applies to project-relative resources; it does not constrain the
+/// subprocess-owned package resolver.
 fn resolve_logical_resource_path(
     entry_path: &VirtualPathBuf,
     resource: &str,
@@ -252,6 +265,81 @@ fn canonical_project_root(project_root: &Path) -> Result<PathBuf, TypstError> {
         ));
     }
     Ok(canonical)
+}
+
+fn static_module_preflight_rejected(logical_path: &VirtualPathBuf) -> TypstError {
+    TypstError::Subprocess(format!(
+        "static Typst module preflight rejected a package or dynamic module operand for {}",
+        logical_path
+    ))
+}
+
+/// Applies best-effort static validation to the active local Typst module graph
+/// rooted at the generated entry source. The project mirror contains every
+/// project file, but only modules reachable through literal project-relative
+/// `import` or `include` operands are inspected here. This keeps unused files
+/// inert while catching obvious package references in reachable helper modules.
+/// It does not prove that runtime evaluation cannot reach a package resolver.
+fn validate_reachable_typst_modules(
+    source: &str,
+    logical_path: &VirtualPathBuf,
+    project_root: &Path,
+) -> Result<(), TypstError> {
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    validate_reachable_typst_module(
+        source,
+        logical_path,
+        project_root,
+        &mut visiting,
+        &mut visited,
+    )
+}
+
+fn validate_reachable_typst_module(
+    source: &str,
+    logical_path: &VirtualPathBuf,
+    project_root: &Path,
+    visiting: &mut BTreeSet<VirtualPathBuf>,
+    visited: &mut BTreeSet<VirtualPathBuf>,
+) -> Result<(), TypstError> {
+    if visited.contains(logical_path) || !visiting.insert(logical_path.clone()) {
+        return Ok(());
+    }
+
+    let mut local_modules = Vec::new();
+    if !collect_static_typst_module_references(source, &mut local_modules) {
+        return Err(static_module_preflight_rejected(logical_path));
+    }
+
+    visited.insert(logical_path.clone());
+    for module_reference in local_modules {
+        let module_path = resolve_logical_resource_path(logical_path, &module_reference)?;
+        let native_path = native_path_from_virtual(project_root, &module_path);
+
+        // Let Typst report a normal missing-module error. Existing files are
+        // the only paths that need policy inspection before the subprocess is
+        // spawned.
+        if !native_path.exists() {
+            continue;
+        }
+        let metadata = fs::metadata(&native_path).map_err(TypstError::Io)?;
+        if !metadata.is_file() {
+            continue;
+        }
+        checked_canonical_target(&native_path, project_root, &module_path)?;
+        let module_source = fs::read_to_string(&native_path).map_err(TypstError::Io)?;
+        validate_reachable_typst_module(
+            &module_source,
+            &module_path,
+            project_root,
+            visiting,
+            visited,
+        )?;
+    }
+
+    visiting.remove(logical_path);
+    Ok(())
 }
 
 fn generated_typst_path(
@@ -407,9 +495,201 @@ fn checked_canonical_target(
 }
 
 fn sanitize_typst_diagnostic(stderr: &[u8], temporary_root: &Path) -> String {
-    let diagnostic = String::from_utf8_lossy(stderr);
+    let mut diagnostic = String::from_utf8_lossy(stderr).into_owned();
     let temporary_root = temporary_root.to_string_lossy();
-    diagnostic.replace(temporary_root.as_ref(), "<typst-build>")
+    let native_root = temporary_root.to_string();
+    let forward_slash_root = temporary_root.replace('\\', "/");
+    let backslash_root = temporary_root.replace('/', "\\");
+    let root_variants = [
+        format!(r"\\?\{native_root}"),
+        format!(r"\\?\{forward_slash_root}"),
+        format!("//?/{native_root}"),
+        format!("//?/{forward_slash_root}"),
+        native_root,
+        forward_slash_root,
+        backslash_root,
+    ];
+
+    for root in root_variants {
+        diagnostic = diagnostic.replace(&root, "<typst-build>");
+    }
+
+    let marker = "<typst-build>";
+    let mut normalized = String::with_capacity(diagnostic.len());
+    let mut offset = 0;
+    while let Some(relative_start) = diagnostic[offset..].find(marker) {
+        let marker_start = offset + relative_start;
+        normalized.push_str(&diagnostic[offset..marker_start]);
+        normalized.push_str(marker);
+        let path_start = marker_start + marker.len();
+        let path_end = path_start
+            + diagnostic[path_start..]
+                .find(char::is_whitespace)
+                .unwrap_or(diagnostic.len() - path_start);
+        normalized.push_str(&diagnostic[path_start..path_end].replace('\\', "/"));
+        offset = path_end;
+    }
+    normalized.push_str(&diagnostic[offset..]);
+    sanitize_absolute_path_tokens(&normalized)
+}
+
+fn sanitize_absolute_path_tokens(diagnostic: &str) -> String {
+    let mut sanitized = String::with_capacity(diagnostic.len());
+    let mut offset = 0;
+    while let Some(relative_start) = next_absolute_path_start(&diagnostic[offset..]) {
+        let start = offset + relative_start;
+        sanitized.push_str(&diagnostic[offset..start]);
+        let end = start
+            + diagnostic[start..]
+                .find(char::is_whitespace)
+                .unwrap_or(diagnostic.len() - start);
+        let token = &diagnostic[start..end];
+        let (path, location) = split_diagnostic_location(token);
+        if let Some(logical_path) = logical_path_from_absolute_token(path) {
+            sanitized.push_str(&logical_path);
+        } else {
+            sanitized.push_str("<host-path>");
+        }
+        sanitized.push_str(location);
+        offset = end;
+    }
+    sanitized.push_str(&diagnostic[offset..]);
+    sanitized
+}
+
+fn split_diagnostic_location(token: &str) -> (&str, &str) {
+    let Some(last_colon) = token.rfind(':') else {
+        return (token, "");
+    };
+    if !token[last_colon + 1..]
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+    {
+        return (token, "");
+    }
+
+    let Some(line_colon) = token[..last_colon].rfind(':') else {
+        return (token, "");
+    };
+    if token[line_colon + 1..last_colon]
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+    {
+        return (&token[..line_colon], &token[line_colon..]);
+    }
+
+    (&token[..last_colon], &token[last_colon..])
+}
+
+fn next_absolute_path_start(diagnostic: &str) -> Option<usize> {
+    let bytes = diagnostic.as_bytes();
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if !path_token_boundary(bytes, index) {
+            continue;
+        }
+
+        if index + 2 < bytes.len()
+            && byte.is_ascii_alphabetic()
+            && bytes[index + 1] == b':'
+            && matches!(bytes[index + 2], b'/' | b'\\')
+        {
+            return Some(index);
+        }
+
+        if index + 1 < bytes.len() && matches!(byte, b'/' | b'\\') && bytes[index + 1] == byte {
+            return Some(index);
+        }
+
+        // A single leading backslash is a rooted Windows path. Relative
+        // components such as `target\\main.typ` do not reach this branch.
+        if byte == b'\\' && bytes.get(index + 1).is_some_and(|next| *next != b'\\') {
+            return Some(index);
+        }
+
+        // A Unix absolute path. `//...` was handled as UNC above, while
+        // `<typst-build>/project/...` is intentionally not a token boundary
+        // at the slash after the synthetic marker.
+        if byte == b'/'
+            && bytes
+                .get(index + 1)
+                .is_some_and(|next| !next.is_ascii_whitespace())
+        {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn path_token_boundary(bytes: &[u8], index: usize) -> bool {
+    index == 0
+        || bytes[index - 1].is_ascii_whitespace()
+        || matches!(
+            bytes[index - 1],
+            b'(' | b'[' | b'{' | b'<' | b':' | b'=' | b'"' | b'\''
+        )
+}
+
+fn logical_path_from_absolute_token(token: &str) -> Option<String> {
+    let normalized = token.replace('\\', "/");
+    let (_, logical_path) = normalized.split_once("/project/")?;
+    Some(format!("/{logical_path}"))
+}
+
+/// Detects obvious static module references for best-effort preflight without
+/// embedding the Typst compiler or evaluator. The syntax-only parser
+/// identifies active `import`/`include` nodes, so comments, raw text, and
+/// ordinary strings are not mistaken for module sources. Literal package
+/// specifications use Typst's own grammar; dynamic module expressions are
+/// rejected because this adapter cannot prove that they remain project-local
+/// without evaluating code. Runtime evaluation is deliberately outside this
+/// check: this function does not inspect identifiers such as `eval` or claim
+/// to make runtime package access impossible.
+fn contains_static_typst_preflight_violation(source: &str) -> bool {
+    let mut local_modules = Vec::new();
+    !collect_static_typst_module_references(source, &mut local_modules)
+}
+
+fn collect_static_typst_module_references(source: &str, local_modules: &mut Vec<String>) -> bool {
+    let root = typst_syntax::parse(source);
+    collect_static_typst_module_references_from_node(&root, local_modules)
+}
+
+fn collect_static_typst_module_references_from_node(
+    node: &typst_syntax::SyntaxNode,
+    local_modules: &mut Vec<String>,
+) -> bool {
+    let module_source = match node.kind() {
+        typst_syntax::SyntaxKind::ModuleImport => node
+            .cast::<typst_syntax::ast::ModuleImport>()
+            .map(|module| module.source()),
+        typst_syntax::SyntaxKind::ModuleInclude => node
+            .cast::<typst_syntax::ast::ModuleInclude>()
+            .map(|module| module.source()),
+        _ => None,
+    };
+
+    if let Some(module_source) = module_source {
+        if module_source_requires_static_rejection(module_source) {
+            return false;
+        }
+        let typst_syntax::ast::Expr::Str(string) = module_source else {
+            return false;
+        };
+        local_modules.push(string.get().to_string());
+    }
+
+    node.children()
+        .all(|child| collect_static_typst_module_references_from_node(child, local_modules))
+}
+
+fn module_source_requires_static_rejection(source: typst_syntax::ast::Expr<'_>) -> bool {
+    match source {
+        typst_syntax::ast::Expr::Str(string) => string
+            .get()
+            .parse::<typst_syntax::package::PackageSpec>()
+            .is_ok(),
+        _ => true,
+    }
 }
 
 #[cfg(test)]
@@ -520,6 +800,218 @@ mod tests {
             err.contains("nonexistent"),
             "error must name the configured path: {}",
             err
+        );
+    }
+
+    #[test]
+    fn subprocess_backend_rejects_static_package_namespaces_before_execution() {
+        let backend = SubprocessBackend::new("/nonexistent/typst");
+        for source in [
+            "#import \"@preview/not-present:1.0.0\": *\n",
+            "#import \"@local/company-package:1.0.0\": *\n",
+            "#include \"@company/internal-package:2.3.4\"\n",
+            "#{ import \"@workspace/private-package:0.1.0\" }\n",
+        ] {
+            let result = backend.compile(&TypstInput {
+                source: source.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            });
+
+            let error = result
+                .expect_err("static package access must be rejected by preflight")
+                .to_string();
+            assert!(error.contains("static Typst module preflight rejected"));
+            assert!(!error.contains("http://") && !error.contains("https://"));
+            assert!(!error.contains("not found at"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn subprocess_backend_ignores_package_looking_inert_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let _spawn_guard = FAKE_TYPST_SPAWN_LOCK.lock().unwrap();
+        let fake = write_fake_typst(dir.path(), "%PDF-1.7 inert", "", 0);
+        let source = r###"// #import "@preview/comment:1.0.0": *
+/* nested /* #include "@local/comment:1.0.0" */ comment */
+`#import "@preview/inline-raw:1.0.0": *`
+```typst
+#import "@workspace/raw-block:1.0.0": *
+```
+#let example = "@company/example:1.0.0"
+#raw("#import \"@preview/raw-string:1.0.0\": *")
+\#import "@preview/escaped-hash:1.0.0": *
+import "@preview/markup-text:1.0.0"
+"###;
+        let output = SubprocessBackend::new(fake)
+            .compile(&TypstInput {
+                source: source.to_string(),
+                entry_path: "docs/main.qd".to_string(),
+            })
+            .expect("inert package-looking text must not be denied");
+        assert_eq!(output.pdf.as_deref(), Some(b"%PDF-1.7 inert".as_slice()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_context_preflight_follows_reachable_local_modules() {
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_root = project_parent.path().join("project");
+        fs::create_dir_all(project_root.join("docs")).unwrap();
+        let backend = SubprocessBackend::new("/nonexistent/typst")
+            .with_source_context(TypstSourceContext::new(&project_root));
+
+        for package in [
+            "@preview/nested-package:1.0.0",
+            "@local/nested-package:1.0.0",
+        ] {
+            fs::write(
+                project_root.join("docs/helper.typ"),
+                format!("#import \"{package}\": *\n"),
+            )
+            .unwrap();
+            let error = backend
+                .compile(&TypstInput {
+                    source: "#import \"./helper.typ\": *\n".to_string(),
+                    entry_path: "docs/main.qd".to_string(),
+                })
+                .expect_err("a reachable helper package must be rejected by static preflight");
+            let error = error.to_string();
+            assert!(
+                error.contains("static Typst module preflight rejected"),
+                "{error}"
+            );
+            assert!(!error.contains("not found at"), "{error}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_context_module_preflight_is_cycle_safe() {
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_root = project_parent.path().join("project");
+        fs::create_dir_all(project_root.join("docs")).unwrap();
+        fs::write(
+            project_root.join("docs/helper.typ"),
+            "#import \"./helper.typ\": *\n",
+        )
+        .unwrap();
+        let project_root = canonical_project_root(&project_root).unwrap();
+
+        validate_reachable_typst_modules(
+            "#import \"./helper.typ\": *\n",
+            &VirtualPathBuf::parse("docs/main.qd").unwrap(),
+            &project_root,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn typst_diagnostics_sanitize_native_and_slash_temp_paths() {
+        let temporary_root = Path::new("D:\\a\\_temp\\scribium");
+        let stderr = "error: D:/a/_temp/scribium/project/docs/main.typ:1:1\n".to_string()
+            + "error: \\\\?\\D:\\a\\_temp\\scribium\\project\\docs\\main.typ:2:1\n"
+            + "error: C:/Users/runneradmin/AppData/Temp/project/docs/target/Users/main.typ:3:1\n"
+            + "error: <typst-build>/project/docs/target/Users/main.typ:4:1\n"
+            + "error: \\\\server\\share\\outside\\main.typ:5:1\n"
+            + "error: \\\\server\\share\\project\\docs\\target\\Users\\main.typ:6:1\n";
+
+        let sanitized = sanitize_typst_diagnostic(stderr.as_bytes(), temporary_root);
+
+        assert_eq!(
+            sanitized,
+            "error: <typst-build>/project/docs/main.typ:1:1\n".to_string()
+                + "error: <typst-build>/project/docs/main.typ:2:1\n"
+                + "error: /docs/target/Users/main.typ:3:1\n"
+                + "error: <typst-build>/project/docs/target/Users/main.typ:4:1\n"
+                + "error: <host-path>:5:1\n"
+                + "error: /docs/target/Users/main.typ:6:1\n"
+        );
+        assert!(!sanitized.contains("D:/a/"));
+        assert!(!sanitized.contains("D:\\a\\"));
+        assert!(!sanitized.contains("C:/Users/"));
+        assert!(!sanitized.contains("\\\\?\\"));
+    }
+
+    #[test]
+    fn static_package_preflight_only_matches_active_module_operands() {
+        assert!(contains_static_typst_preflight_violation(
+            "#import \"@preview/pkg:1.0.0\": *"
+        ));
+        assert!(contains_static_typst_preflight_violation(
+            "#include \"@local/pkg:1.0.0\""
+        ));
+        assert!(contains_static_typst_preflight_violation(
+            "#{ import \"@company/pkg:1.0.0\" }"
+        ));
+        assert!(contains_static_typst_preflight_violation(
+            "#let module = { import \"@workspace/pkg:1.0.0\" }"
+        ));
+        assert!(contains_static_typst_preflight_violation(
+            "#let package = \"@local/pkg:1.0.0\"\n#import package"
+        ));
+
+        for source in [
+            "// #import \"@preview/pkg:1.0.0\": *",
+            "/* #include \"@local/pkg:1.0.0\" */",
+            "`#import \"@company/pkg:1.0.0\"`",
+            "```typst\n#import \"@company/pkg:1.0.0\"\n```",
+            "#let text = \"@preview/pkg:1.0.0\"",
+            "#raw(\"#import \\\"@preview/pkg:1.0.0\\\": *\")",
+            "\\#import \"@preview/pkg:1.0.0\"",
+            "import \"@preview/pkg:1.0.0\"",
+            "text { import \"@preview/pkg:1.0.0\" }",
+        ] {
+            assert!(
+                !contains_static_typst_preflight_violation(source),
+                "inert text was classified as a package reference: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_package_preflight_does_not_block_runtime_evaluation() {
+        for source in [
+            "#eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+            "#let package = \"@preview/\" + \"pkg:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")",
+            "#let runtime_eval = eval\n#runtime_eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+            "#let runtime_eval = std.eval\n#runtime_eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+        ] {
+            assert!(
+                !contains_static_typst_preflight_violation(source),
+                "runtime evaluation must not be rejected by static preflight: {source:?}"
+            );
+        }
+
+        for source in [
+            "// #eval(\"#import \\\"@preview/pkg:1.0.0\\\": *\")",
+            "`#eval(\"@preview/pkg:1.0.0\")`",
+            "```typst\n#eval(\"@preview/pkg:1.0.0\")\n```",
+            "#let text = \"eval(\\\"@preview/pkg:1.0.0\\\")\"",
+            "#raw(\"#eval(\\\"@preview/pkg:1.0.0\\\")\")",
+        ] {
+            assert!(
+                !contains_static_typst_preflight_violation(source),
+                "inert runtime-evaluation text was rejected: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn logical_path_components_are_not_host_path_markers() {
+        let diagnostic = "<typst-build>/project/docs/target/Users/main.typ:1:1";
+        assert_eq!(sanitize_absolute_path_tokens(diagnostic), diagnostic);
+        assert_eq!(
+            sanitize_absolute_path_tokens("/tmp/build/project/docs/target/Users/main.typ:1:1"),
+            "/docs/target/Users/main.typ:1:1"
+        );
+        assert_eq!(
+            sanitize_absolute_path_tokens("relative/target/Users/main.typ:1:1"),
+            "relative/target/Users/main.typ:1:1"
+        );
+        assert_eq!(
+            sanitize_absolute_path_tokens(r"relative\target\Users\main.typ:1:1"),
+            r"relative\target\Users\main.typ:1:1"
         );
     }
 

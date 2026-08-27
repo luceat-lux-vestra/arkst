@@ -63,6 +63,7 @@ tempfile = "3"
 rushdown = { git = "https://github.com/yuin/rushdown.git", rev = "e5eb4e4446541ea0ed53111c1b37e779283ff57c", default-features = false, features = ["std", "html-entities"] }
 libm = { version = "0.2.16", default-features = false }
 typst = "0.15.1"
+typst-syntax = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
 typst-layout = "0.15.1"
 typst-pdf = "0.15.1"

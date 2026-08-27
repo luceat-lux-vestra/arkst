@@ -2204,6 +2204,7 @@ dependencies = [
  "scribium-source",
  "scribium-typst",
  "scribium-typst-subprocess",
+ "tempfile",
  "typst",
  "typst-assets",
  "typst-layout",
@@ -2218,6 +2219,7 @@ dependencies = [
  "scribium-project",
  "scribium-typst",
  "tempfile",
+ "typst-syntax",
 ]
 
 [[package]]

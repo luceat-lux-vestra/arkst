@@ -12,6 +12,7 @@ description = "Native Typst CLI subprocess adapter for Scribium"
 scribium-project.workspace = true
 scribium-typst.workspace = true
 tempfile.workspace = true
+typst-syntax.workspace = true
 
 [dev-dependencies]
 scribium-core.workspace = true

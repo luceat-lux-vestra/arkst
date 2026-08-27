@@ -28,14 +28,15 @@ dedicated `scribium-typst-inprocess` crate. The adapter may be used as an
 explicitly selected backend after the production follow-up is reviewed, but
 the subprocess backend remains the default and supported baseline.
 
-The adapter must:
+For `InProcessBackend` specifically, the adapter must:
 
 - consume the existing `TypstBackend` contract after `scribium-typst` has
   generated Typst source;
 - map Typst's public `World` interface from an existing `VirtualProject`;
 - keep source, asset, font, path, and project-boundary policy owned by
   Scribium's virtual project model;
-- fail closed for unavailable package/network capabilities;
+- fail closed for unavailable package/network capabilities at the
+  Scribium-owned `World` boundary;
 - keep Typst compiler types inside the native adapter crate;
 - remain separate from the platform-neutral `scribium-typst` lowering and its
   `wasm32-unknown-unknown` boundary; and
@@ -48,10 +49,11 @@ not approval for browser/WASM rendering.
 
 The current public Typst 0.15.1 compile and PDF APIs were sufficient to build a
 `ProjectWorld` over `VirtualProject`. Real generated Scribium source compiled
-to valid PDFs. Images, project fonts, missing resources, traversal, package
-denial, fail-closed date behavior, repeated reads, and structured failure
-diagnostics were exercised. A subprocess parity test covered generated
-multi-page success and invalid-source failure classification.
+to valid PDFs. Images, project fonts, missing resources, traversal,
+in-process package capability denial, fail-closed date behavior, repeated
+reads, and structured failure diagnostics were exercised. A subprocess parity
+test covered generated multi-page success and invalid-source failure
+classification.
 
 The workspace temporarily pins citationberg's upstream PR #44 merge revision
 `06a591e2f237d25e1dfdedac3f3d1494c496c52d` because the crates.io `0.7.0`
@@ -87,7 +89,9 @@ remain macOS arm64 measurements.
 - Native embedders can avoid a process boundary after an explicit opt-in.
 - In-process failures can become structured Scribium diagnostics without
   exposing Typst types across semantic boundaries.
-- `VirtualProject` remains the resource/security authority.
+- `VirtualProject` remains the resource and capability authority for the
+  in-process World; subprocess source staging remains a separate native
+  adapter boundary.
 - The existing subprocess path remains available as the default and fallback.
 
 ### Negative
@@ -146,6 +150,47 @@ network, and date/environment capabilities fail-closed.
 Issue #201 remains the companion work for cross-platform parity corpus and
 fixture-level semantic-oracle expansion. Issue #203's citationberg pin and
 the related `deny.toml` policy were not changed by this implementation.
+
+## Capability contract correction addendum (2026-08-27, issue #201 / PR #205)
+
+The initial PR #205 parity implementation treated the subprocess adapter's
+syntax preflight as if it could establish the same package/network isolation
+as the in-process adapter. That contract was unsound and is corrected here;
+the earlier decision history remains unchanged.
+
+`SubprocessBackend` invokes the Typst CLI, which owns its runtime package
+resolver. Scribium cannot prove through syntax analysis alone that every
+runtime execution path avoids that resolver or its network capability. Typst
+supports runtime evaluation and dynamic module/value access, so extending a
+deny-list for each discovered spelling would duplicate interpreter and
+data-flow semantics without producing a maintainable security boundary.
+
+The subprocess adapter therefore remains the default,
+compatibility-oriented backend with explicit project-root staging, generated
+source/resource staging, diagnostic path sanitization, and optional
+best-effort static validation of obvious package or dynamic module operands.
+That validation is for early validation and user experience only. It is not a
+security sandbox and does not guarantee package resolver unreachability,
+network denial, or prevention of all runtime-generated package access. In
+particular, `eval` is not denied by identifier, alias, or field-access
+blacklists.
+
+`InProcessBackend` owns the hard package/resource capability boundary because
+Scribium owns the Typst `World`. Its `VirtualProject`-only resource authority
+denies package roots, host filesystem access, and network/package resolution
+fail-closed, including when a request is produced at runtime. This capability
+difference is an intentional architectural divergence, not a parity oracle
+assertion. The parity oracle continues to require equivalent document success,
+resource/project-boundary behavior, diagnostic path hygiene, and reliable
+source-map provenance.
+
+This correction does not implement an OS-level subprocess sandbox, change the
+default backend, or expand #188, #190, #191, or #203. If a hardened subprocess
+boundary is required, it needs a separate proposal covering Linux
+namespace/seccomp or bwrap-style isolation, macOS sandboxing, Windows
+restricted-token/AppContainer/job-object strategy, filesystem allowlists,
+network denial, package/cache isolation, and cross-platform deployment and
+support cost.
 
 ## References
 

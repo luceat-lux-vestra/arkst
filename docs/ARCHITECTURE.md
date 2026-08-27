@@ -251,7 +251,7 @@ These are the physical architectural boundaries after R8. `scribium-source`,
 `scribium-engine` own their extracted domains. `scribium-typst` owns only pure,
 platform-neutral IR-to-Typst lowering and its contract, while
 `scribium-typst-subprocess` is native-only and owns Typst CLI execution,
-filesystem staging, and security-boundary enforcement. `scribium-core` remains
+filesystem staging, and project-resource boundary enforcement. `scribium-core` remains
 the orchestration and facade layer. `scribium-typst-inprocess` is also
 native-only; it owns the optional public-API `World` mapping over an existing
 `VirtualProject` and PDF export without adding host filesystem or network
@@ -463,14 +463,17 @@ This design ensures:
 
 ### Native Typst source context
 
-The native Typst subprocess adapter has a second, explicit filesystem context
-in addition to the in-memory `VirtualProject`:
+The native Typst subprocess adapter has a second, explicit context for staged
+project resources in addition to the in-memory `VirtualProject`:
 
 - `TypstInput.entry_path` is the normalized, project-root-relative logical path
   of the Scribium source entry. It is not display metadata and is never an OS
   absolute path.
-- `TypstSourceContext.project_root` is an explicit physical read boundary. The
-  adapter does not use `std::env::current_dir()` as an implicit resource root.
+- `TypstSourceContext.project_root` identifies the explicit physical root for
+  staged project-resource reads. This boundary covers project-relative source
+  and asset reads only; it does not constrain the subprocess-owned Typst
+  package resolver. The adapter does not use `std::env::current_dir()` as an
+  implicit resource root.
 - With a source context, the adapter creates a unique temporary mirror of the
   project tree, canonicalizes every source and symlink target, and rejects any
   final target outside the canonical project root. Symlinks that remain inside
@@ -485,7 +488,8 @@ in addition to the in-memory `VirtualProject`:
   `typst compile --root <temporary-mirror> <temporary-mirror>/<entry>.typ
   <temporary-build>/output.pdf`. This makes relative Typst resources resolve
   from the Scribium logical entry directory while keeping the source tree
-  read-only.
+  read-only. The project-resource boundary does not turn subprocess package
+  resolution into a Scribium-controlled capability.
 
 The backend without a `TypstSourceContext` remains a self-contained compilation
 mode. It can compile generated Typst that does not need filesystem resources,
@@ -499,9 +503,10 @@ Markdown frontend and backend-neutral IR retain the source destination rather
 than injecting an OS path. For a local relative image, Typst lowering emits
 `#image("...")`, so the source-context entry directory determines the
 resolution base. The native mirror and `--root` boundary reject project-root
-escapes and symlink escapes. Absolute filesystem paths and URI schemes,
-including `http`, `https`, and `data`, are rejected before Typst; Scribium does
-not fetch network images. Image alt content and titles remain in AST/IR, while
+escapes and symlink escapes for project-relative resources. Absolute filesystem
+paths and URI schemes, including `http`, `https`, and `data`, are rejected
+before Typst; Scribium does not fetch network images. Image alt content and
+titles remain in AST/IR, while
 the current Typst backend does not emit PDF accessibility metadata for them.
 
 ### Synchronous Core, Async Host
@@ -860,6 +865,15 @@ process exit status, stdout/stderr, and subprocess-specific errors. It
 implements the platform-neutral contract; the contract itself does not move
 into this crate.
 
+The subprocess adapter remains the default and compatibility-oriented native
+backend. Its explicit project-root staging, generated-resource staging, and
+diagnostic path sanitization are native adapter boundaries. It may perform
+best-effort static preflight of obvious package and dynamic module operands for
+early validation, but Typst CLI owns runtime evaluation and package resolution.
+Syntax-only preflight does not guarantee package resolver unreachability,
+network denial, or prevention of every runtime-generated package access. An
+OS-level sandbox, if required, is a separate host/security decision.
+
 ```text
 scribium-typst
         |
@@ -878,8 +892,10 @@ installed Typst executable
 It maps an existing `VirtualProject` to Typst's public `World` contract,
 compiles the generated source to a paged document, and exports PDF through the
 public `typst-pdf` API. Its project, asset, font, package, date, and traversal
-policies remain bounded by `VirtualProject`; it does not use `typst-kit` host
-filesystem/package discovery. Typst compiler types remain inside this crate.
+policies remain bounded by `VirtualProject`; its Scribium-owned `World` is the
+hard capability boundary. It does not use `typst-kit` host filesystem/package
+discovery, so package and network capability requests fail closed, including
+when generated at runtime. Typst compiler types remain inside this crate.
 
 The subprocess adapter remains the default and rollback path. The optional
 adapter and its evidence are recorded in ADR-0021 and
@@ -1295,10 +1311,13 @@ This architecture does not design sandboxing or privilege separation.
 
 ### Filesystem, network, and determinism policy
 
-Platform-independent compiler crates perform no network access. Any future
-network-backed package or resource acquisition belongs to an explicit
-host/tooling adapter and requires a separate architecture and security
-decision; no such adapter is defined here.
+Platform-independent compiler crates perform no network access. The
+in-process Typst `World` likewise exposes no host filesystem, package, or
+network capability. The subprocess adapter invokes the Typst CLI, whose runtime
+package resolver is outside Scribium's syntax-only preflight; this is not a
+hard package/network isolation guarantee. Any Scribium-controlled
+network-backed package or resource acquisition, or any hardened subprocess
+sandbox, requires an explicit host/tooling architecture and security decision.
 
 Project-root containment, absolute include restrictions, and symlink escape
 prevention are native host filesystem policies. Compiler crates receive only

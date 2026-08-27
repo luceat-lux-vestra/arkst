@@ -102,11 +102,36 @@ on the runner image.
 The native in-process adapter is covered by
 `crates/scribium-typst-inprocess/tests/backend_integration.rs`. Its focused
 suite validates generated Scribium Typst, multi-page PDFs, VirtualProject
-images and fonts, repeated loads, missing/traversal/package denial, invalid
+images and fonts, repeated loads, missing/traversal failures, in-process
+package-capability denial (including a runtime-generated request), invalid
 entry paths, deterministic diagnostics, and source-map handoff. CLI selection
 tests cover the subprocess default, explicit values, invalid values, and an
 explicit in-process PDF build; cross-platform parity corpus expansion remains
 tracked by issue #201.
+
+Issue #201's fixture-level semantic oracle is an independent test target:
+
+~~~
+SCRIBIUM_REQUIRE_TYPST=1 \
+  cargo test -p scribium-typst-inprocess \
+  --test backend_parity --all-features -- --nocapture
+~~~
+
+The target requires Typst 0.15.1, runs the generated Scribium source through
+both native adapters, compares success/document behavior and normalized
+failure semantics, and checks logical diagnostics, source-map availability,
+resource/font policy, project-boundary behavior, and host-path leakage. Static
+package preflight cases are an intentional architectural divergence: the
+subprocess case records best-effort validation while the in-process case
+records hard denial at the Scribium-owned World boundary; this is not a
+package/network isolation parity assertion. Runtime-generated package access
+is tested only against InProcessBackend and is never executed by the
+subprocess parity target. The target does not compare PDF bytes. The CI native
+OS matrix runs it as a named step, in addition to the general workspace test,
+with the Typst requirement enabled so a missing executable cannot produce a
+false green result. See
+[docs/research/typst-parity-201.md](research/typst-parity-201.md) for the
+fixture matrix and intentional divergences.
 
 ## Property Tests
 

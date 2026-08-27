@@ -47,7 +47,9 @@ and Typst-quality output.
 4. **Semantic parity, not pixel parity** — PDF and HTML serve different purposes
 5. **Backend neutrality** — any future native `.typ` passthrough is a
    host-level capability, not a generic raw-Typst escape hatch in backend-neutral IR
-6. **Safe by default** — no shell execution, no network, scoped filesystem
+6. **Safe by default** — no shell execution or core network access, scoped
+   filesystem; strict package/network isolation uses the explicit in-process
+   World or a separately approved host sandbox
 7. **Deterministic** — same input always produces same output
 8. **Diagnostics first** — clear error messages with source locations
 
