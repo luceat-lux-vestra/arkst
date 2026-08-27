@@ -121,6 +121,21 @@ fn audit_keeps_implicit_reference_structural_and_modes_isolated() {
             if name == "1" && source_slice(source, *span) == ".1"
     ));
 
+    let prefix_source = ".1abc\n";
+    let prefix_output = parse_with_diagnostics(prefix_source);
+    assert!(prefix_output.diagnostics.is_empty(), "{prefix_output:?}");
+    let Block::Paragraph { content, span } = &prefix_output.document.nodes[0] else {
+        panic!("expected numeric call prefix and source remainder")
+    };
+    assert_eq!(source_slice(prefix_source, *span), ".1abc");
+    assert!(content.iter().any(|inline| {
+        matches!(inline, Inline::DirectiveCall { name, span, .. }
+            if name == "1" && source_slice(prefix_source, *span) == ".1")
+    }));
+    assert!(content.iter().any(|inline| {
+        matches!(inline, Inline::Text { span, .. } if source_slice(prefix_source, *span) == "abc")
+    }));
+
     let markdown = parse_with_mode(".note {x}\n", Mode::Markdown);
     assert!(!markdown.document.nodes.iter().any(|node| {
         matches!(node, Block::DirectiveCall { .. })
@@ -518,7 +533,7 @@ fn audit_requires_adjacent_named_argument_delimiters_and_preserves_source() {
         }));
     }
 
-    for source in [".foo name :{x}\n", ".foo name : {x}\n"] {
+    for source in [".foo name :{x}\n", ".foo name: {x}\n", ".foo name : {x}\n"] {
         let output = parse_with_diagnostics(source);
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::Paragraph { content, span } = &output.document.nodes[0] else {
@@ -541,16 +556,6 @@ fn audit_requires_adjacent_named_argument_delimiters_and_preserves_source() {
         }));
         assert_markdown_isolated(source);
     }
-
-    let source = ".foo name: {x}\n";
-    let output = parse_with_diagnostics(source);
-    assert_eq!(output.diagnostics.len(), 1, "{output:?}");
-    assert_eq!(output.diagnostics[0].code, "E2002");
-    assert_eq!(source_slice(source, output.diagnostics[0].span), "name:");
-    assert!(
-        matches!(output.document.nodes.first(), Some(Block::Unsupported { span, .. }) if source_slice(source, *span) == source),
-        "{output:?}"
-    );
 }
 
 #[test]

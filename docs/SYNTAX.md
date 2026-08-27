@@ -126,9 +126,9 @@ implicit-positional-reference:
 
 The call lexer uses the pinned Quarkdown v2.5.1 identifier alternatives. An
 alphabetic identifier consumes only ASCII letters and digits; a numeric
-identifier consumes ASCII digits, including `0` and leading zeros. A numeric
-token followed immediately by an ASCII alphanumeric byte is not recognized as
-a complete token (`.1abc` remains source text). Numeric call identifiers use
+identifier consumes ASCII digits, including `0` and leading zeros. The scanner
+returns the prefix accepted by that grammar, so `.1abc` is the numeric call
+`.1` followed by the untouched remainder `abc`. Numeric call identifiers use
 the same argument grammar as other call identifiers; interpreting `.1`, `.01`,
 and related tokens as implicit references remains an evaluator concern owned by
 #150.
@@ -140,10 +140,9 @@ Call syntax has the following properties:
   named-argument identifier; nonmatching suffixes remain source text rather
   than being folded into the identifier.
 - **Implicit positional references** (`.1`, `.2`, `.12`, `.0`, `.01`, ...) are
-  numeric call identifiers at the grammar boundary. `.1abc` is not a complete
-  numeric token, while `.1-1` is the `.1` token followed by ordinary source.
-  Binding and evaluation of these references remain separate from lexical
-  recognition.
+  numeric call identifiers at the grammar boundary. `.1abc` is the `.1` token
+  followed by ordinary source, just as `.1-1` is. Binding and evaluation of
+  these references remain separate from lexical recognition.
 - A call introducer may begin at source start or after a byte other than ASCII
   alphanumeric, `.`, or `\\`, matching the pinned call-pattern evidence. This
   permits UTF-8 surroundings and symbol/underscore surroundings while keeping
@@ -152,9 +151,10 @@ Call syntax has the following properties:
 - Positional arguments are wrapped in curly braces: `{...}`.
 - Named arguments are `name:{...}`. The identifier, `:`, and `{` must be
   adjacent; `name :{...}`, `name: {...}`, and `name : {...}` do not create a
-  named argument. The existing structured diagnostic for an immediately
-  recognized `name:` without an adjacent braced value remains distinct from
-  named-argument recognition.
+  named argument. When that optional argument does not match, the parser stops
+  at the call prefix and leaves the candidate as source remainder; malformed
+  braced values that do match the `name:{` boundary retain their structured
+  diagnostic path.
 - Positional and named arguments may be mixed. Scribium's current parser
   enforces that every argument after a named argument must also be named and
   reports `E2001` for an unnamed argument that follows one. In pinned

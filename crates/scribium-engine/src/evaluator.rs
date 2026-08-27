@@ -9459,9 +9459,10 @@ fn number_to_range_endpoint(value: &InvocationValue) -> Result<i32, String> {
 
 /// Parses the numeric part of a parser-preserved implicit parameter call.
 ///
-/// The frontend already enforces the token boundary and rejects `.0`/leading
-/// zero spellings. This checked conversion keeps oversized decimal indices
-/// deterministic instead of allowing an integer conversion panic.
+/// The frontend preserves the numeric spelling; this evaluator policy accepts
+/// only 1-based indices without a leading zero. This checked conversion keeps
+/// oversized decimal indices deterministic instead of allowing an integer
+/// conversion panic.
 fn implicit_parameter_index(name: &str) -> Option<ImplicitParameterIndex> {
     let bytes = name.as_bytes();
     if bytes.is_empty() || bytes[0] == b'0' || !bytes.iter().all(u8::is_ascii_digit) {

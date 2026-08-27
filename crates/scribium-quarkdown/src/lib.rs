@@ -573,7 +573,7 @@ fn parse_segment(
         ));
     };
 
-    let Some((name_end, identifier_kind)) = scan_identifier(bytes, name_start) else {
+    let Some(name_end) = scan_identifier(bytes, name_start) else {
         if dotted {
             return Ok((
                 CallSegment {
@@ -592,22 +592,6 @@ fn parse_segment(
             ByteSpan::new(start.min(source.len()), (name_start + 1).min(source.len())),
         ));
     };
-    if identifier_kind == IdentifierKind::Numeric
-        && bytes
-            .get(name_end)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric())
-    {
-        return Ok((
-            CallSegment {
-                name: String::new(),
-                name_span: ByteSpan::new(start, start),
-                positional_args: Vec::new(),
-                named_args: Vec::new(),
-                span: ByteSpan::new(start, start),
-            },
-            start,
-        ));
-    }
     let parsed = parse_arguments(source, name_end)?;
     let span = ByteSpan::new(if dotted { start } else { name_start }, parsed.end);
     Ok((
@@ -662,7 +646,7 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
             positional_args.push(arg);
         } else {
             let arg_name_start = cursor;
-            let Some((arg_name_end, _)) = scan_identifier(bytes, arg_name_start) else {
+            let Some(arg_name_end) = scan_identifier(bytes, arg_name_start) else {
                 if require_argument {
                     return Err(ParseError::new(
                         "E2004",
@@ -685,11 +669,11 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
             }
             let open = cursor + 1;
             if bytes.get(open) != Some(&b'{') {
-                return Err(ParseError::new(
-                    "E2002",
-                    "named argument must be followed by a braced value",
-                    ByteSpan::new(arg_name_start, cursor + 1),
-                ));
+                // The named-argument parser is one optional argument in the
+                // surrounding repeat. If its braced-value boundary does not
+                // match, leave the entire candidate for the caller's
+                // remainder path instead of fabricating a diagnostic.
+                break;
             }
             let value = parse_braced(source, open)?;
             end = value.span.end;
@@ -908,35 +892,28 @@ fn consume_continuation(bytes: &[u8], cursor: usize) -> Option<usize> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IdentifierKind {
-    Alphabetic,
-    Numeric,
-}
-
 /// Scan one call-grammar identifier using the pinned v2.5.1 alternatives:
 /// `[A-Za-z][A-Za-z0-9]*|[0-9]+`.
-///
-/// The returned kind lets the caller apply the one lexical distinction that
-/// the surrounding call grammar needs: a numeric identifier followed directly
-/// by an ASCII alphanumeric byte is not a complete numeric token.
-fn scan_identifier(bytes: &[u8], start: usize) -> Option<(usize, IdentifierKind)> {
+fn scan_identifier(bytes: &[u8], start: usize) -> Option<usize> {
     let first = *bytes.get(start)?;
-    let kind = if first.is_ascii_alphabetic() {
-        IdentifierKind::Alphabetic
+    let numeric = if first.is_ascii_alphabetic() {
+        false
     } else if first.is_ascii_digit() {
-        IdentifierKind::Numeric
+        true
     } else {
         return None;
     };
     let mut end = start + 1;
-    while bytes.get(end).is_some_and(|byte| match kind {
-        IdentifierKind::Alphabetic => byte.is_ascii_alphanumeric(),
-        IdentifierKind::Numeric => byte.is_ascii_digit(),
+    while bytes.get(end).is_some_and(|byte| {
+        if numeric {
+            byte.is_ascii_digit()
+        } else {
+            byte.is_ascii_alphanumeric()
+        }
     }) {
         end += 1;
     }
-    Some((end, kind))
+    Some(end)
 }
 
 /// Returns whether `name` satisfies Scribium's declaration-name grammar:
@@ -984,7 +961,7 @@ mod tests {
 
     #[test]
     fn empty_and_plain_text_are_not_calls() {
-        for source in ["", "hello world", ".", ".1abc", ". note", "...ellipsis"] {
+        for source in ["", "hello world", ".", ". note", "...ellipsis"] {
             assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
         }
     }
@@ -1007,8 +984,13 @@ mod tests {
             assert_eq!(end, source.len());
         }
 
-        for source in [".1abc", ".12foo", ".1e5"] {
-            assert!(matches!(parse_call(source), Ok(None)), "{source:?}");
+        for (source, expected_name, expected_end) in
+            [(".1abc", "1", 2), (".12foo", "12", 3), (".1e5", "1", 2)]
+        {
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(call.name, expected_name, "{source:?}");
+            assert_eq!(call.span, ByteSpan::new(0, expected_end), "{source:?}");
+            assert_eq!(end, expected_end, "{source:?}");
         }
         for source in [".1-1", ".1.", ".1)", ".1!", ".1한"] {
             let (call, end) = parse_call(source).unwrap().unwrap();
@@ -1371,11 +1353,15 @@ mod tests {
 
     #[test]
     fn rejects_malformed_chains_deterministically() {
-        for source in [".a::", ".a:::b", ".a:: {x}", ".a::1abc"] {
+        for source in [".a::", ".a:::b", ".a:: {x}"] {
             let error = parse_call(source).unwrap_err();
             assert_eq!(error.code, "E2004", "{source:?}");
             assert!(error.span.is_valid_for(source), "{source:?}");
         }
+        let (call, end) = parse_call(".a::1abc").unwrap().unwrap();
+        assert_eq!(call.chain[0].name, "1");
+        assert_eq!(call.span, ByteSpan::new(0, 5));
+        assert_eq!(end, 5);
         for source in [
             concat!(".call {a} \\", "\n"),
             concat!(".call {a} \\", "\n\nnext"),
@@ -1442,8 +1428,12 @@ mod tests {
             assert_eq!(error.code, "E2003", "{source:?}");
         }
         for source in [".foo key:", ".foo key: value", ".foo key: {value}"] {
-            let error = parse_call(source).unwrap_err();
-            assert_eq!(error.code, "E2002", "{source:?}");
+            let (call, end) = parse_call(source).unwrap().unwrap();
+            assert_eq!(call.name, "foo", "{source:?}");
+            assert!(call.named_args.is_empty(), "{source:?}");
+            assert_eq!(call.span, ByteSpan::new(0, 4), "{source:?}");
+            assert_eq!(end, 4, "{source:?}");
+            assert_eq!(&source[end..], &source[4..], "{source:?}");
         }
         let error = parse_call(".foo width:{\"x\"} {y}").unwrap_err();
         assert_eq!(error.code, "E2001");

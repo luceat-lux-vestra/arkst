@@ -53,7 +53,9 @@ data structures, private plugin ABI, or internal compiler architecture.
 The Quarkdown function-call grammar is audited and implemented at the bounded
 parser/frontend boundary recorded by #148. The #157 identifier, named-delimiter,
 numeric-reference, and call-start lexical slice is aligned with the pinned
-evidence; the remaining call-grammar gaps are still partial. The work is
+evidence, including prefix parsing such as `.1abc` as `.1` plus source
+remainder and non-diagnostic incomplete named candidates; the remaining
+call-grammar gaps are still partial. The work is
 clean-room from public documentation, notably *"Syntax of a function call"*
 on the Quarkdown wiki. No Quarkdown source code is copied or translated. See
 `SPEC_SOURCES.md` and [`RECONCILIATION.md`](RECONCILIATION.md) for provenance
@@ -126,7 +128,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Feature                        | Syntax                           | Compatibility            | Status           |
 |--------------------------------|----------------------------------|--------------------------|------------------|
 | Dot-prefixed call              | `.note`                          | Parsed                   | Parsed-only: pinned identifier and call-start lexical boundaries are aligned by #157; separator and recovery gaps remain |
-| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported numeric identifiers; binding is separate | Parsed-only lexical recognition, including `.0`/`.01`; implicit-reference evaluation remains #150-owned |
+| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported numeric identifiers; binding is separate | Parsed-only lexical recognition, including `.0`/`.01` and `.1abc` as `.1` plus remainder; implicit-reference evaluation remains #150-owned |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
 | Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: identifier and `:{` adjacency are aligned by #157; positional-after-named remains #163 and binding validity belongs to #149 |
 | Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163) |
@@ -135,7 +137,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: nested tight/content boundaries are tracked by #158 and #160 |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Partial: top-level tight calls pass; nested tight content is #158 |
-| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Partial: inline recovery suffix loss is #159 |
+| Malformed-call diagnostics     | `E2001`, `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; inline recovery suffix loss is #159 |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -1240,8 +1242,11 @@ accessed dates.
 
 - The #157 lexical slice is now aligned with the pinned identifier,
   named-delimiter, numeric-reference, and ASCII/Unicode call-start evidence.
-  Implicit-reference binding/evaluation remains #150-owned, and declaration
-  name validity remains the evaluator-owned contract.
+  Numeric identifiers use accepted-prefix parsing (`.1abc` leaves `abc` as
+  remainder), and incomplete optional named candidates remain source without a
+  fabricated diagnostic. Implicit-reference binding/evaluation remains
+  #150-owned, and declaration name validity remains the evaluator-owned
+  contract.
 - Pinned v2.5.1 permits optional argument separators before the first argument
   and before `::`, and consumes a trailing continuation without an argument;
   current Scribium does not preserve those forms and reports `E2004` in some

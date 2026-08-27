@@ -659,11 +659,7 @@ mod tests {
 
     #[test]
     fn compile_propagates_parser_diagnostics() {
-        for (input, expected_code) in [
-            (".foo {", "E2003"),
-            (".foo width:{x} {y}", "E2001"),
-            (".foo key:", "E2002"),
-        ] {
+        for (input, expected_code) in [(".foo {", "E2003"), (".foo width:{x} {y}", "E2001")] {
             let (result, source_id) = compile_source(input);
             assert_eq!(result.diagnostics.len(), 1, "input {input:?}");
             let diag = &result.diagnostics[0];
