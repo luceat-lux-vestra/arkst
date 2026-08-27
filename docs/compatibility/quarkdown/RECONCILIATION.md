@@ -48,7 +48,7 @@ surfaces.
 
 | Audit / canonical owner | Canonical artifact and executable guard | Enumerated rows | Status result | Cross-audit rule |
 |---|---|---:|---|---|
-| #148 grammar/frontend | [`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md); `crates/scribium-markdown/tests/call_grammar_audit.rs` | 15 | 12 `PARTIAL`, 3 `PARSED_ONLY` | Recognition/provenance only; #149 owns binding and #150 owns evaluation. |
+| #148 grammar/frontend | [`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md); `crates/scribium-markdown/tests/call_grammar_audit.rs` | 15 | 10 `PARTIAL`, 5 `PARSED_ONLY` | Recognition/provenance only; #149 owns binding and #150 owns evaluation. #157's lexical slice is implemented; remaining grammar gaps retain their row statuses. |
 | #149 value/binding/conversion | [`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md) | 23 | 10 `SUPPORTED_SEMANTICS`, 12 `PARTIAL`, 1 `NOT_APPLICABLE` | Shared conversion and binding are engine-owned; consumers link back instead of adding local adapters. |
 | #150 programmable semantics | [`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md) | 16 | 13 `PARTIAL`, 2 `UNSUPPORTED`, 1 `NOT_APPLICABLE` | Callable, scope, order, failure, and provenance semantics remain separate from syntax and content producers. |
 | #151 stdlib/general builtins | [`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md) and [`STDLIB_BUILTINS_AUDIT_MANIFEST.tsv`](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) | 162 | 41 `SUPPORTED_SEMANTICS`, 8 `PARTIAL`, 10 `UNSUPPORTED`, 1 `NOT_APPLICABLE` among 60 #151-owned rows; 102 explicit handoffs | The complete pinned declaration sweep is retained; cross-owned names are not silently omitted or reclassified. |
@@ -89,7 +89,7 @@ status recorded by its owner.
 
 | Surface or boundary | Primary owner and status | Consumer/handoff | Evidence and residual gap |
 |---|---|---|---|
-| Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #149 binding, #150 evaluation, #154 content | Parser tests retain spans, but pinned lexical/recovery gaps are #157–#164. Parser recognition is never a semantic claim. |
+| Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #149 binding, #150 evaluation, #154 content | Parser tests retain spans; the remaining pinned grammar/provenance gaps are #158–#164. Parser recognition is never a semantic claim. |
 | Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths are evidenced; shared binder/raw-body/diagnostic/atomicity gaps are #165–#167. |
 | Variables, callable scope, lazy evaluation, iteration, optionality, extension, failure, and evaluator provenance | #150; `PARTIAL` except `.node`/`.extend` boundaries | #151 builtin declarations; #154 content results | Current bounded callable paths are tested. `.extend`/`.super` is `UNSUPPORTED` and #169-owned; upstream partial-effects divergence is not fixed here. |
 | General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` remain `PARTIAL` and #172-owned; `.get` is #194-owned, library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
@@ -155,7 +155,7 @@ implementation requests created by #156.
 
 | Gap class | Current ownership |
 |---|---|
-| `PRODUCTION_GAP` | #157–#160, #162–#167, #169, #172–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent. |
+| `PRODUCTION_GAP` | #158–#160, #162–#167, #169, #172–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
 | `BACKEND_GAP` | #201 parity evidence and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
@@ -168,11 +168,11 @@ numbers are not inferred from a numeric sequence.
 
 | Issues | Origin / canonical owner | Scope and dependency decision | Recommended band |
 |---|---|---|---|
-| [#157](https://github.com/luceat-lux-vestra/scribium/issues/157), [#159](https://github.com/luceat-lux-vestra/scribium/issues/159), [#162](https://github.com/luceat-lux-vestra/scribium/issues/162), [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) | #148 / Markdown and Quarkdown frontend | Lexical boundaries, malformed recovery, escaped delimiters, and separator placement. These are production grammar/provenance gaps; they must not absorb binder/evaluator behavior. | Frontend band; parallel after #187. |
+| [#159](https://github.com/luceat-lux-vestra/scribium/issues/159), [#162](https://github.com/luceat-lux-vestra/scribium/issues/162), [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) | #148 / Markdown and Quarkdown frontend | Malformed recovery, escaped delimiters, and separator placement. These are production grammar/provenance gaps; they must not absorb binder/evaluator behavior. | Frontend band; parallel after #187. |
 | [#158](https://github.com/luceat-lux-vestra/scribium/issues/158), [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | #148 → #154 / Markdown content conversion | Nested tight-call structure and inline Markdown content retention. #160 consumes the frontend/content boundary; #158 is its structural prerequisite where nested wrappers are involved. | Frontend/content band; #160 follows #158 where the shared representation is required. |
-| [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) | #148 → #149 / grammar representation with engine handoff | Preserve positional-after-named shape in frontend data; semantic rejection remains #149-owned. Depends on #157’s name/shape contract. | After #157, before #165. |
+| [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) | #148 → #149 / grammar representation with engine handoff | Preserve positional-after-named shape in frontend data; semantic rejection remains #149-owned. It consumes the completed #157 name/shape contract. | After #157, before #165. |
 | [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | #149 / engine binder, conversion, raw body, diagnostics, atomicity | One shared engine contract; no per-builtin binder or conversion duplicates. #165 depends on #163; #166 consumes structured content/call shapes; #167 hardens the shared commit/diagnostic boundary used by state and content consumers. | Engine prerequisite band. |
-| [#169](https://github.com/luceat-lux-vestra/scribium/issues/169) | #150 / engine evaluator | `.extend`/`.super`, condition, chaining, scope, and failure semantics. Depends on the grammar and shared binder/evaluator contracts (#157–#167). | After engine prerequisite band. |
+| [#169](https://github.com/luceat-lux-vestra/scribium/issues/169) | #150 / engine evaluator | `.extend`/`.super`, condition, chaining, scope, and failure semantics. Depends on the grammar and shared binder/evaluator contracts (#158–#167). | After engine prerequisite band. |
 | [#172](https://github.com/luceat-lux-vestra/scribium/issues/172), [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #151 / #152 | #172 owns Unicode titlecase and case-insensitive prefix semantics; #173 owns bounded `.doclang` locale closure. They consume shared conversion/state contracts and do not duplicate localization ownership. | Parallel after shared engine prerequisites. |
 | [#175](https://github.com/luceat-lux-vestra/scribium/issues/175), [#176](https://github.com/luceat-lux-vestra/scribium/issues/176), [#177](https://github.com/luceat-lux-vestra/scribium/issues/177), [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | #153 / document-wide configuration and layout policy | #175 owns document-wide state; #176 owns page margins/counters/heading/page policy; #177 owns navigation/markers/TOC; #178 owns slide configuration. Component-local content remains #154-owned. They consume #165–#167 and the backend strategy decision where output is involved. | Layout/configuration band after prerequisites. |
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | #153 → #154 / `.texmacro` state and raw body | Distinct macro-map/raw-body/math-renderer contract. Depends on #166–#167 and is consumed by #185; it is not a generic backend escape hatch. | After raw-body/atomicity prerequisites. |
@@ -223,7 +223,7 @@ closed, or treated as proof of complete v2.5.1 compatibility.
                                  │ sequencing preference; no hard #188 edge
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
-  #157/#159/#162/#164       #188 resolver              #190 capability
+  #159/#162/#164            #188 resolver              #190 capability
         │                        │                        │
         ▼                        ▼                        │
       #163                    #189 data                 │
@@ -317,7 +317,7 @@ freeze wording is no longer a complete status. After
 
 - #187 is **completed as the backend-strategy re-evaluation** and #200 is the
   explicit-selection follow-up;
-- #157–#185 are **sequenced after the relevant shared engine/backend/content
+- #158–#185 are **sequenced after the relevant shared engine/backend/content
   prerequisites**, with parallel work only where the graph permits it;
 - #188 is **after #187**, #189 is **after #188**, and #190 is a parallel
   capability-contract band after #187;

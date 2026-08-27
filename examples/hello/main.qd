@@ -6,9 +6,9 @@ title: "Hello, Scribium"
 
 This document mixes ordinary **Markdown** with Quarkdown-compatible evaluator semantics.
 
-.var {show_extra} {yes}
+.var {showextra} {yes}
 
-.if {.show_extra}
+.if {.showextra}
     This paragraph is emitted from a boolean-backed conditional.
 
 ## Typed value flow

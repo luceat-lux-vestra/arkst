@@ -50,8 +50,12 @@ document-observable semantics for the tracked release. It does not require
 Quarkdown implementation identity, private APIs, undocumented bugs, internal
 data structures, private plugin ABI, or internal compiler architecture.
 
-The Quarkdown function-call grammar is audited and implemented only at the
-bounded, partially compatible boundary recorded by #148. The work is
+The Quarkdown function-call grammar is audited and implemented at the bounded
+parser/frontend boundary recorded by #148. The #157 identifier, named-delimiter,
+numeric-reference, and call-start lexical slice is aligned with the pinned
+evidence, including prefix parsing such as `.1abc` as `.1` plus source
+remainder and non-diagnostic incomplete named candidates; the remaining
+call-grammar gaps are still partial. The work is
 clean-room from public documentation, notably *"Syntax of a function call"*
 on the Quarkdown wiki. No Quarkdown source code is copied or translated. See
 `SPEC_SOURCES.md` and [`RECONCILIATION.md`](RECONCILIATION.md) for provenance
@@ -123,17 +127,17 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
 |--------------------------------|----------------------------------|--------------------------|------------------|
-| Dot-prefixed call              | `.note`                          | Parsed                   | Partial: pinned identifier/boundary reconciliation is tracked by #157 |
-| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported for the current 1-based slice; binding is separate | Partial: pinned lexical reconciliation is tracked by #157 |
+| Dot-prefixed call              | `.note`                          | Parsed                   | Parsed-only: pinned identifier and call-start lexical boundaries are aligned by #157; separator and recovery gaps remain |
+| Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported numeric identifiers; binding is separate | Parsed-only lexical recognition, including `.0`/`.01` and `.1abc` as `.1` plus remainder; implicit-reference evaluation remains #150-owned |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
-| Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: current named-argument name scanning accepts local `_`, `-`, numeric, and hyphenated names and whitespace around `:`/`{`; lexical/delimiter reconciliation is tracked by #157, while binding validity belongs to #149 |
-| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163), and named-argument identifier lexical reconciliation is tracked by #157 |
+| Named arguments                | `.panel width:{320}`             | Parsed                   | Partial: identifier and `:{` adjacency are aligned by #157; positional-after-named remains #163 and binding validity belongs to #149 |
+| Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Partial: Scribium currently rejects positional-after-named in the grammar layer; pinned v2.5.1 assigns that validity check to binder semantics (#163) |
 | Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: nested tight/content boundaries are tracked by #158 and #160 |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Partial: top-level tight calls pass; nested tight content is #158 |
-| Malformed-call diagnostics     | `E2001`, `E2002`, `E2003`, `E2004` | Error                  | Partial: inline recovery suffix loss is #159 |
+| Malformed-call diagnostics     | `E2001`, `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; inline recovery suffix loss is #159 |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -829,11 +833,11 @@ implementation-evidence counterpart of the upstream provenance recorded in
 
 | Feature                         | Evidence (unit tests) |
 |---------------------------------|------------------------|
-| Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `scribium-quarkdown/src/lib.rs::parses_normal_call_names_and_spans`, `scribium-markdown/src/parser.rs::qd_mode_preserves_nested_body_and_utf8_spans` |
-| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `implicit_references_do_not_consume_arguments`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
+| Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `call_and_named_identifiers_share_the_pinned_scanner`, `parses_normal_call_names_and_spans`, `scribium-markdown/tests/call_grammar_audit.rs::audit_aligns_call_boundaries_across_utf8_crlf_and_modes` |
+| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `numeric_identifiers_share_the_argument_grammar`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
 | Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
-| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract`, `audit_records_current_named_argument_delimiter_adjacency_gap` |
-| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_named_argument_identifier_lexical_contract`, `audit_records_current_early_rejection_of_positional_after_named` |
+| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `call_and_named_identifiers_share_the_pinned_scanner`; `scribium-markdown/tests/call_grammar_audit.rs::audit_aligns_named_argument_identifier_lexing_and_spans`, `audit_requires_adjacent_named_argument_delimiters_and_preserves_source` |
+| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_aligns_named_argument_identifier_lexing_and_spans`, `audit_records_current_early_rejection_of_positional_after_named` |
 | Escaped call/argument delimiters | `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
 | Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
 | Nested calls                    | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans` |
@@ -859,11 +863,14 @@ implementation-evidence counterpart of the upstream provenance recorded in
 ### v2.5.1 syntax-gap evidence
 
 The v2.5.1 public function-call syntax review is backed by independently
-authored fixtures in the grammar and frontend tests. The evidence covers
-multiline nested positional/named arguments, line continuation with arbitrary
-leading indentation, parser-preserved `::` chains, tight brace-wrapped calls,
-normal boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd`
-isolation, and the existing dynamic body-indentation lifecycle.
+authored fixtures in the grammar and frontend tests. The evidence covers the
+#157 shared identifier and adjacent named-delimiter contract, numeric
+identifier/reference boundaries, multiline nested positional/named arguments,
+line continuation with arbitrary leading indentation, parser-preserved `::`
+chains, tight brace-wrapped calls, normal boundary regressions, malformed
+recovery, UTF-8, CRLF, `.md`/`.qd` isolation, and the existing dynamic
+body-indentation lifecycle. Malformed recovery, separator placement, escaped
+delimiters, and positional-after-named remain their separately owned gaps.
 
 The complete grammar/frontend re-audit, including its conservative status
 matrix and bounded follow-up issues, is recorded in
@@ -1233,9 +1240,13 @@ accessed dates.
 
 ## Known Divergences
 
-- The #148 audit found a pinned lexical-contract mismatch for normal names,
-  named-argument names/delimiter adjacency, implicit references, and
-  Unicode/ASCII boundaries; see #157.
+- The #157 lexical slice is now aligned with the pinned identifier,
+  named-delimiter, numeric-reference, and ASCII/Unicode call-start evidence.
+  Numeric identifiers use accepted-prefix parsing (`.1abc` leaves `abc` as
+  remainder), and incomplete optional named candidates remain source without a
+  fabricated diagnostic. Implicit-reference binding/evaluation remains
+  #150-owned, and declaration name validity remains the evaluator-owned
+  contract.
 - Pinned v2.5.1 permits optional argument separators before the first argument
   and before `::`, and consumes a trailing continuation without an argument;
   current Scribium does not preserve those forms and reports `E2004` in some

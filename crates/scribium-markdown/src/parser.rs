@@ -155,9 +155,9 @@ impl BlockParser for QuarkdownBlockParser {
             let candidate = source.get(call_start..candidate_end)?;
             let continuation_pending =
                 as_extension_data!(arena, node_ref, QuarkdownBlock).continuation_pending;
-            if continuation_pending && !starts_argument_line(&line) {
-                return None;
-            }
+            // Let the Quarkdown grammar classify the complete original
+            // candidate. A second line-prefix scanner would drift from the
+            // shared identifier and delimiter contract.
             match scribium_quarkdown::parse_call(candidate) {
                 Ok(Some((call, _))) => {
                     let call_end = call.span.end.checked_add(call_start)?;
@@ -226,36 +226,6 @@ impl BlockParser for QuarkdownBlockParser {
 
     fn can_interrupt_paragraph(&self) -> bool {
         true
-    }
-}
-
-fn starts_argument_line(line: &[u8]) -> bool {
-    let mut cursor = 0;
-    while line
-        .get(cursor)
-        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
-    {
-        cursor += 1;
-    }
-    match line.get(cursor) {
-        Some(b'{') => true,
-        Some(byte) if byte.is_ascii_alphabetic() || *byte == b'_' => {
-            cursor += 1;
-            while line
-                .get(cursor)
-                .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-            {
-                cursor += 1;
-            }
-            while line
-                .get(cursor)
-                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
-            {
-                cursor += 1;
-            }
-            line.get(cursor) == Some(&b':')
-        }
-        _ => false,
     }
 }
 

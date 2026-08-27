@@ -8,16 +8,16 @@
               "content": "3.5",
               "span": {
                 "source_id": 1,
-                "start": 36,
-                "end": 55
+                "start": 35,
+                "end": 53
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 36,
-          "end": 55
+          "start": 35,
+          "end": 53
         }
       }
     },
@@ -29,8 +29,8 @@
               "content": "boolean",
               "span": {
                 "source_id": 1,
-                "start": 117,
-                "end": 124
+                "start": 113,
+                "end": 120
               }
             }
           },
@@ -39,16 +39,16 @@
               "content": " conversion",
               "span": {
                 "source_id": 1,
-                "start": 124,
-                "end": 135
+                "start": 120,
+                "end": 131
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 117,
-          "end": 135
+          "start": 113,
+          "end": 131
         }
       }
     },
@@ -60,16 +60,16 @@
               "content": "2",
               "span": {
                 "source_id": 1,
-                "start": 172,
-                "end": 201
+                "start": 167,
+                "end": 195
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 172,
-          "end": 201
+          "start": 167,
+          "end": 195
         }
       }
     },
@@ -81,16 +81,16 @@
               "content": "3",
               "span": {
                 "source_id": 1,
-                "start": 172,
-                "end": 201
+                "start": 167,
+                "end": 195
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 172,
-          "end": 201
+          "start": 167,
+          "end": 195
         }
       }
     },
@@ -102,16 +102,16 @@
               "content": "4",
               "span": {
                 "source_id": 1,
-                "start": 172,
-                "end": 201
+                "start": 167,
+                "end": 195
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 172,
-          "end": 201
+          "start": 167,
+          "end": 195
         }
       }
     },
@@ -123,16 +123,16 @@
               "content": "2..4",
               "span": {
                 "source_id": 1,
-                "start": 203,
-                "end": 217
+                "start": 197,
+                "end": 211
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 203,
-          "end": 217
+          "start": 197,
+          "end": 211
         }
       }
     }

@@ -121,6 +121,21 @@ fn audit_keeps_implicit_reference_structural_and_modes_isolated() {
             if name == "1" && source_slice(source, *span) == ".1"
     ));
 
+    let prefix_source = ".1abc\n";
+    let prefix_output = parse_with_diagnostics(prefix_source);
+    assert!(prefix_output.diagnostics.is_empty(), "{prefix_output:?}");
+    let Block::Paragraph { content, span } = &prefix_output.document.nodes[0] else {
+        panic!("expected numeric call prefix and source remainder")
+    };
+    assert_eq!(source_slice(prefix_source, *span), ".1abc");
+    assert!(content.iter().any(|inline| {
+        matches!(inline, Inline::DirectiveCall { name, span, .. }
+            if name == "1" && source_slice(prefix_source, *span) == ".1")
+    }));
+    assert!(content.iter().any(|inline| {
+        matches!(inline, Inline::Text { span, .. } if source_slice(prefix_source, *span) == "abc")
+    }));
+
     let markdown = parse_with_mode(".note {x}\n", Mode::Markdown);
     assert!(!markdown.document.nodes.iter().any(|node| {
         matches!(node, Block::DirectiveCall { .. })
@@ -270,13 +285,32 @@ fn audit_records_current_early_rejection_of_positional_after_named() {
 }
 
 #[test]
-fn audit_records_current_named_argument_identifier_lexical_contract() {
-    for (source, expected_name, expected_end) in [
-        (".foo _:{x}", "_", 6),
-        (".foo -:{x}", "-", 6),
-        (".foo 1:{x}", "1", 6),
-        (".foo 10:{x}", "10", 7),
-        (".foo name-1:{x}", "name-1", 11),
+fn audit_aligns_named_argument_identifier_lexing_and_spans() {
+    for (source, expected_name, expected_name_span, expected_argument_span) in [
+        (
+            ".foo name:{x}\n",
+            "name",
+            ByteSpan::new(5, 9),
+            ByteSpan::new(5, 13),
+        ),
+        (
+            ".foo 1:{x}\n",
+            "1",
+            ByteSpan::new(5, 6),
+            ByteSpan::new(5, 10),
+        ),
+        (
+            ".foo 10:{x}\n",
+            "10",
+            ByteSpan::new(5, 7),
+            ByteSpan::new(5, 11),
+        ),
+        (
+            ".foo name:{한글}\r\n",
+            "name",
+            ByteSpan::new(5, 9),
+            ByteSpan::new(5, 18),
+        ),
     ] {
         let output = parse_with_diagnostics(source);
         assert!(output.diagnostics.is_empty(), "{output:?}");
@@ -285,11 +319,8 @@ fn audit_records_current_named_argument_identifier_lexical_contract() {
         };
         assert_eq!(named_args.len(), 1, "{source:?}");
         assert_eq!(named_args[0].name, expected_name, "{source:?}");
-        assert_eq!(
-            named_args[0].name_span,
-            ByteSpan::new(5, expected_end),
-            "{source:?}"
-        );
+        assert_eq!(named_args[0].name_span, expected_name_span, "{source:?}");
+        assert_eq!(named_args[0].span, expected_argument_span, "{source:?}");
         assert_eq!(
             source_slice(source, named_args[0].name_span),
             expected_name,
@@ -304,6 +335,27 @@ fn audit_records_current_named_argument_identifier_lexical_contract() {
                 .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
             _ => false,
         }));
+    }
+
+    for source in [".foo _:{x}\n", ".foo -:{x}\n", ".foo name-1:{x}\n"] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, span } = &output.document.nodes[0] else {
+            panic!("expected invalid named argument to remain paragraph text: {source:?}")
+        };
+        assert_eq!(source_slice(source, *span), source.trim_end());
+        let call = content
+            .iter()
+            .find_map(|inline| match inline {
+                Inline::DirectiveCall {
+                    named_args, span, ..
+                } => Some((named_args, *span)),
+                _ => None,
+            })
+            .expect("expected the valid `.foo` prefix to remain a call");
+        assert!(call.0.is_empty(), "{source:?}");
+        assert_eq!(source_slice(source, call.1), ".foo", "{source:?}");
+        assert_markdown_isolated(source);
     }
 }
 
@@ -447,12 +499,10 @@ fn audit_records_current_chain_separator_placement_gap() {
 }
 
 #[test]
-fn audit_records_current_named_argument_delimiter_adjacency_gap() {
+fn audit_requires_adjacent_named_argument_delimiters_and_preserves_source() {
     for (source, expected_argument_span) in [
-        (".foo name :{x}\n", "name :{x}"),
-        (".foo name: {x}\n", "name: {x}"),
-        (".foo name : {x}\n", "name : {x}"),
-        (".foo name :{한글}\r\n", "name :{한글}"),
+        (".foo name:{x}\n", ByteSpan::new(5, 13)),
+        (".foo name:{한글}\r\n", ByteSpan::new(5, 18)),
     ] {
         let output = parse_with_diagnostics(source);
         assert!(output.diagnostics.is_empty(), "{output:?}");
@@ -460,16 +510,16 @@ fn audit_records_current_named_argument_delimiter_adjacency_gap() {
             named_args, span, ..
         } = &output.document.nodes[0]
         else {
-            panic!("expected current named-argument acceptance for {source:?}")
+            panic!("expected pinned named-argument acceptance for {source:?}")
         };
         assert_eq!(named_args.len(), 1, "{source:?}");
         assert_eq!(named_args[0].name, "name", "{source:?}");
         assert_eq!(named_args[0].name_span, ByteSpan::new(5, 9), "{source:?}");
         assert_eq!(source_slice(source, named_args[0].name_span), "name");
+        assert_eq!(named_args[0].span, expected_argument_span, "{source:?}");
         assert_eq!(
             source_slice(source, named_args[0].span),
-            expected_argument_span,
-            "{source:?}"
+            &source[5..expected_argument_span.end]
         );
         assert!(source_slice(source, *span).starts_with(".foo name"));
 
@@ -482,4 +532,98 @@ fn audit_records_current_named_argument_delimiter_adjacency_gap() {
             _ => false,
         }));
     }
+
+    for source in [".foo name :{x}\n", ".foo name: {x}\n", ".foo name : {x}\n"] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, span } = &output.document.nodes[0] else {
+            panic!("expected non-adjacent named syntax to remain source text: {source:?}")
+        };
+        assert_eq!(source_slice(source, *span), source.trim_end());
+        let (named_args, call_span) = content
+            .iter()
+            .find_map(|inline| match inline {
+                Inline::DirectiveCall {
+                    named_args, span, ..
+                } => Some((named_args, *span)),
+                _ => None,
+            })
+            .expect("expected the valid `.foo` prefix to remain a call");
+        assert!(named_args.is_empty(), "{source:?}");
+        assert_eq!(source_slice(source, call_span), ".foo", "{source:?}");
+        assert!(content.iter().any(|inline| {
+            matches!(inline, Inline::Text { span, .. } if source_slice(source, *span).contains("name"))
+        }));
+        assert_markdown_isolated(source);
+    }
+}
+
+#[test]
+fn audit_aligns_call_boundaries_across_utf8_crlf_and_modes() {
+    let source = "앞 word.foo {x} 중 .foo {x}한글 끝\r\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::Paragraph { content, span } = &output.document.nodes[0] else {
+        panic!("expected inline calls and ordinary text")
+    };
+    assert_eq!(source_slice(source, *span), source.trim_end());
+    assert_eq!(
+        content
+            .iter()
+            .filter(|inline| matches!(inline, Inline::DirectiveCall { name, .. } if name == "foo"))
+            .count(),
+        1
+    );
+    let call = content
+        .iter()
+        .find_map(|inline| match inline {
+            Inline::DirectiveCall {
+                name,
+                name_span,
+                span,
+                positional_args,
+                ..
+            } if name == "foo" => Some((*name_span, *span, positional_args)),
+            _ => None,
+        })
+        .expect("expected the UTF-8-surrounded call");
+    assert_eq!(source_slice(source, call.0), ".foo");
+    assert_eq!(source_slice(source, call.1), ".foo {x}");
+    assert_eq!(call.2.len(), 1);
+    assert!(source_slice(source, *span).contains("word.foo {x}"));
+    assert!(source_slice(source, *span).ends_with("끝"));
+
+    let block_source = ".foo {x}\r\n";
+    let block_output = parse_with_diagnostics(block_source);
+    assert!(block_output.diagnostics.is_empty(), "{block_output:?}");
+    let Block::DirectiveCall {
+        name_span, span, ..
+    } = &block_output.document.nodes[0]
+    else {
+        panic!("expected an isolated Quarkdown block call")
+    };
+    assert_eq!(source_slice(block_source, *name_span), ".foo");
+    assert_eq!(source_slice(block_source, *span), ".foo {x}");
+
+    for isolated in [source, block_source, "한글 .foo 1:{x}\r\n"] {
+        assert_markdown_isolated(isolated);
+    }
+}
+
+#[test]
+fn audit_numeric_named_arguments_cross_the_block_continuation_boundary() {
+    let source = ".foo {x} \\\r\n\t10:{한글}\r\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall {
+        named_args, span, ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected numeric named argument in a continued block call")
+    };
+    assert_eq!(source_slice(source, *span), source.trim_end());
+    assert_eq!(named_args.len(), 1);
+    assert_eq!(named_args[0].name, "10");
+    assert_eq!(source_slice(source, named_args[0].name_span), "10");
+    assert_eq!(source_slice(source, named_args[0].span), "10:{한글}");
 }

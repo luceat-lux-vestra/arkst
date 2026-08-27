@@ -659,11 +659,7 @@ mod tests {
 
     #[test]
     fn compile_propagates_parser_diagnostics() {
-        for (input, expected_code) in [
-            (".foo {", "E2003"),
-            (".foo width:{x} {y}", "E2001"),
-            (".foo key:", "E2002"),
-        ] {
+        for (input, expected_code) in [(".foo {", "E2003"), (".foo width:{x} {y}", "E2001")] {
             let (result, source_id) = compile_source(input);
             assert_eq!(result.diagnostics.len(), 1, "input {input:?}");
             let diag = &result.diagnostics[0];
@@ -1292,7 +1288,7 @@ mod tests {
 
     #[test]
     fn compile_nested_dictionary_destructuring_restores_outer_scope() {
-        let source = ".var {outer_table}\n    .dictionary\n        - outer\n            - nested: 1\n.var {inner_table}\n    .dictionary\n        - inner: 2\n\n.foreach {.outer_table}\n    key value:\n    .foreach {.inner_table}\n        key value:\n        .key\n    .key\n";
+        let source = ".var {outertable}\n    .dictionary\n        - outer\n            - nested: 1\n.var {innertable}\n    .dictionary\n        - inner: 2\n\n.foreach {.outertable}\n    key value:\n    .foreach {.innertable}\n        key value:\n        .key\n    .key\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "inner\nouter");
@@ -1913,7 +1909,7 @@ mod tests {
 
     #[test]
     fn theme_state_is_shared_by_callables_and_front_matter_stays_separate() {
-        let source = ".function {set-theme}\n    .theme {Dark} layout:{Compact}\n\n.set-theme\n";
+        let source = ".function {settheme}\n    .theme {Dark} layout:{Compact}\n\n.settheme\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(
@@ -2356,7 +2352,7 @@ mod tests {
 
     #[test]
     fn docauthor_uses_shared_document_state_inside_callable_scopes() {
-        let source = ".function {set-author}\n    .docauthor {Alice}\n\n.set-author\n.docauthor {Bob}\n.docauthor\n";
+        let source = ".function {setauthor}\n    .docauthor {Alice}\n\n.setauthor\n.docauthor {Bob}\n.docauthor\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "Alice");
@@ -2433,7 +2429,7 @@ mod tests {
 
     #[test]
     fn docauthors_named_and_typed_dictionary_arguments_share_the_body_path() {
-        let source = ".var {authors}\n    .dictionary\n        - Carol\n            - email: carol@example.com\n.var {more-authors}\n    .dictionary\n        - Dave\n            - website: dave.example\n.docauthors {.authors}\n.docauthors authors:{.more-authors}\n.docauthor\n";
+        let source = ".var {authors}\n    .dictionary\n        - Carol\n            - email: carol@example.com\n.var {moreauthors}\n    .dictionary\n        - Dave\n            - website: dave.example\n.docauthors {.authors}\n.docauthors authors:{.moreauthors}\n.docauthor\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "Carol");
@@ -2513,7 +2509,7 @@ mod tests {
 
     #[test]
     fn docauthors_state_is_shared_by_callable_child_scopes() {
-        let source = ".function {set-authors}\n    .docauthors\n        - Callable\n            - email: callable@example.com\n\n.set-authors\n.docauthor\n";
+        let source = ".function {setauthors}\n    .docauthors\n        - Callable\n            - email: callable@example.com\n\n.setauthors\n.docauthor\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "Callable");
@@ -2668,7 +2664,7 @@ mod tests {
 
     #[test]
     fn dockeywords_state_is_shared_by_callable_child_scopes() {
-        let source = ".function {set-keywords}\n    .dockeywords\n        - callable\n        - shared\n\n.set-keywords\n.dockeywords::first\n";
+        let source = ".function {setkeywords}\n    .dockeywords\n        - callable\n        - shared\n\n.setkeywords\n.dockeywords::first\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "callable");
@@ -2957,18 +2953,17 @@ mod tests {
 
     #[test]
     fn compile_dynamic_and_static_string_origins_use_different_conversion_boundaries() {
-        let positive = ".var {number-text} {.string {-3.5}}\n.abs {.number-text}\n\n.var {boolean-text} {.string {YES}}\n.if {.boolean-text}\n    boolean conversion\n\n.var {range-text} {.string {2..4}}\n.foreach {.range-text}\n    .1\n.size {.range-text}\n";
+        let positive = ".var {numbertext} {.string {-3.5}}\n.abs {.numbertext}\n\n.var {booleantext} {.string {YES}}\n.if {.booleantext}\n    boolean conversion\n\n.var {rangetext} {.string {2..4}}\n.foreach {.rangetext}\n    .1\n.size {.rangetext}\n";
         let (result, _) = compile_source(positive);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "3.5\nboolean conversion\n2\n3\n4\n3");
 
-        let (result, _) = compile_source(".var {chain-text} {.string {-3.5}}\n.chain-text::abs\n");
+        let (result, _) = compile_source(".var {chaintext} {.string {-3.5}}\n.chaintext::abs\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "3.5");
 
-        let (result, _) = compile_source(
-            ".function {numeric-text}\n    .string {-3.5}\n\n.abs {.numeric-text}\n",
-        );
+        let (result, _) =
+            compile_source(".function {numerictext}\n    .string {-3.5}\n\n.abs {.numerictext}\n");
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "3.5");
 
@@ -3058,13 +3053,13 @@ mod tests {
 
     #[test]
     fn compile_truncate_accepts_only_integral_dynamic_number_text() {
-        let source = ".var {two-text} {.string {\"2\"}}\n.truncate {12.345} decimals:{.two-text}\n.var {two-point-zero-text} {.string {\"2.0\"}}\n.truncate {12.345} decimals:{.two-point-zero-text}\n";
+        let source = ".var {twotext} {.string {\"2\"}}\n.truncate {12.345} decimals:{.twotext}\n.var {twopointzero} {.string {\"2.0\"}}\n.truncate {12.345} decimals:{.twopointzero}\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "12.34\n12.34");
 
         for source in [
-            "앞 문장\r\n.var {fraction-text} {.string {\"1.5\"}}\r\n.truncate {12.345} decimals:{.fraction-text}\r\n뒤 문장\r\n",
+            "앞 문장\r\n.var {fractiontext} {.string {\"1.5\"}}\r\n.truncate {12.345} decimals:{.fractiontext}\r\n뒤 문장\r\n",
             "앞 문장\r\n.truncate {12.345} decimals:{.string {\"2\"}}\r\n뒤 문장\r\n",
         ] {
             let (result, _) = compile_source(source);
@@ -3225,7 +3220,7 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(output_text(&result), "yes");
 
-        let none = ".function {optional}\n    value?:\n    .value\n\n.function {identity}\n    .1\n\n.function {is-none}\n    .isnone {.1}\n\n.is-none {.identity {.optional}}\n.is-none {\"None\"}\n";
+        let none = ".function {optional}\n    value?:\n    .value\n\n.function {identity}\n    .1\n\n.function {checknone}\n    .isnone {.1}\n\n.checknone {.identity {.optional}}\n.checknone {\"None\"}\n";
         let (result, _) = compile_source(none);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(output_text(&result), "true\nfalse");
@@ -3403,7 +3398,7 @@ mod tests {
         assert!(matches!(content.as_slice(), [IrInline::Strong { .. }]));
         assert_eq!(inline_text(content), "Body");
 
-        let inline_source = ".function {inline_greet}\n    name:\n    **Hello, .name!**\n\nprefix .inline_greet {world} suffix\n";
+        let inline_source = ".function {inlinegreet}\n    name:\n    **Hello, .name!**\n\nprefix .inlinegreet {world} suffix\n";
         let (inline, _) = compile_source(inline_source);
         assert!(inline.diagnostics.is_empty(), "{:?}", inline.diagnostics);
         let IrNode::Paragraph { content, .. } = &inline.ir.nodes[0] else {

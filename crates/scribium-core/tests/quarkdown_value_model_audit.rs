@@ -39,7 +39,7 @@ fn output_text(result: &scribium_core::CompileResult) -> String {
 
 #[test]
 fn audit_dynamic_text_converts_but_static_text_stays_text() {
-    let dynamic = ".var {number-text} {.string {-3.5}}\n.abs {.number-text}\n";
+    let dynamic = ".var {numbertext} {.string {-3.5}}\n.abs {.numbertext}\n";
     let (result, _) = compile_source(dynamic);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(output_text(&result), "3.5");

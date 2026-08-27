@@ -116,14 +116,10 @@ adjacency, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
-boundaries, and source provenance. It records seven bounded production
-follow-ups:
+boundaries, and source provenance. The #157 lexical production slice is
+implemented as recorded in the audit below. The remaining six bounded
+production follow-ups are:
 
-- [#157](https://github.com/luceat-lux-vestra/scribium/issues/157) — align
-  call and named-argument identifier/delimiter lexing, implicit-reference
-  recognition, and Unicode/ASCII boundaries with pinned v2.5.1 evidence; bounded to
-  `scribium-quarkdown` grammar plus `scribium-markdown` integration, with
-  binder semantics excluded;
 - [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) — preserve
   nested tight-call wrappers inside content arguments;
 - [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) — retain
@@ -145,8 +141,9 @@ follow-ups:
   `scribium-quarkdown` separator scanning and `scribium-markdown` block/inline
   integration, with LF/CRLF evidence kept separate.
 
-These gaps are not hidden by expected-failure allowlists and are not fixed by
-the audit documentation/test PR.
+These remaining gaps are not hidden by expected-failure allowlists or by the
+#157 implementation. The #157 change is limited to the grammar/frontend
+identifier, delimiter, boundary, and provenance contract.
 
 ## #149 value-model, binding, and conversion audit
 
@@ -193,7 +190,7 @@ separation is `NOT_APPLICABLE` to #150. No row is promoted to
 valid for its bounded foundation but does not establish full v2.5.1
 compatibility.
 
-The audit reuses #148/#157–#164 for grammar/frontend boundaries and
+The audit reuses #148/#158–#164 for grammar/frontend boundaries and
 #149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
 does not create duplicate builtin or test issues. The only new cohesive
 semantic follow-up is [#169](https://github.com/luceat-lux-vestra/scribium/issues/169)
