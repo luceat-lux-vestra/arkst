@@ -89,8 +89,8 @@ boundary row; the tests named below remain parser/provenance evidence only.
 
 ## #157 implementation reconciliation
 
-At the required base `af037698821f6978885e0799b11c6ea717eb5be0`, the lexer uses
-one byte-oriented scanner for the pinned call-grammar alternatives
+Based on the required base `af037698821f6978885e0799b11c6ea717eb5be0`, issue
+#157 introduces one byte-oriented scanner for the pinned call-grammar alternatives
 `[A-Za-z][A-Za-z0-9]*|[0-9]+`. Alphabetic identifiers do not consume `_` or `-`;
 numeric identifiers include `0` and leading zeros, and the scanner returns the
 accepted prefix, so `.1abc` is `.1` followed by the untouched `abc` remainder.
@@ -177,8 +177,10 @@ is the conservative canonical status used for #147.
 ## Explicit deferrals and non-goals
 
 - The #157 production change is limited to the `scribium-quarkdown` lexer and
-  the necessary `scribium-markdown` lifecycle integration; no evaluator,
-  binder, builtin, IR, Typst, or Rushdown code changed.
+  the necessary `scribium-markdown` lifecycle integration. No evaluator
+  semantics or behavior changed; evaluator documentation was updated to
+  describe the existing 1-based implicit-reference policy accurately. Binder,
+  builtin, IR, Typst, and Rushdown behavior/code remain unchanged.
 - No dependency, compatibility target, or upstream baseline changed.
 - #149 owns unknown/duplicate/excess/default/optional binding behavior.
 - #150 owns lambda binding, call evaluation order, chain value flow, and
