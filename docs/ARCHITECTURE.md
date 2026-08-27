@@ -860,6 +860,15 @@ process exit status, stdout/stderr, and subprocess-specific errors. It
 implements the platform-neutral contract; the contract itself does not move
 into this crate.
 
+The subprocess adapter remains the default and compatibility-oriented native
+backend. Its explicit project-root staging, generated-resource staging, and
+diagnostic path sanitization are native adapter boundaries. It may perform
+best-effort static preflight of obvious package and dynamic module operands for
+early validation, but Typst CLI owns runtime evaluation and package resolution.
+Syntax-only preflight does not guarantee package resolver unreachability,
+network denial, or prevention of every runtime-generated package access. An
+OS-level sandbox, if required, is a separate host/security decision.
+
 ```text
 scribium-typst
         |
@@ -878,8 +887,10 @@ installed Typst executable
 It maps an existing `VirtualProject` to Typst's public `World` contract,
 compiles the generated source to a paged document, and exports PDF through the
 public `typst-pdf` API. Its project, asset, font, package, date, and traversal
-policies remain bounded by `VirtualProject`; it does not use `typst-kit` host
-filesystem/package discovery. Typst compiler types remain inside this crate.
+policies remain bounded by `VirtualProject`; its Scribium-owned `World` is the
+hard capability boundary. It does not use `typst-kit` host filesystem/package
+discovery, so package and network capability requests fail closed, including
+when generated at runtime. Typst compiler types remain inside this crate.
 
 The subprocess adapter remains the default and rollback path. The optional
 adapter and its evidence are recorded in ADR-0021 and
@@ -1295,10 +1306,13 @@ This architecture does not design sandboxing or privilege separation.
 
 ### Filesystem, network, and determinism policy
 
-Platform-independent compiler crates perform no network access. Any future
-network-backed package or resource acquisition belongs to an explicit
-host/tooling adapter and requires a separate architecture and security
-decision; no such adapter is defined here.
+Platform-independent compiler crates perform no network access. The
+in-process Typst `World` likewise exposes no host filesystem, package, or
+network capability. The subprocess adapter invokes the Typst CLI, whose runtime
+package resolver is outside Scribium's syntax-only preflight; this is not a
+hard package/network isolation guarantee. Any Scribium-controlled
+network-backed package or resource acquisition, or any hardened subprocess
+sandbox, requires an explicit host/tooling architecture and security decision.
 
 Project-root containment, absolute include restrictions, and symlink escape
 prevention are native host filesystem policies. Compiler crates receive only

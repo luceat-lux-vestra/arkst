@@ -1,13 +1,10 @@
 # Issue #201: Native Typst backend parity evidence
 
-Status: implementation and parity evidence for PR #205. The current
-code-bearing corrective implementation is commit
-`4d29f1a452531221f3ed519673eaef15762e1e0f`. Its exact-head native matrix
-evidence is CI run [33023853364](https://github.com/luceat-lux-vestra/scribium/actions/runs/33023853364),
-which passed the named parity step on Linux, macOS, and Windows. This evidence
-record is a documentation-only follow-up to that code-bearing commit; it
-changes the PR head without changing the backend implementation or its
-evidence.
+Status: corrective backend-contract work for PR #205. The subprocess and
+in-process adapters intentionally do not provide the same package/network
+capability contract. Exact-head implementation and CI evidence are recorded
+after the corrective commit and must not be inferred from an earlier green
+run.
 The canonical executable oracle is
 
 ~~~
@@ -41,15 +38,17 @@ serialization are intentionally outside the oracle.
 
 The test-only OutcomeClass normalizes subprocess text only at the oracle
 boundary. The subprocess adapter retains its existing error type/API and does
-not require backend-specific diagnostic wording to match. Before subprocess
-execution, its package policy walks the active AST import/include graph from
-the generated entry: static package specifications in any namespace and
-dynamic module operands are denied; active references to `eval` (including
-aliases and field accesses) are denied because they can construct imports
-after this syntax-only preflight; static project-relative local modules are
-resolved within the canonical project root and scanned recursively with cycle
-protection. Unreachable project files and package-looking text in comments,
-raw blocks, code blocks, strings, and inert `eval(...)` text remain inert.
+not require backend-specific diagnostic wording to match. Its optional static
+preflight walks the active AST import/include graph from the generated entry:
+static package specifications in any namespace and dynamic module operands
+may be rejected before CLI execution; static project-relative local modules
+are resolved within the canonical project root and scanned recursively with
+cycle protection. This is best-effort early validation, not a sandbox: it does
+not prove that runtime execution cannot reach Typst's package resolver or
+network capability. Runtime evaluation, including `eval` and aliases, is not
+blocked by this syntax-only preflight. Unreachable project files and
+package-looking text in comments, raw blocks, code blocks, and strings remain
+inert.
 
 ## Fixture matrix
 
@@ -72,13 +71,12 @@ same fixture corpus; they are not inferred from the local run.
 | project-font | PASS | PASS | project-supplied font policy, valid PDF | no Scribium font semantic yet |
 | missing-resource | FAIL | FAIL | resource failure, logical missing path | error wording may differ |
 | traversal | FAIL | FAIL | project boundary denial | error wording may differ |
-| package-denial-preview | FAIL | FAIL | package/network fail-closed | error wording may differ |
-| package-denial-local | FAIL | FAIL | package/network fail-closed | error wording may differ |
-| package-denial-arbitrary-namespace | FAIL | FAIL | package/network fail-closed | error wording may differ |
+| static-package-preflight-preview | REJECTED | DENIED | static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
+| static-package-preflight-local | REJECTED | DENIED | static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
+| static-package-preflight-arbitrary-namespace | REJECTED | DENIED | static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
 | package-looking-inert-text | PASS | PASS | inert package-looking text, valid PDF | none observed |
-| runtime-eval-package-denial | FAIL | FAIL | runtime-generated package denied | error wording may differ |
-| nested-local-module-package-preview | FAIL | FAIL | reachable local package denied | error wording may differ |
-| nested-local-module-package-local | FAIL | FAIL | reachable local package denied | error wording may differ |
+| nested-local-module-static-package-preflight-preview | REJECTED | DENIED | reachable static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
+| nested-local-module-static-package-preflight-local | REJECTED | DENIED | reachable static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
 | nested-local-module-inert-package-looking-text | PASS | PASS | reachable inert module and unused file, valid PDF | none observed |
 | invalid-generated | FAIL | FAIL | generated Typst compile failure | subprocess text versus structured in-process diagnostic |
 | mapped-diagnostic | FAIL | FAIL | logical path plus original span in-process | subprocess has no structured span |
@@ -95,6 +93,12 @@ silently become a handwritten Typst-only suite. The font fixture has a
 test-owned Typst text rule after real lowering because the current Scribium
 semantic model has no font-selection construct; the font bytes themselves
 remain a project-owned VirtualProject asset and no system font is required.
+
+The runtime-generated-package case is deliberately not part of the two-backend
+security oracle. An InProcessBackend-only integration fixture verifies that a
+runtime-generated package request is denied by the Scribium-owned World. No
+subprocess fixture executes such a request to exercise a package or network
+resolver.
 
 ## Cross-platform and security evidence
 
@@ -115,11 +119,10 @@ The corpus exercises:
 - a project-supplied font fixture without system-font discovery assumptions;
 - missing project-relative resources;
 - ../../outside.svg traversal denial;
-- @preview, @local, and arbitrary-namespace package denial without URL
-  leakage, including packages reached through a project-local module, while
-  package-looking comments/raw/code/string text, inert `eval(...)` text, and
-  unused project files remain inert; runtime-generated package imports through
-  active `eval` references are denied;
+- static @preview, @local, and arbitrary-namespace package preflight without
+  URL leakage, including packages reached through a project-local module,
+  while package-looking comments/raw/code/string text and unused project files
+  remain inert;
 - logical generated/source paths and mapped/unmapped/ambiguous source spans;
   and
 - rejection of temporary, runner, Unix absolute, Windows drive, UNC-like, or
@@ -129,28 +132,37 @@ The first Windows run exposed a native path spelling that the original
 temporary-root replacement did not cover. The subprocess boundary now
 normalizes native, slash, backslash, and extended-prefix forms and redacts
 remaining absolute runner/temp tokens while retaining logical project paths.
-The first complete parity run also showed that Typst CLI package resolution
-could reach its network resolver. Static `import`/`include` package operands
-for every namespace are now rejected before subprocess execution, including
-when reached through a recursively scanned project-local module. The syntax
-parser ignores comments, raw text, and inert strings, and the scanner is
-cycle-safe without scanning unused files. Dynamic module operands are also
-rejected because the adapter cannot prove they are project-local without
-evaluating code. Active `eval` references are rejected for the same reason:
-the runtime-generated source is outside this preflight's syntax-only boundary.
-Ordinary literal relative imports remain supported.
+The subprocess preflight is intentionally limited to static `import`/`include`
+operands. It may reject package specifications in every namespace before CLI
+execution, including packages reached through a recursively scanned
+project-local module. The syntax parser ignores comments, raw text, and inert
+strings, and the scanner is cycle-safe without scanning unused files. Dynamic
+module operands may also be rejected because the adapter cannot prove they are
+project-local without evaluating code. Runtime execution paths are outside
+this analysis; in particular, `eval` is not an identifier deny-list. Ordinary
+literal relative imports remain supported. None of these checks is a hard
+package/network isolation guarantee for SubprocessBackend.
 The diagnostic retains the logical entry path. The sanitizer and parity oracle
 treat relative components such as `target/` and `Users/` as ordinary logical
 path components; only absolute/native/temporary path tokens are redacted.
 
 ## Intentional divergences and scope
 
+Package/network capability isolation is an intentional architectural
+divergence, not a parity assertion:
+
+| Backend | Contract |
+|---|---|
+| SubprocessBackend | default, compatibility-oriented CLI backend; explicit project-root staging and best-effort static preflight; no hard package/network isolation guarantee |
+| InProcessBackend | optional explicit backend; Scribium-owned `World`/`VirtualProject` resource authority; package and network capability fail-closed |
+
 The in-process adapter returns structured Scribium diagnostics and can retain
 an original SourceSpan when the lowering map is reliable. The subprocess
 adapter keeps its sanitized compiler text and does not expose an equivalent
-structured span in this parity harness. This is an expected implementation
-difference; success/failure classification, logical-path policy, and leakage
-checks remain parity requirements.
+structured span in this parity harness. Success/document behavior, resource
+and project-boundary behavior, diagnostic path hygiene, and reliable source
+map provenance remain parity requirements. Package/network capability does
+not.
 
 The default backend remains SubprocessBackend, and this evidence does not
 claim browser rendering or a WASM in-process backend. The platform-neutral

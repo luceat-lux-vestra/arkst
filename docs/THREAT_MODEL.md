@@ -22,8 +22,8 @@ vulnerabilities (report to Typst GmbH).
 | T10 | Hostile regex               | CPU                  | Malicious doc     | Evaluator      | No user-provided regex in core      | Low           |
 | T11 | Environment leakage         | Secrets              | Malicious doc     | Evaluator      | Environment access disabled by def  | Low           |
 | T12 | Arbitrary shell execution   | System               | Malicious doc     | Evaluator      | No shell execution                  | None (blocked) |
-| T13 | Network access              | Network              | Malicious doc     | Evaluator      | Network denied by default           | None (blocked) |
-| T14 | Typst package resolution    | Network / Filesystem | Malicious doc     | Typst backend  | Package scope policy, no auto-install | Medium        |
+| T13 | Network access              | Network              | Malicious doc     | Evaluator / native backend | Core evaluator has no network capability; InProcess World denies it; subprocess CLI resolver is not hard-isolated by syntax preflight | Medium for subprocess |
+| T14 | Typst package resolution    | Network / Filesystem | Malicious doc     | Typst backend  | InProcess World denies package roots; subprocess provides only best-effort static preflight and no hard guarantee | Medium for subprocess |
 | T15 | Untrusted template          | Filesystem           | Malicious doc     | Include        | Same path validation as T1          | Low           |
 | T16 | Generated file overwrite    | Filesystem           | Malicious doc     | CLI / backend  | Atomic output, overwrite protection | Low           |
 | T17 | Terminal escape injection   | Display              | Malicious doc     | Diagnostics    | Diagnostic output sanitization      | Low           |
@@ -33,7 +33,7 @@ vulnerabilities (report to Typst GmbH).
 ## Default Security Policy
 
 ```
-network:          denied
+network:          denied in core and InProcess World; subprocess resolver capability is not hard-denied by static analysis
 shell:            denied
 environment:      denied
 filesystem:       explicit project-root scoped; temporary mirror for Typst reads
@@ -62,15 +62,20 @@ mirror, while the PDF is written to a separate temporary output location.
 The source tree is therefore a read-only resource context and never a write
 location for generated Typst, PDF, or temporary metadata. Typst is invoked with
 `--root` pointing at the mirror, so parent traversal and absolute host paths
-cannot escape the staged project boundary. A symlink is allowed only when its
-final canonical target remains inside the explicit source root; both file and
-directory symlink escapes are rejected.
+are constrained by the staged project boundary. A symlink is allowed only
+when its final canonical target remains inside the explicit source root; both
+file and directory symlink escapes are rejected. This filesystem staging and
+path sanitization do not deny the subprocess-owned package resolver or prove
+that runtime-generated package access is impossible.
 
 The optional in-process path has no host filesystem mirror or network/package
 resolver: its Typst `World` is populated only from the already constructed
-`VirtualProject`, embedded/project-supplied fonts, and generated source. It is
-available only to a trusted native host through explicit backend selection and
-does not provide browser/WASM rendering.
+`VirtualProject`, embedded/project-supplied fonts, and generated source. The
+World is the hard capability boundary, so package requests fail closed even
+when generated at runtime. It is available only to a trusted native host
+through explicit backend selection and does not provide browser/WASM
+rendering. This is an intentional capability divergence from the subprocess
+adapter, not a claim that the two backends have equivalent package isolation.
 
 ## Configurable Resource Limits
 

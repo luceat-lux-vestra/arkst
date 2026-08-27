@@ -275,6 +275,25 @@ fn package_resolution_is_explicitly_denied_without_network_access() {
 }
 
 #[test]
+fn runtime_generated_package_is_denied_by_the_world_capability_boundary() {
+    let project = project("valid Scribium input");
+    let error = InProcessBackend::new(&project)
+        .compile(&TypstInput {
+            source: "#let package = \"@preview/\" + \"not-present:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")\n"
+                .to_string(),
+            entry_path: "docs/main.qd".to_string(),
+        })
+        .expect_err("runtime-generated package access must fail at the World boundary");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("package") || rendered.contains("@preview"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("http://") && !rendered.contains("https://"));
+    assert!(!rendered.contains("/tmp/"));
+}
+
+#[test]
 fn generated_typst_diagnostics_preserve_path_without_fabricating_source_span() {
     let project = project("valid Scribium input");
     let error = InProcessBackend::new(&project)

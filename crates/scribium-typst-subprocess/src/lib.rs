@@ -1,8 +1,9 @@
 //! Native Typst CLI subprocess adapter for Scribium.
 //!
 //! This crate owns process execution, temporary staging, and the explicit
-//! project-root security boundary. Pure IR-to-Typst lowering lives in
-//! `scribium-typst`.
+//! project-root staging boundary. Static Typst module preflight is a
+//! best-effort validation aid, not a package or network security boundary.
+//! Pure IR-to-Typst lowering lives in `scribium-typst`.
 
 use scribium_project::VirtualPathBuf;
 use scribium_typst::{TypstBackend, TypstInput, TypstOutput};
@@ -97,9 +98,9 @@ impl TypstBackend for SubprocessBackend {
             .map(|context| canonical_project_root(&context.project_root))
             .transpose()?;
         if let Some(project_root) = &project_root {
-            ensure_reachable_typst_modules_allowed(&input.source, &entry_path, project_root)?;
-        } else if contains_denied_typst_module_reference(&input.source) {
-            return Err(package_resolution_denied(&entry_path));
+            validate_reachable_typst_modules(&input.source, &entry_path, project_root)?;
+        } else if contains_static_typst_preflight_violation(&input.source) {
+            return Err(static_module_preflight_rejected(&entry_path));
         }
 
         // Create a unique temporary directory for the generated Typst source,
@@ -262,26 +263,27 @@ fn canonical_project_root(project_root: &Path) -> Result<PathBuf, TypstError> {
     Ok(canonical)
 }
 
-fn package_resolution_denied(logical_path: &VirtualPathBuf) -> TypstError {
+fn static_module_preflight_rejected(logical_path: &VirtualPathBuf) -> TypstError {
     TypstError::Subprocess(format!(
-        "package resolution is denied by Scribium for {}",
+        "static Typst module preflight rejected a package or dynamic module operand for {}",
         logical_path
     ))
 }
 
-/// Applies the package policy to the active local Typst module graph rooted at
-/// the generated entry source. The project mirror contains every project file,
-/// but only modules reachable through literal project-relative `import` or
-/// `include` operands are inspected here. This keeps unused files inert while
-/// preventing a reachable helper module from bypassing the entry preflight.
-fn ensure_reachable_typst_modules_allowed(
+/// Applies best-effort static validation to the active local Typst module graph
+/// rooted at the generated entry source. The project mirror contains every
+/// project file, but only modules reachable through literal project-relative
+/// `import` or `include` operands are inspected here. This keeps unused files
+/// inert while catching obvious package references in reachable helper modules.
+/// It does not prove that runtime evaluation cannot reach a package resolver.
+fn validate_reachable_typst_modules(
     source: &str,
     logical_path: &VirtualPathBuf,
     project_root: &Path,
 ) -> Result<(), TypstError> {
     let mut visiting = BTreeSet::new();
     let mut visited = BTreeSet::new();
-    scan_reachable_typst_module(
+    validate_reachable_typst_module(
         source,
         logical_path,
         project_root,
@@ -290,7 +292,7 @@ fn ensure_reachable_typst_modules_allowed(
     )
 }
 
-fn scan_reachable_typst_module(
+fn validate_reachable_typst_module(
     source: &str,
     logical_path: &VirtualPathBuf,
     project_root: &Path,
@@ -302,8 +304,8 @@ fn scan_reachable_typst_module(
     }
 
     let mut local_modules = Vec::new();
-    if !collect_local_typst_module_references(source, &mut local_modules) {
-        return Err(package_resolution_denied(logical_path));
+    if !collect_static_typst_module_references(source, &mut local_modules) {
+        return Err(static_module_preflight_rejected(logical_path));
     }
 
     visited.insert(logical_path.clone());
@@ -323,7 +325,7 @@ fn scan_reachable_typst_module(
         }
         checked_canonical_target(&native_path, project_root, &module_path)?;
         let module_source = fs::read_to_string(&native_path).map_err(TypstError::Io)?;
-        scan_reachable_typst_module(
+        validate_reachable_typst_module(
             &module_source,
             &module_path,
             project_root,
@@ -629,36 +631,29 @@ fn logical_path_from_absolute_token(token: &str) -> Option<String> {
     Some(format!("/{logical_path}"))
 }
 
-/// Detects Typst package access without embedding the compiler or evaluator.
-/// The syntax-only parser identifies active `import`/`include` nodes, so
-/// comments, raw text, and ordinary strings are not mistaken for module
-/// sources. Literal package specifications use Typst's own grammar; dynamic
-/// module expressions are rejected because this adapter cannot prove that
-/// they remain project-local without evaluating code. Active references to
-/// Typst's `eval` are also rejected, including aliases and field accesses:
-/// they can construct a package import at runtime, outside the syntax tree
-/// available to this preflight. Inert `eval(...)` text is not an AST reference
-/// and remains allowed.
-fn contains_denied_typst_module_reference(source: &str) -> bool {
+/// Detects obvious static module references for best-effort preflight without
+/// embedding the Typst compiler or evaluator. The syntax-only parser
+/// identifies active `import`/`include` nodes, so comments, raw text, and
+/// ordinary strings are not mistaken for module sources. Literal package
+/// specifications use Typst's own grammar; dynamic module expressions are
+/// rejected because this adapter cannot prove that they remain project-local
+/// without evaluating code. Runtime evaluation is deliberately outside this
+/// check: this function does not inspect identifiers such as `eval` or claim
+/// to make runtime package access impossible.
+fn contains_static_typst_preflight_violation(source: &str) -> bool {
     let mut local_modules = Vec::new();
-    !collect_local_typst_module_references(source, &mut local_modules)
+    !collect_static_typst_module_references(source, &mut local_modules)
 }
 
-fn collect_local_typst_module_references(source: &str, local_modules: &mut Vec<String>) -> bool {
+fn collect_static_typst_module_references(source: &str, local_modules: &mut Vec<String>) -> bool {
     let root = typst_syntax::parse(source);
-    collect_local_typst_module_references_from_node(&root, local_modules)
+    collect_static_typst_module_references_from_node(&root, local_modules)
 }
 
-fn collect_local_typst_module_references_from_node(
+fn collect_static_typst_module_references_from_node(
     node: &typst_syntax::SyntaxNode,
     local_modules: &mut Vec<String>,
 ) -> bool {
-    if let Some(identifier) = node.cast::<typst_syntax::ast::Ident>() {
-        if identifier.as_str() == "eval" {
-            return false;
-        }
-    }
-
     let module_source = match node.kind() {
         typst_syntax::SyntaxKind::ModuleImport => node
             .cast::<typst_syntax::ast::ModuleImport>()
@@ -670,7 +665,7 @@ fn collect_local_typst_module_references_from_node(
     };
 
     if let Some(module_source) = module_source {
-        if module_source_is_denied(module_source) {
+        if module_source_requires_static_rejection(module_source) {
             return false;
         }
         let typst_syntax::ast::Expr::Str(string) = module_source else {
@@ -680,10 +675,10 @@ fn collect_local_typst_module_references_from_node(
     }
 
     node.children()
-        .all(|child| collect_local_typst_module_references_from_node(child, local_modules))
+        .all(|child| collect_static_typst_module_references_from_node(child, local_modules))
 }
 
-fn module_source_is_denied(source: typst_syntax::ast::Expr<'_>) -> bool {
+fn module_source_requires_static_rejection(source: typst_syntax::ast::Expr<'_>) -> bool {
     match source {
         typst_syntax::ast::Expr::Str(string) => string
             .get()
@@ -805,14 +800,13 @@ mod tests {
     }
 
     #[test]
-    fn subprocess_backend_denies_all_static_package_namespaces_before_execution() {
+    fn subprocess_backend_rejects_static_package_namespaces_before_execution() {
         let backend = SubprocessBackend::new("/nonexistent/typst");
         for source in [
             "#import \"@preview/not-present:1.0.0\": *\n",
             "#import \"@local/company-package:1.0.0\": *\n",
             "#include \"@company/internal-package:2.3.4\"\n",
             "#{ import \"@workspace/private-package:0.1.0\" }\n",
-            "#let package = \"@preview/\" + \"runtime-package:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")\n",
         ] {
             let result = backend.compile(&TypstInput {
                 source: source.to_string(),
@@ -820,9 +814,9 @@ mod tests {
             });
 
             let error = result
-                .expect_err("package access must be denied")
+                .expect_err("static package access must be rejected by preflight")
                 .to_string();
-            assert!(error.contains("package resolution is denied"));
+            assert!(error.contains("static Typst module preflight rejected"));
             assert!(!error.contains("http://") && !error.contains("https://"));
             assert!(!error.contains("not found at"));
         }
@@ -877,9 +871,12 @@ import "@preview/markup-text:1.0.0"
                     source: "#import \"./helper.typ\": *\n".to_string(),
                     entry_path: "docs/main.qd".to_string(),
                 })
-                .expect_err("a reachable helper package must be denied");
+                .expect_err("a reachable helper package must be rejected by static preflight");
             let error = error.to_string();
-            assert!(error.contains("package resolution is denied"), "{error}");
+            assert!(
+                error.contains("static Typst module preflight rejected"),
+                "{error}"
+            );
             assert!(!error.contains("not found at"), "{error}");
         }
     }
@@ -897,7 +894,7 @@ import "@preview/markup-text:1.0.0"
         .unwrap();
         let project_root = canonical_project_root(&project_root).unwrap();
 
-        ensure_reachable_typst_modules_allowed(
+        validate_reachable_typst_modules(
             "#import \"./helper.typ\": *\n",
             &VirtualPathBuf::parse("docs/main.qd").unwrap(),
             &project_root,
@@ -933,20 +930,20 @@ import "@preview/markup-text:1.0.0"
     }
 
     #[test]
-    fn package_parser_only_matches_active_module_operands() {
-        assert!(contains_denied_typst_module_reference(
+    fn static_package_preflight_only_matches_active_module_operands() {
+        assert!(contains_static_typst_preflight_violation(
             "#import \"@preview/pkg:1.0.0\": *"
         ));
-        assert!(contains_denied_typst_module_reference(
+        assert!(contains_static_typst_preflight_violation(
             "#include \"@local/pkg:1.0.0\""
         ));
-        assert!(contains_denied_typst_module_reference(
+        assert!(contains_static_typst_preflight_violation(
             "#{ import \"@company/pkg:1.0.0\" }"
         ));
-        assert!(contains_denied_typst_module_reference(
+        assert!(contains_static_typst_preflight_violation(
             "#let module = { import \"@workspace/pkg:1.0.0\" }"
         ));
-        assert!(contains_denied_typst_module_reference(
+        assert!(contains_static_typst_preflight_violation(
             "#let package = \"@local/pkg:1.0.0\"\n#import package"
         ));
 
@@ -962,14 +959,14 @@ import "@preview/markup-text:1.0.0"
             "text { import \"@preview/pkg:1.0.0\" }",
         ] {
             assert!(
-                !contains_denied_typst_module_reference(source),
+                !contains_static_typst_preflight_violation(source),
                 "inert text was classified as a package reference: {source:?}"
             );
         }
     }
 
     #[test]
-    fn package_parser_denies_active_eval_but_ignores_inert_eval_text() {
+    fn static_package_preflight_does_not_block_runtime_evaluation() {
         for source in [
             "#eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
             "#let package = \"@preview/\" + \"pkg:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")",
@@ -977,8 +974,8 @@ import "@preview/markup-text:1.0.0"
             "#let runtime_eval = std.eval\n#runtime_eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
         ] {
             assert!(
-                contains_denied_typst_module_reference(source),
-                "active eval must be denied: {source:?}"
+                !contains_static_typst_preflight_violation(source),
+                "runtime evaluation must not be rejected by static preflight: {source:?}"
             );
         }
 
@@ -990,8 +987,8 @@ import "@preview/markup-text:1.0.0"
             "#raw(\"#eval(\\\"@preview/pkg:1.0.0\\\")\")",
         ] {
             assert!(
-                !contains_denied_typst_module_reference(source),
-                "inert eval text was denied: {source:?}"
+                !contains_static_typst_preflight_violation(source),
+                "inert runtime-evaluation text was rejected: {source:?}"
             );
         }
     }

@@ -24,7 +24,8 @@ enum OutcomeClass {
     CompilationFailure,
     ResourceFailure,
     TraversalDenied,
-    PackageDenied,
+    StaticPackagePreflightRejected,
+    PackageCapabilityDenied,
     InvalidInput,
 }
 
@@ -35,7 +36,8 @@ impl fmt::Display for OutcomeClass {
             Self::CompilationFailure => "compile-failure",
             Self::ResourceFailure => "resource-failure",
             Self::TraversalDenied => "traversal-denied",
-            Self::PackageDenied => "package-denied",
+            Self::StaticPackagePreflightRejected => "static-package-preflight-rejected",
+            Self::PackageCapabilityDenied => "world-package-capability-denied",
             Self::InvalidInput => "invalid-input",
         };
         formatter.write_str(name)
@@ -43,8 +45,20 @@ impl fmt::Display for OutcomeClass {
 }
 
 #[derive(Debug, Clone, Copy)]
+enum BackendOutcomeExpectation {
+    Shared(OutcomeClass),
+    /// Package capability is intentionally not a cross-backend parity claim:
+    /// subprocess has only best-effort static validation, while InProcess
+    /// rejects the request at its Scribium-owned World boundary.
+    IntentionalSecurityDivergence {
+        subprocess: OutcomeClass,
+        in_process: OutcomeClass,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ParityExpectation {
-    outcome: OutcomeClass,
+    outcome: BackendOutcomeExpectation,
     minimum_pages: Option<usize>,
     source_markers: &'static [&'static str],
     require_logical_diagnostic_path: bool,
@@ -214,8 +228,10 @@ fn classify_error_with_fallback(text: &str, fallback: OutcomeClass) -> OutcomeCl
         || lower.contains("traversal")
     {
         OutcomeClass::TraversalDenied
+    } else if lower.contains("static typst module preflight rejected") {
+        OutcomeClass::StaticPackagePreflightRejected
     } else if lower.contains("package") || lower.contains("@preview") {
-        OutcomeClass::PackageDenied
+        OutcomeClass::PackageCapabilityDenied
     } else if lower.contains("missing.svg")
         || lower.contains("file not found")
         || lower.contains("resource not found")
@@ -336,21 +352,46 @@ fn parity_path_oracle_distinguishes_logical_components_from_native_paths() {
 }
 
 fn assert_fixture_expectation(fixture: &ParityFixture, observation: &ParityObservation) {
-    assert_eq!(
-        observation.subprocess.outcome, fixture.expectation.outcome,
-        "fixture '{}' subprocess classification",
-        fixture.name
-    );
-    assert_eq!(
-        observation.in_process.outcome, fixture.expectation.outcome,
-        "fixture '{}' in-process classification",
-        fixture.name
-    );
+    match fixture.expectation.outcome {
+        BackendOutcomeExpectation::Shared(expected) => {
+            assert_eq!(
+                observation.subprocess.outcome, expected,
+                "fixture '{}' subprocess classification",
+                fixture.name
+            );
+            assert_eq!(
+                observation.in_process.outcome, expected,
+                "fixture '{}' in-process classification",
+                fixture.name
+            );
+            assert_eq!(
+                observation.subprocess.outcome, observation.in_process.outcome,
+                "fixture '{}' backend outcome parity: subprocess={:?}, in-process={:?}",
+                fixture.name, observation.subprocess, observation.in_process
+            );
+        }
+        BackendOutcomeExpectation::IntentionalSecurityDivergence {
+            subprocess,
+            in_process,
+        } => {
+            assert_eq!(
+                observation.subprocess.outcome, subprocess,
+                "fixture '{}' subprocess static-validation classification",
+                fixture.name
+            );
+            assert_eq!(
+                observation.in_process.outcome, in_process,
+                "fixture '{}' in-process capability classification",
+                fixture.name
+            );
+        }
+    }
 
-    assert_eq!(
-        observation.subprocess.outcome, observation.in_process.outcome,
-        "fixture '{}' backend outcome parity: subprocess={:?}, in-process={:?}",
-        fixture.name, observation.subprocess, observation.in_process
+    let requires_package_diagnostic_hygiene = matches!(
+        fixture.expectation.outcome,
+        BackendOutcomeExpectation::Shared(OutcomeClass::PackageCapabilityDenied)
+            | BackendOutcomeExpectation::Shared(OutcomeClass::StaticPackagePreflightRejected)
+            | BackendOutcomeExpectation::IntentionalSecurityDivergence { .. }
     );
 
     for (backend, backend_observation) in [
@@ -363,7 +404,7 @@ fn assert_fixture_expectation(fixture: &ParityFixture, observation: &ParityObser
                 "fixture '{}' {backend} diagnostic leaked a host path",
                 fixture.name
             );
-            if fixture.expectation.outcome == OutcomeClass::PackageDenied {
+            if requires_package_diagnostic_hygiene {
                 assert!(
                     !diagnostic.remote_url_leakage,
                     "fixture '{}' {backend} package diagnostic leaked a remote URL",
@@ -373,7 +414,10 @@ fn assert_fixture_expectation(fixture: &ParityFixture, observation: &ParityObser
         }
     }
 
-    if fixture.expectation.outcome == OutcomeClass::Success {
+    if matches!(
+        fixture.expectation.outcome,
+        BackendOutcomeExpectation::Shared(OutcomeClass::Success)
+    ) {
         let subprocess_pdf = observation
             .subprocess
             .pdf
@@ -617,7 +661,7 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             ),
             &[],
             ParityExpectation {
-                outcome: OutcomeClass::Success,
+                outcome: BackendOutcomeExpectation::Shared(OutcomeClass::Success),
                 minimum_pages: Some(2),
                 source_markers: &["Multi-page document", "paged document oracle"],
                 require_logical_diagnostic_path: false,
@@ -656,25 +700,25 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             failure_expectation(OutcomeClass::TraversalDenied),
         ),
         typst_override_fixture(
-            "package-denial-preview",
+            "static-package-preflight-preview",
             "docs/main.qd",
             "# Package denial\n",
             "#import \"@preview/not-present:1.0.0\": *\n",
-            failure_expectation(OutcomeClass::PackageDenied),
+            static_package_preflight_expectation(),
         ),
         typst_override_fixture(
-            "package-denial-local",
+            "static-package-preflight-local",
             "docs/main.qd",
             "# Package denial\n",
             "#import \"@local/company-package:1.0.0\": *\n",
-            failure_expectation(OutcomeClass::PackageDenied),
+            static_package_preflight_expectation(),
         ),
         typst_override_fixture(
-            "package-denial-arbitrary-namespace",
+            "static-package-preflight-arbitrary-namespace",
             "docs/main.qd",
             "# Package denial\n",
             "#include \"@company/internal-package:2.3.4\"\n",
-            failure_expectation(OutcomeClass::PackageDenied),
+            static_package_preflight_expectation(),
         ),
         typst_override_fixture(
             "package-looking-inert-text",
@@ -683,15 +727,8 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             "```typst\n#import \"@preview/raw-block:1.0.0\": *\n```\n#let text = \"@local/example:1.0.0\"\n#raw(\"#import \\\"@company/example:1.0.0\\\": *\")\n",
             success_expectation(&["@preview/raw-block", "@local/example", "@company/example"]),
         ),
-        typst_override_fixture(
-            "runtime-eval-package-denial",
-            "docs/main.qd",
-            "# Runtime package denial\n",
-            "#let package = \"@preview/\" + \"not-present:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")\n",
-            failure_expectation(OutcomeClass::PackageDenied),
-        ),
         typst_override_fixture_with_sources(
-            "nested-local-module-package-preview",
+            "nested-local-module-static-package-preflight-preview",
             "docs/main.qd",
             "# Nested package denial\n",
             "#import \"./helper.typ\": *\n",
@@ -699,10 +736,10 @@ fn parity_fixtures() -> Vec<ParityFixture> {
                 "docs/helper.typ",
                 "#import \"@preview/nested-package:1.0.0\": *\n",
             )],
-            failure_expectation(OutcomeClass::PackageDenied),
+            static_package_preflight_expectation(),
         ),
         typst_override_fixture_with_sources(
-            "nested-local-module-package-local",
+            "nested-local-module-static-package-preflight-local",
             "docs/main.qd",
             "# Nested package denial\n",
             "#import \"./helper.typ\": *\n",
@@ -710,7 +747,7 @@ fn parity_fixtures() -> Vec<ParityFixture> {
                 "docs/helper.typ",
                 "#import \"@local/nested-package:1.0.0\": *\n",
             )],
-            failure_expectation(OutcomeClass::PackageDenied),
+            static_package_preflight_expectation(),
         ),
         typst_override_fixture_with_sources(
             "nested-local-module-inert-package-looking-text",
@@ -739,7 +776,7 @@ const SVG_FIXTURE: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20
 
 fn success_expectation(source_markers: &'static [&'static str]) -> ParityExpectation {
     ParityExpectation {
-        outcome: OutcomeClass::Success,
+        outcome: BackendOutcomeExpectation::Shared(OutcomeClass::Success),
         minimum_pages: None,
         source_markers,
         require_logical_diagnostic_path: false,
@@ -751,7 +788,22 @@ fn success_expectation(source_markers: &'static [&'static str]) -> ParityExpecta
 
 fn failure_expectation(outcome: OutcomeClass) -> ParityExpectation {
     ParityExpectation {
-        outcome,
+        outcome: BackendOutcomeExpectation::Shared(outcome),
+        minimum_pages: None,
+        source_markers: &[],
+        require_logical_diagnostic_path: true,
+        require_in_process_span: false,
+        require_in_process_unmapped: false,
+        expected_in_process_span: None,
+    }
+}
+
+fn static_package_preflight_expectation() -> ParityExpectation {
+    ParityExpectation {
+        outcome: BackendOutcomeExpectation::IntentionalSecurityDivergence {
+            subprocess: OutcomeClass::StaticPackagePreflightRejected,
+            in_process: OutcomeClass::PackageCapabilityDenied,
+        },
         minimum_pages: None,
         source_markers: &[],
         require_logical_diagnostic_path: true,

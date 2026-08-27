@@ -94,6 +94,22 @@ fn integration_compile_produces_valid_pdf() {
 }
 
 #[test]
+fn integration_runtime_evaluation_remains_available_to_subprocess() {
+    with_typst("runtime-evaluation", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: "#eval(\"1 + 1\", mode: \"code\")\n".to_string(),
+                entry_path: "runtime-evaluation.qd".to_string(),
+            })
+            .expect("static preflight must not disable Typst runtime evaluation");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
     let source = ".row alignment:{spacebetween} cross:{stretch} gap:{10px}\n    A\n\n    B\n\n.column alignment:{spacearound} cross:{start} gap:{25%}\n    C\n\n    D\n\n.grid columns:{2} alignment:{spaceevenly} cross:{end} gap:{1cm} vgap:{2cm} hgap:{3cm}\n    E\n\n    F\n\n    G\n";
     let project = VirtualProjectBuilder::new()

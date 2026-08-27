@@ -1,13 +1,16 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-//! Native in-process Typst backend for trusted hosts.
+//! Native in-process Typst backend for explicit native opt-in.
 //!
 //! This adapter intentionally sits after the scribium-typst lowering. It maps a
 //! completed VirtualProject to Typst's public World contract, compiles the
 //! generated Typst source, and exports a PDF. Typst types stay inside this
 //! native adapter; Scribium semantic IR and the platform-neutral lowering
 //! crate never depend on them. The crate is not part of the WASM/browser
-//! rendering path.
+//! rendering path. Unlike the subprocess adapter's static preflight, this
+//! adapter owns the Typst `World` and therefore provides the hard capability
+//! boundary for project resources, packages, and unavailable environment
+//! capabilities.
 
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_project::{VirtualPathBuf, VirtualProject};
@@ -30,9 +33,13 @@ use typst_pdf::PdfOptions;
 
 /// A native in-process adapter bound to one completed virtual project.
 ///
-/// The project is the only resource authority. This adapter does not inspect
-/// the host filesystem, discover system fonts, consult the process clock, or
-/// resolve packages over the network.
+/// The project is the only resource authority and the `World` is the hard
+/// capability boundary. This adapter does not inspect the host filesystem,
+/// discover system fonts, consult the process clock, or resolve packages over
+/// the network. Package roots are not represented by the world, so a runtime
+/// package request fails closed regardless of how the request was produced.
+/// This capability contract intentionally differs from subprocess static
+/// preflight, which is validation rather than sandboxing.
 pub struct InProcessBackend<'a> {
     project: &'a VirtualProject,
 }
