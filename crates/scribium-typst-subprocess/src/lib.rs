@@ -634,7 +634,11 @@ fn logical_path_from_absolute_token(token: &str) -> Option<String> {
 /// comments, raw text, and ordinary strings are not mistaken for module
 /// sources. Literal package specifications use Typst's own grammar; dynamic
 /// module expressions are rejected because this adapter cannot prove that
-/// they remain project-local without evaluating code.
+/// they remain project-local without evaluating code. Active references to
+/// Typst's `eval` are also rejected, including aliases and field accesses:
+/// they can construct a package import at runtime, outside the syntax tree
+/// available to this preflight. Inert `eval(...)` text is not an AST reference
+/// and remains allowed.
 fn contains_denied_typst_module_reference(source: &str) -> bool {
     let mut local_modules = Vec::new();
     !collect_local_typst_module_references(source, &mut local_modules)
@@ -649,6 +653,12 @@ fn collect_local_typst_module_references_from_node(
     node: &typst_syntax::SyntaxNode,
     local_modules: &mut Vec<String>,
 ) -> bool {
+    if let Some(identifier) = node.cast::<typst_syntax::ast::Ident>() {
+        if identifier.as_str() == "eval" {
+            return false;
+        }
+    }
+
     let module_source = match node.kind() {
         typst_syntax::SyntaxKind::ModuleImport => node
             .cast::<typst_syntax::ast::ModuleImport>()
@@ -802,6 +812,7 @@ mod tests {
             "#import \"@local/company-package:1.0.0\": *\n",
             "#include \"@company/internal-package:2.3.4\"\n",
             "#{ import \"@workspace/private-package:0.1.0\" }\n",
+            "#let package = \"@preview/\" + \"runtime-package:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")\n",
         ] {
             let result = backend.compile(&TypstInput {
                 source: source.to_string(),
@@ -953,6 +964,34 @@ import "@preview/markup-text:1.0.0"
             assert!(
                 !contains_denied_typst_module_reference(source),
                 "inert text was classified as a package reference: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_parser_denies_active_eval_but_ignores_inert_eval_text() {
+        for source in [
+            "#eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+            "#let package = \"@preview/\" + \"pkg:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")",
+            "#let runtime_eval = eval\n#runtime_eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+            "#let runtime_eval = std.eval\n#runtime_eval(\"import \\\"@preview/pkg:1.0.0\\\": *\", mode: \"code\")",
+        ] {
+            assert!(
+                contains_denied_typst_module_reference(source),
+                "active eval must be denied: {source:?}"
+            );
+        }
+
+        for source in [
+            "// #eval(\"#import \\\"@preview/pkg:1.0.0\\\": *\")",
+            "`#eval(\"@preview/pkg:1.0.0\")`",
+            "```typst\n#eval(\"@preview/pkg:1.0.0\")\n```",
+            "#let text = \"eval(\\\"@preview/pkg:1.0.0\\\")\"",
+            "#raw(\"#eval(\\\"@preview/pkg:1.0.0\\\")\")",
+        ] {
+            assert!(
+                !contains_denied_typst_module_reference(source),
+                "inert eval text was denied: {source:?}"
             );
         }
     }

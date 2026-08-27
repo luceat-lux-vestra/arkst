@@ -44,10 +44,12 @@ boundary. The subprocess adapter retains its existing error type/API and does
 not require backend-specific diagnostic wording to match. Before subprocess
 execution, its package policy walks the active AST import/include graph from
 the generated entry: static package specifications in any namespace and
-dynamic module operands are denied; static project-relative local modules are
-resolved within the canonical project root and scanned recursively with
-cycle protection. Unreachable project files and package-looking text in
-comments, raw blocks, code blocks, and strings remain inert.
+dynamic module operands are denied; active references to `eval` (including
+aliases and field accesses) are denied because they can construct imports
+after this syntax-only preflight; static project-relative local modules are
+resolved within the canonical project root and scanned recursively with cycle
+protection. Unreachable project files and package-looking text in comments,
+raw blocks, code blocks, strings, and inert `eval(...)` text remain inert.
 
 ## Fixture matrix
 
@@ -74,6 +76,7 @@ same fixture corpus; they are not inferred from the local run.
 | package-denial-local | FAIL | FAIL | package/network fail-closed | error wording may differ |
 | package-denial-arbitrary-namespace | FAIL | FAIL | package/network fail-closed | error wording may differ |
 | package-looking-inert-text | PASS | PASS | inert package-looking text, valid PDF | none observed |
+| runtime-eval-package-denial | FAIL | FAIL | runtime-generated package denied | error wording may differ |
 | nested-local-module-package-preview | FAIL | FAIL | reachable local package denied | error wording may differ |
 | nested-local-module-package-local | FAIL | FAIL | reachable local package denied | error wording may differ |
 | nested-local-module-inert-package-looking-text | PASS | PASS | reachable inert module and unused file, valid PDF | none observed |
@@ -114,8 +117,9 @@ The corpus exercises:
 - ../../outside.svg traversal denial;
 - @preview, @local, and arbitrary-namespace package denial without URL
   leakage, including packages reached through a project-local module, while
-  package-looking comments/raw/code/string text and unused project files
-  remain inert;
+  package-looking comments/raw/code/string text, inert `eval(...)` text, and
+  unused project files remain inert; runtime-generated package imports through
+  active `eval` references are denied;
 - logical generated/source paths and mapped/unmapped/ambiguous source spans;
   and
 - rejection of temporary, runner, Unix absolute, Windows drive, UNC-like, or
@@ -132,7 +136,9 @@ when reached through a recursively scanned project-local module. The syntax
 parser ignores comments, raw text, and inert strings, and the scanner is
 cycle-safe without scanning unused files. Dynamic module operands are also
 rejected because the adapter cannot prove they are project-local without
-evaluating code; ordinary literal relative imports remain supported.
+evaluating code. Active `eval` references are rejected for the same reason:
+the runtime-generated source is outside this preflight's syntax-only boundary.
+Ordinary literal relative imports remain supported.
 The diagnostic retains the logical entry path. The sanitizer and parity oracle
 treat relative components such as `target/` and `Users/` as ordinary logical
 path components; only absolute/native/temporary path tokens are redacted.

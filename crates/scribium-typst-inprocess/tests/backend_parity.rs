@@ -683,6 +683,13 @@ fn parity_fixtures() -> Vec<ParityFixture> {
             "```typst\n#import \"@preview/raw-block:1.0.0\": *\n```\n#let text = \"@local/example:1.0.0\"\n#raw(\"#import \\\"@company/example:1.0.0\\\": *\")\n",
             success_expectation(&["@preview/raw-block", "@local/example", "@company/example"]),
         ),
+        typst_override_fixture(
+            "runtime-eval-package-denial",
+            "docs/main.qd",
+            "# Runtime package denial\n",
+            "#let package = \"@preview/\" + \"not-present:1.0.0\"\n#eval(\"import \\\"\" + package + \"\\\": *\", mode: \"code\")\n",
+            failure_expectation(OutcomeClass::PackageDenied),
+        ),
         typst_override_fixture_with_sources(
             "nested-local-module-package-preview",
             "docs/main.qd",
