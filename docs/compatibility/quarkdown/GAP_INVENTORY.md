@@ -139,7 +139,8 @@ production follow-ups are:
 These remaining gaps are not hidden by expected-failure allowlists or by the
 #157/#163 implementations. #157 is limited to the grammar/frontend identifier,
 delimiter, boundary, and provenance contract; #163 is limited to the ordered
-mixed-argument grammar/frontend handoff plus its bounded engine safety guard.
+mixed-argument grammar/frontend handoff, which the #165 shared engine binder
+now consumes as the single semantic binding source.
 
 ## #149 value-model, binding, and conversion audit
 
@@ -158,9 +159,9 @@ The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-
 (dynamic/content target conversion), and
 [#167](https://github.com/luceat-lux-vestra/scribium/issues/167)
 (conversion diagnostics and validate-then-commit atomicity). They are native
-sub-issues of #149. #163 now provides the parser/frontend prerequisite and
-transitional engine safety guard for positional-after-named shape; #165 must
-absorb that guard into shared binding. #150–#155 remain the broader programmable,
+sub-issues of #149. #163 provides the parser/frontend and IR prerequisite for
+the ordered argument shape; #165 implements the shared engine binding contract
+for positional-after-named and the related slot rules. #150–#155 remain the broader programmable,
 general-builtin, metadata, layout, content, and resource audits; #156 remains
 the reconciliation gate.
 

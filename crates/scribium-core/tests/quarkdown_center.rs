@@ -80,6 +80,7 @@ fn center_rejects_lambda_parameters() {
             name: "center".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![scribium_core::ir::IrParameter {
                 name: "x".to_string(),
                 name_span: span,

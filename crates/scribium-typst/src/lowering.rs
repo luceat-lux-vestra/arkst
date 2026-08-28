@@ -775,6 +775,7 @@ impl LoweringContext {
                 named_args,
                 body,
                 span,
+                ..
             } => {
                 let before = self.output.len();
                 self.push_str("#");
@@ -2683,6 +2684,7 @@ mod tests {
                         name: "strong".into(),
                         positional_args: vec![],
                         named_args: vec![],
+                        ordered_args: None,
                         body: Some(vec![text("emphasized")]),
                         span: empty_span(),
                     },
@@ -2707,6 +2709,7 @@ mod tests {
                     value: IrValue::String("table".into()),
                     span: empty_span(),
                 }],
+                ordered_args: None,
                 lambda_parameters: None,
                 body: Some(vec![IrNode::Paragraph {
                     content: vec![text("content")],
@@ -2733,6 +2736,7 @@ mod tests {
                         value: IrValue::None,
                         span: empty_span(),
                     }],
+                    ordered_args: None,
                     lambda_parameters: None,
                     body: None,
                     span: empty_span(),
@@ -2746,6 +2750,7 @@ mod tests {
                         value: IrValue::String("None".into()),
                         span: empty_span(),
                     }],
+                    ordered_args: None,
                     lambda_parameters: None,
                     body: None,
                     span: empty_span(),
@@ -2771,6 +2776,7 @@ mod tests {
                     span: SourceSpan::new(SourceId(1), 5, 9),
                 })],
                 named_args: Vec::new(),
+                ordered_args: None,
                 lambda_parameters: None,
                 body: None,
                 span: empty_span(),
@@ -2793,6 +2799,7 @@ mod tests {
                     name_span: SourceSpan::new(source_id, 0, 2),
                     positional_args: vec![],
                     named_args: vec![],
+                    ordered_args: None,
                     span: SourceSpan::new(source_id, 0, 6),
                 },
                 chain: vec![IrCallSegment {
@@ -2800,6 +2807,7 @@ mod tests {
                     name_span: SourceSpan::new(source_id, 8, 9),
                     positional_args: vec![],
                     named_args: vec![],
+                    ordered_args: None,
                     span: SourceSpan::new(source_id, 8, 13),
                 }],
                 body: None,

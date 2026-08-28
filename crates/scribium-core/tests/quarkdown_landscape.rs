@@ -93,6 +93,7 @@ fn landscape_rejects_lambda_body_without_evaluating_it() {
             name: "landscape".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![IrParameter {
                 name: "value".to_string(),
                 name_span: span,
@@ -108,6 +109,7 @@ fn landscape_rejects_lambda_body_without_evaluating_it() {
                     value: scribium_core::ir::IrValue::Number(0.0),
                     span,
                 }],
+                ordered_args: None,
                 lambda_parameters: None,
                 body: None,
                 span,

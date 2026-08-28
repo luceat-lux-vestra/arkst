@@ -82,6 +82,7 @@ fn align_rejects_lambda_body() {
             name: "align".to_string(),
             positional_args: vec![scribium_core::ir::IrValue::Identifier("center".to_string())],
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![IrParameter {
                 name: "x".to_string(),
                 name_span: span,
