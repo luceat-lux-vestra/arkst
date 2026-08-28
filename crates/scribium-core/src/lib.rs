@@ -801,7 +801,7 @@ mod tests {
             let (result, _) = compile_source(source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert_eq!(result.diagnostics[0].code, "E3003", "{source:?}: {result:?}");
-            assert_eq!(output_text(&result).contains("changed"), false, "{source:?}");
+            assert!(!output_text(&result).contains("changed"), "{source:?}");
         }
     }
 
