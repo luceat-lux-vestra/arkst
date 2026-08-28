@@ -1071,9 +1071,7 @@ fn positional_after_named_error(
         message: "positional argument after named argument is not allowed".to_string(),
         primary: Some(byte_to_source_span(&positional_span, source_id)),
         secondary: vec![byte_to_source_span(&named_span, source_id)],
-        hints: vec![
-            "Positional arguments must precede named arguments; shared binder validation remains the future #165 replacement for this handoff guard.".to_string(),
-        ],
+        hints: vec!["Move all positional arguments before named arguments.".to_string()],
     }
 }
 
