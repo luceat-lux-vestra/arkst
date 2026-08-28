@@ -1,8 +1,8 @@
-# Scribium labeler — automatic PR area labels based on changed files
-# https://github.com/actions/labeler
+# Scribium automatic PR area classification.
+# Area labels are derived only from changed paths and synchronized on each PR update.
 
-changed-files-labels-limit: 10
-max-files-changed: 100
+changed-files-labels-limit: 30
+max-files-changed: 1000
 
 area:ci:
   - changed-files:
@@ -18,37 +18,60 @@ area:core:
       - any-glob-to-any-file:
           - "crates/scribium-core/**"
 
+area:engine:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-engine/**"
+
+area:parser:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-markdown/**"
+          - "crates/scribium-quarkdown/**"
+
+area:ir:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-ir/**"
+
+area:diagnostics:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-diagnostics/**"
+
 area:typst:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/scribium-typst/**"
+          - "crates/scribium-typst-inprocess/**"
+          - "crates/scribium-typst-subprocess/**"
 
 area:cli:
   - changed-files:
       - any-glob-to-any-file:
           - "crates/scribium-cli/**"
 
-area:parser:
+area:project:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-core/src/syntax/**"
-
-area:ir:
-  - changed-files:
-      - any-glob-to-any-file:
-          - "crates/scribium-core/src/ir.rs"
-
-area:diagnostics:
-  - changed-files:
-      - any-glob-to-any-file:
-          - "crates/scribium-core/src/diagnostics.rs"
-          - "crates/scribium-core/src/compatibility/diagnostics.rs"
+          - "crates/scribium-project/**"
+          - "crates/scribium-source/**"
 
 area:compatibility:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-core/src/compatibility/**"
+          - "crates/scribium-compat/**"
+          - "crates/scribium-quarkdown/**"
+          - "fixtures/quarkdown-conformance/**"
           - "docs/compatibility/**"
+
+# Test ownership is reserved for shared test infrastructure and fixture suites,
+# not every implementation PR that also adds regression tests.
+area:test:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/scribium-test-support/**"
+          - "fixtures/**"
 
 area:legal:
   - changed-files:

@@ -1,0 +1,118 @@
+name: Issue labels
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-labeler-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    name: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify issues
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const defs = [
+              ['type:bug', 'B60205', 'A defect in existing functionality'],
+              ['type:feature', '1D76DB', 'A new user-facing capability'],
+              ['type:compatibility', '5319E7', 'Compatibility-target work'],
+              ['type:research', 'BFDADC', 'Research, audit, or feasibility work'],
+              ['type:task', '0E8A16', 'Implementation, maintenance, CI, test, or documentation task'],
+              ['area:ci', 'C5DEF5', 'CI/CD and automation'],
+              ['area:core', 'C5DEF5', 'Core public/compiler boundary'],
+              ['area:engine', 'C5DEF5', 'Evaluator and semantic engine'],
+              ['area:parser', 'C5DEF5', 'Markdown and Quarkdown parsing/frontends'],
+              ['area:ir', 'C5DEF5', 'Backend-neutral intermediate representation'],
+              ['area:diagnostics', 'C5DEF5', 'Diagnostics and source reporting'],
+              ['area:typst', 'C5DEF5', 'Typst lowering and native backends'],
+              ['area:cli', 'C5DEF5', 'Command-line interface'],
+              ['area:project', 'C5DEF5', 'Project/source/resource model'],
+              ['area:compatibility', 'C5DEF5', 'Compatibility evidence and conformance'],
+              ['area:test', 'C5DEF5', 'Shared test support and fixtures'],
+              ['area:legal', 'C5DEF5', 'Licensing and legal notices'],
+              ['area:docs', 'EDEDED', 'Documentation'],
+              ['priority:normal', 'FBCA04', 'Default triage priority'],
+            ];
+            for (const [name, color, description] of defs) {
+              try {
+                const { data } = await github.rest.issues.getLabel({ ...context.repo, name });
+                if ((data.description || '') !== description) {
+                  await github.rest.issues.updateLabel({ ...context.repo, name, description });
+                }
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ ...context.repo, name, color, description });
+              }
+            }
+
+            async function classify(issue) {
+              if (issue.pull_request) return;
+              const title = (issue.title || '').trim().toLowerCase();
+              const body = (issue.body || '').toLowerCase();
+              const { data: labels } = await github.rest.issues.listLabelsOnIssue({ ...context.repo, issue_number: issue.number, per_page: 100 });
+              const names = labels.map(x => x.name);
+              const knownTypes = ['type:bug', 'type:feature', 'type:compatibility', 'type:research', 'type:task'];
+              const existingTypes = names.filter(x => knownTypes.includes(x));
+
+              let explicitType = null;
+              if (/^(fix|bug)(\([^)]*\))?:/.test(title)) explicitType = 'type:bug';
+              else if (/^(feat|feature)(\([^)]*\))?:/.test(title)) explicitType = 'type:feature';
+              else if (/^compat(\([^)]*\))?:|^\[upstream\]|compatibility gap/.test(title)) explicitType = 'type:compatibility';
+              else if (/^(research|audit|spike)(\([^)]*\))?:/.test(title)) explicitType = 'type:research';
+
+              const areas = new Set();
+              if (/scribium-core|\(core\)/.test(title) || /crates\/scribium-core\//.test(body)) areas.add('area:core');
+              if (/\(engine\)|\bevaluator\b|\bbinder\b/.test(title) || /crates\/scribium-engine\/|semantic engine/.test(body)) areas.add('area:engine');
+              if (/\(markdown\)|\(quarkdown\)|\(parser\)|\bparser\b|\bgrammar\b/.test(title) || /crates\/scribium-markdown\/|crates\/scribium-quarkdown\/|parser\/frontend/.test(body)) areas.add('area:parser');
+              if (/\(ir\)|\bir\b/.test(title) || /crates\/scribium-ir\/|intermediate representation/.test(body)) areas.add('area:ir');
+              if (/diagnostic/.test(title) || /crates\/scribium-diagnostics\/|source span/.test(body)) areas.add('area:diagnostics');
+              if (/\(typst\)|\btypst\b/.test(title) || /crates\/scribium-typst|subprocess backend|in-process backend/.test(body)) areas.add('area:typst');
+              if (/\(cli\)|\bcli\b/.test(title) || /crates\/scribium-cli\/|command-line/.test(body)) areas.add('area:cli');
+              if (/\(project\)|\bproject\b|\bresource\b/.test(title) || /crates\/scribium-project\/|crates\/scribium-source\/|virtualproject|assetstore/.test(body)) areas.add('area:project');
+              if (/^compat|\[upstream\]|compatibility|conformance|quarkdown/.test(title) || /docs\/compatibility\/|fixtures\/quarkdown-conformance\//.test(body)) areas.add('area:compatibility');
+              if (/\btest\b|fixture/.test(title) || /crates\/scribium-test-support\//.test(body)) areas.add('area:test');
+              if (/license|notice|legal/.test(title)) areas.add('area:legal');
+              if (/^docs[:(]|documentation/.test(title) || /### documentation location/.test(body)) areas.add('area:docs');
+              if (/^ci[:(]|github|workflow|dependabot|ruleset/.test(title) || /\.github\//.test(body)) areas.add('area:ci');
+
+              const add = [...areas].filter(x => !names.includes(x));
+
+              // Only explicit title signals own type replacement. Otherwise preserve
+              // Issue Form/upstream/manual type choices and default truly unlabeled issues.
+              if (explicitType) {
+                for (const name of existingTypes) {
+                  if (name !== explicitType) {
+                    await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue.number, name });
+                  }
+                }
+                if (!names.includes(explicitType)) add.push(explicitType);
+              } else if (existingTypes.length === 0) {
+                add.push('type:task');
+              }
+
+              // Issue area inference is additive; unlike PR changed paths, heuristics are
+              // not authoritative enough to delete manually curated ownership labels.
+              if (!names.some(x => x.startsWith('priority:'))) add.push('priority:normal');
+              if (add.length) await github.rest.issues.addLabels({ ...context.repo, issue_number: issue.number, labels: [...new Set(add)] });
+            }
+
+            if (context.eventName === 'workflow_dispatch') {
+              const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
+              for (const issue of issues) await classify(issue);
+            } else {
+              await classify(context.payload.issue);
+            }
