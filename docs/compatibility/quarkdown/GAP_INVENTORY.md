@@ -139,7 +139,8 @@ production follow-ups are:
 These remaining gaps are not hidden by expected-failure allowlists or by the
 #157/#163 implementations. #157 is limited to the grammar/frontend identifier,
 delimiter, boundary, and provenance contract; #163 is limited to the ordered
-mixed-argument grammar/frontend handoff plus its bounded engine safety guard.
+mixed-argument grammar/frontend handoff, which the #165 shared engine binder
+now consumes as the single semantic binding source.
 
 ## #149 value-model, binding, and conversion audit
 

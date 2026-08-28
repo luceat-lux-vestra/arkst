@@ -677,7 +677,7 @@ mod tests {
             assert_eq!(result.ir.nodes.len(), 0, "input {input:?}");
         }
 
-        let (result, source_id) = compile_source(".foo width:{x} {y}");
+        let (result, source_id) = compile_source(".sum a:{x} {y}");
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "E3003");
         assert_eq!(
@@ -692,7 +692,7 @@ mod tests {
         for source in [
             ".theme layout:{Compact} {Light}\n",
             ".captionposition tables:{top} {bottom}\n",
-            ".sum {1}::multiply first:{2} {3}\n",
+            ".sum {1} {1}::multiply first:{2} {3}\n",
         ] {
             let (result, source_id) = compile_source(source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
@@ -749,6 +749,38 @@ mod tests {
             ))
         );
         assert_eq!(output_text(&result), "");
+    }
+
+    #[test]
+    fn compile_duplicate_named_argument_retains_conflict_provenance() {
+        let source = ".html content:{one} content:{two}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3003");
+        let first_name = source.find("content:").expect("first named argument");
+        let second_name = source.rfind("content:").expect("second named argument");
+        assert_eq!(
+            diagnostic.primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                second_name,
+                second_name + "content".len(),
+            ))
+        );
+        let first_argument_end = source[first_name..]
+            .find('}')
+            .map(|offset| first_name + offset + 1)
+            .expect("first named argument end");
+        assert_eq!(
+            diagnostic.secondary,
+            vec![scribium_source::SourceSpan::new(
+                source_id,
+                first_name,
+                first_argument_end,
+            )]
+        );
+        assert!(result.ir.nodes.is_empty());
     }
 
     #[test]

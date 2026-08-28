@@ -6,7 +6,7 @@
 //! this step succeeds.
 
 use scribium_source::SourceSpan;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 /// Whether a parameter must be supplied or may be omitted by the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +113,24 @@ pub(crate) struct BoundInvocation<T> {
     pub(crate) slots: Vec<BoundSlot<T>>,
 }
 
+/// A structural binding decision that can be carried across candidate
+/// evaluation. The plan owns slot selection; applying it later must not
+/// repeat name lookup, duplicate detection, or positional assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BindingPlan {
+    slots: Vec<PlannedSlot>,
+    candidate_count: usize,
+    binds_body: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlannedSlot {
+    Candidate(usize),
+    Body,
+    Omitted,
+    Defaulted,
+}
+
 /// A bound slot retains omission/default classification instead of collapsing
 /// it into an explicit `None` value.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,7 +156,7 @@ pub(crate) struct BindingError {
 /// evaluated, so invalid mixed calls cannot execute nested values or bodies.
 pub(crate) fn validate_order<T>(candidates: &[Candidate<T>]) -> Result<(), BindingError> {
     let mut named_started = None;
-    let mut seen_named = BTreeSet::new();
+    let mut seen_named = BTreeMap::new();
     for candidate in candidates {
         match candidate {
             Candidate::Positional { span, .. } => {
@@ -159,11 +177,11 @@ pub(crate) fn validate_order<T>(candidates: &[Candidate<T>]) -> Result<(), Bindi
                 ..
             } => {
                 named_started.get_or_insert(*span);
-                if !seen_named.insert(name) {
+                if let Some(previous_span) = seen_named.insert(name.as_str(), *span) {
                     return Err(BindingError {
                         message: format!("named argument `{name}` was supplied more than once"),
                         primary: *name_span,
-                        secondary: Vec::new(),
+                        secondary: vec![previous_span],
                         hint: "Use one value for each named parameter.".to_string(),
                     });
                 }
@@ -173,22 +191,48 @@ pub(crate) fn validate_order<T>(candidates: &[Candidate<T>]) -> Result<(), Bindi
     Ok(())
 }
 
-/// Bind one ordered candidate sequence against one explicit signature.
-pub(crate) fn bind<T: Clone>(
+/// Validate a headerless callable's positional-only invocation contract.
+/// Such callables have no finite parameter table, but they still share the
+/// source-order and named-argument rules with every other invocation path.
+pub(crate) fn validate_implicit<T>(candidates: &[Candidate<T>]) -> Result<(), BindingError> {
+    validate_order(candidates)?;
+    if let Some(name_span) = candidates.iter().find_map(|candidate| match candidate {
+        Candidate::Named { name_span, .. } => Some(*name_span),
+        Candidate::Positional { .. } => None,
+    }) {
+        return Err(BindingError {
+            message: "implicit lambda parameters are positional only".to_string(),
+            primary: name_span,
+            secondary: Vec::new(),
+            hint: "Pass implicit lambda values positionally.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Build the structural binding decision for one ordered candidate sequence.
+pub(crate) fn plan<T>(
     parameters: &[ParameterMetadata<'_>],
     candidates: &[Candidate<T>],
-    body: Option<Candidate<T>>,
+    body: Option<&Candidate<T>>,
     body_policy: BodyPolicy,
     call_span: SourceSpan,
-) -> Result<BoundInvocation<T>, BindingError> {
+) -> Result<BindingPlan, BindingError> {
     validate_order(candidates)?;
-    let mut slots: Vec<Option<T>> = vec![None; parameters.len()];
+    let mut named_parameters = BTreeMap::new();
+    for (index, parameter) in parameters.iter().enumerate() {
+        named_parameters.entry(parameter.name).or_insert(index);
+        for alias in parameter.aliases {
+            named_parameters.entry(*alias).or_insert(index);
+        }
+    }
+    let mut slots: Vec<Option<PlannedSlot>> = vec![None; parameters.len()];
     let mut bound_spans: Vec<Option<SourceSpan>> = vec![None; parameters.len()];
     let mut next_positional = 0;
 
-    for candidate in candidates {
+    for (candidate_index, candidate) in candidates.iter().enumerate() {
         match candidate {
-            Candidate::Positional { value, span } => {
+            Candidate::Positional { span, .. } => {
                 while next_positional < parameters.len() && bound_spans[next_positional].is_some() {
                     next_positional += 1;
                 }
@@ -201,22 +245,17 @@ pub(crate) fn bind<T: Clone>(
                         hint: "Remove the excess positional argument or bind it to a declared parameter.".to_string(),
                     });
                 }
-                slots[index] = Some(value.clone());
+                slots[index] = Some(PlannedSlot::Candidate(candidate_index));
                 bound_spans[index] = Some(*span);
                 next_positional += 1;
             }
             Candidate::Named {
                 name,
                 name_span,
-                value,
                 span,
+                ..
             } => {
-                let Some((index, parameter)) =
-                    parameters.iter().enumerate().find(|(_, parameter)| {
-                        parameter.name == name
-                            || parameter.aliases.iter().any(|alias| *alias == name)
-                    })
-                else {
+                let Some(&index) = named_parameters.get(name.as_str()) else {
                     return Err(BindingError {
                         message: format!("unknown named argument `{name}`"),
                         primary: *name_span,
@@ -225,6 +264,7 @@ pub(crate) fn bind<T: Clone>(
                             .to_string(),
                     });
                 };
+                let parameter = &parameters[index];
                 if !parameter.allows_named {
                     return Err(BindingError {
                         message: format!("named argument `{name}` is not supported"),
@@ -244,7 +284,7 @@ pub(crate) fn bind<T: Clone>(
                         hint: "Remove the positional or named value that already fills this parameter.".to_string(),
                     });
                 }
-                slots[index] = Some(value.clone());
+                slots[index] = Some(PlannedSlot::Candidate(candidate_index));
                 bound_spans[index] = Some(*span);
             }
         }
@@ -279,25 +319,17 @@ pub(crate) fn bind<T: Clone>(
                     hint: "Remove the final explicit value when using a body fallback.".to_string(),
                 });
             }
-            let (value, span) = match body {
-                Candidate::Positional { value, span } | Candidate::Named { value, span, .. } => {
-                    (value, span)
-                }
-            };
-            slots[index] = Some(value);
-            bound_spans[index] = Some(span);
+            slots[index] = Some(PlannedSlot::Body);
+            bound_spans[index] = Some(body.span());
         }
         (Some(_), BodyPolicy::AllowSeparate) | (None, BodyPolicy::AllowSeparate) => {}
         (None, BodyPolicy::Reject | BodyPolicy::BindFinal) => {}
     }
 
-    let mut result = Vec::with_capacity(parameters.len());
+    let mut planned = Vec::with_capacity(parameters.len());
     for (index, parameter) in parameters.iter().enumerate() {
         match slots[index].take() {
-            Some(value) => result.push(BoundSlot::Explicit {
-                value,
-                span: bound_spans[index].unwrap_or(call_span),
-            }),
+            Some(source) => planned.push(source),
             None => match parameter.omission {
                 OmissionPolicy::Required => {
                     return Err(BindingError {
@@ -307,12 +339,86 @@ pub(crate) fn bind<T: Clone>(
                         hint: "Provide a value for every required parameter.".to_string(),
                     });
                 }
-                OmissionPolicy::Optional => result.push(BoundSlot::Omitted),
-                OmissionPolicy::Default => result.push(BoundSlot::Defaulted),
+                OmissionPolicy::Optional => planned.push(PlannedSlot::Omitted),
+                OmissionPolicy::Default => planned.push(PlannedSlot::Defaulted),
             },
         }
     }
-    Ok(BoundInvocation { slots: result })
+    Ok(BindingPlan {
+        slots: planned,
+        candidate_count: candidates.len(),
+        binds_body: matches!(body_policy, BodyPolicy::BindFinal) && body.is_some(),
+    })
+}
+
+impl BindingPlan {
+    /// Apply a previously validated structural plan to evaluated candidates.
+    /// This is deliberately the only post-evaluation slot assignment path.
+    pub(crate) fn bind<T: Clone>(
+        &self,
+        candidates: &[Candidate<T>],
+        body: Option<&Candidate<T>>,
+        call_span: SourceSpan,
+    ) -> Result<BoundInvocation<T>, BindingError> {
+        if candidates.len() != self.candidate_count || body.is_some() != self.binds_body {
+            return Err(plan_mismatch(call_span));
+        }
+        let mut slots = Vec::with_capacity(self.slots.len());
+        for source in &self.slots {
+            match source {
+                PlannedSlot::Candidate(index) => {
+                    let Some(candidate) = candidates.get(*index) else {
+                        return Err(plan_mismatch(call_span));
+                    };
+                    let (value, span) = match candidate {
+                        Candidate::Positional { value, span }
+                        | Candidate::Named { value, span, .. } => (value.clone(), *span),
+                    };
+                    slots.push(BoundSlot::Explicit { value, span });
+                }
+                PlannedSlot::Body => {
+                    let Some(candidate) = body else {
+                        return Err(plan_mismatch(call_span));
+                    };
+                    let (value, span) = match candidate {
+                        Candidate::Positional { value, span }
+                        | Candidate::Named { value, span, .. } => (value.clone(), *span),
+                    };
+                    slots.push(BoundSlot::Explicit { value, span });
+                }
+                PlannedSlot::Omitted => slots.push(BoundSlot::Omitted),
+                PlannedSlot::Defaulted => slots.push(BoundSlot::Defaulted),
+            }
+        }
+        Ok(BoundInvocation { slots })
+    }
+}
+
+fn plan_mismatch(call_span: SourceSpan) -> BindingError {
+    BindingError {
+        message: "evaluated invocation did not match its binding plan".to_string(),
+        primary: call_span,
+        secondary: Vec::new(),
+        hint: "Keep the invocation candidates unchanged after binding validation.".to_string(),
+    }
+}
+
+/// Bind one ordered candidate sequence against one explicit signature.
+pub(crate) fn bind<T: Clone>(
+    parameters: &[ParameterMetadata<'_>],
+    candidates: &[Candidate<T>],
+    body: Option<Candidate<T>>,
+    body_policy: BodyPolicy,
+    call_span: SourceSpan,
+) -> Result<BoundInvocation<T>, BindingError> {
+    let plan = plan(
+        parameters,
+        candidates,
+        body.as_ref(),
+        body_policy,
+        call_span,
+    )?;
+    plan.bind(candidates, body.as_ref(), call_span)
 }
 
 #[cfg(test)]
@@ -463,6 +569,20 @@ mod tests {
         )
         .expect_err("body rejection");
         assert_eq!(body.primary, span(30, 35));
+
+        let duplicate = bind(
+            &[
+                ParameterMetadata::optional("value"),
+                ParameterMetadata::optional("other"),
+            ],
+            &[named("value", 1, 40), named("value", 2, 50)],
+            None,
+            BodyPolicy::Reject,
+            span(0, 60),
+        )
+        .expect_err("duplicate named argument");
+        assert_eq!(duplicate.primary, span(50, 51));
+        assert_eq!(duplicate.secondary, [span(40, 42)]);
     }
 
     #[test]
@@ -519,5 +639,58 @@ mod tests {
                 span: span(10, 11)
             }]
         );
+    }
+
+    #[test]
+    fn binding_plan_is_reused_for_evaluated_values() {
+        let parameters = [
+            ParameterMetadata::required("first"),
+            ParameterMetadata::optional("second"),
+        ];
+        let structural = [
+            Candidate::Positional {
+                value: (),
+                span: span(10, 13),
+            },
+            Candidate::Named {
+                name: "second".to_string(),
+                name_span: span(20, 26),
+                value: (),
+                span: span(20, 29),
+            },
+        ];
+        let plan = plan(
+            &parameters,
+            &structural,
+            None,
+            BodyPolicy::Reject,
+            span(0, 30),
+        )
+        .expect("structural plan");
+        let evaluated = [positional(11, 10), named("second", 22, 20)];
+        let bound = plan
+            .bind(&evaluated, None, span(0, 30))
+            .expect("evaluated values follow the plan");
+        assert_eq!(
+            bound.slots,
+            [
+                BoundSlot::Explicit {
+                    value: 11,
+                    span: span(10, 11)
+                },
+                BoundSlot::Explicit {
+                    value: 22,
+                    span: span(20, 22)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn headerless_callable_binding_rejects_named_values() {
+        let error = validate_implicit(&[named("value", 1, 10)])
+            .expect_err("headerless callable parameters are positional only");
+        assert_eq!(error.primary, span(10, 11));
+        assert!(error.message.contains("positional only"));
     }
 }

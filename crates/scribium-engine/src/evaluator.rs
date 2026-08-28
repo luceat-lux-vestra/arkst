@@ -42,7 +42,9 @@
 //! segments continue in source order. No source or backend text is generated
 //! during this process.
 
-use crate::invocation_binder::{self, BodyPolicy, BoundSlot, Candidate, ParameterMetadata};
+use crate::invocation_binder::{
+    self, BindingPlan, BodyPolicy, BoundSlot, Candidate, ParameterMetadata,
+};
 use crate::value_conversion::{
     self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
 };
@@ -1524,9 +1526,6 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        if !self.validate_ordered_arguments(name, ordered_args, *span, diagnostics) {
-            return CallOutcome::Failed;
-        }
         match self.evaluate_call_value_with_ordered(
             name,
             ordered_args,
@@ -1575,9 +1574,6 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Vec<IrInline> {
-        if !self.validate_ordered_arguments(name, ordered_args, *span, diagnostics) {
-            return Vec::new();
-        }
         if is_stacked_layout(name) {
             diagnostics.push(stacked_inline_materialization_error(*span));
             return Vec::new();
@@ -1628,48 +1624,6 @@ impl Evaluator {
         }
     }
 
-    /// Runs the one shared source-order validation pass before target
-    /// selection and candidate evaluation. Legacy manually constructed IR may
-    /// omit the ordered projection; source-produced calls never do.
-    fn validate_ordered_arguments(
-        &self,
-        name: &str,
-        ordered_args: Option<&[IrCallArgument]>,
-        span: SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
-        let Some(ordered_args) = ordered_args else {
-            return true;
-        };
-        let candidates = structural_candidates(Some(ordered_args), &[], &[], span);
-        match invocation_binder::validate_order(&candidates) {
-            Ok(()) => true,
-            Err(error) => {
-                let code = if error.message.starts_with("named argument ") {
-                    "E3001"
-                } else {
-                    "E3003"
-                };
-                let message = if builtins::lookup(name).is_some()
-                    || native_binding_parameters(name).is_some()
-                {
-                    native_binding_message(name, error.message)
-                } else {
-                    error.message
-                };
-                diagnostics.push(Diagnostic {
-                    code: code.to_string(),
-                    severity: Severity::Error,
-                    message,
-                    primary: Some(error.primary),
-                    secondary: error.secondary,
-                    hints: vec![error.hint],
-                });
-                false
-            }
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn preflight_binding(
         &self,
@@ -1682,15 +1636,24 @@ impl Evaluator {
         span: SourceSpan,
         diagnostic_code: &str,
         native_name: Option<&str>,
+        lambda_body_span: Option<SourceSpan>,
         user_function: bool,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
+    ) -> Result<BindingPlan, ()> {
         let candidates = structural_candidates(ordered_args, positional_args, named_args, span);
         let body = body.map(|body| body_candidate_shape(body, span));
-        match invocation_binder::bind(parameters, &candidates, body, body_policy, span) {
-            Ok(_) => true,
+        match invocation_binder::plan(parameters, &candidates, body.as_ref(), body_policy, span) {
+            Ok(plan) => Ok(plan),
             Err(mut error) => {
                 if let Some(name) = native_name {
+                    if let Some(lambda_body_span) = lambda_body_span {
+                        if error.message == "this invocation does not accept a body" {
+                            error.message = format!("`.{name}` does not accept a lambda body");
+                            error.primary = lambda_body_span;
+                            error.hint =
+                                format!("Remove the lambda body; `.{name}` does not accept one.");
+                        }
+                    }
                     if error.message.starts_with("missing required")
                         && matches!(
                             name,
@@ -1729,8 +1692,14 @@ impl Evaluator {
                 if user_function {
                     error.message = callable_binding_message(error.message, &error.hint);
                 }
+                let diagnostic_code =
+                    if error.message == "positional argument after named argument is not allowed" {
+                        "E3003"
+                    } else {
+                        diagnostic_code
+                    };
                 diagnostics.push(binding_diagnostic_with_code(error, diagnostic_code));
-                false
+                Err(())
             }
         }
     }
@@ -1743,10 +1712,11 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
         span: SourceSpan,
         context: &EvaluationContext<'_>,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
+    ) -> Result<Option<BindingPlan>, ()> {
         // A parameterless call to a captured/assigned name is a value
         // reference, not the collection builtin with the same spelling (for
         // example `.first` inside a function that declares `first`). Likewise
@@ -1755,10 +1725,7 @@ impl Evaluator {
         if is_variable_reference_call(name, positional_args, named_args, body, context)
             || is_variable_reassignment_call(name, positional_args, named_args, body, context)
         {
-            return true;
-        }
-        if name == "var" && positional_args.is_empty() {
-            return true;
+            return Ok(None);
         }
         // A source-defined function owns its name once normal dispatch has
         // reached it. The documented state exceptions are native-owned unless
@@ -1768,10 +1735,10 @@ impl Evaluator {
             "captionposition" | "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
         ) && context.get_function(name).is_some();
         if context.get_function(name).is_some() && !is_document_state(name) {
-            return true;
+            return Ok(None);
         }
         if state_shadowed {
-            return true;
+            return Ok(None);
         }
 
         if let Some(builtin) = builtins::lookup(name) {
@@ -1780,30 +1747,34 @@ impl Evaluator {
                 builtins::BuiltinBodyPolicy::Reject => BodyPolicy::Reject,
                 builtins::BuiltinBodyPolicy::BindEvaluatedContent => BodyPolicy::BindFinal,
             };
-            return self.preflight_binding(
-                &parameters,
-                ordered_args,
-                positional_args,
-                named_args,
-                body,
-                body_policy,
-                span,
-                "E3001",
-                Some(name),
-                false,
-                diagnostics,
-            );
+            return self
+                .preflight_binding(
+                    &parameters,
+                    ordered_args,
+                    positional_args,
+                    named_args,
+                    body,
+                    body_policy,
+                    span,
+                    "E3001",
+                    Some(name),
+                    lambda_body_span(name, lambda_parameters),
+                    false,
+                    diagnostics,
+                )
+                .map(Some);
         }
 
         let Some((parameters, body_policy)) = native_binding_parameters(name) else {
-            return true;
+            return Ok(None);
         };
-        let diagnostic_code =
-            if is_document_state(name) || matches!(name, "let" | "br" | "html" | "markdown") {
-                "E3003"
-            } else {
-                "E3001"
-            };
+        let diagnostic_code = if name == "var" {
+            "E3002"
+        } else if is_document_state(name) || matches!(name, "let" | "br" | "html" | "markdown") {
+            "E3003"
+        } else {
+            "E3001"
+        };
         self.preflight_binding(
             &parameters,
             ordered_args,
@@ -1814,9 +1785,11 @@ impl Evaluator {
             span,
             diagnostic_code,
             Some(name),
+            lambda_body_span(name, lambda_parameters),
             false,
             diagnostics,
         )
+        .map(Some)
     }
 
     /// Evaluates a block chain and materializes its final semantic value.
@@ -1960,24 +1933,36 @@ impl Evaluator {
             };
         }
 
-        if !self.preflight_native_binding(
+        let native_binding_plan = match self.preflight_native_binding(
             name,
             ordered_args,
             positional_args,
             named_args,
             body,
+            lambda_parameters,
             *span,
             context,
             diagnostics,
         ) {
-            return CallOutcome::Failed;
-        }
+            Ok(plan) => plan,
+            Err(()) => return CallOutcome::Failed,
+        };
 
         if is_conditional(name) {
+            let Some(binding_plan) = native_binding_plan.as_ref() else {
+                return CallOutcome::Failed;
+            };
+            let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+            let bound = match binding_plan.bind(&raw_candidates, None, *span) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    return CallOutcome::Failed;
+                }
+            };
             let condition = match self.resolve_call_condition(
                 name,
-                positional_args,
-                named_args,
+                bound.slots.first(),
                 span,
                 diagnostics,
                 context,
@@ -1987,14 +1972,7 @@ impl Evaluator {
                 Err(outcome) => return outcome,
             };
             return if take_branch(name, condition) {
-                self.conditional_content_value(
-                    positional_args,
-                    named_args,
-                    body,
-                    span,
-                    diagnostics,
-                    context,
-                )
+                self.conditional_content_value(&bound, body, span, diagnostics, context)
             } else {
                 CallOutcome::Value(IrValue::Content(Vec::new()))
             };
@@ -2013,6 +1991,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2025,6 +2004,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2036,6 +2016,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2048,6 +2029,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2070,6 +2052,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2102,6 +2085,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2115,6 +2099,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2128,6 +2113,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2141,6 +2127,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2153,6 +2140,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2199,6 +2187,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2211,6 +2200,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2224,6 +2214,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2237,6 +2228,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2248,6 +2240,7 @@ impl Evaluator {
                 lambda_parameters,
                 span,
                 diagnostics,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2260,6 +2253,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2274,6 +2268,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2286,6 +2281,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
                 first_origin,
             );
         }
@@ -2298,6 +2294,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
@@ -2309,17 +2306,14 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                native_binding_plan.as_ref(),
             );
         }
 
         if is_collection_access(name) {
-            if body.is_some() {
-                diagnostics.push(iteration_error(
-                    format!("`.{name}` does not accept a block body"),
-                    *span,
-                ));
+            let Some(binding_plan) = native_binding_plan.as_ref() else {
                 return CallOutcome::Failed;
-            }
+            };
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
                 span,
@@ -2341,10 +2335,14 @@ impl Evaluator {
                 &evaluated_named,
                 span,
                 diagnostics,
+                binding_plan,
             );
         }
 
         if let Some(builtin) = builtins::lookup(name) {
+            let Some(binding_plan) = native_binding_plan.as_ref() else {
+                return CallOutcome::Failed;
+            };
             let evaluated_candidates = match self.evaluate_invocation_candidates(
                 ordered_args,
                 positional_args,
@@ -2358,52 +2356,33 @@ impl Evaluator {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
-            let mut evaluated_positional = evaluated_candidates
-                .iter()
-                .filter_map(|candidate| match candidate {
-                    Candidate::Positional { value, .. } => Some(value.clone()),
-                    Candidate::Named { .. } => None,
-                })
-                .collect::<Vec<_>>();
-            let has_body = match builtin.body_policy {
-                builtins::BuiltinBodyPolicy::Reject => body.is_some(),
+            let evaluated_body = match builtin.body_policy {
+                builtins::BuiltinBodyPolicy::Reject => None,
                 builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
-                    if let Some(body) = body {
-                        let body = match self.evaluate_call_body(body, span, diagnostics, context) {
-                            CallOutcome::Value(value) => value,
-                            outcome => return outcome,
-                        };
-                        evaluated_positional.push(InvocationValue::static_value(body));
+                    if let Some(call_body) = body {
+                        let body =
+                            match self.evaluate_call_body(call_body, span, diagnostics, context) {
+                                CallOutcome::Value(value) => value,
+                                outcome => return outcome,
+                            };
+                        Some(Candidate::Positional {
+                            value: InvocationValue::static_value(body),
+                            span: call_body_source_span(call_body, *span),
+                        })
+                    } else {
+                        None
                     }
-                    false
                 }
             };
-            let evaluated_named = evaluated_candidates
-                .into_iter()
-                .filter_map(|candidate| match candidate {
-                    Candidate::Named {
-                        name,
-                        name_span,
-                        value,
-                        span,
-                    } => Some(InvocationNamedArg::new(
-                        IrNamedArg {
-                            name,
-                            name_span,
-                            value: value.value,
-                            span,
-                        },
-                        value.origin,
-                    )),
-                    Candidate::Positional { .. } => None,
-                })
-                .collect::<Vec<_>>();
-            return match builtins::evaluate_with_origins(
-                builtin,
-                &evaluated_positional,
-                &evaluated_named,
-                has_body,
-            ) {
+            let bound =
+                match binding_plan.bind(&evaluated_candidates, evaluated_body.as_ref(), *span) {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                        return CallOutcome::Failed;
+                    }
+                };
+            return match builtins::evaluate_bound(builtin, bound) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {
                     diagnostics.push(chain_evaluation_error(error.message, *span));
@@ -2420,26 +2399,22 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_center(
         &self,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
+        _positional_args: &[IrValue],
+        _named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        if !positional_args.is_empty() {
-            diagnostics.push(center_argument_error(
-                "`.center` does not accept positional arguments",
-                value_source_span(&positional_args[0], span),
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
-        if let Some(argument) = named_args.first() {
-            diagnostics.push(center_argument_error(
-                "`.center` does not accept named arguments",
-                argument.span,
-            ));
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
             return CallOutcome::Failed;
         }
         if let Some(parameters) = lambda_parameters {
@@ -2486,26 +2461,22 @@ impl Evaluator {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_landscape(
         &self,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
+        _positional_args: &[IrValue],
+        _named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        if let Some(argument) = positional_args.first() {
-            diagnostics.push(landscape_argument_error(
-                "`.landscape` does not accept positional arguments",
-                value_source_span(argument, span),
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
-        if let Some(argument) = named_args.first() {
-            diagnostics.push(landscape_argument_error(
-                "`.landscape` does not accept named arguments",
-                argument.span,
-            ));
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
             return CallOutcome::Failed;
         }
         if let Some(parameters) = lambda_parameters {
@@ -2548,27 +2519,24 @@ impl Evaluator {
         )))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_br(
         &self,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _positional_args: &[IrValue],
+        _named_args: &[IrNamedArg],
+        _body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        if let Some(argument) = positional_args.first() {
-            diagnostics.push(br_argument_error(
-                "`.br` does not accept positional arguments",
-                value_source_span(argument, span),
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
-        if let Some(argument) = named_args.first() {
-            diagnostics.push(br_argument_error(
-                "`.br` does not accept named arguments",
-                argument.span,
-            ));
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
             return CallOutcome::Failed;
         }
         if let Some(parameters) = lambda_parameters {
@@ -2579,11 +2547,6 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        if body.is_some() {
-            diagnostics.push(br_argument_error("`.br` does not accept a body", *span));
-            return CallOutcome::Failed;
-        }
-
         CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
             content: vec![IrInline::HardBreak { span: *span }],
             span: *span,
@@ -2595,11 +2558,12 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2625,7 +2589,16 @@ impl Evaluator {
                 span: value_source_span(source, span),
             })
             .collect();
-        let bound = match bind_whitespace_arguments(positional, named_values, span, diagnostics) {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let bound = match bind_whitespace_arguments(
+            binding_plan,
+            positional,
+            named_values,
+            span,
+            diagnostics,
+        ) {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
@@ -2659,14 +2632,6 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        if body.is_some() {
-            diagnostics.push(whitespace_argument_error(
-                "`.whitespace` does not accept a body",
-                *span,
-            ));
-            return CallOutcome::Failed;
-        }
-
         let (width, height) = match (width, height) {
             (None, None) => (None, None),
             (width, height) => (
@@ -2694,6 +2659,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2719,10 +2685,14 @@ impl Evaluator {
                 span: value_source_span(source, span),
             })
             .collect();
-        let alignment = match bind_align_argument(positional, named_values, span, diagnostics) {
-            Ok(argument) => argument,
-            Err(outcome) => return outcome,
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
         };
+        let alignment =
+            match bind_align_argument(binding_plan, positional, named_values, span, diagnostics) {
+                Ok(argument) => argument,
+                Err(outcome) => return outcome,
+            };
         let alignment = match convert_align_alignment(&alignment.value) {
             Ok(value) => value,
             Err(error) => {
@@ -2781,6 +2751,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2806,7 +2777,16 @@ impl Evaluator {
                 span: value_source_span(source, span),
             })
             .collect();
-        let bound = match bind_container_arguments(positional, named_values, span, diagnostics) {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let bound = match bind_container_arguments(
+            binding_plan,
+            positional,
+            named_values,
+            span,
+            diagnostics,
+        ) {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
@@ -2897,6 +2877,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let positional_values = match self.evaluate_invocation_values(
@@ -2922,8 +2903,17 @@ impl Evaluator {
                 span: value_source_span(source, span),
             })
             .collect();
-        let bound = match bind_stacked_arguments(name, positional, named_values, span, diagnostics)
-        {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let bound = match bind_stacked_arguments(
+            binding_plan,
+            name,
+            positional,
+            named_values,
+            span,
+            diagnostics,
+        ) {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
@@ -3148,6 +3138,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if name == "docauthors" {
@@ -3158,6 +3149,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
                 first_origin,
             );
         }
@@ -3170,6 +3162,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
                 first_origin,
             );
         }
@@ -3182,6 +3175,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
                 first_origin,
             );
         }
@@ -3194,6 +3188,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
                 first_origin,
             );
         }
@@ -3206,21 +3201,17 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
                 first_origin,
             );
-        }
-
-        if body.is_some() {
-            diagnostics.push(document_state_call_error(
-                format!("`.{name}` does not accept a block body"),
-                *span,
-            ));
-            return CallOutcome::Failed;
         }
 
         if positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value(name));
         }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
 
         if name == "docauthor" {
             let evaluated_positional = match self.evaluate_invocation_values(
@@ -3239,15 +3230,14 @@ impl Evaluator {
                     Err(outcome) => return outcome,
                 };
             let bound = match bind_evaluated_arguments(
+                binding_plan,
                 evaluated_positional
                     .into_iter()
                     .zip(positional_args.iter())
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                &[ParameterMetadata::optional("value").with_aliases(&["author"])],
                 None,
-                BodyPolicy::Reject,
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3294,15 +3284,14 @@ impl Evaluator {
 
         if name == "doctype" {
             let bound = match bind_evaluated_arguments(
+                binding_plan,
                 evaluated_positional
                     .into_iter()
                     .zip(positional_args.iter())
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                &[ParameterMetadata::optional("value").with_aliases(&["type"])],
                 None,
-                BodyPolicy::Reject,
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3342,15 +3331,14 @@ impl Evaluator {
         }
 
         let bound = match bind_evaluated_arguments(
+            binding_plan,
             evaluated_positional
                 .into_iter()
                 .zip(positional_args.iter())
                 .map(|(value, source)| (value, value_source_span(source, span)))
                 .collect(),
             evaluated_named,
-            &[ParameterMetadata::optional("value").named(false)],
             None,
-            BodyPolicy::Reject,
             *span,
         ) {
             Ok(bound) => bound,
@@ -3401,11 +3389,15 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value("doclang"));
         }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
 
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>| {
@@ -3434,15 +3426,14 @@ impl Evaluator {
                 }
             };
         let bound = match bind_evaluated_arguments(
+            binding_plan,
             evaluated_positional
                 .into_iter()
                 .zip(positional_args.iter())
                 .map(|(value, source)| (value, value_source_span(source, span)))
                 .collect(),
             evaluated_named,
-            &[ParameterMetadata::optional("locale").with_aliases(&["locale"])],
             None,
-            BodyPolicy::Reject,
             *span,
         ) {
             Ok(bound) => bound,
@@ -3503,11 +3494,15 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
             return self.document_authors_value(*span, diagnostics, context);
         }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
 
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
@@ -3539,13 +3534,26 @@ impl Evaluator {
                     return outcome;
                 }
             };
-            (
-                IrValue::Dictionary(IrDictionary {
+            let body_candidate = Candidate::Positional {
+                value: InvocationValue::static_value(IrValue::Dictionary(IrDictionary {
                     entries,
                     span: *span,
-                }),
-                *span,
-            )
+                })),
+                span: *span,
+            };
+            let bound = match binding_plan.bind(&[], Some(&body_candidate), *span) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            };
+            let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            };
+            (value.value, span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3569,15 +3577,14 @@ impl Evaluator {
                     }
                 };
             let bound = match bind_evaluated_arguments(
+                binding_plan,
                 evaluated_positional
                     .into_iter()
                     .zip(positional_args.iter())
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                &[ParameterMetadata::optional("authors").with_aliases(&["authors"])],
                 None,
-                BodyPolicy::Reject,
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3623,11 +3630,15 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value("dockeywords"));
         }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
 
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
@@ -3653,7 +3664,23 @@ impl Evaluator {
                     return outcome;
                 }
             };
-            (values, *span)
+            let body_candidate = Candidate::Positional {
+                value: values,
+                span: *span,
+            };
+            let bound = match binding_plan.bind(&[], Some(&body_candidate), *span) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            };
+            let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
+                restore_on_failure(context, &previous_state);
+                return CallOutcome::Failed;
+            };
+            (value, span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3677,15 +3704,14 @@ impl Evaluator {
                     }
                 };
             let bound = match bind_evaluated_arguments(
+                binding_plan,
                 evaluated_positional
                     .into_iter()
                     .zip(positional_args.iter())
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                &[ParameterMetadata::optional("keywords").with_aliases(&["keywords"])],
                 None,
-                BodyPolicy::Reject,
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3747,25 +3773,27 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        if body.is_some() {
-            diagnostics.push(document_state_call_error(
-                "`.captionposition` does not accept a block body".to_string(),
-                *span,
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
+        };
 
-        let bindings =
-            match bind_caption_position_arguments(positional_args, named_args, span, diagnostics) {
-                Ok(bindings) => bindings,
-                Err(outcome) => return outcome,
-            };
+        let bindings = match bind_caption_position_arguments(
+            binding_plan,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+        ) {
+            Ok(bindings) => bindings,
+            Err(outcome) => return outcome,
+        };
 
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>| {
@@ -3891,19 +3919,16 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        if body.is_some() {
-            diagnostics.push(document_state_call_error(
-                "`.theme` block-body fallback is deferred because the evaluator does not receive the raw body text".to_string(),
-                *span,
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
+        };
 
         let previous_state = context.document_state.borrow().clone();
         let restore_on_failure = |context: &EvaluationContext<'_>| {
@@ -3940,17 +3965,7 @@ impl Evaluator {
                 .collect(),
             evaluated_named,
         );
-        let metadata = [
-            ParameterMetadata::optional("color"),
-            ParameterMetadata::optional("layout"),
-        ];
-        let bound = match invocation_binder::bind(
-            &metadata,
-            &candidates,
-            None,
-            BodyPolicy::Reject,
-            *span,
-        ) {
+        let bound = match binding_plan.bind(&candidates, None, *span) {
             Ok(bound) => bound,
             Err(error) => {
                 let message =
@@ -4293,25 +4308,22 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
         if !self.capabilities.allows(Capability::NativeContent) {
             diagnostics.push(native_content_denied(*span));
             return CallOutcome::Failed;
         }
 
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
         let candidates = raw_invocation_locations(positional_args, named_args, *span);
         let body_candidate = body.map(|body| Candidate::Positional {
             value: InvocationArgumentLocation::Body,
             span: call_body_source_span(body, *span),
         });
-        let parameters = [ParameterMetadata::required("content")];
-        let bound = match invocation_binder::bind(
-            &parameters,
-            &candidates,
-            body_candidate,
-            BodyPolicy::BindFinal,
-            *span,
-        ) {
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
             Ok(bound) => bound,
             Err(error) => {
                 let mut diagnostic = binding_diagnostic_with_code(error, "E3003");
@@ -4432,6 +4444,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
         if !self.capabilities.allows(Capability::NativeContent) {
             diagnostics.push(Diagnostic {
@@ -4447,19 +4460,15 @@ impl Evaluator {
             });
             return CallOutcome::Failed;
         }
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
         let candidates = raw_invocation_locations(positional_args, named_args, *span);
         let body_candidate = body.map(|body| Candidate::Positional {
             value: InvocationArgumentLocation::Body,
             span: call_body_source_span(body, *span),
         });
-        let parameters = [ParameterMetadata::required("content")];
-        let bound = match invocation_binder::bind(
-            &parameters,
-            &candidates,
-            body_candidate,
-            BodyPolicy::BindFinal,
-            *span,
-        ) {
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
             Ok(bound) => bound,
             Err(error) => {
                 let mut diagnostic = binding_diagnostic_with_code(error, "E3003");
@@ -4554,20 +4563,15 @@ impl Evaluator {
         name: &str,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        if body.is_some() {
-            diagnostics.push(resource_diagnostic(
-                "E3003",
-                format!("`.{name}` does not accept a block body"),
-                *span,
-                "Pass the logical project resource path as an argument.",
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
+        };
 
         let evaluated_positional =
             match self.evaluate_values(positional_args, span, diagnostics, context) {
@@ -4586,6 +4590,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
             ),
             "json" => self.evaluate_json(
                 &evaluated_positional,
@@ -4593,6 +4598,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
             ),
             "include" => self.evaluate_include(
                 &evaluated_positional,
@@ -4600,6 +4606,7 @@ impl Evaluator {
                 span,
                 diagnostics,
                 context,
+                binding_plan,
             ),
             _ => CallOutcome::Failed,
         }
@@ -4612,10 +4619,16 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
     ) -> CallOutcome {
-        let Some(reference) =
-            resource_path_argument("read", positional_args, named_args, span, diagnostics)
-        else {
+        let Some(reference) = resource_path_argument(
+            "read",
+            positional_args,
+            named_args,
+            binding_plan,
+            span,
+            diagnostics,
+        ) else {
             return CallOutcome::Failed;
         };
         let lines = match resource_lines_argument(named_args, span, diagnostics) {
@@ -4657,21 +4670,18 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
     ) -> CallOutcome {
-        let Some(reference) =
-            resource_path_argument("json", positional_args, named_args, span, diagnostics)
-        else {
+        let Some(reference) = resource_path_argument(
+            "json",
+            positional_args,
+            named_args,
+            binding_plan,
+            span,
+            diagnostics,
+        ) else {
             return CallOutcome::Failed;
         };
-        if !named_args.is_empty() {
-            diagnostics.push(resource_diagnostic(
-                "E3003",
-                "`.json` does not support named arguments".to_string(),
-                named_args[0].name_span,
-                "Pass exactly one logical project resource path.",
-            ));
-            return CallOutcome::Failed;
-        }
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -4715,10 +4725,16 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
     ) -> CallOutcome {
-        let Some(reference) =
-            resource_path_argument("include", positional_args, named_args, span, diagnostics)
-        else {
+        let Some(reference) = resource_path_argument(
+            "include",
+            positional_args,
+            named_args,
+            binding_plan,
+            span,
+            diagnostics,
+        ) else {
             return CallOutcome::Failed;
         };
         let sandbox = match include_sandbox_argument(named_args, span, diagnostics) {
@@ -4832,6 +4848,7 @@ impl Evaluator {
         named_args: &[InvocationNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
+        binding_plan: &BindingPlan,
     ) -> CallOutcome {
         match name {
             "size" | "first" | "second" | "third" | "last" | "sumall" | "average" | "distinct"
@@ -4842,6 +4859,7 @@ impl Evaluator {
                     named_parameter,
                     positional_args,
                     named_args,
+                    binding_plan,
                     span,
                     diagnostics,
                 ) {
@@ -4883,11 +4901,16 @@ impl Evaluator {
                 }
             }
             "getat" => {
-                let (value, index, fallback) =
-                    match getat_operands(positional_args, named_args, span, diagnostics) {
-                        Ok(operands) => operands,
-                        Err(outcome) => return outcome,
-                    };
+                let (value, index, fallback) = match getat_operands(
+                    positional_args,
+                    named_args,
+                    binding_plan,
+                    span,
+                    diagnostics,
+                ) {
+                    Ok(operands) => operands,
+                    Err(outcome) => return outcome,
+                };
                 let elements = match self.coerce_iterable(value, span, diagnostics) {
                     Ok(elements) => elements,
                     Err(outcome) => return outcome,
@@ -4915,13 +4938,33 @@ impl Evaluator {
     fn evaluate_pair(
         &self,
         positional_args: &[IrValue],
-        _named_args: &[IrNamedArg],
+        named_args: &[IrNamedArg],
         _body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        let values = match self.evaluate_values(positional_args, span, diagnostics, context) {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&raw_candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let values = bound
+            .slots
+            .into_iter()
+            .filter_map(|slot| match slot {
+                BoundSlot::Explicit { value, .. } => Some(value),
+                BoundSlot::Omitted | BoundSlot::Defaulted => None,
+            })
+            .collect::<Vec<_>>();
+        let values = match self.evaluate_values(&values, span, diagnostics, context) {
             Ok(values) => values,
             Err(outcome) => return outcome,
         };
@@ -4951,7 +4994,17 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if binding_plan
+            .bind::<InvocationValue>(&[], None, *span)
+            .is_err()
+        {
+            return CallOutcome::Failed;
+        }
         let body = match body {
             None => &[][..],
             Some(CallBody::Block(nodes)) => nodes,
@@ -5118,13 +5171,28 @@ impl Evaluator {
     fn evaluate_let(
         &self,
         positional_args: &[IrValue],
-        _named_args: &[IrNamedArg],
+        named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&raw_candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit { value, .. }) = bound.slots.into_iter().next() else {
+            return CallOutcome::Failed;
+        };
         let body = match body {
             Some(CallBody::Block(nodes)) => nodes,
             Some(CallBody::Inline(_)) => {
@@ -5160,19 +5228,16 @@ impl Evaluator {
             }
         }
 
-        let value = match self.evaluate_value(&positional_args[0], diagnostics, context) {
+        let value = match self.evaluate_value(&value, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
-                match self.preserve_value_expression(&positional_args[0], diagnostics, context) {
+                match self.preserve_value_expression(&value, diagnostics, context) {
                     Ok(value) => value,
                     Err(outcome) => return outcome,
                 }
             }
             CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(
-                    &positional_args[0],
-                    span,
-                )));
+                diagnostics.push(no_value_required(value_source_span(&value, span)));
                 return CallOutcome::Failed;
             }
             CallOutcome::Failed => return CallOutcome::Failed,
@@ -5198,23 +5263,78 @@ impl Evaluator {
     fn evaluate_foreach(
         &self,
         positional_args: &[IrValue],
-        _named_args: &[IrNamedArg],
+        named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        let (iterable_argument, iteration_body) = match resolve_iteration_operands(
-            ".foreach",
-            positional_args,
-            body,
-            span,
-            diagnostics,
-        ) {
-            Ok(operands) => operands,
-            Err(outcome) => return outcome,
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&raw_candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: iterable_argument,
+            ..
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let callback_argument = match slots.next() {
+            Some(BoundSlot::Explicit { value, .. }) => Some(value),
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        };
+        let iteration_body = match body {
+            Some(CallBody::Block(nodes)) => IterationBody::Block(nodes),
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.foreach` does not accept an ordinary inline content body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                let Some(callback) = callback_argument else {
+                    diagnostics.push(iteration_error(
+                        "`.foreach` requires a block or inline callable body".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let callable = match callback {
+                    IrValue::Callable(callable) => callable,
+                    IrValue::InlineBody(IrInlineBody {
+                        parameters,
+                        body,
+                        span,
+                        ..
+                    }) => IrCallable {
+                        parameters,
+                        body,
+                        span,
+                        capture: None,
+                    },
+                    value => {
+                        diagnostics.push(iteration_error(
+                            "`.foreach` inline body must be a callable".to_string(),
+                            value_source_span(&value, span),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                IterationBody::Inline(callable)
+            }
         };
         let callable_parameters = match &iteration_body {
             IterationBody::Block(_) => lambda_parameters,
@@ -5226,7 +5346,7 @@ impl Evaluator {
 
         let value = match self
             .evaluate_invocation_values(
-                std::slice::from_ref(iterable_argument),
+                std::slice::from_ref(&iterable_argument),
                 span,
                 diagnostics,
                 context,
@@ -5269,18 +5389,78 @@ impl Evaluator {
     fn evaluate_repeat(
         &self,
         positional_args: &[IrValue],
-        _named_args: &[IrNamedArg],
+        named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        let (count_argument, iteration_body) =
-            match resolve_iteration_operands(".repeat", positional_args, body, span, diagnostics) {
-                Ok(operands) => operands,
-                Err(outcome) => return outcome,
-            };
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&raw_candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: count_argument,
+            ..
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let callback_argument = match slots.next() {
+            Some(BoundSlot::Explicit { value, .. }) => Some(value),
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        };
+        let iteration_body = match body {
+            Some(CallBody::Block(nodes)) => IterationBody::Block(nodes),
+            Some(CallBody::Inline(_)) => {
+                diagnostics.push(iteration_error(
+                    "`.repeat` does not accept an ordinary inline content body".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            None => {
+                let Some(callback) = callback_argument else {
+                    diagnostics.push(iteration_error(
+                        "`.repeat` requires a block or inline callable body".to_string(),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                let callable = match callback {
+                    IrValue::Callable(callable) => callable,
+                    IrValue::InlineBody(IrInlineBody {
+                        parameters,
+                        body,
+                        span,
+                        ..
+                    }) => IrCallable {
+                        parameters,
+                        body,
+                        span,
+                        capture: None,
+                    },
+                    value => {
+                        diagnostics.push(iteration_error(
+                            "`.repeat` inline body must be a callable".to_string(),
+                            value_source_span(&value, span),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                IterationBody::Inline(callable)
+            }
+        };
         let callable_parameters = match &iteration_body {
             IterationBody::Block(_) => lambda_parameters,
             IterationBody::Inline(callable) => callable.parameters.as_deref(),
@@ -5289,16 +5469,16 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
 
-        let count_value = match self.evaluate_value(count_argument, diagnostics, context) {
+        let count_value = match self.evaluate_value(&count_argument, diagnostics, context) {
             CallOutcome::Value(value) => value,
             CallOutcome::Unresolved => {
-                match self.preserve_value_expression(count_argument, diagnostics, context) {
+                match self.preserve_value_expression(&count_argument, diagnostics, context) {
                     Ok(value) => value,
                     Err(outcome) => return outcome,
                 }
             }
             CallOutcome::NoValue => {
-                diagnostics.push(no_value_required(value_source_span(count_argument, span)));
+                diagnostics.push(no_value_required(value_source_span(&count_argument, span)));
                 return CallOutcome::Failed;
             }
             CallOutcome::Failed => return CallOutcome::Failed,
@@ -5360,6 +5540,7 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
         let (raw_collection, raw_callback) = match transform_operands(
@@ -5367,6 +5548,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body.is_some(),
+            binding_plan,
             *span,
             diagnostics,
         ) {
@@ -5499,12 +5681,14 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
         let (raw_value, raw_callback) = match optionality_operands(
             name,
             positional_args,
             named_args,
             body.is_some(),
+            binding_plan,
             *span,
             diagnostics,
         ) {
@@ -5628,23 +5812,21 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        body: Option<CallBody<'_>>,
+        _body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        if body.is_some() {
-            diagnostics.push(iteration_error(
-                "`.range` does not accept a block body".to_string(),
-                *span,
-            ));
+        let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
-        }
-        let (start, end) = match range_arguments(positional_args, named_args, span, diagnostics) {
-            Ok(arguments) => arguments,
-            Err(outcome) => return outcome,
         };
+        let (start, end) =
+            match range_arguments(positional_args, named_args, binding_plan, span, diagnostics) {
+                Ok(arguments) => arguments,
+                Err(outcome) => return outcome,
+            };
         let start = match start {
             Some(value) => {
                 match self.evaluate_range_endpoint(&value, span, diagnostics, context, first_origin)
@@ -6275,7 +6457,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
         implicit_argument: Option<InvocationValue>,
     ) -> CallOutcome {
-        if let LambdaParameters::Explicit(parameters) = &binding.parameters {
+        let binding_plan = if let LambdaParameters::Explicit(parameters) = &binding.parameters {
             let metadata = parameters
                 .iter()
                 .map(|parameter| {
@@ -6287,7 +6469,7 @@ impl Evaluator {
                     metadata.with_name_span(parameter.name_span)
                 })
                 .collect::<Vec<_>>();
-            if !self.preflight_binding(
+            match self.preflight_binding(
                 &metadata,
                 ordered_args,
                 positional_args,
@@ -6297,12 +6479,25 @@ impl Evaluator {
                 *span,
                 "E3003",
                 None,
+                None,
                 true,
                 diagnostics,
             ) {
+                Ok(plan) => Some(plan),
+                Err(()) => return CallOutcome::Failed,
+            }
+        } else {
+            let candidates =
+                structural_candidates(ordered_args, positional_args, named_args, *span);
+            if let Err(error) = invocation_binder::validate_implicit(&candidates) {
+                diagnostics.push(binding_diagnostic_with_message(
+                    error,
+                    callable_binding_message,
+                ));
                 return CallOutcome::Failed;
             }
-        }
+            None
+        };
         // Caller arguments are evaluated before any callee scope is created.
         let candidates = match self.evaluate_invocation_candidates(
             ordered_args,
@@ -6319,6 +6514,7 @@ impl Evaluator {
         };
         let bound = match self.bind_callable_arguments(
             &binding.parameters,
+            binding_plan.as_ref(),
             candidates,
             body,
             span,
@@ -6347,6 +6543,7 @@ impl Evaluator {
     fn bind_callable_arguments(
         &self,
         parameters: &LambdaParameters,
+        binding_plan: Option<&BindingPlan>,
         candidates: Vec<Candidate<InvocationValue>>,
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
@@ -6355,20 +6552,6 @@ impl Evaluator {
     ) -> Result<BoundLambdaArguments, CallOutcome> {
         match parameters {
             LambdaParameters::Implicit => {
-                if let Err(error) = invocation_binder::validate_order(&candidates) {
-                    diagnostics.push(binding_diagnostic(error));
-                    return Err(CallOutcome::Failed);
-                }
-                if let Some(argument) = candidates.iter().find_map(|candidate| match candidate {
-                    Candidate::Named { name_span, .. } => Some(*name_span),
-                    Candidate::Positional { .. } => None,
-                }) {
-                    diagnostics.push(function_error_at(
-                        "Implicit lambda parameters are positional only".to_string(),
-                        argument,
-                    ));
-                    return Err(CallOutcome::Failed);
-                }
                 let mut arguments = candidates
                     .into_iter()
                     .filter_map(|candidate| match candidate {
@@ -6387,18 +6570,7 @@ impl Evaluator {
                 }
                 Ok(BoundLambdaArguments::Implicit(arguments))
             }
-            LambdaParameters::Explicit(parameters) => {
-                let metadata = parameters
-                    .iter()
-                    .map(|parameter| {
-                        let metadata = if parameter.optional {
-                            ParameterMetadata::optional(&parameter.name)
-                        } else {
-                            ParameterMetadata::required(&parameter.name)
-                        };
-                        metadata.with_name_span(parameter.name_span)
-                    })
-                    .collect::<Vec<_>>();
+            LambdaParameters::Explicit(_parameters) => {
                 let body_value = if let Some(body) = body {
                     let value = match self.evaluate_call_body(body, span, diagnostics, context) {
                         CallOutcome::Value(value) => value,
@@ -6406,50 +6578,31 @@ impl Evaluator {
                         CallOutcome::Failed => return Err(CallOutcome::Failed),
                         CallOutcome::Unresolved => return Err(CallOutcome::Unresolved),
                     };
-                    Some(Candidate::Positional { value, span: *span })
+                    Some(Candidate::Positional {
+                        value: InvocationValue::static_value(value),
+                        span: call_body_source_span(body, *span),
+                    })
                 } else {
                     None
                 };
-                let candidates = candidates
-                    .into_iter()
-                    .map(|candidate| match candidate {
-                        Candidate::Positional { value, span } => Candidate::Positional {
-                            value: value.value,
-                            span,
-                        },
-                        Candidate::Named {
-                            name,
-                            name_span,
-                            value,
-                            span,
-                        } => Candidate::Named {
-                            name,
-                            name_span,
-                            value: value.value,
-                            span,
-                        },
-                    })
-                    .collect::<Vec<_>>();
-                let bound = invocation_binder::bind(
-                    &metadata,
-                    &candidates,
-                    body_value,
-                    BodyPolicy::BindFinal,
-                    *span,
-                )
-                .map_err(|error| {
-                    diagnostics.push(binding_diagnostic_with_message(
-                        error,
-                        callable_binding_message,
-                    ));
-                    CallOutcome::Failed
-                })?;
+                let Some(binding_plan) = binding_plan else {
+                    return Err(CallOutcome::Failed);
+                };
+                let bound = binding_plan
+                    .bind(&candidates, body_value.as_ref(), *span)
+                    .map_err(|error| {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        CallOutcome::Failed
+                    })?;
                 Ok(BoundLambdaArguments::Explicit(
                     bound
                         .slots
                         .into_iter()
                         .map(|slot| match slot {
-                            BoundSlot::Explicit { value, .. } => value,
+                            BoundSlot::Explicit { value, .. } => value.value,
                             BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
                         })
                         .collect(),
@@ -6504,14 +6657,6 @@ impl Evaluator {
                 span,
                 ..
             } => {
-                if !self.validate_ordered_arguments(
-                    name,
-                    ordered_args.as_deref(),
-                    *span,
-                    diagnostics,
-                ) {
-                    return CallOutcome::Failed;
-                }
                 match self.evaluate_call_value_with_ordered(
                     name,
                     ordered_args.as_deref(),
@@ -6571,24 +6716,6 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        if !self.validate_ordered_arguments(
-            &head.name,
-            head.ordered_args.as_deref(),
-            head.span,
-            diagnostics,
-        ) {
-            return CallOutcome::Failed;
-        }
-        for segment in chain {
-            if !self.validate_ordered_arguments(
-                &segment.name,
-                segment.ordered_args.as_deref(),
-                segment.span,
-                diagnostics,
-            ) {
-                return CallOutcome::Failed;
-            }
-        }
         let mut value_origin = call_result_origin(&head.name, context);
         let mut value = match self.chain_outcome(
             self.evaluate_call_value_with_ordered(
@@ -6754,18 +6881,16 @@ impl Evaluator {
     fn resolve_call_condition(
         &self,
         name: &str,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
+        condition_slot: Option<&BoundSlot<IrValue>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         first_origin: Option<ValueOrigin>,
     ) -> Result<bool, CallOutcome> {
-        let Some((raw_condition, condition_origin)) = named_args
-            .iter()
-            .find(|arg| arg.name == "condition")
-            .map(|arg| (&arg.value, None))
-            .or_else(|| positional_args.first().map(|value| (value, first_origin)))
+        let Some(BoundSlot::Explicit {
+            value: raw_condition,
+            ..
+        }) = condition_slot
         else {
             diagnostics.push(unresolvable_condition(name, span));
             return Err(CallOutcome::Failed);
@@ -6785,7 +6910,7 @@ impl Evaluator {
                     span,
                     diagnostics,
                     context,
-                    condition_origin,
+                    first_origin,
                 )?
                 .into_iter()
                 .next()
@@ -6809,8 +6934,7 @@ impl Evaluator {
     /// dispatch.
     fn conditional_content_value(
         &self,
-        positional_args: &[IrValue],
-        named_args: &[IrNamedArg],
+        bound: &invocation_binder::BoundInvocation<IrValue>,
         body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -6819,11 +6943,7 @@ impl Evaluator {
         if let Some(body) = body {
             return self.evaluate_call_body(body, span, diagnostics, context);
         }
-        if let Some(arg) = named_args.iter().find(|arg| arg.name == "body") {
-            let value = &arg.value;
-            return self.evaluate_content_argument(value, span, diagnostics, context);
-        }
-        if let Some(value) = positional_args.get(1) {
+        if let Some(BoundSlot::Explicit { value, .. }) = bound.slots.get(1) {
             return self.evaluate_content_argument(value, span, diagnostics, context);
         }
         CallOutcome::Value(IrValue::Content(Vec::new()))
@@ -7196,14 +7316,6 @@ impl Evaluator {
                     ..
                 }] = nodes.as_slice()
                 {
-                    if !self.validate_ordered_arguments(
-                        name,
-                        ordered_args.as_deref(),
-                        *span,
-                        diagnostics,
-                    ) {
-                        return CallOutcome::Failed;
-                    }
                     return self.evaluate_call_value_with_ordered(
                         name,
                         ordered_args.as_deref(),
@@ -7637,6 +7749,7 @@ impl CaptionPositionBindings {
 }
 
 fn bind_caption_position_arguments(
+    plan: &BindingPlan,
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
     span: &SourceSpan,
@@ -7660,42 +7773,31 @@ fn bind_caption_position_arguments(
                 span: argument.span,
             }),
     );
-    let metadata = [
-        ParameterMetadata::optional("default"),
-        ParameterMetadata::optional("figures"),
-        ParameterMetadata::optional("tables"),
-        ParameterMetadata::optional("code"),
-    ];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
-        .map_err(|error| {
-            let message = if let Some(name) = error.message.strip_prefix("unknown named argument ")
-            {
-                format!("Unknown named argument {name} for `.captionposition`")
-            } else if error.message == "received too many positional arguments" {
-                "`.captionposition` accepts at most four positional arguments".to_string()
-            } else if let Some(parameter) =
-                error
-                    .message
-                    .strip_prefix("parameter ")
-                    .and_then(|message| {
-                        message.strip_suffix(" collides with an already bound argument")
-                    })
-            {
-                format!("`.captionposition` received the {parameter} argument more than once")
-            } else if let Some(name) = error
-                .message
-                .strip_prefix("named argument `")
-                .and_then(|message| message.strip_suffix("` was supplied more than once"))
-            {
-                format!("`.captionposition` received the `{name}` argument more than once")
-            } else {
-                error.message.clone()
-            };
-            let mut diagnostic = binding_diagnostic_with_code(error, "E3003");
-            diagnostic.message = message;
-            diagnostics.push(diagnostic);
-            CallOutcome::Failed
-        })?;
+    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+        let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
+            format!("Unknown named argument {name} for `.captionposition`")
+        } else if error.message == "received too many positional arguments" {
+            "`.captionposition` accepts at most four positional arguments".to_string()
+        } else if let Some(parameter) = error
+            .message
+            .strip_prefix("parameter ")
+            .and_then(|message| message.strip_suffix(" collides with an already bound argument"))
+        {
+            format!("`.captionposition` received the {parameter} argument more than once")
+        } else if let Some(name) = error
+            .message
+            .strip_prefix("named argument `")
+            .and_then(|message| message.strip_suffix("` was supplied more than once"))
+        {
+            format!("`.captionposition` received the `{name}` argument more than once")
+        } else {
+            error.message.clone()
+        };
+        let mut diagnostic = binding_diagnostic_with_code(error, "E3003");
+        diagnostic.message = message;
+        diagnostics.push(diagnostic);
+        CallOutcome::Failed
+    })?;
 
     let mut bindings = CaptionPositionBindings::default();
     for (parameter, slot) in [
@@ -7967,6 +8069,7 @@ fn is_deferred(name: &str) -> bool {
 }
 
 fn bind_whitespace_arguments(
+    plan: &BindingPlan,
     positional: Vec<WhitespaceArgument>,
     named: Vec<InvocationNamedArg>,
     span: &SourceSpan,
@@ -7990,15 +8093,10 @@ fn bind_whitespace_arguments(
         },
         span: argument.arg.span,
     }));
-    let metadata = [
-        ParameterMetadata::optional("width"),
-        ParameterMetadata::optional("height"),
-    ];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
-        .map_err(|error| {
-            diagnostics.push(binding_diagnostic(error));
-            CallOutcome::Failed
-        })?;
+    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+        diagnostics.push(binding_diagnostic(error));
+        CallOutcome::Failed
+    })?;
     let mut slots = bound.slots.into_iter();
     let to_argument = |slot: BoundSlot<InvocationValue>| match slot {
         BoundSlot::Explicit { value, span } => Some(WhitespaceArgument { value, span }),
@@ -8035,6 +8133,7 @@ fn zero_whitespace_size() -> IrSize {
 }
 
 fn bind_container_arguments(
+    plan: &BindingPlan,
     positional: Vec<ContainerArgument>,
     named: Vec<InvocationNamedArg>,
     span: &SourceSpan,
@@ -8047,35 +8146,25 @@ fn bind_container_arguments(
             .collect(),
         named,
     );
-    let metadata = [
-        ParameterMetadata::optional("width"),
-        ParameterMetadata::optional("height"),
-        ParameterMetadata::defaulted("fullwidth"),
-    ];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
-        .map_err(|error| {
-            let message = if let Some(name) = error.message.strip_prefix("unknown named argument ")
-            {
-                format!("Unknown named argument {name}")
-            } else if error.message == "received too many positional arguments" {
-                "`.container` accepts at most three positional arguments".to_string()
-            } else if let Some(parameter) =
-                error
-                    .message
-                    .strip_prefix("parameter ")
-                    .and_then(|message| {
-                        message.strip_suffix(" collides with an already bound argument")
-                    })
-            {
-                format!("Argument {parameter} was bound more than once")
-            } else {
-                error.message.clone()
-            };
-            let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
-            diagnostic.message = message;
-            diagnostics.push(diagnostic);
-            CallOutcome::Failed
-        })?;
+    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+        let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
+            format!("Unknown named argument {name}")
+        } else if error.message == "received too many positional arguments" {
+            "`.container` accepts at most three positional arguments".to_string()
+        } else if let Some(parameter) = error
+            .message
+            .strip_prefix("parameter ")
+            .and_then(|message| message.strip_suffix(" collides with an already bound argument"))
+        {
+            format!("Argument {parameter} was bound more than once")
+        } else {
+            error.message.clone()
+        };
+        let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
+        diagnostic.message = message;
+        diagnostics.push(diagnostic);
+        CallOutcome::Failed
+    })?;
     let mut slots = bound.slots.into_iter();
     let take = |slot: Option<BoundSlot<InvocationValue>>| match slot {
         Some(BoundSlot::Explicit { value, span }) => Some(ContainerArgument { value, span }),
@@ -8158,6 +8247,7 @@ fn container_argument_error_at(message: String, span: SourceSpan) -> Diagnostic 
 }
 
 fn bind_align_argument(
+    plan: &BindingPlan,
     positional: Vec<AlignArgument>,
     named: Vec<InvocationNamedArg>,
     span: &SourceSpan,
@@ -8170,33 +8260,27 @@ fn bind_align_argument(
             .collect(),
         named,
     );
-    let metadata = [ParameterMetadata::required("alignment")];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
-        .map_err(|error| {
-            let message = if let Some(name) = error.message.strip_prefix("unknown named argument ")
-            {
-                format!("Unknown named argument {name}")
-            } else if error.message == "received too many positional arguments" {
-                "`.align` accepts exactly one `alignment` argument".to_string()
-            } else if error.message.starts_with("missing required argument") {
-                "`.align` requires the `alignment` argument".to_string()
-            } else if let Some(parameter) =
-                error
-                    .message
-                    .strip_prefix("parameter ")
-                    .and_then(|message| {
-                        message.strip_suffix(" collides with an already bound argument")
-                    })
-            {
-                format!("Argument {parameter} was bound more than once")
-            } else {
-                error.message.clone()
-            };
-            let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
-            diagnostic.message = message;
-            diagnostics.push(diagnostic);
-            CallOutcome::Failed
-        })?;
+    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+        let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
+            format!("Unknown named argument {name}")
+        } else if error.message == "received too many positional arguments" {
+            "`.align` accepts exactly one `alignment` argument".to_string()
+        } else if error.message.starts_with("missing required argument") {
+            "`.align` requires the `alignment` argument".to_string()
+        } else if let Some(parameter) = error
+            .message
+            .strip_prefix("parameter ")
+            .and_then(|message| message.strip_suffix(" collides with an already bound argument"))
+        {
+            format!("Argument {parameter} was bound more than once")
+        } else {
+            error.message.clone()
+        };
+        let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
+        diagnostic.message = message;
+        diagnostics.push(diagnostic);
+        CallOutcome::Failed
+    })?;
     match bound.slots.into_iter().next() {
         Some(BoundSlot::Explicit { value, span }) => Ok(AlignArgument { value, span }),
         _ => Err(CallOutcome::Failed),
@@ -8225,17 +8309,13 @@ fn convert_align_alignment(
 }
 
 fn bind_stacked_arguments(
+    plan: &BindingPlan,
     name: &str,
     positional: Vec<StackedArgument>,
     named: Vec<InvocationNamedArg>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<BoundStackedArguments, CallOutcome> {
-    let parameter_names: &[&str] = match name {
-        "row" | "column" => &["alignment", "cross", "gap"],
-        "grid" => &["columns", "alignment", "cross", "gap", "vgap", "hgap"],
-        _ => return Err(CallOutcome::Unresolved),
-    };
     let candidates = invocation_candidates(
         positional
             .into_iter()
@@ -8243,43 +8323,25 @@ fn bind_stacked_arguments(
             .collect(),
         named,
     );
-    let mut metadata = parameter_names
-        .iter()
-        .map(|parameter| {
-            if name == "grid" && *parameter == "columns" {
-                ParameterMetadata::required(parameter)
-            } else {
-                ParameterMetadata::defaulted(parameter)
-            }
-        })
-        .collect::<Vec<_>>();
-    for parameter in &mut metadata {
-        *parameter = parameter.with_name_span(*span);
-    }
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
-        .map_err(|error| {
-            let message = if let Some(name) = error.message.strip_prefix("unknown named argument ")
-            {
-                format!("Unknown named argument {name}")
-            } else if error.message == "received too many positional arguments" {
-                "too many positional arguments".to_string()
-            } else if let Some(parameter) =
-                error
-                    .message
-                    .strip_prefix("parameter ")
-                    .and_then(|message| {
-                        message.strip_suffix(" collides with an already bound argument")
-                    })
-            {
-                format!("Argument {parameter} was bound more than once")
-            } else {
-                error.message.clone()
-            };
-            let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
-            diagnostic.message = format!("`.{name}` {message}");
-            diagnostics.push(diagnostic);
-            CallOutcome::Failed
-        })?;
+    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+        let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
+            format!("Unknown named argument {name}")
+        } else if error.message == "received too many positional arguments" {
+            "too many positional arguments".to_string()
+        } else if let Some(parameter) = error
+            .message
+            .strip_prefix("parameter ")
+            .and_then(|message| message.strip_suffix(" collides with an already bound argument"))
+        {
+            format!("Argument {parameter} was bound more than once")
+        } else {
+            error.message.clone()
+        };
+        let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
+        diagnostic.message = format!("`.{name}` {message}");
+        diagnostics.push(diagnostic);
+        CallOutcome::Failed
+    })?;
     let values = bound
         .slots
         .into_iter()
@@ -8753,6 +8815,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     const KEYWORDS_ALIASES: &[&str] = &["keywords"];
     const LOCALE_ALIASES: &[&str] = &["locale"];
     const TYPE_ALIASES: &[&str] = &["type"];
+    const VAR_VALUE_ALIASES: &[&str] = &["body"];
     const CALLBACK_ALIASES: &[&str] = &["by"];
 
     let signature = match name {
@@ -8806,7 +8869,8 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::AllowSeparate,
         ),
         "dictionary" => (Vec::new(), BodyPolicy::AllowSeparate),
-        "center" | "landscape" | "br" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "center" | "landscape" => (Vec::new(), BodyPolicy::AllowSeparate),
+        "br" => (Vec::new(), BodyPolicy::Reject),
         "align" => (
             vec![ParameterMetadata::required("alignment")],
             BodyPolicy::AllowSeparate,
@@ -8872,7 +8936,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         "var" => (
             vec![
                 ParameterMetadata::required("name"),
-                ParameterMetadata::optional("value"),
+                ParameterMetadata::optional("value").with_aliases(VAR_VALUE_ALIASES),
             ],
             BodyPolicy::BindFinal,
         ),
@@ -8937,24 +9001,33 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     Some(signature)
 }
 
+fn lambda_body_span(name: &str, parameters: Option<&[IrParameter]>) -> Option<SourceSpan> {
+    (name == "br")
+        .then(|| {
+            parameters.and_then(|parameters| parameters.first().map(|parameter| parameter.span))
+        })
+        .flatten()
+}
+
 fn transform_operands(
     _name: &str,
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
     has_body: bool,
+    binding_plan: Option<&BindingPlan>,
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(IrValue, Option<IrValue>), CallOutcome> {
     let candidates = raw_invocation_candidates(positional_args, named_args, span);
-    let metadata = [
-        ParameterMetadata::required("from"),
-        ParameterMetadata::optional("callback").with_aliases(&["by"]),
-    ];
+    let Some(binding_plan) = binding_plan else {
+        return Err(CallOutcome::Failed);
+    };
     let body = has_body.then_some(Candidate::Positional {
         value: IrValue::None,
         span,
     });
-    let bound = invocation_binder::bind(&metadata, &candidates, body, BodyPolicy::BindFinal, span)
+    let bound = binding_plan
+        .bind(&candidates, body.as_ref(), span)
         .map_err(|error| {
             diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
             CallOutcome::Failed
@@ -8974,28 +9047,24 @@ fn transform_operands(
 }
 
 fn optionality_operands(
-    name: &str,
+    _name: &str,
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
     has_body: bool,
+    binding_plan: Option<&BindingPlan>,
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(IrValue, Option<IrValue>), CallOutcome> {
-    let callback_name = if name == "ifpresent" {
-        "mapping"
-    } else {
-        "condition"
+    let Some(binding_plan) = binding_plan else {
+        return Err(CallOutcome::Failed);
     };
     let candidates = raw_invocation_candidates(positional_args, named_args, span);
-    let metadata = [
-        ParameterMetadata::required("value"),
-        ParameterMetadata::optional(callback_name),
-    ];
     let body = has_body.then_some(Candidate::Positional {
         value: IrValue::None,
         span,
     });
-    let bound = invocation_binder::bind(&metadata, &candidates, body, BodyPolicy::BindFinal, span)
+    let bound = binding_plan
+        .bind(&candidates, body.as_ref(), span)
         .map_err(|error| {
             diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
             CallOutcome::Failed
@@ -9014,9 +9083,10 @@ fn optionality_operands(
 
 fn collection_access_operand(
     name: &str,
-    named_parameter: &str,
+    _named_parameter: &str,
     positional_args: &[InvocationValue],
     named_args: &[InvocationNamedArg],
+    binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<InvocationValue, CallOutcome> {
@@ -9027,8 +9097,8 @@ fn collection_access_operand(
             .collect(),
         named_args.to_vec(),
     );
-    let metadata = [ParameterMetadata::required(named_parameter)];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
         .map_err(|error| {
             let message = if let Some(argument_name) =
                 error.message.strip_prefix("unknown named argument ")
@@ -9063,15 +9133,13 @@ fn collection_access_operand(
 fn range_arguments(
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(Option<IrValue>, Option<IrValue>), CallOutcome> {
     let candidates = raw_invocation_candidates(positional_args, named_args, *span);
-    let metadata = [
-        ParameterMetadata::optional("from"),
-        ParameterMetadata::optional("to"),
-    ];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
         .map_err(|error| {
             let message = if let Some(argument_name) =
                 error.message.strip_prefix("unknown named argument ")
@@ -9110,6 +9178,7 @@ fn range_arguments(
 fn getat_operands(
     positional_args: &[InvocationValue],
     named_args: &[InvocationNamedArg],
+    binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(InvocationValue, InvocationValue, IrValue), CallOutcome> {
@@ -9120,12 +9189,8 @@ fn getat_operands(
             .collect(),
         named_args.to_vec(),
     );
-    let metadata = [
-        ParameterMetadata::required("from"),
-        ParameterMetadata::required("index"),
-        ParameterMetadata::optional("orelse"),
-    ];
-    let bound = invocation_binder::bind(&metadata, &candidates, None, BodyPolicy::Reject, *span)
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
         .map_err(|error| {
             let message = if let Some(argument_name) =
                 error.message.strip_prefix("unknown named argument ")
@@ -9402,81 +9467,6 @@ fn group_collection_values(
     }
     grouped.extend(groups.into_iter().map(IrValue::Collection));
     CallOutcome::Value(IrValue::Collection(grouped))
-}
-
-fn resolve_iteration_operands<'a>(
-    name: &str,
-    positional_args: &'a [IrValue],
-    body: Option<CallBody<'a>>,
-    span: &SourceSpan,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(&'a IrValue, IterationBody<'a>), CallOutcome> {
-    match body {
-        Some(CallBody::Block(nodes)) => {
-            if positional_args.len() != 1 {
-                diagnostics.push(iteration_error(
-                    format!(
-                        "`{name}` requires exactly one positional iterable/count argument for a block body (received {})",
-                        positional_args.len()
-                    ),
-                    *span,
-                ));
-                return Err(CallOutcome::Failed);
-            }
-            Ok((&positional_args[0], IterationBody::Block(nodes)))
-        }
-        Some(CallBody::Inline(_)) => {
-            diagnostics.push(iteration_error(
-                format!("`{name}` does not accept an ordinary inline content body"),
-                *span,
-            ));
-            Err(CallOutcome::Failed)
-        }
-        None if positional_args.len() == 2 => {
-            let Some(body) = positional_args.get(1) else {
-                return Err(CallOutcome::Failed);
-            };
-            let callable = match body {
-                IrValue::Callable(callable) => callable.clone(),
-                IrValue::InlineBody(IrInlineBody {
-                    parameters,
-                    body,
-                    span,
-                    ..
-                }) => IrCallable {
-                    parameters: parameters.clone(),
-                    body: body.clone(),
-                    span: *span,
-                    capture: None,
-                },
-                _ => {
-                    diagnostics.push(iteration_error(
-                        format!("`{name}` inline body must be a callable"),
-                        value_source_span(body, span),
-                    ));
-                    return Err(CallOutcome::Failed);
-                }
-            };
-            Ok((&positional_args[0], IterationBody::Inline(callable)))
-        }
-        None if positional_args.len() != 1 => {
-            diagnostics.push(iteration_error(
-                format!(
-                    "`{name}` requires one positional iterable/count argument and an optional inline callable body (received {})",
-                    positional_args.len()
-                ),
-                *span,
-            ));
-            Err(CallOutcome::Failed)
-        }
-        None => {
-            diagnostics.push(iteration_error(
-                format!("`{name}` requires a block or inline callable body"),
-                *span,
-            ));
-            Err(CallOutcome::Failed)
-        }
-    }
 }
 
 fn validate_iteration_lambda(
@@ -9793,29 +9783,12 @@ fn resource_path_argument(
     builtin: &str,
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<String> {
-    let metadata = match builtin {
-        "json" => vec![ParameterMetadata::required("path").named(false)],
-        "read" => vec![
-            ParameterMetadata::required("path"),
-            ParameterMetadata::optional("lines"),
-        ],
-        "include" => vec![
-            ParameterMetadata::required("path"),
-            ParameterMetadata::optional("sandbox"),
-        ],
-        _ => return None,
-    };
     let candidates = raw_invocation_candidates(positional_args, named_args, *span);
-    let bound = match invocation_binder::bind(
-        &metadata,
-        &candidates,
-        None,
-        BodyPolicy::Reject,
-        *span,
-    ) {
+    let bound = match binding_plan.bind(&candidates, None, *span) {
         Ok(bound) => bound,
         Err(error) => {
             diagnostics.push(resource_diagnostic(
@@ -10300,15 +10273,14 @@ fn raw_invocation_locations(
 }
 
 fn bind_evaluated_arguments(
+    plan: &BindingPlan,
     positional: Vec<(InvocationValue, SourceSpan)>,
     named: Vec<InvocationNamedArg>,
-    parameters: &[ParameterMetadata<'_>],
-    body: Option<Candidate<InvocationValue>>,
-    body_policy: BodyPolicy,
+    body: Option<&Candidate<InvocationValue>>,
     call_span: SourceSpan,
 ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, invocation_binder::BindingError> {
     let candidates = invocation_candidates(positional, named);
-    invocation_binder::bind(parameters, &candidates, body, body_policy, call_span)
+    plan.bind(&candidates, body, call_span)
 }
 
 fn function_error(message: String, span: SourceSpan) -> Diagnostic {
@@ -10949,11 +10921,32 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
-        // Check for malformed declaration: must have a name (first positional arg)
-        let var_name = match positional_args.first() {
-            Some(IrValue::Identifier(name)) => name.clone(),
-            Some(IrValue::String(name)) => name.clone(),
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let body_placeholder = body.map(|body| Candidate::Positional {
+            value: IrValue::None,
+            span: call_body_source_span(body, *span),
+        });
+        let raw_candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&raw_candidates, body_placeholder.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit {
+            value: raw_name, ..
+        }) = bound.slots.first()
+        else {
+            diagnostics.push(invalid_var_declaration(span));
+            return CallOutcome::Failed;
+        };
+        let var_name = match raw_name {
+            IrValue::Identifier(name) | IrValue::String(name) => name.clone(),
             _ => {
                 diagnostics.push(invalid_var_declaration(span));
                 return CallOutcome::Failed;
@@ -10965,7 +10958,6 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
 
-        // Determine the value: body > named "body" > second positional > named "value" > empty
         if let Some(body) = body {
             let outcome = match body {
                 CallBody::Block(nodes) => {
@@ -10986,10 +10978,7 @@ impl Evaluator {
                 }
             }
         }
-
-        // Check named "body" argument
-        if let Some(arg) = named_args.iter().find(|arg| arg.name == "body") {
-            let value = &arg.value;
+        if let Some(BoundSlot::Explicit { value, .. }) = bound.slots.get(1) {
             match self.evaluate_value(value, diagnostics, context) {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
@@ -11012,56 +11001,6 @@ impl Evaluator {
             }
         }
 
-        // Check named "value" argument
-        if let Some(arg) = named_args.iter().find(|arg| arg.name == "value") {
-            let value = &arg.value;
-            match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => {
-                    context.assign_value(var_name, value);
-                    return CallOutcome::NoValue;
-                }
-                CallOutcome::Unresolved => {
-                    match self.preserve_value_expression(value, diagnostics, context) {
-                        Ok(value) => {
-                            context.assign_value(var_name, value);
-                            return CallOutcome::NoValue;
-                        }
-                        Err(outcome) => return outcome,
-                    }
-                }
-                CallOutcome::NoValue => {
-                    diagnostics.push(no_value_required(value_source_span(value, span)));
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Failed => return CallOutcome::Failed,
-            }
-        }
-
-        // Fall back to second positional argument
-        if let Some(value) = positional_args.get(1) {
-            match self.evaluate_value(value, diagnostics, context) {
-                CallOutcome::Value(value) => {
-                    context.assign_value(var_name, value);
-                    return CallOutcome::NoValue;
-                }
-                CallOutcome::Unresolved => {
-                    match self.preserve_value_expression(value, diagnostics, context) {
-                        Ok(value) => {
-                            context.assign_value(var_name, value);
-                            return CallOutcome::NoValue;
-                        }
-                        Err(outcome) => return outcome,
-                    }
-                }
-                CallOutcome::NoValue => {
-                    diagnostics.push(no_value_required(value_source_span(value, span)));
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Failed => return CallOutcome::Failed,
-            }
-        }
-
-        // No value provided - invalid declaration
         diagnostics.push(invalid_var_declaration(span));
         CallOutcome::Failed
     }
