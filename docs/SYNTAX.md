@@ -158,13 +158,13 @@ Call syntax has the following properties:
 - Positional and named arguments may be mixed. Scribium's grammar/frontend
   preserves the complete source-ordered argument sequence, including an
   unnamed argument after a named argument, and does not report parser `E2001`
-  for that shape. Before the legacy split IR projection, the engine handoff
-  guard rejects positional-after-named with source-backed `E3003`, using the
-  original argument spans and omitting the invalid call from IR. In pinned
-  Quarkdown v2.5.1, `FunctionCallGrammar` preserves the sequence and
-  `RegularArgumentsBinder` owns validity checking. The guard is a transitional
-  safety boundary for #163; complete shared semantic binding remains #149/#165
-  work.
+  for that shape. The engine retains that sequence alongside the legacy
+  positional/named projections, and its shared invocation binder rejects
+  positional-after-named with source-backed `E3003`, using the original
+  argument spans. In pinned Quarkdown v2.5.1, `FunctionCallGrammar` preserves
+  the sequence and `RegularArgumentsBinder` owns validity checking. The
+  frontend/IR representation is the bounded #163 prerequisite; shared
+  semantic binding is the #165 engine contract.
 - An escaped call introducer is literal, and escaped `{`/`}` delimiters do not
   change call-argument depth in pinned v2.5.1. Scribium currently records the
   introducer boundary but counts escaped argument braces while scanning; the

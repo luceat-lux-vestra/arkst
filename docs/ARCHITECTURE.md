@@ -636,6 +636,15 @@ Typst names or Typst source. The Typst backend may lower the materialized
 semantic node into an appropriate Typst construct; this does not make the IR
 Typst-specific.
 
+Call nodes retain their source-ordered argument shape in `IrCallArgument`
+alongside the legacy positional and named projections used by existing
+adapters. `scribium-engine` owns the shared invocation binder that consumes
+that ordered shape for native builtins, source-defined functions, and callback
+invocations. It assigns slots and applies required/optional/default/body
+policy before target-driven conversion; transient evaluator data such as
+`ValueOrigin` is not stored in the IR. Legacy projections are an adapter for
+older manually constructed IR, not a source-order reconstruction mechanism.
+
 IR nodes preserve their original `SourceSpan`, but generated-output source-map
 entries are not stored in `IrDocument` or `IrNode`:
 

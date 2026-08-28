@@ -158,9 +158,9 @@ The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-
 (dynamic/content target conversion), and
 [#167](https://github.com/luceat-lux-vestra/scribium/issues/167)
 (conversion diagnostics and validate-then-commit atomicity). They are native
-sub-issues of #149. #163 now provides the parser/frontend prerequisite and
-transitional engine safety guard for positional-after-named shape; #165 must
-absorb that guard into shared binding. #150–#155 remain the broader programmable,
+sub-issues of #149. #163 provides the parser/frontend and IR prerequisite for
+the ordered argument shape; #165 implements the shared engine binding contract
+for positional-after-named and the related slot rules. #150–#155 remain the broader programmable,
 general-builtin, metadata, layout, content, and resource audits; #156 remains
 the reconciliation gate.
 

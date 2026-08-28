@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Shared invocation binder validation (#165):** Native builtins,
+  source-defined functions, and callback/lambda paths now consume one
+  engine-owned binder with explicit parameter metadata for ordered positional
+  and named binding, aliases, duplicate/collision/excess rejection, required
+  and optional/default slots, and body policy. Frontend/IR calls retain their
+  source-ordered mixed-argument sequence until binding, preserving the
+  positional-after-named diagnostic spans; the temporary #163 handoff guard
+  is removed. Target-driven conversion, raw DynamicValue/content fallback,
+  and broader conversion diagnostics/commit atomicity remain #166/#167 work.
+
 - **Explicit native Typst backend selection (#200):** PDF builds continue to
   use the subprocess adapter by default, and the default CLI build does not
   include the in-process Typst compiler graph. Trusted native hosts may opt in
