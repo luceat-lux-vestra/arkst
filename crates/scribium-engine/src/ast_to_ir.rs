@@ -7,8 +7,9 @@
 use crate::DocumentMetadataDefaults;
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
-    IrCallSegment, IrDocument, IrInline, IrInlineBody, IrListItem, IrMetadata, IrNamedArg, IrNode,
-    IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
+    IrCallArgument, IrCallSegment, IrDocument, IrInline, IrInlineBody, IrListItem, IrMetadata,
+    IrNamedArg, IrNode, IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow,
+    IrTaskStatus,
 };
 use scribium_markdown::ast::{
     Block, CallArgument, CallSegment, Document, Inline, TableAlignment, TaskStatus, Value,
@@ -179,7 +180,7 @@ fn block_to_ir(
             lambda_header,
             span,
         } => {
-            let (ir_positional, ir_named) =
+            let (ir_positional, ir_named, ordered_args) =
                 call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let ir_body = body.as_ref().map(|blocks| {
                 blocks
@@ -213,6 +214,7 @@ fn block_to_ir(
                     name: name.clone(),
                     positional_args: ir_positional,
                     named_args: ir_named,
+                    ordered_args: Some(ordered_args),
                     lambda_parameters: lambda_header
                         .as_ref()
                         .map(|header| lambda_parameters_to_ir(header, source_id)),
@@ -226,6 +228,7 @@ fn block_to_ir(
                         name_span: byte_to_source_span(name_span, source_id),
                         positional_args: ir_positional,
                         named_args: ir_named,
+                        ordered_args: Some(ordered_args),
                         span: byte_to_source_span(head_span, source_id),
                     },
                     chain: chain
@@ -356,52 +359,63 @@ fn call_segment_to_ir(
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
 ) -> Option<IrCallSegment> {
-    let (positional_args, named_args) =
+    let (positional_args, named_args, ordered_args) =
         call_arguments_to_ir(&segment.arguments, source_id, diagnostics, source_mode)?;
     Some(IrCallSegment {
         name: segment.name.clone(),
         name_span: byte_to_source_span(&segment.name_span, source_id),
         positional_args,
         named_args,
+        ordered_args: Some(ordered_args),
         span: byte_to_source_span(&segment.span, source_id),
     })
 }
 
-/// The current IR still exposes separate positional/named projections. Derive
-/// them from the frontend's single ordered argument sequence at this existing
-/// boundary, but reject the one ordering rule that cannot safely survive the
-/// projection. The eventual shared binder in #165 should absorb this guard.
+/// Retain both the legacy projections used by existing evaluator adapters and
+/// the original source order consumed by the engine invocation binder.
 fn call_arguments_to_ir(
     arguments: &[CallArgument],
     source_id: SourceId,
     diagnostics: &mut Vec<Diagnostic>,
     source_mode: Mode,
-) -> Option<(Vec<scribium_ir::IrValue>, Vec<IrNamedArg>)> {
-    if let Some((positional_span, named_span)) = positional_after_named(arguments) {
-        diagnostics.push(positional_after_named_error(
-            positional_span,
-            named_span,
-            source_id,
-        ));
-        return None;
-    }
-
+) -> Option<(
+    Vec<scribium_ir::IrValue>,
+    Vec<IrNamedArg>,
+    Vec<IrCallArgument>,
+)> {
     let mut positional_args = Vec::new();
     let mut named_args = Vec::new();
+    let mut ordered_args = Vec::with_capacity(arguments.len());
     for argument in arguments {
         match argument {
-            CallArgument::Positional { value, .. } => {
-                positional_args.push(value_to_ir(value, source_id, diagnostics, source_mode)?);
+            CallArgument::Positional { value, span } => {
+                let value = value_to_ir(value, source_id, diagnostics, source_mode)?;
+                positional_args.push(value.clone());
+                ordered_args.push(IrCallArgument::Positional {
+                    value,
+                    span: byte_to_source_span(span, source_id),
+                });
             }
-            CallArgument::Named(argument) => named_args.push(IrNamedArg {
-                name: argument.name.clone(),
-                name_span: byte_to_source_span(&argument.name_span, source_id),
-                value: value_to_ir(&argument.value, source_id, diagnostics, source_mode)?,
-                span: byte_to_source_span(&argument.span, source_id),
-            }),
+            CallArgument::Named(argument) => {
+                let value = value_to_ir(&argument.value, source_id, diagnostics, source_mode)?;
+                let name_span = byte_to_source_span(&argument.name_span, source_id);
+                let span = byte_to_source_span(&argument.span, source_id);
+                named_args.push(IrNamedArg {
+                    name: argument.name.clone(),
+                    name_span,
+                    value: value.clone(),
+                    span,
+                });
+                ordered_args.push(IrCallArgument::Named {
+                    name: argument.name.clone(),
+                    name_span,
+                    value,
+                    span,
+                });
+            }
         }
     }
-    Some((positional_args, named_args))
+    Some((positional_args, named_args, ordered_args))
 }
 
 fn inlines_to_ir(
@@ -683,7 +697,7 @@ fn inline_to_ir(
             body,
             span,
         } => {
-            let (ir_positional, ir_named) =
+            let (ir_positional, ir_named, ordered_args) =
                 call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let ir_body = body
                 .as_ref()
@@ -693,6 +707,7 @@ fn inline_to_ir(
                     name: name.clone(),
                     positional_args: ir_positional,
                     named_args: ir_named,
+                    ordered_args: Some(ordered_args),
                     body: ir_body,
                     span: byte_to_source_span(span, source_id),
                 })
@@ -703,6 +718,7 @@ fn inline_to_ir(
                         name_span: byte_to_source_span(name_span, source_id),
                         positional_args: ir_positional,
                         named_args: ir_named,
+                        ordered_args: Some(ordered_args),
                         span: byte_to_source_span(head_span, source_id),
                     },
                     chain: chain
@@ -845,7 +861,7 @@ fn content_value_to_ir(
         span,
     }] = inlines
     {
-        let (ir_positional, ir_named) =
+        let (ir_positional, ir_named, ordered_args) =
             call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
         let ir_body = body.as_ref().map(|b| {
             vec![IrNode::Paragraph {
@@ -858,6 +874,7 @@ fn content_value_to_ir(
                 name: name.clone(),
                 positional_args: ir_positional,
                 named_args: ir_named,
+                ordered_args: Some(ordered_args),
                 lambda_parameters: None,
                 body: ir_body,
                 span: byte_to_source_span(span, source_id),
@@ -869,6 +886,7 @@ fn content_value_to_ir(
                     name_span: byte_to_source_span(name_span, source_id),
                     positional_args: ir_positional,
                     named_args: ir_named,
+                    ordered_args: Some(ordered_args),
                     span: byte_to_source_span(head_span, source_id),
                 },
                 chain: chain
@@ -908,7 +926,7 @@ fn inline_lambda_body_to_ir(
             body,
             span,
         }] => {
-            let (positional_args, named_args) =
+            let (positional_args, named_args, ordered_args) =
                 call_arguments_to_ir(arguments, source_id, diagnostics, source_mode)?;
             let body = body.as_ref().map(|inlines| {
                 vec![IrNode::Paragraph {
@@ -921,6 +939,7 @@ fn inline_lambda_body_to_ir(
                     name: name.clone(),
                     positional_args,
                     named_args,
+                    ordered_args: Some(ordered_args),
                     lambda_parameters: None,
                     body,
                     span: byte_to_source_span(span, source_id),
@@ -932,6 +951,7 @@ fn inline_lambda_body_to_ir(
                         name_span: byte_to_source_span(name_span, source_id),
                         positional_args,
                         named_args,
+                        ordered_args: Some(ordered_args),
                         span: byte_to_source_span(head_span, source_id),
                     },
                     chain: chain
@@ -1040,38 +1060,6 @@ fn invalid_function_declaration(
         primary: Some(byte_to_source_span(span, source_id)),
         secondary: Vec::new(),
         hints: vec!["A user-defined function needs one positional name argument.".to_string()],
-    }
-}
-
-fn positional_after_named(arguments: &[CallArgument]) -> Option<(ByteSpan, ByteSpan)> {
-    let mut first_named_span = None;
-    for argument in arguments {
-        match argument {
-            CallArgument::Named(argument) => {
-                first_named_span.get_or_insert(argument.span);
-            }
-            CallArgument::Positional { span, .. } => {
-                if let Some(named_span) = first_named_span {
-                    return Some((*span, named_span));
-                }
-            }
-        }
-    }
-    None
-}
-
-fn positional_after_named_error(
-    positional_span: ByteSpan,
-    named_span: ByteSpan,
-    source_id: SourceId,
-) -> Diagnostic {
-    Diagnostic {
-        code: "E3003".to_string(),
-        severity: Severity::Error,
-        message: "positional argument after named argument is not allowed".to_string(),
-        primary: Some(byte_to_source_span(&positional_span, source_id)),
-        secondary: vec![byte_to_source_span(&named_span, source_id)],
-        hints: vec!["Move all positional arguments before named arguments.".to_string()],
     }
 }
 

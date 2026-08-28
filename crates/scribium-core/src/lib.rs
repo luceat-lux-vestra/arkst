@@ -688,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_positional_after_named_at_engine_handoff() {
+    fn compile_rejects_positional_after_named_through_shared_binder() {
         for source in [
             ".theme layout:{Compact} {Light}\n",
             ".captionposition tables:{top} {bottom}\n",
@@ -1396,6 +1396,35 @@ mod tests {
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "1\n2\n3\n1\n2\n3");
+    }
+
+    #[test]
+    fn compile_shared_invocation_binding_covers_native_user_and_callback_paths() {
+        let native = compile_source(".sum {1} b:{2}\n").0;
+        assert!(native.diagnostics.is_empty(), "{native:?}");
+        assert_eq!(output_text(&native), "3");
+
+        let user = compile_source(
+            ".function {add}\n    first second:\n    .sum {.first} {.second}\n\n.add {1} second:{2}\n",
+        )
+        .0;
+        assert!(user.diagnostics.is_empty(), "{user:?}");
+        assert_eq!(output_text(&user), "3");
+
+        let callback = compile_source(".map {1..2} by:{value: .multiply {.value} by:{2}}\n").0;
+        assert!(callback.diagnostics.is_empty(), "{callback:?}");
+        assert_eq!(output_text(&callback), "2\n4");
+
+        for source in [
+            ".sum b:{2} {1}\n",
+            ".function {add}\n    first second:\n    .sum {.first} {.second}\n\n.add second:{2} {1}\n",
+            ".ifpresent {value} {@lambda first second: .first}\n",
+        ] {
+            let result = compile_source(source).0;
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003", "{source:?}: {result:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
     }
 
     #[test]
@@ -2374,14 +2403,16 @@ mod tests {
         let source = ".docauthor {Alice}\n.docauthor {Bob} {Carol}\n.docauthor\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        let invalid_call = ".docauthor {Bob} {Carol}";
-        let invalid_start = source.find(invalid_call).expect("invalid docauthor call");
+        let invalid_argument = "{Carol}";
+        let invalid_start = source
+            .find(invalid_argument)
+            .expect("invalid docauthor argument");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
                 invalid_start,
-                invalid_start + invalid_call.len(),
+                invalid_start + invalid_argument.len(),
             ))
         );
         assert_eq!(output_text(&result), "Alice");
@@ -2396,7 +2427,7 @@ mod tests {
         let source = ".docauthor {Alice}\n.docauthor foo:{Bob}\n.docauthor\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        let invalid_argument = "foo:{Bob}";
+        let invalid_argument = "foo";
         let invalid_start = source
             .find(invalid_argument)
             .expect("invalid named argument");
@@ -2786,11 +2817,12 @@ mod tests {
                 Some(source_id),
                 "{source:?}: {result:?}"
             );
+            let marker_start = source.find(marker).unwrap();
+            let marker_end = marker_start + marker.len();
             assert!(
                 result.diagnostics[0]
                     .primary
-                    .is_some_and(|span| span.start <= source.find(marker).unwrap()
-                        && span.end >= source.find(marker).unwrap() + marker.len()),
+                    .is_some_and(|span| span.start >= marker_start && span.end <= marker_end),
                 "{source:?}: {result:?}"
             );
             assert_eq!(output_text(&result), "stable", "{source:?}: {result:?}");

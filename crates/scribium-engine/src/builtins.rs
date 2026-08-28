@@ -1,9 +1,11 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
+use crate::invocation_binder::{self, BodyPolicy, BoundSlot, Candidate, ParameterMetadata};
 use crate::value_conversion::{
     self, InvocationNamedArg, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin,
 };
 use scribium_ir::{IrInline, IrNode, IrValue};
+use scribium_source::{SourceId, SourceSpan};
 
 type Arguments<'a> = &'a [InvocationValue];
 type NamedArguments<'a> = &'a [InvocationNamedArg];
@@ -372,6 +374,28 @@ pub(crate) fn lookup(name: &str) -> Option<&'static BuiltinSpec> {
     REGULAR_BUILTINS.iter().find(|builtin| builtin.name == name)
 }
 
+/// Returns the explicit slot metadata shared with the engine binder. The
+/// regular builtin inventory remains the single owner of parameter names,
+/// named-argument capability, and omission policy.
+pub(crate) fn binding_parameters(builtin: &BuiltinSpec) -> Vec<ParameterMetadata<'static>> {
+    builtin
+        .signature
+        .parameter_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let parameter = match (builtin.kind, index) {
+                (BuiltinKind::Concatenate, 2)
+                | (BuiltinKind::StartsWith, 2)
+                | (BuiltinKind::IsLower, 2)
+                | (BuiltinKind::IsGreater, 2) => ParameterMetadata::defaulted(name),
+                _ => ParameterMetadata::required(name),
+            };
+            parameter.named(builtin.signature.allows_named)
+        })
+        .collect()
+}
+
 /// Evaluates one supported builtin without source or backend conversion.
 #[cfg(test)]
 pub(crate) fn evaluate(
@@ -668,43 +692,43 @@ fn bind_arguments(
     positional_args: Arguments<'_>,
     named_args: NamedArguments<'_>,
 ) -> Result<Vec<Option<InvocationValue>>, BuiltinError> {
-    let name = builtin.name;
-    let signature = builtin.signature;
-    if positional_args.len() > signature.max_positional {
-        return Err(error(format!(
-            "`.{name}` received too many positional arguments"
-        )));
-    }
-    let mut arguments = vec![None; signature.parameter_names.len()];
-    for (index, value) in positional_args.iter().enumerate() {
-        arguments[index] = Some(value.clone());
-    }
-    if !signature.allows_named && !named_args.is_empty() {
-        return Err(error(format!("`.{name}` does not support named arguments")));
-    }
-    for argument in named_args {
-        let Some(index) = signature
-            .parameter_names
+    let parameters = binding_parameters(builtin);
+    let fallback_span = SourceSpan::new(SourceId(0), 0, 0);
+    let mut candidates = Vec::with_capacity(positional_args.len() + named_args.len());
+    candidates.extend(
+        positional_args
             .iter()
-            .position(|parameter| *parameter == argument.name)
-        else {
-            return Err(error(format!(
-                "`.{name}` does not support named argument `{}`",
-                argument.name
-            )));
-        };
-        if arguments[index].is_some() {
-            return Err(error(format!(
-                "`.{name}` received argument `{}` more than once",
-                argument.name
-            )));
-        }
-        arguments[index] = Some(InvocationValue {
+            .cloned()
+            .map(|value| Candidate::Positional {
+                value,
+                span: fallback_span,
+            }),
+    );
+    candidates.extend(named_args.iter().map(|argument| Candidate::Named {
+        name: argument.name.clone(),
+        name_span: argument.name_span,
+        value: InvocationValue {
             value: argument.value.clone(),
             origin: argument.origin,
-        });
-    }
-    Ok(arguments)
+        },
+        span: argument.span,
+    }));
+    let bound = invocation_binder::bind(
+        &parameters,
+        &candidates,
+        None,
+        BodyPolicy::Reject,
+        fallback_span,
+    )
+    .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
+    Ok(bound
+        .slots
+        .into_iter()
+        .map(|slot| match slot {
+            BoundSlot::Explicit { value, .. } => Some(value),
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        })
+        .collect())
 }
 
 fn numeric_argument(value: &InvocationValue, parameter: &str) -> Result<f32, BuiltinError> {
@@ -2225,6 +2249,7 @@ mod tests {
                 name: "unknown".into(),
                 positional_args: Vec::new(),
                 named_args: Vec::new(),
+                ordered_args: None,
                 body: None,
                 span,
             }],
