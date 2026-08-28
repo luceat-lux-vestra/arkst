@@ -193,6 +193,7 @@ structure and source spans; no automatic golden-update mode is provided.
 | test (Windows) | Same, on Windows | Merge |
 | docs | `cargo doc --no-deps --all-features` | Merge |
 | license | `cargo-deny check` | Merge |
+| msrv | `cargo check --workspace --all-targets --all-features --locked` on Rust 1.92.0 | Merge |
 | WASM build | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown` | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
