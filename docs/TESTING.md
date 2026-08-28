@@ -188,13 +188,14 @@ structure and source spans; no automatic golden-update mode is provided.
 |-------|-------------|------|
 | fmt | `cargo fmt --all --check` | Merge |
 | clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Merge |
-| test (macOS) | `cargo test --workspace --all-features` | Merge |
-| test (Linux) | Same, on Ubuntu | Merge |
-| test (Windows) | Same, on Windows | Merge |
+| test (macos-latest) | `cargo test --workspace --all-features` | Merge |
+| test (ubuntu-latest) | Same, on Ubuntu | Merge |
+| test (windows-latest) | Same, on Windows | Merge |
 | docs | `cargo doc --no-deps --all-features` | Merge |
 | license | `cargo-deny check` | Merge |
+| compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
 | msrv | `cargo check --workspace --all-targets --all-features --locked` on Rust 1.92.0 | Merge |
-| WASM build | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown` | Merge |
+| wasm | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown` | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM
