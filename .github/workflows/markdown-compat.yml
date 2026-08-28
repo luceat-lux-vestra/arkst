@@ -3,30 +3,8 @@ name: Markdown compatibility
 on:
   push:
     branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/scribium-markdown/**"
-      - "crates/scribium-core/**"
-      - "crates/scribium-typst/**"
-      - "tools/markdown-compat/**"
-      - "tests/compat/**"
-      - "fixtures/markdown/real/**"
-      - "docs/compatibility/markdown/**"
-      - ".github/workflows/markdown-compat.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/scribium-markdown/**"
-      - "crates/scribium-core/**"
-      - "crates/scribium-typst/**"
-      - "tools/markdown-compat/**"
-      - "tests/compat/**"
-      - "fixtures/markdown/real/**"
-      - "docs/compatibility/markdown/**"
-      - ".github/workflows/markdown-compat.yml"
 
 permissions:
   contents: read
@@ -36,21 +14,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  markdown-compat:
-    name: markdown-compat
+  compatibility:
+    name: compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          fetch-depth: 0
+
+      - name: Determine compatibility scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          relevant=true
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "${BASE_SHA}" "${HEAD_SHA}"
+            relevant=false
+            while IFS= read -r path; do
+              case "${path}" in
+                Cargo.toml|Cargo.lock|rust-toolchain.toml|crates/scribium-markdown/*|crates/scribium-core/*|crates/scribium-typst/*|tools/markdown-compat/*|tests/compat/*|fixtures/markdown/real/*|docs/compatibility/markdown/*|.github/workflows/markdown-compat.yml)
+                  relevant=true
+                  ;;
+              esac
+            done < <(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          fi
+          echo "relevant=${relevant}" >> "${GITHUB_OUTPUT}"
+
+      - name: No-op compatibility gate
+        if: steps.scope.outputs.relevant != 'true'
+        run: echo "No Markdown compatibility-affecting files changed; compatibility campaign not applicable."
+
+      - if: steps.scope.outputs.relevant == 'true'
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
         with:
           toolchain: 1.98.0
-      - uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+
+      - if: steps.scope.outputs.relevant == 'true'
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
         with:
           typst-version: 0.15.1
 
       - name: Prepare pinned CommonMark and cmark-gfm references
         id: references
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           python3 tools/markdown-compat/prepare_references.py \
             --config tests/compat/references.toml \
@@ -58,6 +67,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Build pinned cmark-gfm
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           cmake -S "${{ steps.references.outputs.cmark_gfm_root }}" \
             -B "${{ steps.references.outputs.cmark_gfm_root }}/build" \
@@ -67,6 +77,7 @@ jobs:
             --target cmark-gfm --parallel
 
       - name: Build pinned CommonMark cmark
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           cmake -S "${{ steps.references.outputs.cmark_root }}" \
             -B "${{ steps.references.outputs.cmark_root }}/build" \
@@ -76,6 +87,7 @@ jobs:
             --target cmark_exe --parallel
 
       - name: Verify checked-in specification corpora
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           python3 tools/markdown-compat/extract_corpus.py \
             --spec "${{ steps.references.outputs.commonmark_spec }}" \
@@ -89,6 +101,7 @@ jobs:
           cmp tests/compat/corpus/gfm.json "$RUNNER_TEMP/gfm.json"
 
       - name: Run differential corpus and PDF smoke harness
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           cargo run --locked -q -p scribium-markdown-compat -- \
             --commonmark-cmark "${{ steps.references.outputs.cmark_root }}/build/src/cmark" \
@@ -97,7 +110,7 @@ jobs:
             --typst typst
 
       - name: Upload Markdown compatibility artifacts
-        if: always()
+        if: always() && steps.scope.outputs.relevant == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markdown-compat-${{ github.run_id }}
