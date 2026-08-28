@@ -371,8 +371,9 @@ fn call_segment_to_ir(
     })
 }
 
-/// Retain both the legacy projections used by existing evaluator adapters and
-/// the original source order consumed by the engine invocation binder.
+/// Retain the legacy projections used by existing evaluator adapters and a
+/// lightweight source-order index consumed by the engine invocation binder.
+/// The ordered view must not clone the argument value tree a second time.
 fn call_arguments_to_ir(
     arguments: &[CallArgument],
     source_id: SourceId,
@@ -390,9 +391,10 @@ fn call_arguments_to_ir(
         match argument {
             CallArgument::Positional { value, span } => {
                 let value = value_to_ir(value, source_id, diagnostics, source_mode)?;
-                positional_args.push(value.clone());
+                let index = positional_args.len();
+                positional_args.push(value);
                 ordered_args.push(IrCallArgument::Positional {
-                    value,
+                    index,
                     span: byte_to_source_span(span, source_id),
                 });
             }
@@ -400,16 +402,16 @@ fn call_arguments_to_ir(
                 let value = value_to_ir(&argument.value, source_id, diagnostics, source_mode)?;
                 let name_span = byte_to_source_span(&argument.name_span, source_id);
                 let span = byte_to_source_span(&argument.span, source_id);
+                let index = named_args.len();
                 named_args.push(IrNamedArg {
                     name: argument.name.clone(),
                     name_span,
-                    value: value.clone(),
+                    value,
                     span,
                 });
                 ordered_args.push(IrCallArgument::Named {
-                    name: argument.name.clone(),
+                    index,
                     name_span,
-                    value,
                     span,
                 });
             }
@@ -1190,6 +1192,42 @@ mod tests {
         assert_eq!(&source[head.span.start..head.span.end], ".a {x}");
         assert_eq!(&source[chain[0].span.start..chain[0].span.end], "b {y}");
         assert_eq!(&source[span.start..span.end], ".a {x}::b {y}");
+    }
+
+    #[test]
+    fn ordered_call_references_keep_nested_ir_growth_linear() {
+        fn nested_source(depth: usize) -> String {
+            let mut source = String::new();
+            for _ in 0..depth {
+                source.push_str(".foo {");
+            }
+            source.push_str("leaf");
+            for _ in 0..depth {
+                source.push('}');
+            }
+            source.push('\n');
+            source
+        }
+
+        fn serialized_size(depth: usize) -> usize {
+            let source = nested_source(depth);
+            let document = scribium_markdown::parse_qd(&source);
+            let (ir, diagnostics) = ast_to_ir_with_diagnostics_for_mode(
+                &document,
+                source_id(),
+                &empty_project_metadata(),
+                Mode::Quarkdown,
+            );
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            serde_json::to_vec(&ir).expect("IR serializes").len()
+        }
+
+        let shallow = serialized_size(4);
+        let deep = serialized_size(24);
+        assert!(
+            deep < shallow * 8,
+            "ordered argument references should not duplicate nested value trees: shallow={shallow}, deep={deep}"
+        );
     }
 
     #[test]

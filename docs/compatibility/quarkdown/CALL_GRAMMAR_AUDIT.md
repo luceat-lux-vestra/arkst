@@ -140,7 +140,8 @@ The independently authored frontend evidence is
 It covers block, inline, and chain calls, exact surrounding-source boundaries,
 UTF-8, real CRLF bytes, and `.md` isolation. The parser no longer emits
 `E2001` for positional-after-named. The current IR retains the ordered
-`IrCallArgument` sequence alongside its legacy positional/named projections;
+lightweight `IrCallArgument` reference sequence alongside its legacy
+positional/named value projections;
 the engine-owned #165 binder consumes that sequence and rejects the invalid
 shape with `E3003`, using the positional `CallArgument` span as the primary and
 the preceding named argument span as a secondary location. This audit records

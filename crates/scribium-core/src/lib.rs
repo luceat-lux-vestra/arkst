@@ -752,6 +752,60 @@ mod tests {
     }
 
     #[test]
+    fn compile_rejects_positional_after_named_for_unknown_calls_in_all_shapes() {
+        for source in [
+            ".foo width:{x} {y}\n",
+            "prefix .foo width:{x} {y} suffix\n",
+            ".foo width:{x} {y}::bar\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E3003", "{source:?}: {result:?}");
+            assert_eq!(
+                diagnostic.message, "positional argument after named argument is not allowed",
+                "{source:?}: {result:?}"
+            );
+            let positional_start = source.find("{y}").expect("positional argument");
+            assert_eq!(
+                diagnostic.primary,
+                Some(scribium_source::SourceSpan::new(
+                    source_id,
+                    positional_start,
+                    positional_start + "{y}".len(),
+                )),
+                "{source:?}: {result:?}"
+            );
+            let named_start = source.find("width:").expect("named argument");
+            let named_end =
+                named_start + source[named_start..].find('}').expect("named argument end") + 1;
+            assert_eq!(
+                diagnostic.secondary,
+                vec![scribium_source::SourceSpan::new(
+                    source_id,
+                    named_start,
+                    named_end,
+                )],
+                "{source:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_mixed_call_does_not_evaluate_invalid_nested_argument() {
+        for source in [
+            ".var {marker} {before}\n.foo width:{.var {marker} {changed}} {after}\n.marker\n",
+            ".var {marker} {before}\nprefix .foo width:{.var {marker} {changed}} {after} suffix\n.marker\n",
+            ".var {marker} {before}\n.foo width:{.var {marker} {changed}} {after}::bar\n.marker\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003", "{source:?}: {result:?}");
+            assert_eq!(output_text(&result).contains("changed"), false, "{source:?}");
+        }
+    }
+
+    #[test]
     fn compile_duplicate_named_argument_retains_conflict_provenance() {
         let source = ".html content:{one} content:{two}\n";
         let (result, source_id) = compile_source(source);

@@ -1547,6 +1547,7 @@ impl Evaluator {
             CallOutcome::Failed => CallOutcome::Failed,
             CallOutcome::Unresolved => match self.preserve_block_call(
                 name,
+                ordered_args,
                 positional_args,
                 named_args,
                 lambda_parameters,
@@ -1613,6 +1614,7 @@ impl Evaluator {
             CallOutcome::Unresolved => self
                 .preserve_inline_call(
                     name,
+                    ordered_args,
                     positional_args,
                     named_args,
                     body,
@@ -1923,6 +1925,16 @@ impl Evaluator {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
         };
+        if let Err(outcome) = validate_ordered_invocation(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            *span,
+            diagnostics,
+        ) {
+            return outcome;
+        }
         if let Some(result) = context.get_implicit_parameter(name) {
             return match result {
                 Ok(value) => CallOutcome::Value(value),
@@ -6671,6 +6683,7 @@ impl Evaluator {
                     CallOutcome::Unresolved => self
                         .preserve_block_call(
                             name,
+                            ordered_args.as_deref(),
                             positional_args,
                             named_args,
                             lambda_parameters.as_deref(),
@@ -6756,26 +6769,34 @@ impl Evaluator {
                     .map_or(1, |arguments| arguments.len() + 1),
             );
             ordered_args.push(IrCallArgument::Positional {
-                value: IrValue::None,
+                index: 0,
                 span: source_segment.span,
             });
             if let Some(arguments) = &source_segment.ordered_args {
-                ordered_args.extend(arguments.iter().cloned());
+                for argument in arguments {
+                    let Some(argument) = offset_ordered_argument(argument, 1) else {
+                        diagnostics.push(chain_evaluation_error(
+                            "Chained call argument reference is invalid".to_string(),
+                            source_segment.span,
+                        ));
+                        return CallOutcome::Failed;
+                    };
+                    ordered_args.push(argument);
+                }
             } else {
-                ordered_args.extend(source_segment.positional_args.iter().cloned().map(|value| {
-                    IrCallArgument::Positional {
-                        value,
+                ordered_args.extend(source_segment.positional_args.iter().enumerate().map(
+                    |(index, _value)| IrCallArgument::Positional {
+                        index: index + 1,
                         span: source_segment.span,
-                    }
-                }));
-                ordered_args.extend(source_segment.named_args.iter().cloned().map(|argument| {
-                    IrCallArgument::Named {
-                        name: argument.name,
+                    },
+                ));
+                ordered_args.extend(source_segment.named_args.iter().enumerate().map(
+                    |(index, argument)| IrCallArgument::Named {
+                        index,
                         name_span: argument.name_span,
-                        value: argument.value,
                         span: argument.span,
-                    }
-                }));
+                    },
+                ));
             }
             let final_body = (index + 1 == chain.len()).then_some(body).flatten();
             let outcome = self.chain_outcome(
@@ -7055,6 +7076,7 @@ impl Evaluator {
                     name,
                     positional_args,
                     named_args,
+                    ordered_args,
                     lambda_parameters,
                     body,
                     span,
@@ -7064,6 +7086,7 @@ impl Evaluator {
                     return self
                         .preserve_block_call(
                             name,
+                            ordered_args.as_deref(),
                             positional_args,
                             named_args,
                             lambda_parameters.as_deref(),
@@ -7093,6 +7116,7 @@ impl Evaluator {
     fn preserve_block_call(
         &self,
         name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         lambda_parameters: Option<&[IrParameter]>,
@@ -7101,6 +7125,14 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
+        validate_ordered_invocation(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            *span,
+            diagnostics,
+        )?;
         let positional_args =
             self.evaluate_values_for_preservation(positional_args, span, diagnostics, context)?;
         let named_args =
@@ -7119,7 +7151,7 @@ impl Evaluator {
             name: name.to_string(),
             positional_args,
             named_args,
-            ordered_args: None,
+            ordered_args: ordered_args.map(ToOwned::to_owned),
             lambda_parameters: lambda_parameters.map(ToOwned::to_owned),
             body,
             span: *span,
@@ -7130,6 +7162,7 @@ impl Evaluator {
     fn preserve_inline_call(
         &self,
         name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<&[IrInline]>,
@@ -7137,6 +7170,14 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrInline>, CallOutcome> {
+        validate_ordered_invocation(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            *span,
+            diagnostics,
+        )?;
         let positional_args =
             self.evaluate_values_for_preservation(positional_args, span, diagnostics, context)?;
         let named_args =
@@ -7155,7 +7196,7 @@ impl Evaluator {
             name: name.to_string(),
             positional_args,
             named_args,
-            ordered_args: None,
+            ordered_args: ordered_args.map(ToOwned::to_owned),
             body,
             span: *span,
         }])
@@ -7505,7 +7546,7 @@ impl Evaluator {
         for (index, argument) in ordered.iter().enumerate() {
             if index == 0 {
                 if let Some(implicit_argument) = implicit_argument {
-                    let IrCallArgument::Positional { span, .. } = argument else {
+                    let IrCallArgument::Positional { index: 0, span } = argument else {
                         return Err(CallOutcome::Failed);
                     };
                     candidates.push(Candidate::Positional {
@@ -7517,15 +7558,27 @@ impl Evaluator {
             }
             let (raw, candidate) = match argument {
                 IrCallArgument::Positional {
-                    value,
+                    index,
                     span: arg_span,
-                } => (value, CandidateKind::Positional(*arg_span)),
+                } => {
+                    let Some(value) = positional.get(*index) else {
+                        return Err(CallOutcome::Failed);
+                    };
+                    (value, CandidateKind::Positional(*arg_span))
+                }
                 IrCallArgument::Named {
-                    name,
+                    index,
                     name_span,
-                    value,
                     span: arg_span,
-                } => (value, CandidateKind::Named(name, *name_span, *arg_span)),
+                } => {
+                    let Some(argument) = named.get(*index) else {
+                        return Err(CallOutcome::Failed);
+                    };
+                    (
+                        &argument.value,
+                        CandidateKind::Named(&argument.name, *name_span, *arg_span),
+                    )
+                }
             };
             let origin = match candidate {
                 CandidateKind::Positional(_) if first_positional => {
@@ -10134,16 +10187,20 @@ fn structural_candidates(
                     span: *span,
                 },
                 IrCallArgument::Named {
-                    name,
+                    index,
                     name_span,
                     span,
-                    ..
-                } => Candidate::Named {
-                    name: name.clone(),
-                    name_span: *name_span,
-                    value: (),
-                    span: *span,
-                },
+                } => {
+                    let name = named
+                        .get(*index)
+                        .map_or_else(String::new, |argument| argument.name.clone());
+                    Candidate::Named {
+                        name,
+                        name_span: *name_span,
+                        value: (),
+                        span: *span,
+                    }
+                }
             })
             .collect();
     }
@@ -10159,6 +10216,74 @@ fn structural_candidates(
         span: argument.span,
     }));
     candidates
+}
+
+/// Enforce the universal source-order invariant before target lookup or any
+/// candidate/body evaluation. Legacy manually constructed IR without an
+/// ordered projection cannot recover mixed-kind source order and therefore
+/// keeps its historical grouped representation.
+fn validate_ordered_invocation(
+    name: &str,
+    ordered: Option<&[IrCallArgument]>,
+    positional: &[IrValue],
+    named: &[IrNamedArg],
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), CallOutcome> {
+    let Some(ordered) = ordered else {
+        return Ok(());
+    };
+    let candidates = structural_candidates(Some(ordered), positional, named, span);
+    if let Err(mut error) = invocation_binder::validate_order(&candidates) {
+        let native_code = native_binding_diagnostic_code(name);
+        let is_duplicate_named = error.message.starts_with("named argument ");
+        if native_code.is_some() {
+            error.message = native_binding_message(name, error.message);
+        }
+        let code = if is_duplicate_named {
+            native_code.map_or("E3003", |code| code)
+        } else {
+            "E3003"
+        };
+        diagnostics.push(binding_diagnostic_with_code(error, code));
+        return Err(CallOutcome::Failed);
+    }
+    Ok(())
+}
+
+fn native_binding_diagnostic_code(name: &str) -> Option<&'static str> {
+    if builtins::lookup(name).is_some() {
+        return Some("E3001");
+    }
+    native_binding_parameters(name)?;
+    Some(if name == "var" {
+        "E3002"
+    } else if is_document_state(name) || matches!(name, "let" | "br" | "html" | "markdown") {
+        "E3003"
+    } else {
+        "E3001"
+    })
+}
+
+fn offset_ordered_argument(
+    argument: &IrCallArgument,
+    positional_offset: usize,
+) -> Option<IrCallArgument> {
+    match argument {
+        IrCallArgument::Positional { index, span } => Some(IrCallArgument::Positional {
+            index: index.checked_add(positional_offset)?,
+            span: *span,
+        }),
+        IrCallArgument::Named {
+            index,
+            name_span,
+            span,
+        } => Some(IrCallArgument::Named {
+            index: *index,
+            name_span: *name_span,
+            span: *span,
+        }),
+    }
 }
 
 #[derive(Clone, Copy)]

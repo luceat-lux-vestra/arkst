@@ -529,18 +529,21 @@ pub struct IrCallSegment {
 
 /// One source-backed invocation candidate in its original order.
 ///
-/// This is structural call data, not evaluator runtime state: transient
-/// provenance such as `ValueOrigin` remains evaluator-owned.
+/// This is a lightweight structural reference into the sibling positional or
+/// named projection on the containing call. It deliberately does not own a
+/// second `IrValue` tree: transient provenance such as `ValueOrigin` remains
+/// evaluator-owned, and argument values remain owned by the projections.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IrCallArgument {
     Positional {
-        value: IrValue,
+        /// Index into the containing call's `positional_args` vector.
+        index: usize,
         span: SourceSpan,
     },
     Named {
-        name: String,
+        /// Index into the containing call's `named_args` vector.
+        index: usize,
         name_span: SourceSpan,
-        value: IrValue,
         span: SourceSpan,
     },
 }
