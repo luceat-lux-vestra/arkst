@@ -26,6 +26,7 @@ exclude = [
 
 [workspace.package]
 edition = "2021"
+rust-version = "1.92.0"
 license = "Apache-2.0"
 license-file = "LICENSE"
 homepage = "https://github.com/luceat-lux-vestra/scribium"
@@ -73,11 +74,9 @@ opt-level = 2
 debug = 1
 strip = "symbols"
 
-[patch.crates-io]
+[patch.crates-io.citationberg]
 # citationberg has merged the quick-xml 0.41 security fix, but has not yet
 # published a release containing it. Pin the merged upstream commit until a
 # crates.io release can replace this patch.
-citationberg = {
-    git = "https://github.com/typst/citationberg.git",
-    rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d",
-}
+git = "https://github.com/typst/citationberg.git"
+rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d"
