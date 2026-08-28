@@ -160,6 +160,27 @@ supersession/addendum relationships and preserve the original record.
 
 ## Required checks
 
+### Local validation
+
+During local or agent work, run the narrowest checks that exercise the changed
+behavior and affected contract. Expand validation in proportion to risk. Do
+not run the complete workspace suite solely as a routine local baseline for an
+unrelated narrow change.
+
+### GitHub merge gate
+
+Repository-wide required merge gates are executed by GitHub CI. The configured
+required contexts are `fmt`, `clippy`, `test (ubuntu-latest)`,
+`test (macos-latest)`, `test (windows-latest)`, `docs`, `license`, `wasm`,
+`compatibility`, and `msrv`. CI scope must not be weakened to reduce local
+validation cost. A green CI result is necessary evidence, but it is not by
+itself a strict-review PASS; relevant targeted local evidence remains required
+for changes that need it.
+
+The following commands are repository-wide validation examples. Run them when
+the change risk requires them or when reproducing the authoritative CI gate;
+they are not a mandatory local baseline for every task:
+
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -170,8 +191,8 @@ cargo run -p scribium-cli -- build examples/hello/main.qd --format pdf
 cargo run -p scribium-cli -- inspect examples/hello/main.qd --emit typst
 ```
 
-Run relevant checks proportional to risk and report checks that could not be
-run. Do not disable CI or weaken a test to make a change pass.
+Run relevant targeted checks proportional to risk and report checks that could
+not be run. Do not disable CI or weaken a test to make a change pass.
 
 | Change | Minimum evidence |
 |--------|------------------|
@@ -202,7 +223,8 @@ stop architectural invention
 
 ## End-of-task checklist
 
-1. Format, lint, and run relevant/full tests where feasible.
+1. Run relevant targeted tests locally; run the full suite locally only when
+   the change risk requires it. Configured required CI remains authoritative.
 2. Update affected product, compatibility, architecture, ADR, and changelog
    documentation; do not duplicate the full engineering standard in PR text.
 3. Search the repository for stale policy/ownership statements.

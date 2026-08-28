@@ -188,14 +188,14 @@ structure and source spans; no automatic golden-update mode is provided.
 |-------|-------------|------|
 | fmt | `cargo fmt --all --check` | Merge |
 | clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Merge |
-| test (macos-latest) | `cargo test --workspace --all-features` | Merge |
-| test (ubuntu-latest) | Same, on Ubuntu | Merge |
-| test (windows-latest) | Same, on Windows | Merge |
-| docs | `cargo doc --no-deps --all-features` | Merge |
-| license | `cargo-deny check` | Merge |
+| test (macos-latest) | `cargo test --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
+| test (ubuntu-latest) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge |
+| test (windows-latest) | `cargo test --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
+| docs | `cargo doc --workspace --all-features --no-deps` | Merge |
+| license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge |
 | compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
-| msrv | `cargo check --workspace --all-targets --all-features --locked` on Rust 1.92.0 | Merge |
-| wasm | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown` | Merge |
+| msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge |
+| wasm | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown --all-features` | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM
