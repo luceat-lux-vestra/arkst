@@ -16,8 +16,8 @@ use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue
 use scribium_source::ByteSpan;
 
 use crate::ast::{
-    Block, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg, RangeValue, TableCell,
-    TableRow, TaskStatus, Value,
+    Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg,
+    RangeValue, TableCell, TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -937,36 +937,15 @@ fn directive_block(
         name: call.name,
         name_span: offset_span(call.name_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
         head_span: offset_span(call.head_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
-        positional_args: call
-            .positional_args
-            .iter()
-            .enumerate()
-            .map(|(index, arg)| {
-                convert_arg_with_mode(
-                    arg,
-                    source,
-                    base,
-                    call_base,
-                    diagnostics,
-                    is_contextual_inline_body_position(&call_name, index),
-                    is_contextual_inline_body_position(&call_name, index),
-                )
-            })
-            .collect(),
-        named_args: call
-            .named_args
-            .iter()
-            .map(|arg| {
-                convert_named_arg(
-                    arg,
-                    source,
-                    base,
-                    call_base,
-                    diagnostics,
-                    Some(call_name.as_str()),
-                )
-            })
-            .collect(),
+        arguments: convert_call_arguments(
+            &call.arguments,
+            &call_name,
+            source,
+            base,
+            call_base,
+            diagnostics,
+            is_contextual_inline_body_position,
+        ),
         chain: call
             .chain
             .iter()
@@ -1348,36 +1327,15 @@ fn convert_inline(
                 name: call.name,
                 name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
                 head_span: offset_span(call.head_span, base).unwrap_or(ByteSpan::new(0, 0)),
-                positional_args: call
-                    .positional_args
-                    .iter()
-                    .enumerate()
-                    .map(|(index, arg)| {
-                        convert_arg_with_mode(
-                            arg,
-                            source,
-                            base,
-                            0,
-                            diagnostics,
-                            is_contextual_inline_body_position(&call_name, index),
-                            is_contextual_inline_body_position(&call_name, index),
-                        )
-                    })
-                    .collect(),
-                named_args: call
-                    .named_args
-                    .iter()
-                    .map(|arg| {
-                        convert_named_arg(
-                            arg,
-                            source,
-                            base,
-                            0,
-                            diagnostics,
-                            Some(call_name.as_str()),
-                        )
-                    })
-                    .collect(),
+                arguments: convert_call_arguments(
+                    &call.arguments,
+                    &call_name,
+                    source,
+                    base,
+                    0,
+                    diagnostics,
+                    is_contextual_inline_body_position,
+                ),
                 chain: call
                     .chain
                     .iter()
@@ -1587,29 +1545,15 @@ fn convert_content_call(
         name: call.name,
         name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
         head_span: offset_span(call.head_span, base).unwrap_or(ByteSpan::new(0, 0)),
-        positional_args: call
-            .positional_args
-            .iter()
-            .enumerate()
-            .map(|(index, arg)| {
-                convert_arg_with_mode(
-                    arg,
-                    source,
-                    base,
-                    0,
-                    diagnostics,
-                    is_contextual_inline_body_position(&call_name, index),
-                    is_contextual_inline_body_position(&call_name, index),
-                )
-            })
-            .collect(),
-        named_args: call
-            .named_args
-            .iter()
-            .map(|arg| {
-                convert_named_arg(arg, source, base, 0, diagnostics, Some(call_name.as_str()))
-            })
-            .collect(),
+        arguments: convert_call_arguments(
+            &call.arguments,
+            &call_name,
+            source,
+            base,
+            0,
+            diagnostics,
+            is_contextual_inline_body_position,
+        ),
         chain: call
             .chain
             .iter()
@@ -1627,7 +1571,6 @@ fn convert_call_segment(
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> CallSegment {
-    let call_name = segment.name.clone();
     CallSegment {
         name: segment.name.clone(),
         name_span: offset_span(
@@ -1635,39 +1578,60 @@ fn convert_call_segment(
             base.checked_add(call_base).unwrap_or(base),
         )
         .unwrap_or(ByteSpan::new(0, 0)),
-        positional_args: segment
-            .positional_args
-            .iter()
-            .enumerate()
-            .map(|(index, arg)| {
-                convert_arg_with_mode(
-                    arg,
-                    source,
-                    base,
-                    call_base,
-                    diagnostics,
-                    is_chained_contextual_inline_body_position(&call_name, index),
-                    is_chained_contextual_inline_body_position(&call_name, index),
-                )
-            })
-            .collect(),
-        named_args: segment
-            .named_args
-            .iter()
-            .map(|arg| {
-                convert_named_arg(
-                    arg,
-                    source,
-                    base,
-                    call_base,
-                    diagnostics,
-                    Some(call_name.as_str()),
-                )
-            })
-            .collect(),
+        arguments: convert_call_arguments(
+            &segment.arguments,
+            &segment.name,
+            source,
+            base,
+            call_base,
+            diagnostics,
+            is_chained_contextual_inline_body_position,
+        ),
         span: offset_span(segment.span, base.checked_add(call_base).unwrap_or(base))
             .unwrap_or(ByteSpan::new(0, 0)),
     }
+}
+
+fn convert_call_arguments(
+    arguments: &[scribium_quarkdown::CallArgument],
+    call_name: &str,
+    source: &str,
+    base: usize,
+    call_base: usize,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+    positional_body: fn(&str, usize) -> bool,
+) -> Vec<CallArgument> {
+    let offset = base.checked_add(call_base).unwrap_or(base);
+    let mut positional_index = 0;
+    arguments
+        .iter()
+        .map(|argument| match argument {
+            scribium_quarkdown::CallArgument::Positional(arg) => {
+                let index = positional_index;
+                positional_index += 1;
+                CallArgument::Positional {
+                    value: convert_arg_with_mode(
+                        arg,
+                        source,
+                        base,
+                        call_base,
+                        diagnostics,
+                        positional_body(call_name, index),
+                        positional_body(call_name, index),
+                    ),
+                    span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
+                }
+            }
+            scribium_quarkdown::CallArgument::Named(arg) => CallArgument::Named(convert_named_arg(
+                arg,
+                source,
+                base,
+                call_base,
+                diagnostics,
+                Some(call_name),
+            )),
+        })
+        .collect()
 }
 
 fn convert_named_arg(
@@ -1693,6 +1657,7 @@ fn convert_named_arg(
             callback_lambda,
             false,
         ),
+        value_span: offset_span(arg.value.span, offset).unwrap_or(ByteSpan::new(0, 0)),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
     }
 }
@@ -2469,6 +2434,26 @@ mod tests {
     use super::*;
     use crate::ast::TableAlignment;
 
+    fn positional_args(arguments: &[CallArgument]) -> Vec<&Value> {
+        arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional { value, .. } => Some(value),
+                CallArgument::Named(_) => None,
+            })
+            .collect()
+    }
+
+    fn named_args(arguments: &[CallArgument]) -> Vec<&NamedArg> {
+        arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                CallArgument::Positional { .. } => None,
+                CallArgument::Named(argument) => Some(argument),
+            })
+            .collect()
+    }
+
     fn assert_malformed_argument_span(source: &str) {
         let output = parse_with_diagnostics(source);
         let diagnostic = output
@@ -2507,8 +2492,7 @@ mod tests {
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::DirectiveCall {
             name,
-            positional_args,
-            named_args,
+            arguments,
             body,
             span,
             ..
@@ -2520,8 +2504,8 @@ mod tests {
             )
         };
         assert_eq!(name, "divide");
-        assert_eq!(positional_args.len(), 1);
-        assert_eq!(named_args.len(), 1);
+        assert_eq!(positional_args(arguments).len(), 1);
+        assert_eq!(named_args(arguments).len(), 1);
         assert_eq!(&source[span.start..span.end], source.trim_end());
         let body = body.as_ref().expect("body after multiline header");
         assert_eq!(paragraph_text(&body[0]), "body");
@@ -2534,12 +2518,12 @@ mod tests {
         let output = parse_with_diagnostics(continuation);
         assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::DirectiveCall {
-            named_args, span, ..
+            arguments, span, ..
         } = &output.document.nodes[0]
         else {
             panic!("expected continued call")
         };
-        assert_eq!(named_args.len(), 3);
+        assert_eq!(named_args(arguments).len(), 3);
         assert_eq!(&continuation[span.start..span.end], continuation.trim_end());
     }
 
@@ -2654,7 +2638,7 @@ mod tests {
         let crlf_output = parse_with_diagnostics(crlf);
         assert!(crlf_output.diagnostics.is_empty(), "{crlf_output:?}");
         let Block::DirectiveCall {
-            positional_args,
+            arguments,
             span,
             name_span,
             ..
@@ -2666,7 +2650,8 @@ mod tests {
         assert_eq!(&crlf[name_span.start..name_span.end], ".call");
         assert!(crlf.is_char_boundary(span.start));
         assert!(crlf.is_char_boundary(span.end));
-        let Value::Content(content) = &positional_args[0] else {
+        let positional_args = positional_args(arguments);
+        let Value::Content(content) = positional_args[0] else {
             panic!("expected CRLF content argument")
         };
         assert_eq!(
@@ -2687,13 +2672,11 @@ mod tests {
     #[test]
     fn range_value_spans_are_document_absolute_in_block_inline_and_tight_calls() {
         fn assert_block_range(source: &str, node: &Block) {
-            let Block::DirectiveCall {
-                positional_args, ..
-            } = node
-            else {
+            let Block::DirectiveCall { arguments, .. } = node else {
                 panic!("expected block call, got {node:?}")
             };
-            let Value::Range(range) = &positional_args[0] else {
+            let positional_args = positional_args(arguments);
+            let Value::Range(range) = positional_args[0] else {
                 panic!("expected typed Range argument")
             };
             assert_eq!(&source[range.span.start..range.span.end], "2..4");
@@ -2723,12 +2706,11 @@ mod tests {
             let call = content
                 .iter()
                 .find_map(|inline| match inline {
-                    Inline::DirectiveCall {
-                        positional_args, ..
-                    } => Some(positional_args),
+                    Inline::DirectiveCall { arguments, .. } => Some(arguments),
                     _ => None,
                 })
                 .expect("inline or tight call");
+            let call = positional_args(call);
             let Value::Range(range) = &call[0] else {
                 panic!("expected typed Range argument")
             };
@@ -2883,13 +2865,11 @@ mod tests {
                 && diagnostic.span == ByteSpan::new(content_start, content_end)
                 && diagnostic.message.contains("original text")
         }));
-        let Block::DirectiveCall {
-            positional_args, ..
-        } = &output.document.nodes[0]
-        else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected directive block")
         };
-        let Value::Content(content) = &positional_args[0] else {
+        let positional_args = positional_args(arguments);
+        let Value::Content(content) = positional_args[0] else {
             panic!("expected content argument")
         };
         assert!(matches!(content.as_slice(), [Inline::Text { .. }]));
@@ -2906,13 +2886,11 @@ mod tests {
         let source = ".panel {prefix .text {red} suffix}\n";
         let output = parse_with_diagnostics(source);
         assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
-        let Block::DirectiveCall {
-            positional_args, ..
-        } = &output.document.nodes[0]
-        else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected directive block")
         };
-        let Value::Content(content) = &positional_args[0] else {
+        let positional_args = positional_args(arguments);
+        let Value::Content(content) = positional_args[0] else {
             panic!("expected content argument")
         };
         assert!(matches!(
@@ -3520,9 +3498,10 @@ mod tests {
     fn marked_inline_lambda_is_structural_and_source_backed() {
         let output = parse_with_diagnostics(".sorted {1..3} by:{@lambda .1}\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
-        let Block::DirectiveCall { named_args, .. } = &output.document.nodes[0] else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected sorted directive")
         };
+        let named_args = named_args(arguments);
         assert!(matches!(
             named_args.first().map(|argument| &argument.value),
             Some(Value::Lambda {
@@ -3537,9 +3516,10 @@ mod tests {
     fn transform_callback_lambda_uses_contextual_unmarked_form() {
         let output = parse_with_diagnostics(".map {1..3} by:{value: .value}\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
-        let Block::DirectiveCall { named_args, .. } = &output.document.nodes[0] else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected map directive")
         };
+        let named_args = named_args(arguments);
         assert!(matches!(
             named_args.first().map(|argument| &argument.value),
             Some(Value::Lambda {
@@ -3554,12 +3534,10 @@ mod tests {
     fn iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion() {
         let output = parse_with_diagnostics(".foreach {1..3} {item: .item}\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
-        let Block::DirectiveCall {
-            positional_args, ..
-        } = &output.document.nodes[0]
-        else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected foreach directive")
         };
+        let positional_args = positional_args(arguments);
         assert!(matches!(
             positional_args.get(1),
             Some(Value::InlineBody {
@@ -3574,12 +3552,10 @@ mod tests {
     fn implicit_iteration_body_keeps_nested_named_arguments_in_the_body() {
         let output = parse_with_diagnostics(".foreach {1..3} {.islower {.1} than:{5}}\n");
         assert!(output.diagnostics.is_empty(), "{output:?}");
-        let Block::DirectiveCall {
-            positional_args, ..
-        } = &output.document.nodes[0]
-        else {
+        let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected foreach directive")
         };
+        let positional_args = positional_args(arguments);
         assert!(matches!(
             positional_args.get(1),
             Some(Value::InlineBody {

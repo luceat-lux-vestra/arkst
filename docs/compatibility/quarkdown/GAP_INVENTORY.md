@@ -117,7 +117,7 @@ positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
 boundaries, and source provenance. The #157 lexical production slice is
-implemented as recorded in the audit below. The remaining six bounded
+implemented as recorded in the audit below. The remaining five bounded
 production follow-ups are:
 
 - [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) — preserve
@@ -130,11 +130,6 @@ production follow-ups are:
   escaped call and argument delimiter recognition/depth handling with pinned
   `GrammarUtils.kt` and `FunctionCallGrammar.kt`; bounded to
   `scribium-quarkdown` with frontend integration only if required.
-- [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) — preserve
-  positional/named argument shape through grammar/frontend and defer
-  unnamed-after-named rejection to the binder; bounded to representation
-  ownership in `scribium-quarkdown`/`scribium-markdown`, with semantic rejection
-  remaining in #149.
 - [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) — align
   optional argument-separator placement before the first argument and `::`,
   plus pinned trailing-continuation consumption; bounded to
@@ -142,8 +137,9 @@ production follow-ups are:
   integration, with LF/CRLF evidence kept separate.
 
 These remaining gaps are not hidden by expected-failure allowlists or by the
-#157 implementation. The #157 change is limited to the grammar/frontend
-identifier, delimiter, boundary, and provenance contract.
+#157/#163 implementations. #157 is limited to the grammar/frontend identifier,
+delimiter, boundary, and provenance contract; #163 is limited to the ordered
+mixed-argument grammar/frontend handoff plus its bounded engine safety guard.
 
 ## #149 value-model, binding, and conversion audit
 
@@ -162,8 +158,9 @@ The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-
 (dynamic/content target conversion), and
 [#167](https://github.com/luceat-lux-vestra/scribium/issues/167)
 (conversion diagnostics and validate-then-commit atomicity). They are native
-sub-issues of #149. #163 remains the parser/frontend prerequisite for
-positional-after-named shape; #150–#155 remain the broader programmable,
+sub-issues of #149. #163 now provides the parser/frontend prerequisite and
+transitional engine safety guard for positional-after-named shape; #165 must
+absorb that guard into shared binding. #150–#155 remain the broader programmable,
 general-builtin, metadata, layout, content, and resource audits; #156 remains
 the reconciliation gate.
 

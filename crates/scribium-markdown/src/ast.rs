@@ -57,8 +57,8 @@ pub enum Block {
         name: String,
         name_span: ByteSpan,
         head_span: ByteSpan,
-        positional_args: Vec<Value>,
-        named_args: Vec<NamedArg>,
+        /// Arguments in their original source order.
+        arguments: Vec<CallArgument>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
         /// Contextual lambda metadata for calls with lambda body semantics
@@ -133,8 +133,8 @@ pub enum Inline {
         name: String,
         name_span: ByteSpan,
         head_span: ByteSpan,
-        positional_args: Vec<Value>,
-        named_args: Vec<NamedArg>,
+        /// Arguments in their original source order.
+        arguments: Vec<CallArgument>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Inline>>,
         span: ByteSpan,
@@ -214,7 +214,16 @@ pub struct NamedArg {
     pub name: String,
     pub name_span: ByteSpan,
     pub value: Value,
+    /// The exact source span of the braced value, including its delimiters.
+    pub value_span: ByteSpan,
     pub span: ByteSpan,
+}
+
+/// One source-backed call argument, retained in source order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallArgument {
+    Positional { value: Value, span: ByteSpan },
+    Named(NamedArg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -240,7 +249,7 @@ pub struct LambdaParameter {
 pub struct CallSegment {
     pub name: String,
     pub name_span: ByteSpan,
-    pub positional_args: Vec<Value>,
-    pub named_args: Vec<NamedArg>,
+    /// Arguments in their original source order.
+    pub arguments: Vec<CallArgument>,
     pub span: ByteSpan,
 }

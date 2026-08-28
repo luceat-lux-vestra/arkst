@@ -3201,18 +3201,10 @@ impl Evaluator {
         }
 
         if positional_args.len() == 1 && named_args.len() == 1 {
-            if positional_span(0).start > named_args[0].span.start {
-                diagnostics.push(document_state_call_error(
-                    "`.doclang` cannot place an unnamed argument after a named argument"
-                        .to_string(),
-                    positional_span(0),
-                ));
-            } else {
-                diagnostics.push(document_state_call_error(
-                    "`.doclang` received the `locale` argument more than once".to_string(),
-                    named_args[0].span,
-                ));
-            }
+            diagnostics.push(document_state_call_error(
+                "`.doclang` received the `locale` argument more than once".to_string(),
+                named_args[0].span,
+            ));
             return CallOutcome::Failed;
         }
 
@@ -3904,20 +3896,6 @@ impl Evaluator {
                 positional_span(2),
             ));
             return CallOutcome::Failed;
-        }
-
-        if let Some(first_named_start) = named_args.iter().map(|argument| argument.span.start).min()
-        {
-            if let Some(value) = positional_args
-                .iter()
-                .find(|value| value_source_span(value, span).start > first_named_start)
-            {
-                diagnostics.push(document_state_call_error(
-                    "`.theme` cannot place an unnamed argument after a named argument".to_string(),
-                    value_source_span(value, span),
-                ));
-                return CallOutcome::Failed;
-            }
         }
 
         let mut color_bound = !positional_args.is_empty();
@@ -6363,8 +6341,9 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         // Caller arguments are evaluated before any callee scope is created.
-        // The parser guarantees that positional arguments precede named ones,
-        // so these two passes preserve source order for the supported grammar.
+        // The current IR exposes positional and named projections; the
+        // grammar/frontend source order is preserved before this existing
+        // boundary, while shared binder ordering validation remains #165 work.
         let positional = match self.evaluate_values(positional_args, span, diagnostics, context) {
             Ok(values) => values,
             Err(outcome) => return outcome,
@@ -7504,20 +7483,6 @@ fn bind_caption_position_arguments(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<CaptionPositionBindings, CallOutcome> {
     let mut bindings = CaptionPositionBindings::default();
-
-    if let Some(first_named_start) = named_args.iter().map(|argument| argument.span.start).min() {
-        if let Some(value) = positional_args
-            .iter()
-            .find(|value| value_source_span(value, span).start > first_named_start)
-        {
-            diagnostics.push(document_state_call_error(
-                "`.captionposition` cannot place an unnamed argument after a named argument"
-                    .to_string(),
-                value_source_span(value, span),
-            ));
-            return Err(CallOutcome::Failed);
-        }
-    }
 
     if positional_args.len() > 4 {
         diagnostics.push(document_state_call_error(

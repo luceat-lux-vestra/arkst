@@ -1,4 +1,4 @@
-use scribium_markdown::ast::{Block, Inline, Value};
+use scribium_markdown::ast::{Block, CallArgument, Inline, Value};
 use scribium_markdown::{parse_with_mode, Mode};
 
 fn assert_span(source: &str, span: scribium_source::ByteSpan, expected: &str) {
@@ -17,7 +17,7 @@ fn html_braced_content_is_a_source_backed_content_argument() {
 
     let Block::DirectiveCall {
         name,
-        positional_args,
+        arguments,
         body: None,
         span,
         ..
@@ -27,8 +27,12 @@ fn html_braced_content_is_a_source_backed_content_argument() {
     };
     assert_eq!(name, "html");
     assert_span(source, *span, ".html {<em>world</em>}");
-    let [Value::Content(content)] = positional_args.as_slice() else {
-        panic!("expected one content argument, got {positional_args:?}");
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        ..
+    }] = arguments.as_slice()
+    else {
+        panic!("expected one content argument, got {arguments:?}");
     };
     assert!(matches!(
         content.as_slice(),
@@ -95,7 +99,7 @@ fn html_indented_body_remains_parser_owned_raw_html() {
 
     let Block::DirectiveCall {
         name,
-        positional_args,
+        arguments,
         body: Some(body),
         ..
     } = &output.document.nodes[0]
@@ -103,7 +107,7 @@ fn html_indented_body_remains_parser_owned_raw_html() {
         panic!("expected .html body, got {:?}", output.document.nodes);
     };
     assert_eq!(name, "html");
-    assert!(positional_args.is_empty());
+    assert!(arguments.is_empty());
     let [Block::RawHtml { source: raw, span }] = body.as_slice() else {
         panic!("expected one raw HTML body node, got {body:?}");
     };

@@ -659,7 +659,8 @@ mod tests {
 
     #[test]
     fn compile_propagates_parser_diagnostics() {
-        for (input, expected_code) in [(".foo {", "E2003"), (".foo width:{x} {y}", "E2001")] {
+        {
+            let (input, expected_code) = (".foo {", "E2003");
             let (result, source_id) = compile_source(input);
             assert_eq!(result.diagnostics.len(), 1, "input {input:?}");
             let diag = &result.diagnostics[0];
@@ -675,6 +676,79 @@ mod tests {
             // semantic node merely to produce IR.
             assert_eq!(result.ir.nodes.len(), 0, "input {input:?}");
         }
+
+        let (result, source_id) = compile_source(".foo width:{x} {y}");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+        assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_rejects_positional_after_named_at_engine_handoff() {
+        for source in [
+            ".theme layout:{Compact} {Light}\n",
+            ".captionposition tables:{top} {bottom}\n",
+            ".sum {1}::multiply first:{2} {3}\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E3003", "{source:?}: {result:?}");
+            assert_eq!(
+                diagnostic.message, "positional argument after named argument is not allowed",
+                "{source:?}: {result:?}"
+            );
+            let positional_start = source.rfind('{').expect("positional argument");
+            let positional_end = source.rfind('}').expect("positional argument end") + 1;
+            assert_eq!(
+                diagnostic.primary,
+                Some(scribium_source::SourceSpan::new(
+                    source_id,
+                    positional_start,
+                    positional_end,
+                )),
+                "{source:?}: {result:?}"
+            );
+            let named_start = source.find("first:").unwrap_or_else(|| {
+                source
+                    .find("layout:")
+                    .unwrap_or_else(|| source.find("tables:").expect("named argument"))
+            });
+            let named_end = source[named_start..]
+                .find('}')
+                .map(|offset| named_start + offset + 1)
+                .expect("named argument end");
+            assert_eq!(
+                diagnostic.secondary,
+                vec![scribium_source::SourceSpan::new(
+                    source_id,
+                    named_start,
+                    named_end,
+                )],
+                "{source:?}: {result:?}"
+            );
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+
+        let source =
+            ".function {needs}\n    first:\n    .uppercase {ran}\n\n.needs first:{one} {two}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3003");
+        let positional_start = source.rfind("{two}").expect("positional argument");
+        assert_eq!(
+            result.diagnostics[0].primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                positional_start,
+                positional_start + "{two}".len(),
+            ))
+        );
+        assert_eq!(output_text(&result), "");
     }
 
     #[test]
@@ -2016,10 +2090,7 @@ mod tests {
             let (result, source_id) = compile_source(&source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert!(
-                matches!(
-                    result.diagnostics[0].code.as_str(),
-                    "E2001" | "E3001" | "E3003"
-                ),
+                matches!(result.diagnostics[0].code.as_str(), "E3001" | "E3003"),
                 "{source:?}: {result:?}"
             );
             assert_eq!(
@@ -2163,10 +2234,7 @@ mod tests {
             let (result, source_id) = compile_source(&source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert!(
-                matches!(
-                    result.diagnostics[0].code.as_str(),
-                    "E2001" | "E3001" | "E3003"
-                ),
+                matches!(result.diagnostics[0].code.as_str(), "E3001" | "E3003"),
                 "{source:?}: {result:?}"
             );
             assert_eq!(
@@ -4072,13 +4140,15 @@ mod tests {
 
         let content_source = ".outer {.a::b}\n";
         let parsed = scribium_markdown::parse_qd(content_source);
-        let scribium_markdown::ast::Block::DirectiveCall {
-            positional_args, ..
-        } = &parsed.nodes[0]
+        let scribium_markdown::ast::Block::DirectiveCall { arguments, .. } = &parsed.nodes[0]
         else {
             panic!("expected outer call");
         };
-        let scribium_markdown::ast::Value::Content(content) = &positional_args[0] else {
+        let Some(scribium_markdown::ast::CallArgument::Positional {
+            value: scribium_markdown::ast::Value::Content(content),
+            ..
+        }) = arguments.first()
+        else {
             panic!("expected content argument");
         };
         assert!(content.iter().any(|inline| matches!(
