@@ -376,6 +376,11 @@ pub enum IrNode {
         name: String,
         positional_args: Vec<IrValue>,
         named_args: Vec<IrNamedArg>,
+        /// The source-ordered argument candidates retained until semantic
+        /// binding. `None` is accepted for legacy/manually constructed IR;
+        /// frontend-produced calls always populate this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordered_args: Option<Vec<IrCallArgument>>,
         /// Source-backed explicit lambda parameters for contextual block
         /// calls such as `.let`. `None` represents a headerless implicit
         /// lambda when the callee selects that invocation semantics.
@@ -450,6 +455,10 @@ pub enum IrInline {
         name: String,
         positional_args: Vec<IrValue>,
         named_args: Vec<IrNamedArg>,
+        /// Source-ordered candidates retained for the engine invocation
+        /// binder. See [`IrNode::FunctionCall::ordered_args`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordered_args: Option<Vec<IrCallArgument>>,
         body: Option<Vec<IrInline>>,
         span: SourceSpan,
     },
@@ -512,7 +521,31 @@ pub struct IrCallSegment {
     pub name_span: SourceSpan,
     pub positional_args: Vec<IrValue>,
     pub named_args: Vec<IrNamedArg>,
+    /// Source-ordered candidates retained until semantic binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordered_args: Option<Vec<IrCallArgument>>,
     pub span: SourceSpan,
+}
+
+/// One source-backed invocation candidate in its original order.
+///
+/// This is a lightweight structural reference into the sibling positional or
+/// named projection on the containing call. It deliberately does not own a
+/// second `IrValue` tree: transient provenance such as `ValueOrigin` remains
+/// evaluator-owned, and argument values remain owned by the projections.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum IrCallArgument {
+    Positional {
+        /// Index into the containing call's `positional_args` vector.
+        index: usize,
+        span: SourceSpan,
+    },
+    Named {
+        /// Index into the containing call's `named_args` vector.
+        index: usize,
+        name_span: SourceSpan,
+        span: SourceSpan,
+    },
 }
 
 /// One source-backed named call argument.

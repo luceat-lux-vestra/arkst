@@ -112,10 +112,12 @@ fn br_rejects_inline_body_before_evaluating_its_contents() {
                 name: "br".to_string(),
                 positional_args: Vec::new(),
                 named_args: Vec::new(),
+                ordered_args: None,
                 body: Some(vec![IrInline::DirectiveCall {
                     name: "not".to_string(),
                     positional_args: vec![IrValue::Number(1.0)],
                     named_args: Vec::new(),
+                    ordered_args: None,
                     body: None,
                     span,
                 }]),
@@ -147,6 +149,7 @@ fn br_rejects_lambda_body_before_evaluating_its_contents() {
             name: "br".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![IrParameter {
                 name: "value".to_string(),
                 name_span: span,
@@ -162,6 +165,7 @@ fn br_rejects_lambda_body_before_evaluating_its_contents() {
                     value: IrValue::Number(0.0),
                     span,
                 }],
+                ordered_args: None,
                 lambda_parameters: None,
                 body: None,
                 span,

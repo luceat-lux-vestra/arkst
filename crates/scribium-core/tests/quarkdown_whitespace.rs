@@ -167,6 +167,7 @@ fn whitespace_reuses_size_origin_rules_and_typed_identity() {
                 unit: IrSizeUnit::Pt,
             })],
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: None,
             body: None,
             span,
@@ -224,6 +225,7 @@ fn whitespace_rejects_inline_and_lambda_bodies() {
                 name: "whitespace".to_string(),
                 positional_args: Vec::new(),
                 named_args: Vec::new(),
+                ordered_args: None,
                 body: Some(vec![IrInline::Text {
                     content: "body".to_string(),
                     span,
@@ -249,6 +251,7 @@ fn whitespace_rejects_inline_and_lambda_bodies() {
             name: "whitespace".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![scribium_core::ir::IrParameter {
                 name: "value".to_string(),
                 name_span: span,

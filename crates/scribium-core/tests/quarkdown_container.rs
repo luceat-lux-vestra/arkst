@@ -137,6 +137,7 @@ fn container_accepts_positional_prefix_and_preserves_typed_size_identity() {
                 unit: IrSizeUnit::Pt,
             })],
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![IrNode::Paragraph {
                 content: vec![IrInline::Text {
@@ -181,6 +182,7 @@ fn container_rejects_lambda_body() {
             name: "container".to_string(),
             positional_args: Vec::new(),
             named_args: Vec::new(),
+            ordered_args: None,
             lambda_parameters: Some(vec![IrParameter {
                 name: "value".to_string(),
                 name_span: span,

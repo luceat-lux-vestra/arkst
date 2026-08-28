@@ -677,7 +677,7 @@ mod tests {
             assert_eq!(result.ir.nodes.len(), 0, "input {input:?}");
         }
 
-        let (result, source_id) = compile_source(".foo width:{x} {y}");
+        let (result, source_id) = compile_source(".sum a:{x} {y}");
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "E3003");
         assert_eq!(
@@ -688,11 +688,11 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_positional_after_named_at_engine_handoff() {
+    fn compile_rejects_positional_after_named_through_shared_binder() {
         for source in [
             ".theme layout:{Compact} {Light}\n",
             ".captionposition tables:{top} {bottom}\n",
-            ".sum {1}::multiply first:{2} {3}\n",
+            ".sum {1} {1}::multiply first:{2} {3}\n",
         ] {
             let (result, source_id) = compile_source(source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
@@ -749,6 +749,92 @@ mod tests {
             ))
         );
         assert_eq!(output_text(&result), "");
+    }
+
+    #[test]
+    fn compile_rejects_positional_after_named_for_unknown_calls_in_all_shapes() {
+        for source in [
+            ".foo width:{x} {y}\n",
+            "prefix .foo width:{x} {y} suffix\n",
+            ".foo width:{x} {y}::bar\n",
+        ] {
+            let (result, source_id) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            let diagnostic = &result.diagnostics[0];
+            assert_eq!(diagnostic.code, "E3003", "{source:?}: {result:?}");
+            assert_eq!(
+                diagnostic.message, "positional argument after named argument is not allowed",
+                "{source:?}: {result:?}"
+            );
+            let positional_start = source.find("{y}").expect("positional argument");
+            assert_eq!(
+                diagnostic.primary,
+                Some(scribium_source::SourceSpan::new(
+                    source_id,
+                    positional_start,
+                    positional_start + "{y}".len(),
+                )),
+                "{source:?}: {result:?}"
+            );
+            let named_start = source.find("width:").expect("named argument");
+            let named_end =
+                named_start + source[named_start..].find('}').expect("named argument end") + 1;
+            assert_eq!(
+                diagnostic.secondary,
+                vec![scribium_source::SourceSpan::new(
+                    source_id,
+                    named_start,
+                    named_end,
+                )],
+                "{source:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_mixed_call_does_not_evaluate_invalid_nested_argument() {
+        for source in [
+            ".var {marker} {before}\n.foo width:{.var {marker} {changed}} {after}\n.marker\n",
+            ".var {marker} {before}\nprefix .foo width:{.var {marker} {changed}} {after} suffix\n.marker\n",
+            ".var {marker} {before}\n.foo width:{.var {marker} {changed}} {after}::bar\n.marker\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003", "{source:?}: {result:?}");
+            assert!(!output_text(&result).contains("changed"), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn compile_duplicate_named_argument_retains_conflict_provenance() {
+        let source = ".html content:{one} content:{two}\n";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "E3003");
+        let first_name = source.find("content:").expect("first named argument");
+        let second_name = source.rfind("content:").expect("second named argument");
+        assert_eq!(
+            diagnostic.primary,
+            Some(scribium_source::SourceSpan::new(
+                source_id,
+                second_name,
+                second_name + "content".len(),
+            ))
+        );
+        let first_argument_end = source[first_name..]
+            .find('}')
+            .map(|offset| first_name + offset + 1)
+            .expect("first named argument end");
+        assert_eq!(
+            diagnostic.secondary,
+            vec![scribium_source::SourceSpan::new(
+                source_id,
+                first_name,
+                first_argument_end,
+            )]
+        );
+        assert!(result.ir.nodes.is_empty());
     }
 
     #[test]
@@ -1396,6 +1482,35 @@ mod tests {
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "1\n2\n3\n1\n2\n3");
+    }
+
+    #[test]
+    fn compile_shared_invocation_binding_covers_native_user_and_callback_paths() {
+        let native = compile_source(".sum {1} b:{2}\n").0;
+        assert!(native.diagnostics.is_empty(), "{native:?}");
+        assert_eq!(output_text(&native), "3");
+
+        let user = compile_source(
+            ".function {add}\n    first second:\n    .sum {.first} {.second}\n\n.add {1} second:{2}\n",
+        )
+        .0;
+        assert!(user.diagnostics.is_empty(), "{user:?}");
+        assert_eq!(output_text(&user), "3");
+
+        let callback = compile_source(".map {1..2} by:{value: .multiply {.value} by:{2}}\n").0;
+        assert!(callback.diagnostics.is_empty(), "{callback:?}");
+        assert_eq!(output_text(&callback), "2\n4");
+
+        for source in [
+            ".sum b:{2} {1}\n",
+            ".function {add}\n    first second:\n    .sum {.first} {.second}\n\n.add second:{2} {1}\n",
+            ".ifpresent {value} {@lambda first second: .first}\n",
+        ] {
+            let result = compile_source(source).0;
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3003", "{source:?}: {result:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
     }
 
     #[test]
@@ -2374,14 +2489,16 @@ mod tests {
         let source = ".docauthor {Alice}\n.docauthor {Bob} {Carol}\n.docauthor\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        let invalid_call = ".docauthor {Bob} {Carol}";
-        let invalid_start = source.find(invalid_call).expect("invalid docauthor call");
+        let invalid_argument = "{Carol}";
+        let invalid_start = source
+            .find(invalid_argument)
+            .expect("invalid docauthor argument");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
                 invalid_start,
-                invalid_start + invalid_call.len(),
+                invalid_start + invalid_argument.len(),
             ))
         );
         assert_eq!(output_text(&result), "Alice");
@@ -2396,7 +2513,7 @@ mod tests {
         let source = ".docauthor {Alice}\n.docauthor foo:{Bob}\n.docauthor\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        let invalid_argument = "foo:{Bob}";
+        let invalid_argument = "foo";
         let invalid_start = source
             .find(invalid_argument)
             .expect("invalid named argument");
@@ -2786,11 +2903,12 @@ mod tests {
                 Some(source_id),
                 "{source:?}: {result:?}"
             );
+            let marker_start = source.find(marker).unwrap();
+            let marker_end = marker_start + marker.len();
             assert!(
                 result.diagnostics[0]
                     .primary
-                    .is_some_and(|span| span.start <= source.find(marker).unwrap()
-                        && span.end >= source.find(marker).unwrap() + marker.len()),
+                    .is_some_and(|span| span.start >= marker_start && span.end <= marker_end),
                 "{source:?}: {result:?}"
             );
             assert_eq!(output_text(&result), "stable", "{source:?}: {result:?}");
