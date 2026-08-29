@@ -1493,6 +1493,18 @@ fn parse_original_content(
                 _ => {}
             }
         }
+        if byte == b'{' {
+            match scribium_quarkdown::parse_tight_call(source, cursor) {
+                Ok(Some((call, end))) if end <= span.end => {
+                    push_content_text(&mut inlines, source, text_start, cursor, base);
+                    inlines.push(convert_content_call(call, source, base, diagnostics));
+                    cursor = end;
+                    text_start = cursor;
+                    continue;
+                }
+                _ => {}
+            }
+        }
         // Angle-bracket text remains an exact source-backed String boundary;
         // it does not require the unavailable Quarkdown inline-fragment
         // parser. Keep E3010 for Markdown constructs whose structure would be

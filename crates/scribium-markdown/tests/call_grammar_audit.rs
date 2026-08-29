@@ -49,6 +49,266 @@ fn assert_markdown_isolated(source: &str) {
     }));
 }
 
+struct NestedTightExpectation<'a> {
+    outer_call: &'a str,
+    outer_argument: &'a str,
+    prefix: &'a str,
+    wrapper: &'a str,
+    head: &'a str,
+    nested_argument: &'a str,
+    nested_value: &'a str,
+    suffix: &'a str,
+}
+
+fn assert_nested_tight_content(
+    source: &str,
+    outer_span: ByteSpan,
+    arguments: &[CallArgument],
+    expected: NestedTightExpectation<'_>,
+) {
+    assert_eq!(source_slice(source, outer_span), expected.outer_call);
+    let CallArgument::Positional {
+        value: Value::Content(content),
+        span: outer_argument_span,
+    } = &arguments[0]
+    else {
+        panic!("expected the outer positional content argument")
+    };
+    assert_eq!(
+        source_slice(source, *outer_argument_span),
+        expected.outer_argument
+    );
+    assert!(matches!(
+        content.as_slice(),
+        [
+            Inline::Text { .. },
+            Inline::DirectiveCall { .. },
+            Inline::Text { .. }
+        ]
+    ));
+
+    let Inline::Text {
+        content: prefix,
+        span: prefix_span,
+    } = &content[0]
+    else {
+        unreachable!()
+    };
+    let Inline::DirectiveCall {
+        name,
+        name_span,
+        head_span,
+        arguments: nested_arguments,
+        span: nested_span,
+        ..
+    } = &content[1]
+    else {
+        unreachable!()
+    };
+    let Inline::Text {
+        content: suffix,
+        span: suffix_span,
+    } = &content[2]
+    else {
+        unreachable!()
+    };
+
+    assert_eq!(prefix, expected.prefix);
+    assert_eq!(source_slice(source, *prefix_span), expected.prefix);
+    assert_eq!(name, "inner");
+    assert_eq!(source_slice(source, *nested_span), expected.wrapper);
+    assert_eq!(source_slice(source, *head_span), expected.head);
+    assert_eq!(source_slice(source, *name_span), ".inner");
+    assert_eq!(nested_arguments.len(), 1);
+    let CallArgument::Positional {
+        value,
+        span: nested_argument_span,
+    } = &nested_arguments[0]
+    else {
+        panic!("expected the inner positional argument")
+    };
+    match value {
+        Value::Identifier(value) => assert_eq!(value, expected.nested_value),
+        Value::Content(content) => {
+            let [Inline::Text {
+                content: value,
+                span,
+            }] = content.as_slice()
+            else {
+                panic!("expected multibyte argument content to remain one text inline")
+            };
+            assert_eq!(value, expected.nested_value);
+            assert_eq!(source_slice(source, *span), expected.nested_value);
+        }
+        value => panic!("unexpected inner argument value: {value:?}"),
+    }
+    assert_eq!(
+        source_slice(source, *nested_argument_span),
+        expected.nested_argument
+    );
+    assert_eq!(suffix, expected.suffix);
+    assert_eq!(source_slice(source, *suffix_span), expected.suffix);
+}
+
+#[test]
+fn audit_preserves_nested_tight_call_wrapper_inside_content_argument() {
+    let source = ".outer {H{.inner {x}}O}\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall {
+        arguments, span, ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected outer block call, got {:?}", output.document.nodes)
+    };
+    assert_nested_tight_content(
+        source,
+        *span,
+        arguments,
+        NestedTightExpectation {
+            outer_call: ".outer {H{.inner {x}}O}",
+            outer_argument: "{H{.inner {x}}O}",
+            prefix: "H",
+            wrapper: "{.inner {x}}",
+            head: ".inner {x}",
+            nested_argument: "{x}",
+            nested_value: "x",
+            suffix: "O",
+        },
+    );
+    assert_markdown_isolated(source);
+
+    let inline_source = "prefix .outer {H{.inner {x}}O} suffix\n";
+    let inline_output = parse_with_diagnostics(inline_source);
+    assert!(inline_output.diagnostics.is_empty(), "{inline_output:?}");
+    let Block::Paragraph { content, .. } = &inline_output.document.nodes[0] else {
+        panic!("expected inline paragraph")
+    };
+    let Inline::DirectiveCall {
+        arguments, span, ..
+    } = content
+        .iter()
+        .find(|inline| matches!(inline, Inline::DirectiveCall { name, .. } if name == "outer"))
+        .expect("expected inline outer call")
+    else {
+        unreachable!()
+    };
+    assert_nested_tight_content(
+        inline_source,
+        *span,
+        arguments,
+        NestedTightExpectation {
+            outer_call: ".outer {H{.inner {x}}O}",
+            outer_argument: "{H{.inner {x}}O}",
+            prefix: "H",
+            wrapper: "{.inner {x}}",
+            head: ".inner {x}",
+            nested_argument: "{x}",
+            nested_value: "x",
+            suffix: "O",
+        },
+    );
+    assert_markdown_isolated(inline_source);
+}
+
+#[test]
+fn audit_preserves_nested_tight_utf8_and_crlf_provenance() {
+    let utf8_source = ".outer {앞{.inner {값}}뒤}\n";
+    let utf8_output = parse_with_diagnostics(utf8_source);
+    assert!(utf8_output.diagnostics.is_empty(), "{utf8_output:?}");
+    let Block::DirectiveCall {
+        arguments, span, ..
+    } = &utf8_output.document.nodes[0]
+    else {
+        panic!("expected UTF-8 outer block call")
+    };
+    assert_nested_tight_content(
+        utf8_source,
+        *span,
+        arguments,
+        NestedTightExpectation {
+            outer_call: ".outer {앞{.inner {값}}뒤}",
+            outer_argument: "{앞{.inner {값}}뒤}",
+            prefix: "앞",
+            wrapper: "{.inner {값}}",
+            head: ".inner {값}",
+            nested_argument: "{값}",
+            nested_value: "값",
+            suffix: "뒤",
+        },
+    );
+    assert_eq!(
+        source_slice(utf8_source, *span),
+        ".outer {앞{.inner {값}}뒤}"
+    );
+    assert_markdown_isolated(utf8_source);
+
+    let crlf_source = ".outer {H{.inner {x}}O}\r\n";
+    assert!(crlf_source
+        .as_bytes()
+        .windows(2)
+        .any(|pair| pair == b"\r\n"));
+    let crlf_output = parse_with_diagnostics(crlf_source);
+    assert!(crlf_output.diagnostics.is_empty(), "{crlf_output:?}");
+    let Block::DirectiveCall {
+        arguments, span, ..
+    } = &crlf_output.document.nodes[0]
+    else {
+        panic!("expected CRLF outer block call")
+    };
+    assert_nested_tight_content(
+        crlf_source,
+        *span,
+        arguments,
+        NestedTightExpectation {
+            outer_call: ".outer {H{.inner {x}}O}",
+            outer_argument: "{H{.inner {x}}O}",
+            prefix: "H",
+            wrapper: "{.inner {x}}",
+            head: ".inner {x}",
+            nested_argument: "{x}",
+            nested_value: "x",
+            suffix: "O",
+        },
+    );
+    assert_eq!(source_slice(crlf_source, *span), ".outer {H{.inner {x}}O}");
+    assert_markdown_isolated(crlf_source);
+}
+
+#[test]
+fn audit_keeps_ordinary_braces_as_content_and_does_not_promote_markdown() {
+    let source = ".outer {H{ordinary}O}\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
+        panic!("expected outer block call")
+    };
+    let CallArgument::Positional {
+        value: Value::Content(content),
+        ..
+    } = &arguments[0]
+    else {
+        panic!("expected outer content argument")
+    };
+    let [Inline::Text {
+        content: text,
+        span,
+    }] = content.as_slice()
+    else {
+        panic!("expected ordinary braces to remain one text inline")
+    };
+    assert_eq!(text, "H{ordinary}O");
+    assert_eq!(source_slice(source, *span), text);
+    assert_markdown_isolated(source);
+
+    let markdown = parse_with_mode(".outer {H{.inner {x}}O}\n", Mode::Markdown);
+    assert!(matches!(
+        markdown.document.nodes.as_slice(),
+        [Block::Paragraph { content, .. }]
+            if content.iter().all(|inline| !matches!(inline, Inline::DirectiveCall { .. }))
+    ));
+}
+
 #[test]
 fn audit_preserves_multiline_nested_and_named_argument_spans() {
     let source = ".outer {\n  .inner {값}\n} named:{\n  .sum {2} {1}\n}\n";

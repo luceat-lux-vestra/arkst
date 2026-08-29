@@ -205,7 +205,8 @@ Call syntax has the following properties:
 - A complete call may be wrapped in braces to lift word-adjacency boundaries,
   for example `H{.text {2}}O`. The wrapper is consumed by the Quarkdown
   frontend and its source span remains available. A tight call nested inside
-  a braced content argument is a known frontend gap tracked by #158.
+  a braced content argument is also preserved as one source-backed nested call;
+  its wrapper braces are not emitted as ordinary content text.
 - Inline calls appear inside a paragraph: `.strong {bold}` in surrounding
   text. A call that has trailing text after it on the same line is treated
   as an inline call, not a block-level call.
