@@ -790,7 +790,7 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
         match reader.read_event()? {
             Event::Start(event) => {
                 stack.push(XmlNode {
-                    name: String::from_utf8(event.local_name().as_ref().to_vec())?,
+                    name: event.local_name().into_inner().to_owned(),
                     attrs: read_attrs(&event)?,
                     children: Vec::new(),
                     text: String::new(),
@@ -798,7 +798,7 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
             }
             Event::Empty(event) => {
                 let node = XmlNode {
-                    name: String::from_utf8(event.local_name().as_ref().to_vec())?,
+                    name: event.local_name().into_inner().to_owned(),
                     attrs: read_attrs(&event)?,
                     children: Vec::new(),
                     text: String::new(),
@@ -807,18 +807,18 @@ fn parse_xml(xml: &str) -> Result<XmlNode> {
             }
             Event::Text(event) => {
                 if let Some(node) = stack.last_mut() {
-                    let decoded = event.decode()?;
-                    node.text.push_str(&quick_xml::escape::unescape(&decoded)?);
+                    node.text
+                        .push_str(&quick_xml::escape::unescape(event.as_ref())?);
                 }
             }
             Event::CData(event) => {
                 if let Some(node) = stack.last_mut() {
-                    node.text.push_str(&String::from_utf8_lossy(event.as_ref()));
+                    node.text.push_str(event.as_ref());
                 }
             }
             Event::GeneralRef(event) => {
                 if let Some(node) = stack.last_mut() {
-                    let reference = format!("&{};", event.decode()?);
+                    let reference = format!("&{};", event.as_ref());
                     node.text
                         .push_str(&quick_xml::escape::unescape(&reference)?);
                 }
@@ -841,9 +841,8 @@ fn read_attrs(event: &quick_xml::events::BytesStart<'_>) -> Result<BTreeMap<Stri
     let mut attrs = BTreeMap::new();
     for attr in event.attributes() {
         let attr = attr?;
-        let key = String::from_utf8(attr.key.local_name().as_ref().to_vec())?;
-        let raw_value = String::from_utf8(attr.value.to_vec())?;
-        let value = quick_xml::escape::unescape(&raw_value)?.into_owned();
+        let key = attr.key.local_name().into_inner().to_owned();
+        let value = quick_xml::escape::unescape(attr.value.as_ref())?.into_owned();
         attrs.insert(key, value);
     }
     Ok(attrs)
@@ -1246,6 +1245,23 @@ mod profile_tests {
             vec![CanonicalNode::value("text", "foo\n\nbar")]
         );
         assert!(xml_text_nodes("").is_empty());
+    }
+
+    #[test]
+    fn xml_parser_preserves_decoded_text_attributes_and_cdata() {
+        let root = parse_xml(
+            r#"<document><paragraph title="a &amp; b">a &amp; b<![CDATA[ c ]]></paragraph></document>"#,
+        )
+        .expect("valid cmark XML should parse");
+        let paragraph = &root.children[0];
+
+        assert_eq!(paragraph.attrs.get("title"), Some(&"a & b".to_string()));
+        assert_eq!(paragraph.text, "a & b c ");
+    }
+
+    #[test]
+    fn xml_parser_rejects_unclosed_elements() {
+        assert!(parse_xml("<document><paragraph>").is_err());
     }
 }
 
