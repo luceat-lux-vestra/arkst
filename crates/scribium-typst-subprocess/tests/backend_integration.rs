@@ -1282,21 +1282,15 @@ fn integration_variable_evaluation_before_lowering() {
         .unwrap();
     let result = compile(&project, &CompileOptions::default());
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E3010"),
-        "expected an explicit unsupported content diagnostic: {:?}",
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics for source-backed rich content: {:?}",
         result.diagnostics
     );
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    // The source-backed content is retained as literal text; Typst markup
-    // delimiters are escaped at the backend boundary rather than being
-    // falsely represented as Strong after synthetic reparsing was removed.
     assert!(
-        typst_code.contains("\\*\\*Scribium\\*\\*"),
-        "unsupported rich content must remain source text: {}",
+        typst_code.contains("Scribium"),
+        "source-backed rich content should reach the existing lowering path: {}",
         typst_code
     );
     assert!(

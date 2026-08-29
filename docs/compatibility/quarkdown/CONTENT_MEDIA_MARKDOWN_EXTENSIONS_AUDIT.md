@@ -35,8 +35,10 @@ owned status counts are:
 
 The 'NOT_APPLICABLE' rows are not hidden support claims. They identify
 adjacent public surfaces whose producer or prerequisite is owned by #153,
-#155, #149, #158, #160, or #166. The guard requires those ownership edges to
-remain explicit.
+#155, #149, #158, #160, or #166. The #160 frontend/content slice is now
+implemented and independently evidenced; this audit still records it only as
+an ownership handoff and makes no producer, evaluator, IR, or output claim.
+The guard requires those ownership edges to remain explicit.
 
 ## Enumeration method
 
@@ -268,7 +270,7 @@ reused where it already describes the boundary:
 | [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | `.subdocumentgraph` producer and output contract after #188 logical resource resolution; #181 is coordinated only for shared identifiers/indexing |
 | [#155](https://github.com/luceat-lux-vestra/scribium/issues/155) | Resource/environment ownership used by media and content consumers |
 | [#149](https://github.com/luceat-lux-vestra/scribium/issues/149), [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
-| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Inline Markdown in content arguments; the bounded nested tight-call prerequisite is implemented by #158 |
+| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Implemented bounded `scribium-markdown` frontend slice for source-backed inline Markdown in static content arguments; the #158 nested tight-call representation is retained. Dynamic/content conversion and producer/output semantics remain outside this handoff. |
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | .texmacro and math-renderer dependency |
 
 The #154 manifest keeps `.keybinding` as actionable `UNKNOWN` with #184 as

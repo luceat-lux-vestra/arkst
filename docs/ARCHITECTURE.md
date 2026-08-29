@@ -205,11 +205,19 @@ not depend on Markdown parser or AST types. This is a first-party Scribium
 integration, not a plugin API or generic extension framework.
 
 Quarkdown content arguments remain tied to the original document source. The
-adapter may scan nested Quarkdown calls with the grammar crate, but it must not
-create a synthetic Markdown buffer, prepend a sentinel, or compensate offsets.
-Because Rushdown 0.18.0 does not expose an arbitrary original-span inline-parser
-entry point, Markdown inline markers in such content are preserved as original
-text with an explicit diagnostic until a reviewed integration API exists.
+adapter supplies the selected original source segments to the same Rushdown
+block/inline lifecycle, and may use the grammar crate only for Quarkdown call
+grammar. Supported Markdown inline nodes and nested calls retain source-backed
+spans. It must not create a synthetic Markdown buffer, prepend a sentinel, or
+compensate offsets. The range adapter is private to `scribium-markdown`; it does
+not add an arbitrary-span API to Rushdown or claim evaluator, IR, or output
+compatibility.
+
+When the selected content range contains Rushdown raw HTML or the established
+opaque angle-text boundary, the adapter retains the complete original range as
+source-backed text and keeps the existing `E3010` fallback policy where it
+applies. This preserves target-specific `.html` String bytes without turning
+raw HTML into a new #160 structured or output contract.
 
 Raw inline and block HTML recognized by Rushdown is preserved by
 `scribium-markdown` at the frontend boundary. The frontend preserves the

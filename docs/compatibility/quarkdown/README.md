@@ -134,7 +134,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Parsed-only: frontend/IR retains the complete source-ordered sequence, including positional-after-named; the shared engine binder rejects invalid ordering with source-backed `E3003`; no complete value/conversion compatibility claim is made (#163, #165) |
 | Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
-| Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: ordinary and tight nested calls preserve source structure; Markdown inline content remains #160 |
+| Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: ordinary and tight nested calls plus supported Markdown inline content preserve source structure; semantic/output support remains separate |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
 | Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; malformed recovery remains #159 |
 | Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; inline recovery suffix loss is #159 |
@@ -1265,8 +1265,11 @@ accessed dates.
   #165 owns bounded semantic binding. Complete value/conversion compatibility
   remains partial; see #163 and #165.
 - Malformed inline recovery currently drops following source text; see #159.
-- Markdown inline structure inside Quarkdown content arguments remains an
-  explicit `E3010` gap; see #160 and related #154.
+- Supported Markdown inline structure inside static Quarkdown content
+  arguments is retained through the Rushdown frontend with original-source
+  spans; this is parser/frontend evidence only. Dynamic String/content
+  conversion remains a separate #166 boundary, and broader content/output
+  support remains under #154.
 - Scope note: the matrix is an evidence register, not a permanent language
   boundary. Rows marked **Planned** are *not* implemented and must not be
   claimed; any public Quarkdown behavior absent from the matrix is still a gap

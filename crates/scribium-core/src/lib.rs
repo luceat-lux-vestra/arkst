@@ -5043,33 +5043,33 @@ mod tests {
 
     #[test]
     fn compile_variable_rich_content_block_reference() {
-        // Rushdown exposes no original-source inline-fragment parser for this
-        // content span. Preserve the source and report the unsupported gap;
-        // do not synthesize a Markdown document or claim Strong semantics.
         let (result, _) = compile_source(".var {x} {**hello**}\n.x\n");
-        assert!(result.diagnostics.iter().any(|diag| diag.code == "E3010"));
+        assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(result.ir.nodes.len(), 1);
         let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
             panic!("expected paragraph, got {:?}", result.ir.nodes[0])
         };
-        assert!(content
-            .iter()
-            .all(|inline| !matches!(inline, IrInline::Strong { .. })));
+        assert!(matches!(
+            content.as_slice(),
+            [IrInline::Strong { content, .. }]
+                if matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "hello")
+        ));
     }
 
     #[test]
     fn compile_variable_rich_content_inline_reference() {
-        // The same original-source-only limitation applies to inline variable
-        // expansion. The unsupported diagnostic prevents silent data loss.
         let (result, _) = compile_source(".var {x} {**world**}\nHello .x\n");
-        assert!(result.diagnostics.iter().any(|diag| diag.code == "E3010"));
+        assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(result.ir.nodes.len(), 1);
         let IrNode::Paragraph { content, .. } = &result.ir.nodes[0] else {
             panic!()
         };
-        assert!(content
-            .iter()
-            .all(|inline| !matches!(inline, IrInline::Strong { .. })));
+        assert!(matches!(
+            content.as_slice(),
+            [IrInline::Text { content: prefix, .. }, IrInline::Strong { content, .. }]
+                if prefix == "Hello "
+                    && matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "world")
+        ));
     }
 
     #[test]
