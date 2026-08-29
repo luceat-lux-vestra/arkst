@@ -2369,6 +2369,7 @@ impl Evaluator {
                 &evaluated_named,
                 span,
                 diagnostics,
+                context,
                 binding_plan,
             );
         }
@@ -3930,7 +3931,7 @@ impl Evaluator {
                 restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
-            let values = match self.coerce_iterable(value, &span, diagnostics) {
+            let values = match self.coerce_iterable(value, &span, diagnostics, context) {
                 Ok(values) => values.into_iter().map(|value| (value, span)).collect(),
                 Err(outcome) => {
                     restore_on_failure(context, &previous_state);
@@ -3986,7 +3987,8 @@ impl Evaluator {
                 restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
-            let values = match self.coerce_iterable(argument, &argument_span, diagnostics) {
+            let values = match self.coerce_iterable(argument, &argument_span, diagnostics, context)
+            {
                 Ok(values) => values,
                 Err(outcome) => {
                     restore_on_failure(context, &previous_state);
@@ -5097,6 +5099,7 @@ impl Evaluator {
 
     /// Evaluates the bounded Collection access operations through the same
     /// ordered semantic element adaptation used by `.foreach`.
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_collection_access(
         &self,
         name: &str,
@@ -5104,6 +5107,7 @@ impl Evaluator {
         named_args: &[InvocationNamedArg],
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
         binding_plan: &BindingPlan,
     ) -> CallOutcome {
         match name {
@@ -5122,7 +5126,7 @@ impl Evaluator {
                     Ok(value) => value,
                     Err(outcome) => return outcome,
                 };
-                let elements = match self.coerce_iterable(value, span, diagnostics) {
+                let elements = match self.coerce_iterable(value, span, diagnostics, context) {
                     Ok(elements) => elements,
                     Err(outcome) => return outcome,
                 };
@@ -5167,7 +5171,7 @@ impl Evaluator {
                     Ok(operands) => operands,
                     Err(outcome) => return outcome,
                 };
-                let elements = match self.coerce_iterable(value, span, diagnostics) {
+                let elements = match self.coerce_iterable(value, span, diagnostics, context) {
                     Ok(elements) => elements,
                     Err(outcome) => return outcome,
                 };
@@ -5613,7 +5617,7 @@ impl Evaluator {
             Ok(value) => value,
             Err(outcome) => return outcome,
         };
-        let elements = match self.coerce_iterable(value, span, diagnostics) {
+        let elements = match self.coerce_iterable(value, span, diagnostics, context) {
             Ok(elements) => elements,
             Err(outcome) => return outcome,
         };
@@ -5824,7 +5828,7 @@ impl Evaluator {
             Ok(value) => value,
             Err(outcome) => return outcome,
         };
-        let elements = match self.coerce_iterable(collection, span, diagnostics) {
+        let elements = match self.coerce_iterable(collection, span, diagnostics, context) {
             Ok(elements) => elements,
             Err(outcome) => return outcome,
         };
@@ -6473,6 +6477,7 @@ impl Evaluator {
         value: InvocationValue,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
         let origin = value.origin;
         let value = match value_conversion::convert_target_with_origin(
@@ -6488,10 +6493,47 @@ impl Evaluator {
                 let nodes = self.parse_dynamic_markdown_content(
                     &text,
                     *span,
-                    value_conversion::RawMarkdownTarget::Block,
+                    value_conversion::RawMarkdownTarget::Iterable,
                     diagnostics,
                 )?;
-                IrValue::Content(nodes)
+                let fallback = IrValue::Content(nodes.clone());
+                // `ValueFactory.iterable` first evaluates one raw expression
+                // in the current context. A typed iterable result wins. If
+                // the expression is not iterable, fall back to the parsed
+                // Markdown list without evaluating that same expression a
+                // second time. A non-expression Markdown body is evaluated
+                // once as the list fallback so nested calls retain their
+                // normal value-context semantics.
+                let is_expression = matches!(
+                    nodes.as_slice(),
+                    [IrNode::FunctionCall { .. } | IrNode::ChainedFunctionCall { .. }]
+                );
+                if is_expression {
+                    match self.evaluate_value(&fallback, diagnostics, context) {
+                        CallOutcome::Value(
+                            value @ (IrValue::Collection(_)
+                            | IrValue::Pair(_)
+                            | IrValue::Dictionary(_)
+                            | IrValue::Range(_)),
+                        ) => value,
+                        CallOutcome::Value(_) | CallOutcome::Unresolved => fallback,
+                        CallOutcome::NoValue => {
+                            diagnostics.push(no_value_required(*span));
+                            return Err(CallOutcome::Failed);
+                        }
+                        CallOutcome::Failed => return Err(CallOutcome::Failed),
+                    }
+                } else {
+                    match self.evaluate_value(&fallback, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        CallOutcome::Unresolved => fallback,
+                        CallOutcome::NoValue => {
+                            diagnostics.push(no_value_required(*span));
+                            return Err(CallOutcome::Failed);
+                        }
+                        CallOutcome::Failed => return Err(CallOutcome::Failed),
+                    }
+                }
             }
             Err(_) => {
                 diagnostics.push(iteration_error(
@@ -6565,7 +6607,7 @@ impl Evaluator {
                         return Err(CallOutcome::Failed);
                     }
                     for item in items {
-                        values.push(self.list_item_value(item, span, diagnostics)?);
+                        values.push(self.list_item_value(item, span, diagnostics, context)?);
                     }
                     Ok(values)
                 }
@@ -6594,6 +6636,7 @@ impl Evaluator {
         item: &scribium_ir::IrListItem,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<IrValue, CallOutcome> {
         match item.nodes.as_slice() {
             [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
@@ -6601,6 +6644,7 @@ impl Evaluator {
                     InvocationValue::static_value(IrValue::Content(item.nodes.clone())),
                     span,
                     diagnostics,
+                    context,
                 )
                 .map(IrValue::Collection),
             [IrNode::Paragraph { content, .. }] => {
@@ -12960,6 +13004,7 @@ mod tests {
     #[test]
     fn range_materialization_handles_signed_and_left_open_bounds_once() {
         let evaluator = Evaluator::new();
+        let mut context = EvaluationContext::new();
         for (range, expected) in [
             (
                 IrRange {
@@ -12991,6 +13036,7 @@ mod tests {
                 InvocationValue::static_value(IrValue::Range(range)),
                 &span(0, 10),
                 &mut diagnostics,
+                &mut context,
             ) else {
                 panic!("finite ranges materialize");
             };
@@ -13026,6 +13072,7 @@ mod tests {
                 InvocationValue::static_value(IrValue::Range(range)),
                 &span(0, 10),
                 &mut diagnostics,
+                &mut context,
             ) else {
                 panic!("descending or below-default ranges are empty");
             };
@@ -13042,6 +13089,7 @@ mod tests {
             })),
             &span(0, 20),
             &mut diagnostics,
+            &mut context,
         );
         assert!(matches!(result, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1);
@@ -13054,6 +13102,7 @@ mod tests {
             max_materialized_elements: 3,
             max_evaluation_depth: 256,
         });
+        let mut context = EvaluationContext::new();
 
         let mut diagnostics = Vec::new();
         let at_limit = evaluator
@@ -13065,6 +13114,7 @@ mod tests {
                 })),
                 &span(0, 20),
                 &mut diagnostics,
+                &mut context,
             )
             .expect("the exact materialization limit is valid");
         assert_eq!(at_limit.len(), 3);
@@ -13079,6 +13129,7 @@ mod tests {
                 })),
                 &span(0, 40),
                 &mut diagnostics,
+                &mut context,
             )
             .expect("per-operation limits reset for an independent range");
         assert_eq!(repeated_independent.len(), 3);
@@ -13093,6 +13144,7 @@ mod tests {
             })),
             &span(0, 60),
             &mut diagnostics,
+            &mut context,
         );
         assert!(matches!(over_limit, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1);
@@ -13112,6 +13164,7 @@ mod tests {
             })),
             &span(0, 90),
             &mut diagnostics,
+            &mut context,
         );
         assert!(matches!(huge, Err(CallOutcome::Failed)));
         assert_eq!(diagnostics.len(), 1);
@@ -13125,6 +13178,7 @@ mod tests {
             max_materialized_elements: 0,
             max_evaluation_depth: 256,
         });
+        let mut context = EvaluationContext::new();
         let mut diagnostics = Vec::new();
         let values = evaluator
             .coerce_iterable(
@@ -13135,6 +13189,7 @@ mod tests {
                 })),
                 &span(0, 4),
                 &mut diagnostics,
+                &mut context,
             )
             .expect("descending ranges retain their empty semantics");
         assert!(values.is_empty());

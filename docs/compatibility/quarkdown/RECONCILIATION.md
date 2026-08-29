@@ -341,8 +341,12 @@ the targets consumed by this slice.
 The demonstrated consumers are dynamic String to inline Markdown through
 `.plaintext`, typed and Markdown-list iterable conversion, and regular
 document-state body fallback for `.theme`, `.doclang`, and `.captionposition`.
+The retained body source range is the complete upstream body token, including
+leading/trailing blank lines; its target value applies `trimIndent().trimEnd()`.
 Source-backed body fallback does not evaluate or stringify the parsed nested
-body. Static String content remains literal text, raw HTML keeps its existing
+body. Dynamic iterable conversion evaluates one raw expression in context and
+uses typed Iterable/Dictionary results before its Markdown-list fallback.
+Static String content remains literal text, raw HTML keeps its existing
 source-preserving path, and #158/#160 structure remains unchanged. Callable,
 dictionary, remaining block-content consumers, complete upstream target
 coverage, and diagnostic/commit parity remain partial or deferred to their

@@ -118,12 +118,12 @@ fn html_indented_body_remains_parser_owned_raw_html() {
     assert_eq!(raw_body.native_text, "<div>\n        Hello\n    </div>\n");
     assert_eq!(
         raw_body.source_text,
-        "    <div>\n        Hello\n    </div>\n"
+        "\n    <div>\n        Hello\n    </div>\n"
     );
     assert_span(
         source,
         raw_body.span,
-        "    <div>\n        Hello\n    </div>\n",
+        "\n    <div>\n        Hello\n    </div>\n",
     );
 }
 
@@ -151,7 +151,7 @@ fn nested_raw_body_keeps_source_text_and_call_owned_indentation() {
     );
     assert_eq!(
         raw_body.source_text,
-        "        - Callable\n            - email: callable@example.com\n"
+        "\n        - Callable\n            - email: callable@example.com\n\n"
     );
     assert_eq!(
         raw_body.native_text,

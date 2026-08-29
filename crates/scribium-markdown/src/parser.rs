@@ -47,7 +47,16 @@ pub struct ParseOutput {
     pub diagnostics: Vec<ParserDiagnostic>,
 }
 
-type BodyLineRanges = Vec<(ByteSpan, Vec<ByteSpan>)>;
+#[derive(Debug)]
+struct BodyRange {
+    /// The non-blank body lines used to normalize parsed Markdown structure.
+    lines: Vec<ByteSpan>,
+    /// The complete source-backed body token, including blank lines that are
+    /// not represented by Rushdown body nodes.
+    raw: ByteSpan,
+}
+
+type BodyLineRanges = Vec<(ByteSpan, BodyRange)>;
 
 #[derive(Debug)]
 struct QuarkdownBlock {
@@ -61,6 +70,12 @@ struct QuarkdownBlock {
     /// Original reader segments accepted as body lines. These preserve parser
     /// ownership for the frontend's lazy-paragraph normalization.
     body_lines: Vec<Segment>,
+    /// Start of the complete upstream body token, immediately after the
+    /// parsed call head and before its line terminator.
+    raw_body_start: usize,
+    /// End of the complete body token, extended across accepted body and
+    /// blank lines. It is meaningful only when `body_lines` is non-empty.
+    raw_body_end: usize,
 }
 
 impl NodeKind for QuarkdownBlock {
@@ -136,6 +151,8 @@ impl BlockParser for QuarkdownBlockParser {
             continuation_pending: header_pending && continuation_pending,
             body_indent: None,
             body_lines: Vec::new(),
+            raw_body_start: call_segment.stop(),
+            raw_body_end: call_segment.stop(),
         });
         reader.advance_to_eol();
         Some((node_ref, State::HAS_CHILDREN))
@@ -168,6 +185,8 @@ impl BlockParser for QuarkdownBlockParser {
                     if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
                         let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
                         block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = call_end;
+                        block.raw_body_end = call_end;
                         block.header_pending = false;
                         block.continuation_pending = false;
                     } else if has_continuation {
@@ -188,6 +207,8 @@ impl BlockParser for QuarkdownBlockParser {
         }
 
         if is_blank(&line) {
+            let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+            block.raw_body_end = segment.stop();
             reader.advance_to_eol();
             return Some(State::HAS_CHILDREN);
         }
@@ -217,9 +238,9 @@ impl BlockParser for QuarkdownBlockParser {
                 Some(actual_indent);
         }
 
-        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
-            .body_lines
-            .push(segment);
+        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+        block.body_lines.push(segment);
+        block.raw_body_end = segment.stop();
 
         let (position, padding) = indent_position(&line, reader.line_offset(), body_indent)?;
         reader.advance_and_set_padding(position, padding);
@@ -611,7 +632,7 @@ fn normalize_block(
             let accepted_lines = body_line_ranges
                 .iter()
                 .find(|(owner, _)| owner == span)
-                .map(|(_, lines)| lines.as_slice());
+                .map(|(_, range)| range.lines.as_slice());
             let children = std::mem::take(body);
             let mut normalized_children = Vec::new();
             for mut child in children {
@@ -963,7 +984,15 @@ fn convert_block(
                 .map(|segment| offset_span(ByteSpan::new(segment.start(), segment.stop()), base))
                 .collect::<Option<Vec<_>>>()?;
             if !ranges.is_empty() {
-                body_line_ranges.push((span, ranges));
+                let raw_start = extension.raw_body_start.checked_add(base)?;
+                let raw_end = extension.raw_body_end.checked_add(base)?;
+                body_line_ranges.push((
+                    span,
+                    BodyRange {
+                        lines: ranges,
+                        raw: ByteSpan::new(raw_start, raw_end),
+                    },
+                ));
             }
             let call_span = checked_segment(extension.call, source)?;
             match scribium_quarkdown::parse_call(source.get(call_span.start..call_span.end)?) {
@@ -1155,27 +1184,20 @@ fn raw_body_for(
     base: usize,
     body_line_ranges: &BodyLineRanges,
 ) -> Option<RawBody> {
-    let lines = body_line_ranges
+    let range = body_line_ranges
         .iter()
         .find(|(span, _)| *span == owner)
-        .map(|(_, lines)| lines.as_slice())?;
-    let first = lines.first()?;
-    let last = lines.last()?;
-    let first_start = first.start.checked_sub(base)?;
-    let last_end = last.end.checked_sub(base)?;
-    let line_start = source
-        .get(..first_start)?
-        .rfind('\n')
-        .map_or(0, |newline| newline + 1);
-    let source_body = source.get(line_start..last_end)?;
+        .map(|(_, range)| range)?;
+    let raw_start = range.raw.start.checked_sub(base)?;
+    let raw_end = range.raw.end.checked_sub(base)?;
+    let source_body = source.get(raw_start..raw_end)?;
     let text = trim_indent_and_end(source_body);
     let native_text = normalize_native_body(source_body);
-    let span_start = base.checked_add(line_start)?;
-    (!text.trim().is_empty()).then_some(RawBody {
+    (range.raw.start < range.raw.end).then_some(RawBody {
         source_text: source_body.to_owned(),
         text,
         native_text,
-        span: ByteSpan::new(span_start, last.end),
+        span: range.raw,
     })
 }
 
@@ -1219,6 +1241,25 @@ fn trim_indent_and_end(source: &str) -> String {
 /// explicit native-content compatibility channel, not a second Markdown
 /// conversion rule, and it never reconstructs text from parsed nodes.
 fn normalize_native_body(source: &str) -> String {
+    // The complete body token starts at the header's line terminator for the
+    // upstream DynamicValue boundary. The existing native-content contract
+    // starts after that delimiter, so remove only this one separator before
+    // applying its first-line indentation rule. It also historically omitted
+    // blank lines before and after the native body; preserve that contract
+    // here while `source_text` and `text` retain the complete body token.
+    let source = if let Some(source) = source.strip_prefix("\r\n") {
+        source
+    } else {
+        source.strip_prefix('\n').unwrap_or(source)
+    };
+    let lines = source_line_ranges(source);
+    let Some(first) = lines.iter().find(|line| !line.is_blank(source)) else {
+        return String::new();
+    };
+    let Some(last) = lines.iter().rfind(|line| !line.is_blank(source)) else {
+        return String::new();
+    };
+    let source = &source[first.start..last.end];
     let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
     let first_line = &source[..first_line_end];
     let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
@@ -1232,6 +1273,66 @@ fn normalize_native_body(source: &str) -> String {
     normalized.push_str(&first_line[indentation..]);
     normalized.push_str(&source[first_line_end..]);
     normalized
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceLineRange {
+    start: usize,
+    content_end: usize,
+    end: usize,
+}
+
+impl SourceLineRange {
+    fn is_blank(self, source: &str) -> bool {
+        source[self.start..self.content_end]
+            .chars()
+            .all(char::is_whitespace)
+    }
+}
+
+fn source_line_ranges(source: &str) -> Vec<SourceLineRange> {
+    let mut ranges = Vec::new();
+    let bytes = source.as_bytes();
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\n' {
+            let content_end = if index > start && bytes[index - 1] == b'\r' {
+                index - 1
+            } else {
+                index
+            };
+            ranges.push(SourceLineRange {
+                start,
+                content_end,
+                end: index + 1,
+            });
+            start = index + 1;
+        } else if bytes[index] == b'\r' {
+            let (content_end, end) = if bytes.get(index + 1) == Some(&b'\n') {
+                (index, index + 2)
+            } else {
+                (index, index + 1)
+            };
+            ranges.push(SourceLineRange {
+                start,
+                content_end,
+                end,
+            });
+            start = end;
+            index = end;
+            continue;
+        }
+        index += 1;
+    }
+    if start < source.len() || source.is_empty() {
+        ranges.push(SourceLineRange {
+            start,
+            content_end: source.len(),
+            end: source.len(),
+        });
+    }
+    ranges
 }
 
 fn split_lines(source: &str) -> Vec<&str> {

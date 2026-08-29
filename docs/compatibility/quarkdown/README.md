@@ -236,8 +236,11 @@ The pinned Quarkdown v2.5.1 contract gives `.dockeywords` an argumentless
 getter returning the current keywords as an iterable and a setter accepting an
 iterable. Scribium supports the documented Markdown list body, an already
 evaluated typed iterable through normal positional binding, and the named
-`keywords:` binding. Getter order is preserved, the default is an empty list,
-and every successful setter **replaces** the complete prior keyword list.
+`keywords:` binding. For a source-backed body, the shared iterable converter
+evaluates one dynamic expression in the current context and prefers its typed
+Iterable or Dictionary result before using the Markdown-list fallback. Getter
+order is preserved, the default is an empty list, and every successful setter
+**replaces** the complete prior keyword list.
 
 The evaluator materializes and validates the complete candidate before one
 state commit. Only the existing bounded String-like scalar families

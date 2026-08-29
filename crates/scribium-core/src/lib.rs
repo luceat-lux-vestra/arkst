@@ -2834,6 +2834,93 @@ mod tests {
     }
 
     #[test]
+    fn dockeywords_dynamic_body_evaluates_typed_iterable_before_markdown_fallback() {
+        let source = ".function {someFunction}\n    .range {1} {3}\n.dockeywords\n    .someFunction\n.dockeywords::size\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3\n1");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_accepts_a_typed_collection_result() {
+        let source = ".function {someCollection}\n    .foreach {1..2}\n        .1\n.dockeywords\n    .someCollection\n.dockeywords::size\n.dockeywords::last\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n2");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_resolves_a_variable_iterable_once() {
+        let source = ".var {items} {.range {3} {4}}\n.dockeywords\n    .items\n.dockeywords::size\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n3");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["3".to_string(), "4".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_accepts_a_typed_dictionary_result() {
+        let source = ".function {emptyDictionary}\n    .dictionary\n.dockeywords\n    .emptyDictionary\n.dockeywords::size\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_does_not_evaluate_an_expression_twice() {
+        let source = ".var {count} {0}\n.function {counted}\n    .var {count} {.count::sum {1}}\n    .range {1} {2}\n.dockeywords\n    .counted\n.count\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string()]
+        );
+    }
+
+    #[test]
+    fn unused_dynamic_iterable_body_is_not_evaluated() {
+        let source =
+            ".if {false}\n    .dockeywords\n        .unknownFunction\n.dockeywords::size\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+    }
+
+    #[test]
+    fn failed_dynamic_iterable_expression_is_not_reparsed_as_markdown() {
+        let source = ".dockeywords\n    .multiply {true} {true}\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn void_dynamic_iterable_expression_is_not_silently_accepted() {
+        let source =
+            ".function {noValue}\n    .var {temporary} {value}\n.dockeywords\n    .noValue\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0].message.contains("no value"));
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
     fn dockeywords_supports_bounded_scalar_elements_but_rejects_nested_values() {
         let source = ".dockeywords {.pair {stable} {.range {1} {2}}}\n.dockeywords\n";
         let (result, source_id) = compile_source(source);
