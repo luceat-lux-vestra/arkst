@@ -13,6 +13,25 @@ pub struct FrontMatter {
     pub span: ByteSpan,
 }
 
+/// The source-backed body representation used by engine conversion.
+///
+/// `source_text` is the exact source slice for the body. `text` is the same
+/// indentation-normalized body string that Quarkdown's body refiner supplies
+/// to a `DynamicValue`; `span` still identifies the original source range.
+/// Parsed body nodes are deliberately kept separately so a target can choose
+/// lazy structured evaluation without reconstructing this text from an
+/// evaluated value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawBody {
+    pub source_text: String,
+    pub text: String,
+    pub span: ByteSpan,
+    /// The visual indentation owned by the call's first accepted body line.
+    /// Target-specific Markdown conversion removes this prefix from later
+    /// lines without deriving text from parsed nodes.
+    pub indentation: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Heading {
@@ -61,6 +80,7 @@ pub enum Block {
         arguments: Vec<CallArgument>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
+        raw_body: Option<RawBody>,
         /// Contextual lambda metadata for calls with lambda body semantics
         /// (`.function`, `.let`, `.foreach`, and `.repeat`). Other call bodies deliberately
         /// remain ordinary Markdown structures.

@@ -19,7 +19,7 @@ use scribium_source::ByteSpan;
 
 use crate::ast::{
     Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg,
-    RangeValue, TableCell, TableRow, TaskStatus, Value,
+    RangeValue, RawBody, TableCell, TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -453,6 +453,85 @@ pub fn parse_with_diagnostics(source: &str) -> ParseOutput {
 
 pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
     parse_source(source, mode, MarkdownProfile::Gfm)
+}
+
+/// Parses a source-backed inline Markdown value with the same Rushdown and
+/// Quarkdown inline extensions used by document content.
+///
+/// This is intentionally a fragment boundary for target conversion, not a
+/// second Markdown implementation. The range parser keeps the original
+/// source buffer as the reader input, so nested Quarkdown calls and inline
+/// provenance are handled by the ordinary frontend machinery.
+pub fn parse_inline_with_mode(source: &str, mode: Mode) -> ParseOutput {
+    if source.is_empty() {
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: 0,
+            },
+            diagnostics: Vec::new(),
+        };
+    }
+
+    let span = ByteSpan::new(0, source.len());
+    let trigger = source.as_bytes()[0];
+    let parser = parser_with_content_range(mode, MarkdownProfile::Gfm, Some((span, trigger)));
+    let mut reader = BasicReader::new(source);
+    let mut diagnostics = Vec::new();
+    let parsed = catch_unwind(AssertUnwindSafe(|| parser.parse(&mut reader)));
+    let Ok((arena, root)) = parsed else {
+        diagnostics.push(ParserDiagnostic {
+            code: "E9003",
+            message: "Rushdown panicked while parsing inline target content".to_string(),
+            span,
+        });
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: source.lines().count(),
+            },
+            diagnostics,
+        };
+    };
+
+    let Some(paragraph) = arena[root].children(&arena).find(|node| {
+        matches!(arena[*node].kind_data(), KindData::Paragraph(_))
+            && node_span(&arena, *node, source) == Some(span)
+    }) else {
+        diagnostics.push(ParserDiagnostic {
+            code: "E9003",
+            message: "Inline target content did not produce one source-backed paragraph"
+                .to_string(),
+            span,
+        });
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: source.lines().count(),
+            },
+            diagnostics,
+        };
+    };
+
+    let content = convert_inlines(
+        &arena,
+        paragraph,
+        source,
+        0,
+        &mut diagnostics,
+        InlineConversionContext::ContentArgument,
+    );
+    ParseOutput {
+        document: Document {
+            nodes: vec![Block::Paragraph { content, span }],
+            front_matter: None,
+            line_count: source.lines().count(),
+        },
+        diagnostics,
+    }
 }
 
 pub fn parse_with_markdown_profile(source: &str, profile: MarkdownProfile) -> ParseOutput {
@@ -1039,6 +1118,7 @@ fn directive_block(
         .unwrap_or(ByteSpan::new(0, 0));
     let span_base = base.checked_add(call_base).unwrap_or(base);
     let call_name = call.name.clone();
+    let raw_body = raw_body_for(span, source, base, body_line_ranges);
     let body_nodes =
         convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
     Block::DirectiveCall {
@@ -1060,9 +1140,72 @@ fn directive_block(
             .map(|segment| convert_call_segment(segment, source, base, call_base, diagnostics))
             .collect(),
         body: (!body_nodes.is_empty()).then_some(body_nodes),
+        raw_body,
         lambda_header: None,
         span,
     }
+}
+
+/// Captures the exact source-backed body input used by Quarkdown's
+/// `FunctionCallRefiner`. The parsed body remains a separate representation;
+/// this value is never reconstructed from it.
+fn raw_body_for(
+    owner: ByteSpan,
+    source: &str,
+    base: usize,
+    body_line_ranges: &BodyLineRanges,
+) -> Option<RawBody> {
+    let lines = body_line_ranges
+        .iter()
+        .find(|(span, _)| *span == owner)
+        .map(|(_, lines)| lines.as_slice())?;
+    let first = lines.first()?;
+    let last = lines.last()?;
+    let first_start = first.start.checked_sub(base)?;
+    let last_end = last.end.checked_sub(base)?;
+    let source_body = source.get(first_start..last_end)?;
+    let text = normalize_raw_body(source_body);
+    let line_start = source
+        .get(..first_start)
+        .and_then(|prefix| prefix.rfind('\n'))
+        .map_or(0, |newline| newline + 1);
+    let first_line = source.get(line_start..).unwrap_or(source_body);
+    let first_line = first_line
+        .split_once('\n')
+        .map_or(first_line, |(line, _)| line);
+    let first_line = first_line.strip_suffix('\r').unwrap_or(first_line);
+    let indentation = first_line
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .map(char::len_utf8)
+        .sum();
+    (!text.trim().is_empty()).then_some(RawBody {
+        source_text: source_body.to_owned(),
+        text,
+        span: ByteSpan::new(first.start, last.end),
+        indentation,
+    })
+}
+
+/// Mirrors the existing source-backed native-content boundary: the reader's
+/// body indentation is removed from the first body line, while later line
+/// bytes remain untouched. This is intentionally not a reconstruction from
+/// parsed Markdown nodes; relative indentation and line endings are part of
+/// the raw fallback value.
+fn normalize_raw_body(source: &str) -> String {
+    let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
+    let first_line = &source[..first_line_end];
+    let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
+    let first_content = first_content.strip_suffix('\r').unwrap_or(first_content);
+    let indentation = first_content
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .map(char::len_utf8)
+        .sum::<usize>();
+    let mut normalized = String::with_capacity(source.len().saturating_sub(indentation));
+    normalized.push_str(&first_line[indentation..]);
+    normalized.push_str(&source[first_line_end..]);
+    normalized
 }
 
 fn convert_children_blocks(

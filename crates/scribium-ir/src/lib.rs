@@ -307,6 +307,21 @@ pub struct TargetSpecificContent {
     pub span: SourceSpan,
 }
 
+/// Source-backed body text retained alongside a structured call body.
+/// `source_text` is the exact source slice; `text` is its
+/// indentation-normalized conversion input. Evaluator conversion uses this
+/// only when the target consumes Quarkdown's raw body fallback; it is not
+/// evaluator state and is never stored in `IrValue`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrRawBody {
+    #[serde(default)]
+    pub source_text: String,
+    pub text: String,
+    pub span: SourceSpan,
+    #[serde(default)]
+    pub indentation: usize,
+}
+
 /// A backend-neutral block-level IR node.
 ///
 /// Depending on the pipeline stage, a node may contain evaluated semantic
@@ -387,6 +402,11 @@ pub enum IrNode {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lambda_parameters: Option<Vec<IrParameter>>,
         body: Option<Vec<IrNode>>,
+        /// The source-backed raw body supplied to target-driven conversion.
+        /// The structured body remains authoritative for explicit Markdown
+        /// body parameters and lazy semantic evaluation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
     /// A structurally preserved `::` call chain.
@@ -400,6 +420,8 @@ pub enum IrNode {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
         body: Option<Vec<IrNode>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
     /// A source-order user-defined function declaration. The evaluator

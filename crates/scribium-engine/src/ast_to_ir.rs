@@ -8,7 +8,7 @@ use crate::DocumentMetadataDefaults;
 use scribium_diagnostics::{Diagnostic, Severity};
 use scribium_ir::{
     IrCallArgument, IrCallSegment, IrDocument, IrInline, IrInlineBody, IrListItem, IrMetadata,
-    IrNamedArg, IrNode, IrParameter, IrRange, IrTableAlignment, IrTableCell, IrTableRow,
+    IrNamedArg, IrNode, IrParameter, IrRange, IrRawBody, IrTableAlignment, IrTableCell, IrTableRow,
     IrTaskStatus,
 };
 use scribium_markdown::ast::{
@@ -177,6 +177,7 @@ fn block_to_ir(
             arguments,
             chain,
             body,
+            raw_body,
             lambda_header,
             span,
         } => {
@@ -219,6 +220,9 @@ fn block_to_ir(
                         .as_ref()
                         .map(|header| lambda_parameters_to_ir(header, source_id)),
                     body: ir_body,
+                    raw_body: raw_body
+                        .as_ref()
+                        .map(|raw_body| raw_body_to_ir(raw_body, source_id)),
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
@@ -238,6 +242,9 @@ fn block_to_ir(
                         })
                         .collect::<Option<Vec<_>>>()?,
                     body: ir_body,
+                    raw_body: raw_body
+                        .as_ref()
+                        .map(|raw_body| raw_body_to_ir(raw_body, source_id)),
                     span: byte_to_source_span(span, source_id),
                 })
             }
@@ -879,6 +886,7 @@ fn content_value_to_ir(
                 ordered_args: Some(ordered_args),
                 lambda_parameters: None,
                 body: ir_body,
+                raw_body: None,
                 span: byte_to_source_span(span, source_id),
             }])
         } else {
@@ -896,6 +904,7 @@ fn content_value_to_ir(
                     .map(|segment| call_segment_to_ir(segment, source_id, diagnostics, source_mode))
                     .collect::<Option<Vec<_>>>()?,
                 body: ir_body,
+                raw_body: None,
                 span: byte_to_source_span(span, source_id),
             }])
         }
@@ -944,6 +953,7 @@ fn inline_lambda_body_to_ir(
                     ordered_args: Some(ordered_args),
                     lambda_parameters: None,
                     body,
+                    raw_body: None,
                     span: byte_to_source_span(span, source_id),
                 }])
             } else {
@@ -963,6 +973,7 @@ fn inline_lambda_body_to_ir(
                         })
                         .collect::<Option<Vec<_>>>()?,
                     body,
+                    raw_body: None,
                     span: byte_to_source_span(span, source_id),
                 }])
             }
@@ -1101,6 +1112,15 @@ fn inline_span_end(inline: &Inline) -> usize {
 
 fn byte_to_source_span(byte_span: &scribium_source::ByteSpan, source_id: SourceId) -> SourceSpan {
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
+}
+
+fn raw_body_to_ir(raw_body: &scribium_markdown::ast::RawBody, source_id: SourceId) -> IrRawBody {
+    IrRawBody {
+        source_text: raw_body.source_text.clone(),
+        text: raw_body.text.clone(),
+        span: byte_to_source_span(&raw_body.span, source_id),
+        indentation: raw_body.indentation,
+    }
 }
 #[cfg(test)]
 mod tests {

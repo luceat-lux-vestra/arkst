@@ -282,9 +282,9 @@ complete JVM/CLDR locale database.
 getter and does not clear the existing locale. The setter validates argument
 shape, evaluates and converts the candidate, resolves it, and commits once;
 failed resolution restores the previous locale, including state mutated by a
-nested candidate evaluation. Block bodies are rejected before their parsed
-nodes can execute because the current frontend/IR does not expose upstream's
-lossless raw `DynamicValue` body text. Ordinary callable child scopes share the
+nested candidate evaluation. #166 retains a source-backed raw block body beside
+its parsed nodes and converts the bounded `.doclang` fallback without executing
+those nodes. Ordinary callable child scopes share the
 locale state. Source-defined `.doclang` shadows the native builtin, while the
 historical `.docname`, `.docdescription`, and `.doctype` native-first behavior
 is unchanged. Scribium introduces no localization tables, `.localize`
@@ -308,13 +308,11 @@ null, layout: String? = null)` as a setter returning no document value. Both
 regular parameters can bind positionally or by name; `@LikelyNamed` on
 `layout` is metadata and is not a runtime positional restriction. An indented
 body falls back to the final bindable parameter, so it binds `layout` for this
-signature. Scribium defers that fallback: the existing frontend/IR boundary
-provides parsed body nodes, not the lossless raw `DynamicValue` body text
-required by the String parameter contract. It therefore rejects a `.theme`
-block body before evaluation, preserving the upstream contract as a deferred
-compatibility gap rather than treating body syntax as a runtime signature
-restriction. Supplied string components are lowercased and theme existence is
-left to the rendering boundary. Scribium stores the result as an explicit
+signature. Scribium retains the source-backed raw `DynamicValue` body beside
+the parsed body and consumes it lazily for this bounded fallback; nested body
+calls are not executed as a substitute for the raw value. Supplied string
+components are lowercased and theme existence is left to the rendering
+boundary. Scribium stores the result as an explicit
 backend-neutral `IrDocumentTheme` in the shared evaluator-owned document state.
 
 Each successful call replaces the complete theme. Therefore a later
@@ -331,8 +329,10 @@ The existing invocation-time scalar String boundary accepts String,
 Identifier, Number, and Boolean values for each component; `.none` maps to a
 null component. Collections, Dictionary/Pair, Range, Callable, Component,
 rich content, and unresolved values remain outside this bounded component
-conversion. A block body is rejected before its parsed nodes can be evaluated;
-this prevents nested calls or document-state mutations from running. Binding,
+ conversion. A block body is retained as source-backed raw text and selected
+target conversion happens before its parsed nodes can be evaluated; this
+prevents nested calls or document-state mutations from running accidentally.
+Binding,
 evaluation, conversion, normalization, and shape validation complete before
 one state commit; failures retain the old full theme and keep the original
 argument span in the structured diagnostic. Callable child scopes share the
@@ -360,11 +360,11 @@ remain binding failures.
 
 The upstream regular binder also accepts an indented block body. Because
 `codeBlocks` is the final bindable parameter, upstream falls back from that
-body to `codeBlocks` as a raw `DynamicValue`. Scribium does not claim this
-behavior: the current frontend/IR boundary exposes a parsed `CallBody`, not
-the lossless raw body text needed for that conversion. As with `.theme`, this
-is an explicit compatibility gap; `.captionposition` rejects a body before
-body evaluation rather than executing or silently reinterpreting it.
+body to `codeBlocks` as a raw `DynamicValue`. #166 retains the source-backed
+raw body beside the parsed `CallBody` and routes it through the shared target
+conversion boundary. `.captionposition` therefore does not execute parsed
+body nodes as a substitute; caption rendering and broader target coverage
+remain explicit gaps.
 
 Each invocation contributes a partial `CaptionPositionInfo` and merges it into
 the current state. A supplied `default` replaces only the default; supplied
@@ -375,8 +375,8 @@ evaluates every candidate, uses the post-evaluation shared state as the merge
 base, converts through the existing closed-enum boundary, and commits one
 complete `IrCaptionPositionInfo` snapshot. This preserves successful nested
 caption-state mutations while failures still restore the pre-invocation
-state. Body rejection is the explicit raw-body compatibility gap described
-above.
+state. The source-backed body fallback is now covered by #166; caption
+rendering and broader target coverage remain explicit gaps.
 
 The evaluator-owned state is shared by callable child scopes, while a
 source-defined `.captionposition` shadows the native setter in direct and
@@ -561,7 +561,7 @@ The implemented boundary is deliberately consumer-driven:
 | `Boolean` | bounded scalar conversion implemented | conditions, predicates, and boolean argument flags | [`ValueFactory.boolean`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt) |
 | `Range` | bounded conversion implemented for iterable consumers | `.foreach`, collection access, and dynamic range materialization | [`ValueFactory.range`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt), [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt) |
 | `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary; static StringValue remains String | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`StringValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/StringValue.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
-| `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | context-sensitive conversion deferred | parser/evaluation context is required | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
+| `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | bounded context-sensitive conversion implemented; complete coverage deferred | parser/evaluation context is required; source-backed raw bodies remain outside `IrValue` | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
 | `Size` | bounded domain conversion implemented for reviewed consumers | `.container` width/height and Stacked gaps; typed Size identity and DynamicValue-origin text | v2.5.1 `Size` value family and existing evaluator conversion tests |
 | `Color`, `Enum`, and remaining layout/document values | component/layout conversion remains partial or deferred | closed enum alignment consumers are implemented; colors, styles, and remaining layout fields are deferred | v2.5.1 value families; bounded consumers only |
 | collections, callables, and generic document/content stringification | unsupported conversion; existing typed operations remain separate | typed collection/callable paths only | `DynamicValueConverter.kt`, `ValueFactory.kt`, and consumer signatures |
@@ -581,9 +581,10 @@ optional argument omission.
 Invalid conversions use the existing source-backed `E3001` path and do not
 publish partial IR, collection, or callback results. Conversion is a pure
 semantic transformation over the invocation value, its dynamic-origin bit,
-and explicit target; it does not access files, processes, the network, a
-backend, or a hidden parser. In particular, String → Markdown reparsing and
-String → InlineMarkdownContent reparsing are deferred. The independently authored
+and explicit target; it does not access files, processes, the network, or a
+backend. A dynamic String is reparsed only by the explicit `.plaintext`
+InlineMarkdownContent target path; source-backed bodies use retained raw text,
+and all other generic String → Markdown paths remain deferred. The independently authored
 `fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family` fixture and
 the evaluator/unit tests cover the implemented consumer paths. This is
 **bounded scalar conversion implemented**, not broad DynamicValue

@@ -61,6 +61,10 @@ pub(crate) enum BuiltinKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BuiltinBodyPolicy {
     Reject,
+    /// A block body is the final parameter's raw, source-backed dynamic
+    /// candidate. The evaluator must not evaluate or stringify its parsed
+    /// representation before target conversion.
+    BindRaw,
     BindEvaluatedContent,
 }
 
@@ -108,6 +112,12 @@ const fn builtin_spec_with_defaults(
     allows_named: bool,
     body_policy: BuiltinBodyPolicy,
 ) -> BuiltinSpec {
+    let body_policy =
+        if parameter_names.is_empty() || !matches!(body_policy, BuiltinBodyPolicy::Reject) {
+            body_policy
+        } else {
+            BuiltinBodyPolicy::BindRaw
+        };
     BuiltinSpec {
         name,
         kind,

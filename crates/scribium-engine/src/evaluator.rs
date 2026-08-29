@@ -59,9 +59,9 @@ use scribium_ir::{
     IrCapturedFunction, IrCapturedVariable, IrComponent, IrContainerAlignment,
     IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor,
     IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrSize, IrSizeUnit,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrRawBody, IrSize,
+    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+    IrValue, NativeTarget, TargetSpecificContent,
 };
 use scribium_markdown::Mode;
 use scribium_quarkdown::is_valid_normal_call_name;
@@ -1309,6 +1309,7 @@ impl Evaluator {
                 ordered_args,
                 lambda_parameters,
                 body,
+                raw_body,
                 span,
                 ..
             } => match self.evaluate_block_call(
@@ -1318,6 +1319,7 @@ impl Evaluator {
                 named_args,
                 lambda_parameters.as_deref(),
                 body.as_deref(),
+                raw_body.as_ref(),
                 span,
                 diagnostics,
                 context,
@@ -1330,8 +1332,17 @@ impl Evaluator {
                 head,
                 chain,
                 body,
+                raw_body,
                 span,
-            } => match self.evaluate_block_chain(head, chain, body, span, diagnostics, context) {
+            } => match self.evaluate_block_chain(
+                head,
+                chain,
+                body,
+                raw_body.as_ref(),
+                span,
+                diagnostics,
+                context,
+            ) {
                 CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                 CallOutcome::Value(_) | CallOutcome::NoValue | CallOutcome::Failed => Vec::new(),
                 CallOutcome::Unresolved => Vec::new(),
@@ -1522,6 +1533,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         lambda_parameters: Option<&[IrParameter]>,
         body: Option<&[IrNode]>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -1532,6 +1544,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body.map(CallBody::Block),
+            raw_body,
             lambda_parameters,
             span,
             diagnostics,
@@ -1552,6 +1565,7 @@ impl Evaluator {
                 named_args,
                 lambda_parameters,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -1601,6 +1615,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body.map(CallBody::Inline),
+            None,
             None,
             span,
             diagnostics,
@@ -1747,7 +1762,8 @@ impl Evaluator {
             let parameters = builtins::binding_parameters(builtin);
             let body_policy = match builtin.body_policy {
                 builtins::BuiltinBodyPolicy::Reject => BodyPolicy::Reject,
-                builtins::BuiltinBodyPolicy::BindEvaluatedContent => BodyPolicy::BindFinal,
+                builtins::BuiltinBodyPolicy::BindRaw
+                | builtins::BuiltinBodyPolicy::BindEvaluatedContent => BodyPolicy::BindFinal,
             };
             return self
                 .preflight_binding(
@@ -1795,11 +1811,13 @@ impl Evaluator {
     }
 
     /// Evaluates a block chain and materializes its final semantic value.
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_block_chain(
         &self,
         head: &IrCallSegment,
         chain: &[IrCallSegment],
         body: &Option<Vec<IrNode>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -1808,6 +1826,7 @@ impl Evaluator {
             head,
             chain,
             body.as_deref().map(CallBody::Block),
+            raw_body,
             diagnostics,
             context,
         ) {
@@ -1837,6 +1856,7 @@ impl Evaluator {
             head,
             chain,
             body.as_deref().map(CallBody::Inline),
+            None,
             diagnostics,
             context,
         ) {
@@ -1868,6 +1888,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body,
+            None,
             lambda_parameters,
             span,
             diagnostics,
@@ -1886,6 +1907,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -1896,6 +1918,7 @@ impl Evaluator {
             positional_args,
             named_args,
             body,
+            raw_body,
             lambda_parameters,
             span,
             diagnostics,
@@ -1913,6 +1936,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         lambda_parameters: Option<&[IrParameter]>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
@@ -2000,6 +2024,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -2013,6 +2038,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -2025,6 +2051,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -2370,6 +2397,26 @@ impl Evaluator {
             };
             let evaluated_body = match builtin.body_policy {
                 builtins::BuiltinBodyPolicy::Reject => None,
+                builtins::BuiltinBodyPolicy::BindRaw => {
+                    if let Some(call_body) = body {
+                        let Some(raw_body) = raw_body else {
+                            diagnostics.push(chain_evaluation_error(
+                                "This body conversion requires source-backed raw body text"
+                                    .to_string(),
+                                call_body_source_span(call_body, *span),
+                            ));
+                            return CallOutcome::Failed;
+                        };
+                        Some(Candidate::Positional {
+                            value: InvocationValue::dynamic_value(IrValue::String(
+                                raw_body.text.clone(),
+                            )),
+                            span: raw_body.span,
+                        })
+                    } else {
+                        None
+                    }
+                }
                 builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
                     if let Some(call_body) = body {
                         let body =
@@ -2394,6 +2441,11 @@ impl Evaluator {
                         return CallOutcome::Failed;
                     }
                 };
+            let bound =
+                match self.convert_builtin_targets(builtin, bound, *span, diagnostics, context) {
+                    Ok(bound) => bound,
+                    Err(outcome) => return outcome,
+                };
             return match builtins::evaluate_bound(builtin, bound) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {
@@ -2406,6 +2458,151 @@ impl Evaluator {
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    /// Applies target-driven conversion after structural binding and after
+    /// ordinary candidates have been evaluated. This is the one regular
+    /// builtin integration point for context-sensitive content conversion;
+    /// individual builtins receive the resulting semantic value only.
+    fn convert_builtin_targets(
+        &self,
+        builtin: &builtins::BuiltinSpec,
+        mut bound: invocation_binder::BoundInvocation<InvocationValue>,
+        call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<invocation_binder::BoundInvocation<InvocationValue>, CallOutcome> {
+        if builtin.kind != builtins::BuiltinKind::Plaintext {
+            return Ok(bound);
+        }
+
+        for slot in &mut bound.slots {
+            let BoundSlot::Explicit { value, span } = slot else {
+                continue;
+            };
+            let converted = match value_conversion::convert_target_with_origin(
+                value,
+                value_conversion::ConversionTarget::InlineContent,
+                *span,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(target_conversion_error(
+                        "`.plaintext` content",
+                        call_span,
+                        error,
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+            };
+            value.value =
+                self.resolve_target_value(converted, *span, call_span, diagnostics, context)?;
+        }
+        Ok(bound)
+    }
+
+    /// Resolves a conversion request that needs the evaluator's Markdown and
+    /// call context. A source-backed raw call body is handled by its owning
+    /// builtin before this function; this path is only for a dynamic value
+    /// whose target conversion explicitly requests Markdown interpretation.
+    fn resolve_target_value(
+        &self,
+        converted: value_conversion::TargetValue,
+        argument_span: SourceSpan,
+        _call_span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<IrValue, CallOutcome> {
+        match converted {
+            value_conversion::TargetValue::Value(value) => Ok(value),
+            value_conversion::TargetValue::RawMarkdown { target, text } => {
+                if !matches!(
+                    target,
+                    value_conversion::RawMarkdownTarget::Inline
+                        | value_conversion::RawMarkdownTarget::Block
+                ) {
+                    diagnostics.push(target_conversion_error_message(
+                        "dynamic target conversion",
+                        argument_span,
+                        "this target is not materialized by the current builtin boundary"
+                            .to_string(),
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
+                let nodes =
+                    self.parse_dynamic_markdown_content(&text, argument_span, target, diagnostics)?;
+                match target {
+                    value_conversion::RawMarkdownTarget::Inline
+                    | value_conversion::RawMarkdownTarget::Block => {
+                        let before = diagnostics.len();
+                        let nodes = self.evaluate_nodes(&nodes, diagnostics, context);
+                        if diagnostics.len() == before {
+                            Ok(IrValue::Content(nodes))
+                        } else {
+                            Err(CallOutcome::Failed)
+                        }
+                    }
+                    value_conversion::RawMarkdownTarget::Iterable
+                    | value_conversion::RawMarkdownTarget::Dictionary
+                    | value_conversion::RawMarkdownTarget::Callable => unreachable!(
+                        "unsupported raw target was rejected before dynamic Markdown parsing"
+                    ),
+                }
+            }
+        }
+    }
+
+    fn parse_dynamic_markdown_content(
+        &self,
+        text: &str,
+        span: SourceSpan,
+        target: value_conversion::RawMarkdownTarget,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
+        // Dynamic text is reparsed only because the selected upstream target
+        // is a Markdown/content factory. Source-backed call bodies never use
+        // this path: their lossless text is retained in `IrRawBody` and is
+        // passed directly to the target instead.
+        let parsed = match target {
+            value_conversion::RawMarkdownTarget::Inline => {
+                scribium_markdown::parse_inline_with_mode(text, Mode::Quarkdown)
+            }
+            value_conversion::RawMarkdownTarget::Block
+            | value_conversion::RawMarkdownTarget::Iterable
+            | value_conversion::RawMarkdownTarget::Dictionary
+            | value_conversion::RawMarkdownTarget::Callable => {
+                scribium_markdown::parse_with_mode(text, Mode::Quarkdown)
+            }
+        };
+        if !parsed.diagnostics.is_empty() {
+            for diagnostic in parsed.diagnostics {
+                diagnostics.push(target_conversion_error_message(
+                    "dynamic Markdown content",
+                    span,
+                    diagnostic.message,
+                ));
+            }
+            return Err(CallOutcome::Failed);
+        }
+        let (document, conversion_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            span.source_id,
+            &crate::DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+        if !conversion_diagnostics.is_empty() {
+            for diagnostic in conversion_diagnostics {
+                diagnostics.push(target_conversion_error_message(
+                    "dynamic Markdown content",
+                    span,
+                    diagnostic.message,
+                ));
+            }
+            return Err(CallOutcome::Failed);
+        }
+        let mut nodes = document.nodes;
+        rebase_dynamic_nodes(&mut nodes, span);
+        Ok(nodes)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3147,6 +3344,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -3158,6 +3356,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -3171,6 +3370,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -3184,6 +3384,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -3197,6 +3398,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -3210,6 +3412,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -3218,11 +3421,21 @@ impl Evaluator {
             );
         }
 
-        if positional_args.is_empty() && named_args.is_empty() {
+        if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value(name));
         }
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
+        };
+        let raw_body_candidate = match source_backed_body_candidate(
+            body.as_ref()
+                .map(|body| call_body_source_span(*body, *span)),
+            raw_body,
+            name,
+            diagnostics,
+        ) {
+            Ok(candidate) => candidate,
+            Err(outcome) => return outcome,
         };
 
         if name == "docauthor" {
@@ -3249,7 +3462,7 @@ impl Evaluator {
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                None,
+                raw_body_candidate.as_ref(),
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3303,7 +3516,7 @@ impl Evaluator {
                     .map(|(value, source)| (value, value_source_span(source, span)))
                     .collect(),
                 evaluated_named,
-                None,
+                raw_body_candidate.as_ref(),
                 *span,
             ) {
                 Ok(bound) => bound,
@@ -3350,7 +3563,7 @@ impl Evaluator {
                 .map(|(value, source)| (value, value_source_span(source, span)))
                 .collect(),
             evaluated_named,
-            None,
+            raw_body_candidate.as_ref(),
             *span,
         ) {
             Ok(bound) => bound,
@@ -3397,18 +3610,29 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        _body: Option<CallBody<'_>>,
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
-        if positional_args.is_empty() && named_args.is_empty() {
+        if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
             return CallOutcome::Value(context.document_state_value("doclang"));
         }
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
+        };
+        let raw_body_candidate = match source_backed_body_candidate(
+            body.as_ref()
+                .map(|body| call_body_source_span(*body, *span)),
+            raw_body,
+            "doclang",
+            diagnostics,
+        ) {
+            Ok(candidate) => candidate,
+            Err(outcome) => return outcome,
         };
 
         let previous_state = context.document_state.borrow().clone();
@@ -3445,7 +3669,7 @@ impl Evaluator {
                 .map(|(value, source)| (value, value_source_span(source, span)))
                 .collect(),
             evaluated_named,
-            None,
+            raw_body_candidate.as_ref(),
             *span,
         ) {
             Ok(bound) => bound,
@@ -3503,6 +3727,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -3521,37 +3746,19 @@ impl Evaluator {
             context.restore_document_state(state.clone());
         };
 
-        let (candidate, candidate_span) = if let Some(body) = body {
-            let nodes = match body {
-                CallBody::Block(nodes) => nodes,
-                CallBody::Inline(_) => {
-                    diagnostics.push(document_state_call_error(
-                        "`.docauthors` requires a Markdown list block body".to_string(),
-                        *span,
-                    ));
+        let (candidate, candidate_span) = if body.is_some() {
+            let body_candidate = match source_backed_markdown_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                "docauthors",
+                diagnostics,
+            ) {
+                Ok(Some(candidate)) => candidate,
+                Ok(None) | Err(_) => {
                     restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
-            };
-            let entries = match self.evaluate_dictionary_entries(
-                nodes,
-                *span,
-                diagnostics,
-                context,
-                ".docauthors",
-            ) {
-                Ok(entries) => entries,
-                Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
-                    return outcome;
-                }
-            };
-            let body_candidate = Candidate::Positional {
-                value: InvocationValue::static_value(IrValue::Dictionary(IrDictionary {
-                    entries,
-                    span: *span,
-                })),
-                span: *span,
             };
             let bound = match binding_plan.bind(&[], Some(&body_candidate), *span) {
                 Ok(bound) => bound,
@@ -3565,7 +3772,51 @@ impl Evaluator {
                 restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
-            (value.value, span)
+            let candidate = match value_conversion::convert_target_with_origin(
+                &value,
+                value_conversion::ConversionTarget::Dictionary,
+                span,
+            ) {
+                Ok(value_conversion::TargetValue::Value(value)) => value,
+                Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
+                    let nodes = match self.parse_dynamic_markdown_content(
+                        &text,
+                        span,
+                        value_conversion::RawMarkdownTarget::Dictionary,
+                        diagnostics,
+                    ) {
+                        Ok(nodes) => nodes,
+                        Err(outcome) => {
+                            restore_on_failure(context, &previous_state);
+                            return outcome;
+                        }
+                    };
+                    let entries = match self.evaluate_dictionary_entries(
+                        &nodes,
+                        span,
+                        diagnostics,
+                        context,
+                        ".docauthors",
+                    ) {
+                        Ok(entries) => entries,
+                        Err(outcome) => {
+                            restore_on_failure(context, &previous_state);
+                            return outcome;
+                        }
+                    };
+                    IrValue::Dictionary(IrDictionary { entries, span })
+                }
+                Err(_) => {
+                    diagnostics.push(document_state_conversion_error(
+                        "`.docauthors` requires a Dictionary<String, Dictionary<String, String>> value"
+                            .to_string(),
+                        span,
+                    ));
+                    restore_on_failure(context, &previous_state);
+                    return CallOutcome::Failed;
+                }
+            };
+            (candidate, span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3639,6 +3890,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -3657,30 +3909,21 @@ impl Evaluator {
             context.restore_document_state(state.clone());
         };
 
-        let (candidate, candidate_span) = if let Some(body) = body {
-            let nodes = match body {
-                CallBody::Block(nodes) => nodes,
-                CallBody::Inline(_) => {
-                    diagnostics.push(document_state_call_error(
-                        "`.dockeywords` requires a Markdown list block body".to_string(),
-                        *span,
-                    ));
+        let (candidate, candidate_span) = if body.is_some() {
+            let raw_body_candidate = match source_backed_markdown_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                "dockeywords",
+                diagnostics,
+            ) {
+                Ok(Some(candidate)) => candidate,
+                Ok(None) | Err(_) => {
                     restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
-            let values = match self.document_keyword_body_values(nodes, *span, diagnostics) {
-                Ok(values) => values,
-                Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
-                    return outcome;
-                }
-            };
-            let body_candidate = Candidate::Positional {
-                value: values,
-                span: *span,
-            };
-            let bound = match binding_plan.bind(&[], Some(&body_candidate), *span) {
+            let bound = match binding_plan.bind(&[], Some(&raw_body_candidate), *span) {
                 Ok(bound) => bound,
                 Err(error) => {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
@@ -3692,7 +3935,14 @@ impl Evaluator {
                 restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
-            (value, span)
+            let values = match self.coerce_iterable(value, &span, diagnostics) {
+                Ok(values) => values.into_iter().map(|value| (value, span)).collect(),
+                Err(outcome) => {
+                    restore_on_failure(context, &previous_state);
+                    return outcome;
+                }
+            };
+            (values, span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3785,7 +4035,8 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        _body: Option<CallBody<'_>>,
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -3796,10 +4047,27 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
 
+        let body_location_candidate = match (body.as_ref(), raw_body) {
+            (None, _) => None,
+            (Some(_), Some(raw_body)) => Some(Candidate::Positional {
+                value: CaptionPositionArgumentLocation::Body,
+                span: raw_body.span,
+            }),
+            (Some(body), None) => {
+                diagnostics.push(target_conversion_error_message(
+                    "captionposition",
+                    call_body_source_span(*body, *span),
+                    "requires a source-backed block body".to_string(),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
         let bindings = match bind_caption_position_arguments(
             binding_plan,
             positional_args,
             named_args,
+            body_location_candidate.as_ref(),
             span,
             diagnostics,
         ) {
@@ -3862,6 +4130,16 @@ impl Evaluator {
                             origin: argument.origin,
                         },
                         argument.span,
+                    )
+                }
+                CaptionPositionArgumentLocation::Body => {
+                    let Some(raw_body) = raw_body else {
+                        restore_on_failure(context);
+                        return CallOutcome::Failed;
+                    };
+                    (
+                        InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
+                        raw_body.span,
                     )
                 }
             };
@@ -3931,7 +4209,8 @@ impl Evaluator {
         &self,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        _body: Option<CallBody<'_>>,
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -3940,6 +4219,16 @@ impl Evaluator {
     ) -> CallOutcome {
         let Some(binding_plan) = binding_plan else {
             return CallOutcome::Failed;
+        };
+        let raw_body_candidate = match source_backed_body_candidate(
+            body.as_ref()
+                .map(|body| call_body_source_span(*body, *span)),
+            raw_body,
+            "theme",
+            diagnostics,
+        ) {
+            Ok(candidate) => candidate,
+            Err(outcome) => return outcome,
         };
 
         let previous_state = context.document_state.borrow().clone();
@@ -3977,7 +4266,7 @@ impl Evaluator {
                 .collect(),
             evaluated_named,
         );
-        let bound = match binding_plan.bind(&candidates, None, *span) {
+        let bound = match binding_plan.bind(&candidates, raw_body_candidate.as_ref(), *span) {
             Ok(bound) => bound,
             Err(error) => {
                 let message =
@@ -4069,66 +4358,6 @@ impl Evaluator {
 
         context.set_document_theme(IrDocumentTheme { color, layout });
         CallOutcome::NoValue
-    }
-
-    fn document_keyword_body_values(
-        &self,
-        nodes: &[IrNode],
-        span: SourceSpan,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Vec<(IrValue, SourceSpan)>, CallOutcome> {
-        let list = match nodes {
-            [] => return Ok(Vec::new()),
-            [IrNode::UnorderedList { items, .. }] | [IrNode::OrderedList { items, .. }] => items,
-            _ => {
-                diagnostics.push(document_state_conversion_error(
-                    "`.dockeywords` requires exactly one Markdown list body".to_string(),
-                    span,
-                ));
-                return Err(CallOutcome::Failed);
-            }
-        };
-        self.check_materialized_elements_len(list.len(), span, diagnostics)?;
-        let mut values = Vec::new();
-        if let Err(error) = values.try_reserve_exact(list.len()) {
-            diagnostics.push(document_state_conversion_error(
-                format!("document keywords cannot be allocated: {error}"),
-                span,
-            ));
-            return Err(CallOutcome::Failed);
-        }
-        for item in list {
-            let value = self.document_keyword_body_item_value(item, diagnostics)?;
-            values.push((value, item.span));
-        }
-        Ok(values)
-    }
-
-    fn document_keyword_body_item_value(
-        &self,
-        item: &scribium_ir::IrListItem,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<IrValue, CallOutcome> {
-        match item.nodes.as_slice() {
-            [IrNode::UnorderedList { .. }] | [IrNode::OrderedList { .. }] => self
-                .coerce_iterable(
-                    InvocationValue::static_value(IrValue::Content(item.nodes.clone())),
-                    &item.span,
-                    diagnostics,
-                )
-                .map(IrValue::Collection),
-            [IrNode::Paragraph { content, .. }] => {
-                let mut text = String::new();
-                for inline in content {
-                    let IrInline::Text { content, .. } = inline else {
-                        return Ok(IrValue::Content(item.nodes.clone()));
-                    };
-                    text.push_str(content);
-                }
-                Ok(IrValue::String(text))
-            }
-            _ => Ok(IrValue::Content(item.nodes.clone())),
-        }
     }
 
     fn validate_document_keywords(
@@ -4317,6 +4546,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -4356,7 +4586,7 @@ impl Evaluator {
                 let Some(body) = body else {
                     return CallOutcome::Failed;
                 };
-                match self.evaluate_html_body(body, span, diagnostics, context) {
+                match self.evaluate_html_body(body, raw_body, span, diagnostics, context) {
                     CallOutcome::Value(value) => value,
                     outcome => return outcome,
                 }
@@ -4423,10 +4653,24 @@ impl Evaluator {
     fn evaluate_html_body(
         &self,
         body: CallBody<'_>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        if let Some(raw_body) = raw_body {
+            return match raw_body_string_value(raw_body) {
+                Ok(value) => CallOutcome::Value(IrValue::String(value)),
+                Err(error) => {
+                    diagnostics.push(target_conversion_error(
+                        "`.html` body",
+                        raw_body.span,
+                        error,
+                    ));
+                    CallOutcome::Failed
+                }
+            };
+        }
         match body {
             CallBody::Block(nodes) if body_contains_raw_html(nodes) => {
                 match opaque_html_body_string(nodes) {
@@ -4453,6 +4697,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -4500,9 +4745,23 @@ impl Evaluator {
                 let Some(body) = body else {
                     return CallOutcome::Failed;
                 };
-                match self.evaluate_call_body(body, span, diagnostics, context) {
-                    CallOutcome::Value(value) => value,
-                    outcome => return outcome,
+                if let Some(raw_body) = raw_body {
+                    match raw_body_string_value(raw_body) {
+                        Ok(value) => IrValue::String(value),
+                        Err(error) => {
+                            diagnostics.push(target_conversion_error(
+                                "`.markdown` body",
+                                raw_body.span,
+                                error,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    }
+                } else {
+                    match self.evaluate_call_body(body, span, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        outcome => return outcome,
+                    }
                 }
             }
             InvocationArgumentLocation::Positional(index) => {
@@ -6230,7 +6489,34 @@ impl Evaluator {
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrValue>, CallOutcome> {
-        let InvocationValue { value, origin } = value;
+        let origin = value.origin;
+        let value = match value_conversion::convert_target_with_origin(
+            &value,
+            value_conversion::ConversionTarget::Iterable,
+            *span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(value)) => value,
+            Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
+                if let Ok(range) = value_conversion::convert_range_with_origin(&value, *span) {
+                    return self.materialize_range(range, span, diagnostics);
+                }
+                let nodes = self.parse_dynamic_markdown_content(
+                    &text,
+                    *span,
+                    value_conversion::RawMarkdownTarget::Block,
+                    diagnostics,
+                )?;
+                IrValue::Content(nodes)
+            }
+            Err(_) => {
+                diagnostics.push(iteration_error(
+                    "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
+                        .to_string(),
+                    *span,
+                ));
+                return Err(CallOutcome::Failed);
+            }
+        };
         match value {
             IrValue::Collection(values) => {
                 self.check_materialized_elements_len(values.len(), *span, diagnostics)?;
@@ -6332,10 +6618,16 @@ impl Evaluator {
                     diagnostics,
                 )
                 .map(IrValue::Collection),
-            [IrNode::Paragraph { content, .. }] => match content.as_slice() {
-                [IrInline::Text { content, .. }] => Ok(IrValue::String(content.clone())),
-                _ => Ok(IrValue::Content(item.nodes.clone())),
-            },
+            [IrNode::Paragraph { content, .. }] => {
+                let mut text = String::new();
+                for inline in content {
+                    let IrInline::Text { content, .. } = inline else {
+                        return Ok(IrValue::Content(item.nodes.clone()));
+                    };
+                    text.push_str(content);
+                }
+                Ok(IrValue::String(text))
+            }
             _ => Ok(IrValue::Content(item.nodes.clone())),
         }
     }
@@ -6666,6 +6958,7 @@ impl Evaluator {
                 ordered_args,
                 lambda_parameters,
                 body,
+                raw_body,
                 span,
                 ..
             } => {
@@ -6675,6 +6968,7 @@ impl Evaluator {
                     positional_args,
                     named_args,
                     body.as_deref().map(CallBody::Block),
+                    raw_body.as_ref(),
                     lambda_parameters.as_deref(),
                     span,
                     diagnostics,
@@ -6688,6 +6982,7 @@ impl Evaluator {
                             named_args,
                             lambda_parameters.as_deref(),
                             body.as_deref(),
+                            raw_body.as_ref(),
                             span,
                             diagnostics,
                             context,
@@ -6698,11 +6993,16 @@ impl Evaluator {
                 }
             }
             IrNode::ChainedFunctionCall {
-                head, chain, body, ..
+                head,
+                chain,
+                body,
+                raw_body,
+                ..
             } => self.evaluate_chain_value(
                 head,
                 chain,
                 body.as_deref().map(CallBody::Block),
+                raw_body.as_ref(),
                 diagnostics,
                 context,
             ),
@@ -6726,6 +7026,7 @@ impl Evaluator {
         head: &IrCallSegment,
         chain: &[IrCallSegment],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
@@ -6736,6 +7037,7 @@ impl Evaluator {
                 head.ordered_args.as_deref(),
                 &head.positional_args,
                 &head.named_args,
+                None,
                 None,
                 None,
                 &head.span,
@@ -6805,6 +7107,7 @@ impl Evaluator {
                     &positional_args,
                     &source_segment.named_args,
                     final_body,
+                    (index + 1 == chain.len()).then_some(raw_body).flatten(),
                     None,
                     &source_segment.span,
                     diagnostics,
@@ -7079,6 +7382,7 @@ impl Evaluator {
                     ordered_args,
                     lambda_parameters,
                     body,
+                    raw_body,
                     span,
                     ..
                 }] = nodes.as_slice()
@@ -7091,6 +7395,7 @@ impl Evaluator {
                             named_args,
                             lambda_parameters.as_deref(),
                             body.as_deref(),
+                            raw_body.as_ref(),
                             span,
                             diagnostics,
                             context,
@@ -7121,6 +7426,7 @@ impl Evaluator {
         named_args: &[IrNamedArg],
         lambda_parameters: Option<&[IrParameter]>,
         body: Option<&[IrNode]>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -7154,6 +7460,7 @@ impl Evaluator {
             ordered_args: ordered_args.map(ToOwned::to_owned),
             lambda_parameters: lambda_parameters.map(ToOwned::to_owned),
             body,
+            raw_body: raw_body.cloned(),
             span: *span,
         }])
     }
@@ -7353,6 +7660,7 @@ impl Evaluator {
                     ordered_args,
                     lambda_parameters,
                     body,
+                    raw_body,
                     span,
                     ..
                 }] = nodes.as_slice()
@@ -7363,6 +7671,7 @@ impl Evaluator {
                         positional_args,
                         named_args,
                         body.as_deref().map(CallBody::Block),
+                        raw_body.as_ref(),
                         lambda_parameters.as_deref(),
                         span,
                         diagnostics,
@@ -7370,13 +7679,18 @@ impl Evaluator {
                     );
                 }
                 if let [IrNode::ChainedFunctionCall {
-                    head, chain, body, ..
+                    head,
+                    chain,
+                    body,
+                    raw_body,
+                    ..
                 }] = nodes.as_slice()
                 {
                     return self.evaluate_chain_value(
                         head,
                         chain,
                         body.as_deref().map(CallBody::Block),
+                        raw_body.as_ref(),
                         diagnostics,
                         context,
                     );
@@ -7777,6 +8091,7 @@ impl CaptionPositionParameter {
 enum CaptionPositionArgumentLocation {
     Positional(usize),
     Named(usize),
+    Body,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -7805,6 +8120,7 @@ fn bind_caption_position_arguments(
     plan: &BindingPlan,
     positional_args: &[IrValue],
     named_args: &[IrNamedArg],
+    body: Option<&Candidate<CaptionPositionArgumentLocation>>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<CaptionPositionBindings, CallOutcome> {
@@ -7826,7 +8142,7 @@ fn bind_caption_position_arguments(
                 span: argument.span,
             }),
     );
-    let bound = plan.bind(&candidates, None, *span).map_err(|error| {
+    let bound = plan.bind(&candidates, body, *span).map_err(|error| {
         let message = if let Some(name) = error.message.strip_prefix("unknown named argument ") {
             format!("Unknown named argument {name} for `.captionposition`")
         } else if error.message == "received too many positional arguments" {
@@ -8705,6 +9021,7 @@ fn dictionary_inline_value(inlines: Vec<IrInline>, span: SourceSpan) -> IrValue 
                     span: *span,
                 }]
             }),
+            raw_body: None,
             span: *span,
         }]),
         [IrInline::ChainedDirectiveCall {
@@ -8721,6 +9038,7 @@ fn dictionary_inline_value(inlines: Vec<IrInline>, span: SourceSpan) -> IrValue 
                     span: *span,
                 }]
             }),
+            raw_body: None,
             span: *span,
         }]),
         _ => IrValue::Content(vec![IrNode::Paragraph {
@@ -8874,15 +9192,15 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     let signature = match name {
         "docname" | "docdescription" => (
             vec![ParameterMetadata::optional("value").named(false)],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "doctype" => (
             vec![ParameterMetadata::optional("value").with_aliases(TYPE_ALIASES)],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "docauthor" => (
             vec![ParameterMetadata::optional("value").with_aliases(AUTHOR_ALIASES)],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "docauthors" => (
             vec![ParameterMetadata::optional("authors").with_aliases(AUTHORS_ALIASES)],
@@ -8894,14 +9212,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         "doclang" => (
             vec![ParameterMetadata::optional("locale").with_aliases(LOCALE_ALIASES)],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "theme" => (
             vec![
                 ParameterMetadata::optional("color"),
                 ParameterMetadata::optional("layout"),
             ],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "if" | "ifnot" => (
             vec![
@@ -8962,7 +9280,7 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("tables"),
                 ParameterMetadata::optional("code"),
             ],
-            BodyPolicy::Reject,
+            BodyPolicy::BindFinal,
         ),
         "html" | "markdown" => (
             vec![ParameterMetadata::required("content")],
@@ -9051,7 +9369,8 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         ),
         _ => return None,
     };
-    Some(signature)
+    let (parameters, body_policy) = signature;
+    Some((parameters, body_policy))
 }
 
 fn lambda_body_span(name: &str, parameters: Option<&[IrParameter]>) -> Option<SourceSpan> {
@@ -10408,6 +10727,80 @@ fn bind_evaluated_arguments(
     plan.bind(&candidates, body, call_span)
 }
 
+fn source_backed_body_candidate(
+    body_span: Option<SourceSpan>,
+    raw_body: Option<&IrRawBody>,
+    target: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Option<Candidate<InvocationValue>>, CallOutcome> {
+    match (body_span, raw_body) {
+        (None, _) => Ok(None),
+        (Some(_), Some(raw_body)) => Ok(Some(Candidate::Positional {
+            value: InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
+            span: raw_body.span,
+        })),
+        (Some(span), None) => {
+            diagnostics.push(target_conversion_error_message(
+                target,
+                span,
+                "requires a source-backed block body".to_string(),
+            ));
+            Err(CallOutcome::Failed)
+        }
+    }
+}
+
+fn source_backed_markdown_body_candidate(
+    body_span: Option<SourceSpan>,
+    raw_body: Option<&IrRawBody>,
+    target: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Option<Candidate<InvocationValue>>, CallOutcome> {
+    let candidate = source_backed_body_candidate(body_span, raw_body, target, diagnostics)?;
+    let Some(raw_body) = raw_body else {
+        return Ok(candidate);
+    };
+    Ok(candidate.map(|candidate| match candidate {
+        Candidate::Positional { span, .. } => Candidate::Positional {
+            value: InvocationValue::dynamic_value(IrValue::String(raw_body_text_for_markdown(
+                raw_body,
+            ))),
+            span,
+        },
+        candidate => candidate,
+    }))
+}
+
+/// Removes only the call-owned indentation prefix from continuation lines.
+/// The source-backed body remains the input; this normalization is the
+/// target-specific Markdown list boundary and never uses parsed/evaluated
+/// nodes to reconstruct text.
+fn raw_body_text_for_markdown(raw_body: &IrRawBody) -> String {
+    if raw_body.indentation == 0 {
+        return raw_body.text.clone();
+    }
+
+    let mut normalized = String::with_capacity(raw_body.text.len());
+    for (line_index, line) in raw_body.text.split_inclusive('\n').enumerate() {
+        if line_index == 0 {
+            normalized.push_str(line);
+            continue;
+        }
+        let mut removed = 0;
+        let mut content_start = 0;
+        for (index, character) in line.char_indices() {
+            if removed >= raw_body.indentation || !matches!(character, ' ' | '\t') {
+                content_start = index;
+                break;
+            }
+            removed += character.len_utf8();
+            content_start = index + character.len_utf8();
+        }
+        normalized.push_str(&line[content_start..]);
+    }
+    normalized
+}
+
 fn function_error(message: String, span: SourceSpan) -> Diagnostic {
     function_error_at(message, span)
 }
@@ -10426,20 +10819,6 @@ fn function_error_at(message: String, span: SourceSpan) -> Diagnostic {
     }
 }
 
-fn document_state_call_error(message: String, span: SourceSpan) -> Diagnostic {
-    Diagnostic {
-        code: "E3003".to_string(),
-        severity: Severity::Error,
-        message,
-        primary: Some(span),
-        secondary: Vec::new(),
-        hints: vec![
-            "Document-state builtins read without arguments and validate their supported argument before committing state."
-                .to_string(),
-        ],
-    }
-}
-
 fn document_state_conversion_error(message: String, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3001".to_string(),
@@ -10451,6 +10830,54 @@ fn document_state_conversion_error(message: String, span: SourceSpan) -> Diagnos
             "Document-state mutation is committed only after argument conversion and validation succeed."
                 .to_string(),
         ],
+    }
+}
+
+fn target_conversion_error(
+    target: &str,
+    span: SourceSpan,
+    error: value_conversion::ConversionError,
+) -> Diagnostic {
+    let message = match error {
+        value_conversion::ConversionError::InvalidText { .. } => {
+            format!("{target} contains text that is not valid for its target")
+        }
+        value_conversion::ConversionError::UnsupportedValue { .. } => {
+            format!("{target} does not support this value category")
+        }
+    };
+    target_conversion_error_message(target, span, message)
+}
+
+fn target_conversion_error_message(target: &str, span: SourceSpan, message: String) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: format!("{target}: {message}"),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Target conversion preserves the value category and does not apply a generic string fallback."
+                .to_string(),
+        ],
+    }
+}
+
+fn raw_body_string_value(
+    raw_body: &IrRawBody,
+) -> Result<String, value_conversion::ConversionError> {
+    match value_conversion::convert_target_with_origin(
+        &InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
+        value_conversion::ConversionTarget::String,
+        raw_body.span,
+    )? {
+        value_conversion::TargetValue::Value(IrValue::String(value)) => Ok(value),
+        value_conversion::TargetValue::Value(_)
+        | value_conversion::TargetValue::RawMarkdown { .. } => {
+            Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::String,
+            })
+        }
     }
 }
 
@@ -11163,6 +11590,288 @@ impl Evaluator {
     }
 }
 
+/// Dynamic Markdown text has one reliable provenance point: the source
+/// expression that supplied the text. The text itself is not a source buffer,
+/// so parser offsets inside it must not be presented as offsets in the
+/// caller's document. Rebase the parsed tree to that expression span before
+/// evaluation while retaining all structural content.
+fn rebase_dynamic_nodes(nodes: &mut [IrNode], source_span: SourceSpan) {
+    for node in nodes {
+        rebase_dynamic_node(node, source_span);
+    }
+}
+
+fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
+    match node {
+        IrNode::Heading { content, span, .. } | IrNode::Paragraph { content, span, .. } => {
+            *span = source_span;
+            rebase_dynamic_inlines(content, source_span);
+        }
+        IrNode::Blockquote { content, span } => {
+            *span = source_span;
+            rebase_dynamic_nodes(content, source_span);
+        }
+        IrNode::UnorderedList { items, span } | IrNode::OrderedList { items, span, .. } => {
+            *span = source_span;
+            for item in items {
+                item.span = source_span;
+                rebase_dynamic_nodes(&mut item.nodes, source_span);
+            }
+        }
+        IrNode::Table { header, rows, span } => {
+            *span = source_span;
+            rebase_dynamic_table_row(header, source_span);
+            for row in rows {
+                rebase_dynamic_table_row(row, source_span);
+            }
+        }
+        IrNode::CodeBlock { span, .. }
+        | IrNode::RawHtml { span, .. }
+        | IrNode::ThematicBreak { span }
+        | IrNode::Math { span, .. } => *span = source_span,
+        IrNode::TargetSpecificContent { content } => content.span = source_span,
+        IrNode::Component { component } => rebase_dynamic_component(component, source_span),
+        IrNode::FunctionCall {
+            positional_args,
+            named_args,
+            ordered_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+            ..
+        } => {
+            *span = source_span;
+            for value in positional_args {
+                rebase_dynamic_value(value, source_span);
+            }
+            rebase_dynamic_named_args(named_args, source_span);
+            rebase_dynamic_ordered_args(ordered_args, source_span);
+            rebase_dynamic_parameters(lambda_parameters, source_span);
+            if let Some(body) = body {
+                rebase_dynamic_nodes(body, source_span);
+            }
+            if let Some(raw_body) = raw_body {
+                raw_body.span = source_span;
+            }
+        }
+        IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body,
+            raw_body,
+            span,
+        } => {
+            *span = source_span;
+            rebase_dynamic_segment(head, source_span);
+            for segment in chain {
+                rebase_dynamic_segment(segment, source_span);
+            }
+            if let Some(body) = body {
+                rebase_dynamic_nodes(body, source_span);
+            }
+            if let Some(raw_body) = raw_body {
+                raw_body.span = source_span;
+            }
+        }
+        IrNode::FunctionDeclaration {
+            name,
+            parameters,
+            body,
+            span,
+            ..
+        } => {
+            *span = source_span;
+            rebase_dynamic_value(name, source_span);
+            for parameter in parameters {
+                parameter.span = source_span;
+                parameter.name_span = source_span;
+            }
+            rebase_dynamic_nodes(body, source_span);
+        }
+    }
+}
+
+fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
+    for inline in inlines {
+        match inline {
+            IrInline::Text { span, .. }
+            | IrInline::Whitespace { span, .. }
+            | IrInline::Code { span, .. }
+            | IrInline::SoftBreak { span }
+            | IrInline::HardBreak { span }
+            | IrInline::RawHtml { span, .. } => *span = source_span,
+            IrInline::Emphasis { content, span }
+            | IrInline::Strong { content, span }
+            | IrInline::Strikethrough { content, span } => {
+                *span = source_span;
+                rebase_dynamic_inlines(content, source_span);
+            }
+            IrInline::DirectiveCall {
+                positional_args,
+                named_args,
+                ordered_args,
+                body,
+                span,
+                ..
+            } => {
+                *span = source_span;
+                for value in positional_args {
+                    rebase_dynamic_value(value, source_span);
+                }
+                rebase_dynamic_named_args(named_args, source_span);
+                rebase_dynamic_ordered_args(ordered_args, source_span);
+                if let Some(body) = body {
+                    rebase_dynamic_inlines(body, source_span);
+                }
+            }
+            IrInline::ChainedDirectiveCall {
+                head,
+                chain,
+                body,
+                span,
+            } => {
+                *span = source_span;
+                rebase_dynamic_segment(head, source_span);
+                for segment in chain {
+                    rebase_dynamic_segment(segment, source_span);
+                }
+                if let Some(body) = body {
+                    rebase_dynamic_inlines(body, source_span);
+                }
+            }
+            IrInline::Link { content, span, .. } | IrInline::Image { content, span, .. } => {
+                *span = source_span;
+                rebase_dynamic_inlines(content, source_span);
+            }
+            IrInline::TargetSpecificContent { content } => content.span = source_span,
+        }
+    }
+}
+
+fn rebase_dynamic_table_row(row: &mut IrTableRow, source_span: SourceSpan) {
+    row.span = source_span;
+    for cell in &mut row.cells {
+        cell.span = source_span;
+        rebase_dynamic_inlines(&mut cell.content, source_span);
+    }
+}
+
+fn rebase_dynamic_named_args(args: &mut [IrNamedArg], source_span: SourceSpan) {
+    for argument in args {
+        argument.span = source_span;
+        argument.name_span = source_span;
+        rebase_dynamic_value(&mut argument.value, source_span);
+    }
+}
+
+fn rebase_dynamic_ordered_args(args: &mut Option<Vec<IrCallArgument>>, source_span: SourceSpan) {
+    if let Some(args) = args {
+        for argument in args {
+            match argument {
+                IrCallArgument::Positional { span, .. } => *span = source_span,
+                IrCallArgument::Named {
+                    name_span, span, ..
+                } => {
+                    *name_span = source_span;
+                    *span = source_span;
+                }
+            }
+        }
+    }
+}
+
+fn rebase_dynamic_parameters(parameters: &mut Option<Vec<IrParameter>>, source_span: SourceSpan) {
+    if let Some(parameters) = parameters {
+        for parameter in parameters {
+            parameter.span = source_span;
+            parameter.name_span = source_span;
+        }
+    }
+}
+
+fn rebase_dynamic_segment(segment: &mut IrCallSegment, source_span: SourceSpan) {
+    segment.span = source_span;
+    segment.name_span = source_span;
+    for value in &mut segment.positional_args {
+        rebase_dynamic_value(value, source_span);
+    }
+    rebase_dynamic_named_args(&mut segment.named_args, source_span);
+    rebase_dynamic_ordered_args(&mut segment.ordered_args, source_span);
+}
+
+fn rebase_dynamic_value(value: &mut IrValue, source_span: SourceSpan) {
+    match value {
+        IrValue::Range(range) => range.span = source_span,
+        IrValue::Collection(values) => {
+            for value in values {
+                rebase_dynamic_value(value, source_span);
+            }
+        }
+        IrValue::Pair(pair) => {
+            pair.span = source_span;
+            rebase_dynamic_value(&mut pair.first, source_span);
+            rebase_dynamic_value(&mut pair.second, source_span);
+        }
+        IrValue::Dictionary(dictionary) => {
+            dictionary.span = source_span;
+            for pair in &mut dictionary.entries {
+                rebase_dynamic_value(&mut pair.first, source_span);
+                rebase_dynamic_value(&mut pair.second, source_span);
+                pair.span = source_span;
+            }
+        }
+        IrValue::Content(nodes) => rebase_dynamic_nodes(nodes, source_span),
+        IrValue::Component(component) => rebase_dynamic_component(component, source_span),
+        IrValue::Callable(callable) => {
+            callable.span = source_span;
+            rebase_dynamic_parameters(&mut callable.parameters, source_span);
+            rebase_dynamic_nodes(&mut callable.body, source_span);
+            if let Some(capture) = &mut callable.capture {
+                for variable in &mut capture.variables {
+                    rebase_dynamic_value(&mut variable.value, source_span);
+                }
+                for function in &mut capture.functions {
+                    function.callable.span = source_span;
+                    rebase_dynamic_parameters(&mut function.callable.parameters, source_span);
+                    rebase_dynamic_nodes(&mut function.callable.body, source_span);
+                }
+            }
+        }
+        IrValue::InlineBody(body) => {
+            body.span = source_span;
+            rebase_dynamic_parameters(&mut body.parameters, source_span);
+            rebase_dynamic_nodes(&mut body.content, source_span);
+            rebase_dynamic_nodes(&mut body.body, source_span);
+        }
+        IrValue::String(_)
+        | IrValue::Number(_)
+        | IrValue::Boolean(_)
+        | IrValue::Identifier(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
+        | IrValue::None => {}
+    }
+}
+
+fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan) {
+    match component {
+        IrComponent::Stacked(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::Container(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::Landscape(component) => {
+            component.span = source_span;
+            rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -11276,6 +11985,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(body),
+            raw_body: None,
             span: span(0, 1),
         }
     }
@@ -11329,6 +12039,7 @@ mod tests {
             head,
             chain,
             body: None,
+            raw_body: None,
             span,
         }
     }
@@ -11348,6 +12059,7 @@ mod tests {
             head,
             chain,
             body: Some(body),
+            raw_body: None,
             span,
         }
     }
@@ -11360,6 +12072,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         }])
     }
@@ -11385,6 +12098,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters,
             body,
+            raw_body: None,
             span: span(0, 10),
         }
     }
@@ -11409,6 +12123,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters,
             body: Some(body),
+            raw_body: None,
             span: span(0, 20),
         }
     }
@@ -11483,6 +12198,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 20),
         };
         let nodes = evaluate(vec![outer]);
@@ -11514,6 +12230,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: span(0, 1),
             }],
             span: span(0, 1),
@@ -11533,6 +12250,7 @@ mod tests {
                         ordered_args: None,
                         lambda_parameters: None,
                         body: None,
+                        raw_body: None,
                         span: span(0, 1),
                     },
                 ]),
@@ -11716,6 +12434,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: span(10, 20),
             }],
         );
@@ -11942,6 +12661,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: span(12, 20),
             }],
         );
@@ -12042,6 +12762,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span,
             }],
         );
@@ -12488,6 +13209,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(start, start + name.len()),
         }
     }
@@ -14024,6 +14746,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: failure_span,
         };
         let outcome = evaluator.evaluate_call_value(
@@ -14078,6 +14801,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: Some(vec![lambda_parameter("n", 10)]),
             body: Some(vec![local, var_ref("n")]),
+            raw_body: None,
             span: span(0, 20),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![foreach, var_ref("local")]);
@@ -14119,6 +14843,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: Some(vec![lambda_parameter("value", 20)]),
             body: Some(vec![var_ref("value")]),
+            raw_body: None,
             span: span(0, 10),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![call]);
@@ -14160,6 +14885,7 @@ mod tests {
                 span: span(8, 13),
             }],
             body: None,
+            raw_body: None,
             span: whole,
         }]);
         assert!(nodes.is_empty());
@@ -14370,6 +15096,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(7, 12),
         }]);
         let outer = IrNode::FunctionCall {
@@ -14379,6 +15106,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 20),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![
@@ -14401,6 +15129,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(9, 14),
         }]);
         let outer = IrNode::FunctionCall {
@@ -14410,6 +15139,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 22),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![
@@ -14439,6 +15169,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 30),
         };
 
@@ -14460,6 +15191,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 20),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![outer]);
@@ -14483,6 +15215,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(7, 18),
         }]);
         let outer = IrNode::FunctionCall {
@@ -14492,6 +15225,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 20),
         };
         let (nodes, diagnostics) = evaluate_with_diagnostics(vec![outer]);
@@ -14513,6 +15247,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let chain = chain_node(
@@ -14549,6 +15284,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let chain = chain_node(
@@ -14579,6 +15315,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: span(0, 1),
             },
         ];
@@ -14834,6 +15571,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("content")]),
+            raw_body: None,
             span: span(3, 6),
         };
         let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
@@ -14898,6 +15636,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -14916,6 +15655,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -14943,6 +15683,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("from body")]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15175,6 +15916,7 @@ mod tests {
                 IrValue::Boolean(false),
                 vec![text_paragraph("dropped")],
             )]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15205,6 +15947,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("kept")]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15220,6 +15963,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("dropped")]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15235,6 +15979,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("kept")]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15254,6 +15999,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: Some(vec![text_paragraph("content")]),
+                raw_body: None,
                 span: span(0, 1),
             };
             let nodes = evaluate(vec![call]);
@@ -15277,6 +16023,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15295,6 +16042,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15322,6 +16070,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("from indented body")]),
+            raw_body: None,
             span: span(0, 1),
         };
         let nodes = evaluate(vec![call]);
@@ -15401,6 +16150,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("body")]),
+            raw_body: None,
             span: span(3, 6),
         };
         let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
@@ -15421,6 +16171,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         }
     }
@@ -15433,6 +16184,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(body_nodes),
+            raw_body: None,
             span: span(0, 1),
         }
     }
@@ -15445,6 +16197,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         }
     }
@@ -15457,6 +16210,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 1),
         }
     }
@@ -15504,6 +16258,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: Some(vec![text_paragraph("visible")]),
+                raw_body: None,
                 span: span(0, 1),
             },
         ]);
@@ -15529,6 +16284,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: Some(vec![text_paragraph("hidden")]),
+                raw_body: None,
                 span: span(0, 1),
             },
         ]);
@@ -15546,6 +16302,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: Some(vec![text_paragraph("visible")]),
+                raw_body: None,
                 span: span(0, 1),
             },
         ]);
@@ -15682,6 +16439,7 @@ mod tests {
                     "x",
                     IrValue::String("hidden".to_string()),
                 )]),
+                raw_body: None,
                 span: span(0, 1),
             },
             var_ref("x"),
@@ -15714,6 +16472,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(3, 6),
         };
         let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
@@ -15733,6 +16492,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: Some(vec![text_paragraph("nested visible")]),
+            raw_body: None,
             span: span(0, 1),
         }];
         let nodes = evaluate(vec![
@@ -15860,6 +16620,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: Some(body),
+                raw_body: None,
                 span: span(0, 1),
             },
         ]);
@@ -15891,6 +16652,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 25),
         };
         let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
@@ -15914,6 +16676,7 @@ mod tests {
             ordered_args: None,
             lambda_parameters: None,
             body: None,
+            raw_body: None,
             span: span(0, 17),
         };
         let (result, diagnostics) = Evaluator::new().evaluate(&doc(vec![call]));
@@ -15941,6 +16704,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: span(10, 20),
             }],
             span: span(0, 20),

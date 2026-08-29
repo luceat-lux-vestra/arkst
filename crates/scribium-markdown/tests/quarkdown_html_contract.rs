@@ -101,6 +101,7 @@ fn html_indented_body_remains_parser_owned_raw_html() {
         name,
         arguments,
         body: Some(body),
+        raw_body: Some(raw_body),
         ..
     } = &output.document.nodes[0]
     else {
@@ -113,4 +114,43 @@ fn html_indented_body_remains_parser_owned_raw_html() {
     };
     assert_eq!(raw, "<div>\n        Hello\n    </div>\n");
     assert_span(source, *span, raw);
+    assert_eq!(raw_body.text, "<div>\n        Hello\n    </div>\n");
+    assert_eq!(
+        raw_body.source_text,
+        "    <div>\n        Hello\n    </div>\n"
+    );
+    assert_span(
+        source,
+        raw_body.span,
+        "    <div>\n        Hello\n    </div>\n",
+    );
+}
+
+#[test]
+fn nested_raw_body_keeps_source_text_and_call_owned_indentation() {
+    let source = ".function {setauthors}\n    .docauthors\n        - Callable\n            - email: callable@example.com\n\n";
+    let output = parse_with_mode(source, Mode::Quarkdown);
+    assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
+    let Block::DirectiveCall {
+        body: Some(body), ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected function body, got {:?}", output.document.nodes);
+    };
+    let [Block::DirectiveCall {
+        raw_body: Some(raw_body),
+        ..
+    }] = body.as_slice()
+    else {
+        panic!("expected nested docauthors body, got {body:?}");
+    };
+    assert_eq!(raw_body.indentation, 8);
+    assert_eq!(
+        raw_body.text,
+        "- Callable\n            - email: callable@example.com\n"
+    );
+    assert_eq!(
+        raw_body.source_text,
+        "    - Callable\n            - email: callable@example.com\n"
+    );
 }
