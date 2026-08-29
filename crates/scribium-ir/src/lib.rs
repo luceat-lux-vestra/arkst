@@ -309,17 +309,18 @@ pub struct TargetSpecificContent {
 
 /// Source-backed body text retained alongside a structured call body.
 /// `source_text` is the exact source slice; `text` is its
-/// indentation-normalized conversion input. Evaluator conversion uses this
-/// only when the target consumes Quarkdown's raw body fallback; it is not
-/// evaluator state and is never stored in `IrValue`.
+/// `trimIndent().trimEnd()` conversion input; `native_text` preserves the
+/// existing source-backed native-content contract for `.html`. Evaluator
+/// conversion uses these only at their explicit target boundaries; they are
+/// not evaluator state and are never stored in `IrValue`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrRawBody {
     #[serde(default)]
     pub source_text: String,
     pub text: String,
-    pub span: SourceSpan,
     #[serde(default)]
-    pub indentation: usize,
+    pub native_text: String,
+    pub span: SourceSpan,
 }
 
 /// A backend-neutral block-level IR node.

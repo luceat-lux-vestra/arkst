@@ -461,35 +461,6 @@ fn convert_content_target(
                 span,
             },
         ]))),
-        IrValue::Identifier(value) if !block_target => {
-            Ok(TargetValue::Value(IrValue::Content(vec![
-                IrNode::Paragraph {
-                    content: vec![IrInline::Text {
-                        content: value.clone(),
-                        span,
-                    }],
-                    span,
-                },
-            ])))
-        }
-        IrValue::Number(value) if !block_target => Ok(TargetValue::Value(IrValue::Content(vec![
-            IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: number_to_text(*value),
-                    span,
-                }],
-                span,
-            },
-        ]))),
-        IrValue::Boolean(value) if !block_target => Ok(TargetValue::Value(IrValue::Content(vec![
-            IrNode::Paragraph {
-                content: vec![IrInline::Text {
-                    content: value.to_string(),
-                    span,
-                }],
-                span,
-            },
-        ]))),
         _ => Err(ConversionError::UnsupportedValue {
             target: if block_target {
                 ConversionTarget::BlockContent
@@ -2120,6 +2091,18 @@ mod tests {
                 target: ConversionTarget::BlockContent
             })
         ));
+        for value in [IrValue::Number(2.0), IrValue::Boolean(true)] {
+            assert!(matches!(
+                convert_target_with_origin(
+                    &InvocationValue::static_value(value),
+                    ConversionTarget::InlineContent,
+                    span(),
+                ),
+                Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::InlineContent
+                })
+            ));
+        }
     }
 
     #[test]

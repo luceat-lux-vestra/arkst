@@ -2059,7 +2059,7 @@ mod tests {
             result.ir.metadata.document_state.theme,
             Some(crate::ir::IrDocumentTheme {
                 color: None,
-                layout: Some(".theme {mutated}\n    .uppercase {minimal}\n".to_string()),
+                layout: Some(".theme {mutated}\n.uppercase {minimal}".to_string()),
             })
         );
         assert_eq!(output_text(&result), "");
@@ -3187,6 +3187,16 @@ mod tests {
         let (result, _) = compile_source(static_content);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(output_text(&result), "**hello**");
+
+        for source in [
+            ".var {number} {2}\n.plaintext {.number}\n",
+            ".var {boolean} {true}\n.plaintext {.boolean}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
     }
 
     #[test]

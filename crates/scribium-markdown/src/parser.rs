@@ -1163,36 +1163,62 @@ fn raw_body_for(
     let last = lines.last()?;
     let first_start = first.start.checked_sub(base)?;
     let last_end = last.end.checked_sub(base)?;
-    let source_body = source.get(first_start..last_end)?;
-    let text = normalize_raw_body(source_body);
     let line_start = source
-        .get(..first_start)
-        .and_then(|prefix| prefix.rfind('\n'))
+        .get(..first_start)?
+        .rfind('\n')
         .map_or(0, |newline| newline + 1);
-    let first_line = source.get(line_start..).unwrap_or(source_body);
-    let first_line = first_line
-        .split_once('\n')
-        .map_or(first_line, |(line, _)| line);
-    let first_line = first_line.strip_suffix('\r').unwrap_or(first_line);
-    let indentation = first_line
-        .chars()
-        .take_while(|character| *character == ' ' || *character == '\t')
-        .map(char::len_utf8)
-        .sum();
+    let source_body = source.get(line_start..last_end)?;
+    let text = trim_indent_and_end(source_body);
+    let native_text = normalize_native_body(source_body);
+    let span_start = base.checked_add(line_start)?;
     (!text.trim().is_empty()).then_some(RawBody {
         source_text: source_body.to_owned(),
         text,
-        span: ByteSpan::new(first.start, last.end),
-        indentation,
+        native_text,
+        span: ByteSpan::new(span_start, last.end),
     })
 }
 
-/// Mirrors the existing source-backed native-content boundary: the reader's
-/// body indentation is removed from the first body line, while later line
-/// bytes remain untouched. This is intentionally not a reconstruction from
-/// parsed Markdown nodes; relative indentation and line endings are part of
-/// the raw fallback value.
-fn normalize_raw_body(source: &str) -> String {
+/// Mirrors Kotlin's `String.trimIndent()` followed by `trimEnd()` for the
+/// body DynamicValue. Kotlin removes the first and last blank lines, finds the
+/// minimum leading-whitespace character count among non-blank lines, removes
+/// that many characters from every remaining line, joins with LF, and then
+/// trims trailing Unicode whitespace. CRLF and CR are therefore normalized to
+/// LF in the semantic body value.
+fn trim_indent_and_end(source: &str) -> String {
+    let lines = split_lines(source);
+    let mut start = 0;
+    let mut end = lines.len();
+    if lines.get(start).is_some_and(|line| line.is_blank()) {
+        start += 1;
+    }
+    if end > start && lines.get(end - 1).is_some_and(|line| line.is_blank()) {
+        end -= 1;
+    }
+
+    let minimum_indent = lines[start..end]
+        .iter()
+        .filter(|line| !line.is_blank())
+        .map(|line| line.leading_whitespace_chars())
+        .min()
+        .unwrap_or(0);
+
+    let mut result = String::new();
+    for (index, line) in lines[start..end].iter().enumerate() {
+        if index > 0 {
+            result.push('\n');
+        }
+        result.push_str(drop_chars(line, minimum_indent));
+    }
+    result.trim_end().to_owned()
+}
+
+/// Mirrors the existing source-backed native-content boundary used by
+/// `.html`: the reader's body indentation is removed from the first body
+/// line, while later line bytes and line endings remain untouched. This is an
+/// explicit native-content compatibility channel, not a second Markdown
+/// conversion rule, and it never reconstructs text from parsed nodes.
+fn normalize_native_body(source: &str) -> String {
     let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
     let first_line = &source[..first_line_end];
     let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
@@ -1206,6 +1232,50 @@ fn normalize_raw_body(source: &str) -> String {
     normalized.push_str(&first_line[indentation..]);
     normalized.push_str(&source[first_line_end..]);
     normalized
+}
+
+fn split_lines(source: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\n' | b'\r') {
+            lines.push(&source[start..index]);
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            index += 1;
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    lines.push(&source[start..]);
+    lines
+}
+
+trait BodyLine {
+    fn is_blank(&self) -> bool;
+    fn leading_whitespace_chars(&self) -> usize;
+}
+
+impl BodyLine for &str {
+    fn is_blank(&self) -> bool {
+        self.chars().all(char::is_whitespace)
+    }
+
+    fn leading_whitespace_chars(&self) -> usize {
+        self.chars()
+            .take_while(|character| character.is_whitespace())
+            .count()
+    }
+}
+
+fn drop_chars(line: &str, count: usize) -> &str {
+    line.char_indices()
+        .nth(count)
+        .map_or("", |(index, _)| &line[index..])
 }
 
 fn convert_children_blocks(

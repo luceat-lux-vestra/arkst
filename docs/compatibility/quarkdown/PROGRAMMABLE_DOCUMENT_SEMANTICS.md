@@ -143,8 +143,9 @@ after all candidate elements validate. `.theme` accepts nullable scalar
 `color` and `layout` parameters, binds both positionally or by name, accepts
 `.none` as a null component, and lowercases supplied strings. Its regular
 block body falls back to the final `layout` parameter upstream; #166 now
-retains the source-backed raw body and consumes it at the bounded String target
-without evaluating parsed body nodes. A `.theme` body therefore remains lazy
+retains the lossless source-backed raw body and derives its bounded String
+target value with `trimIndent().trimEnd()` without evaluating parsed body
+nodes. A `.theme` body therefore remains lazy
 until target conversion is selected, so nested calls cannot execute or mutate
 document state accidentally. It replaces the complete
 theme on every successful call, including an explicit empty setter. The
@@ -409,7 +410,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
-| Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` remains structured; dynamic String → Markdown is parsed only by the explicit `.plaintext` target path, while source-backed bodies use `IrRawBody` | Content remains structured; conversion is centralized in the engine and source provenance is retained outside `IrValue` | Partial | Remaining target consumers and complete content conversion coverage |
+| Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` remains structured; dynamic String → Markdown is parsed only by the explicit `.plaintext` target path, while source-backed bodies use `IrRawBody` with a lossless source slice and a separate `trimIndent().trimEnd()` target value | Content remains structured; conversion is centralized in the engine and source provenance is retained outside `IrValue` | Partial | Remaining target consumers and complete content conversion coverage |
 | Component conversion | Dynamic result can become a node/layout value through typed output visitors | Closed typed `IrValue::Component`/`IrComponent` is constructed by the reviewed source calls and materialized as one typed block node | Backend-neutral component value, origin-gated construction, typed output materialization | Implemented for reviewed block-body Stacked slice and bounded `.center` | General String → Markdown body conversion and inline insertion |
 
 ## Normative evaluator rules
@@ -511,8 +512,9 @@ are separate and are not part of this closure audit.
 
 ## Intentionally deferred
 
-This slice does not implement String → Markdown or String → component
-conversion, inline Stacked/Container insertion, the deferred direct
+This slice does not implement generic String → Markdown or String → component
+conversion; the explicit `.plaintext` Dynamic String → InlineMarkdownContent
+boundary is covered. Inline Stacked/Container insertion, the deferred direct
 `.container` style parameters, `StyleOptions`, `.float`, `.fullspan`, a generic layout
 engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was

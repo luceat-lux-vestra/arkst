@@ -16,20 +16,18 @@ pub struct FrontMatter {
 /// The source-backed body representation used by engine conversion.
 ///
 /// `source_text` is the exact source slice for the body. `text` is the same
-/// indentation-normalized body string that Quarkdown's body refiner supplies
-/// to a `DynamicValue`; `span` still identifies the original source range.
-/// Parsed body nodes are deliberately kept separately so a target can choose
-/// lazy structured evaluation without reconstructing this text from an
-/// evaluated value.
+/// `trimIndent().trimEnd()` body string that Quarkdown's body refiner supplies
+/// to a `DynamicValue`. `native_text` retains the existing source-backed
+/// native-content contract for `.html`; it is not a target-conversion value.
+/// `span` identifies the original source range. Parsed body nodes are
+/// deliberately kept separately so a target can choose lazy structured
+/// evaluation without reconstructing this text from an evaluated value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawBody {
     pub source_text: String,
     pub text: String,
+    pub native_text: String,
     pub span: ByteSpan,
-    /// The visual indentation owned by the call's first accepted body line.
-    /// Target-specific Markdown conversion removes this prefix from later
-    /// lines without deriving text from parsed nodes.
-    pub indentation: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

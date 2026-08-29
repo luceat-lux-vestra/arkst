@@ -1,7 +1,8 @@
 //! Small, deterministic evaluator builtins used by the current semantic slice.
 
+use crate::invocation_binder::BodyPolicy;
 #[cfg(test)]
-use crate::invocation_binder::{self, BodyPolicy, Candidate};
+use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
 #[cfg(test)]
 use crate::value_conversion::InvocationNamedArg;
@@ -68,6 +69,15 @@ pub(crate) enum BuiltinBodyPolicy {
     BindEvaluatedContent,
 }
 
+impl BuiltinBodyPolicy {
+    pub(crate) const fn binder_policy(self) -> BodyPolicy {
+        match self {
+            Self::Reject => BodyPolicy::Reject,
+            Self::BindRaw | Self::BindEvaluatedContent => BodyPolicy::BindFinal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BuiltinSignature {
     pub(crate) parameter_names: &'static [&'static str],
@@ -112,12 +122,6 @@ const fn builtin_spec_with_defaults(
     allows_named: bool,
     body_policy: BuiltinBodyPolicy,
 ) -> BuiltinSpec {
-    let body_policy =
-        if parameter_names.is_empty() || !matches!(body_policy, BuiltinBodyPolicy::Reject) {
-            body_policy
-        } else {
-            BuiltinBodyPolicy::BindRaw
-        };
     BuiltinSpec {
         name,
         kind,
@@ -143,7 +147,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "b"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "subtract",
@@ -151,7 +155,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "b"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "multiply",
@@ -159,7 +163,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "by"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "divide",
@@ -167,7 +171,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "by"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "rem",
@@ -175,7 +179,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "b"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "pow",
@@ -183,7 +187,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["base", "to"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "abs",
@@ -191,7 +195,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "negate",
@@ -199,7 +203,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "sqrt",
@@ -207,7 +211,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "logn",
@@ -215,7 +219,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "pi",
@@ -231,7 +235,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "cos",
@@ -239,7 +243,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "tan",
@@ -247,7 +251,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "truncate",
@@ -255,7 +259,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x", "decimals"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "round",
@@ -263,7 +267,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "iseven",
@@ -271,7 +275,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["x"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "string",
@@ -279,7 +283,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["value"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec_with_defaults(
         "concatenate",
@@ -288,7 +292,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &[2],
         3,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "uppercase",
@@ -296,7 +300,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["string"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "lowercase",
@@ -304,7 +308,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["string"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "capitalize",
@@ -312,7 +316,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["string"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "isempty",
@@ -320,7 +324,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["string"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "isnotempty",
@@ -328,7 +332,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["string"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec_with_defaults(
         "startswith",
@@ -337,7 +341,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &[2],
         3,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "plaintext",
@@ -361,7 +365,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["value", "fallback"],
         2,
         false,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "isnone",
@@ -369,7 +373,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["value"],
         1,
         false,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec_with_defaults(
         "islower",
@@ -378,7 +382,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &[2],
         3,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec_with_defaults(
         "isgreater",
@@ -387,7 +391,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &[2],
         3,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "equals",
@@ -395,7 +399,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["a", "to"],
         2,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
     builtin_spec(
         "not",
@@ -403,7 +407,7 @@ static REGULAR_BUILTINS: &[BuiltinSpec] = &[
         &["value"],
         1,
         true,
-        BuiltinBodyPolicy::Reject,
+        BuiltinBodyPolicy::BindRaw,
     ),
 ];
 
@@ -499,7 +503,7 @@ pub(crate) fn evaluate_with_origins(
         &parameters,
         &candidates,
         body.as_ref(),
-        BodyPolicy::Reject,
+        builtin.body_policy.binder_policy(),
         fallback_span,
     )
     .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
@@ -1249,6 +1253,7 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
+        BuiltinBodyPolicy,
     };
     use crate::value_conversion::InvocationValue;
     use scribium_ir::{
@@ -1303,6 +1308,24 @@ mod tests {
                 builtin.name
             );
             dispatch_kinds.push(builtin.kind);
+        }
+    }
+
+    #[test]
+    fn regular_body_fallback_policy_is_declared_per_signature() {
+        for builtin in regular_builtins() {
+            let expected = if builtin.name == "plaintext" {
+                BuiltinBodyPolicy::BindEvaluatedContent
+            } else if builtin.signature.parameter_names.is_empty() {
+                BuiltinBodyPolicy::Reject
+            } else {
+                BuiltinBodyPolicy::BindRaw
+            };
+            assert_eq!(
+                builtin.body_policy, expected,
+                "unexpected body policy for .{}",
+                builtin.name
+            );
         }
     }
 
@@ -2012,16 +2035,6 @@ mod tests {
             )
             .expect("identifier scalar is supported"),
             IrValue::String("hello".into())
-        );
-        assert_eq!(
-            evaluate("plaintext", &[number(123.0)], &[], false)
-                .expect("number scalar is supported"),
-            IrValue::String("123".into())
-        );
-        assert_eq!(
-            evaluate("plaintext", &[IrValue::Boolean(true)], &[], false)
-                .expect("boolean scalar is supported"),
-            IrValue::String("true".into())
         );
     }
 

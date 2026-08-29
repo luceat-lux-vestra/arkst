@@ -1760,11 +1760,6 @@ impl Evaluator {
 
         if let Some(builtin) = builtins::lookup(name) {
             let parameters = builtins::binding_parameters(builtin);
-            let body_policy = match builtin.body_policy {
-                builtins::BuiltinBodyPolicy::Reject => BodyPolicy::Reject,
-                builtins::BuiltinBodyPolicy::BindRaw
-                | builtins::BuiltinBodyPolicy::BindEvaluatedContent => BodyPolicy::BindFinal,
-            };
             return self
                 .preflight_binding(
                     &parameters,
@@ -1772,7 +1767,7 @@ impl Evaluator {
                     positional_args,
                     named_args,
                     body,
-                    body_policy,
+                    builtin.body_policy.binder_policy(),
                     span,
                     "E3001",
                     Some(name),
@@ -3747,7 +3742,7 @@ impl Evaluator {
         };
 
         let (candidate, candidate_span) = if body.is_some() {
-            let body_candidate = match source_backed_markdown_body_candidate(
+            let body_candidate = match source_backed_body_candidate(
                 body.as_ref()
                     .map(|body| call_body_source_span(*body, *span)),
                 raw_body,
@@ -3910,7 +3905,7 @@ impl Evaluator {
         };
 
         let (candidate, candidate_span) = if body.is_some() {
-            let raw_body_candidate = match source_backed_markdown_body_candidate(
+            let raw_body_candidate = match source_backed_body_candidate(
                 body.as_ref()
                     .map(|body| call_body_source_span(*body, *span)),
                 raw_body,
@@ -4659,7 +4654,7 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
         if let Some(raw_body) = raw_body {
-            return match raw_body_string_value(raw_body) {
+            return match raw_native_body_string_value(raw_body) {
                 Ok(value) => CallOutcome::Value(IrValue::String(value)),
                 Err(error) => {
                     diagnostics.push(target_conversion_error(
@@ -4746,17 +4741,7 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 };
                 if let Some(raw_body) = raw_body {
-                    match raw_body_string_value(raw_body) {
-                        Ok(value) => IrValue::String(value),
-                        Err(error) => {
-                            diagnostics.push(target_conversion_error(
-                                "`.markdown` body",
-                                raw_body.span,
-                                error,
-                            ));
-                            return CallOutcome::Failed;
-                        }
-                    }
+                    IrValue::String(raw_body.text.clone())
                 } else {
                     match self.evaluate_call_body(body, span, diagnostics, context) {
                         CallOutcome::Value(value) => value,
@@ -10750,57 +10735,6 @@ fn source_backed_body_candidate(
     }
 }
 
-fn source_backed_markdown_body_candidate(
-    body_span: Option<SourceSpan>,
-    raw_body: Option<&IrRawBody>,
-    target: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<Option<Candidate<InvocationValue>>, CallOutcome> {
-    let candidate = source_backed_body_candidate(body_span, raw_body, target, diagnostics)?;
-    let Some(raw_body) = raw_body else {
-        return Ok(candidate);
-    };
-    Ok(candidate.map(|candidate| match candidate {
-        Candidate::Positional { span, .. } => Candidate::Positional {
-            value: InvocationValue::dynamic_value(IrValue::String(raw_body_text_for_markdown(
-                raw_body,
-            ))),
-            span,
-        },
-        candidate => candidate,
-    }))
-}
-
-/// Removes only the call-owned indentation prefix from continuation lines.
-/// The source-backed body remains the input; this normalization is the
-/// target-specific Markdown list boundary and never uses parsed/evaluated
-/// nodes to reconstruct text.
-fn raw_body_text_for_markdown(raw_body: &IrRawBody) -> String {
-    if raw_body.indentation == 0 {
-        return raw_body.text.clone();
-    }
-
-    let mut normalized = String::with_capacity(raw_body.text.len());
-    for (line_index, line) in raw_body.text.split_inclusive('\n').enumerate() {
-        if line_index == 0 {
-            normalized.push_str(line);
-            continue;
-        }
-        let mut removed = 0;
-        let mut content_start = 0;
-        for (index, character) in line.char_indices() {
-            if removed >= raw_body.indentation || !matches!(character, ' ' | '\t') {
-                content_start = index;
-                break;
-            }
-            removed += character.len_utf8();
-            content_start = index + character.len_utf8();
-        }
-        normalized.push_str(&line[content_start..]);
-    }
-    normalized
-}
-
 fn function_error(message: String, span: SourceSpan) -> Diagnostic {
     function_error_at(message, span)
 }
@@ -10863,22 +10797,37 @@ fn target_conversion_error_message(target: &str, span: SourceSpan, message: Stri
     }
 }
 
-fn raw_body_string_value(
+fn raw_native_body_string_value(
     raw_body: &IrRawBody,
 ) -> Result<String, value_conversion::ConversionError> {
-    match value_conversion::convert_target_with_origin(
-        &InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
-        value_conversion::ConversionTarget::String,
-        raw_body.span,
-    )? {
-        value_conversion::TargetValue::Value(IrValue::String(value)) => Ok(value),
-        value_conversion::TargetValue::Value(_)
-        | value_conversion::TargetValue::RawMarkdown { .. } => {
-            Err(value_conversion::ConversionError::UnsupportedValue {
-                target: value_conversion::ConversionTarget::String,
-            })
-        }
+    if !raw_body.native_text.is_empty() {
+        return Ok(raw_body.native_text.clone());
     }
+    if !raw_body.source_text.is_empty() {
+        return Ok(normalize_legacy_native_body(&raw_body.source_text));
+    }
+    if !raw_body.text.is_empty() {
+        return Ok(raw_body.text.clone());
+    }
+    Err(value_conversion::ConversionError::UnsupportedValue {
+        target: value_conversion::ConversionTarget::String,
+    })
+}
+
+fn normalize_legacy_native_body(source: &str) -> String {
+    let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
+    let first_line = &source[..first_line_end];
+    let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
+    let first_content = first_content.strip_suffix('\r').unwrap_or(first_content);
+    let indentation = first_content
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .map(char::len_utf8)
+        .sum();
+    let mut normalized = String::with_capacity(source.len().saturating_sub(indentation));
+    normalized.push_str(&first_line[indentation..]);
+    normalized.push_str(&source[first_line_end..]);
+    normalized
 }
 
 fn html_argument_error(message: &str, span: SourceSpan) -> Diagnostic {

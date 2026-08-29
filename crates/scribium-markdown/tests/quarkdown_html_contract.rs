@@ -114,7 +114,8 @@ fn html_indented_body_remains_parser_owned_raw_html() {
     };
     assert_eq!(raw, "<div>\n        Hello\n    </div>\n");
     assert_span(source, *span, raw);
-    assert_eq!(raw_body.text, "<div>\n        Hello\n    </div>\n");
+    assert_eq!(raw_body.text, "<div>\n    Hello\n</div>");
+    assert_eq!(raw_body.native_text, "<div>\n        Hello\n    </div>\n");
     assert_eq!(
         raw_body.source_text,
         "    <div>\n        Hello\n    </div>\n"
@@ -144,13 +145,16 @@ fn nested_raw_body_keeps_source_text_and_call_owned_indentation() {
     else {
         panic!("expected nested docauthors body, got {body:?}");
     };
-    assert_eq!(raw_body.indentation, 8);
     assert_eq!(
         raw_body.text,
-        "- Callable\n            - email: callable@example.com\n"
+        "- Callable\n    - email: callable@example.com"
     );
     assert_eq!(
         raw_body.source_text,
-        "    - Callable\n            - email: callable@example.com\n"
+        "        - Callable\n            - email: callable@example.com\n"
+    );
+    assert_eq!(
+        raw_body.native_text,
+        "- Callable\n            - email: callable@example.com\n"
     );
 }

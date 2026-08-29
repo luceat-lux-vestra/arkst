@@ -1118,8 +1118,8 @@ fn raw_body_to_ir(raw_body: &scribium_markdown::ast::RawBody, source_id: SourceI
     IrRawBody {
         source_text: raw_body.source_text.clone(),
         text: raw_body.text.clone(),
+        native_text: raw_body.native_text.clone(),
         span: byte_to_source_span(&raw_body.span, source_id),
-        indentation: raw_body.indentation,
     }
 }
 #[cfg(test)]
