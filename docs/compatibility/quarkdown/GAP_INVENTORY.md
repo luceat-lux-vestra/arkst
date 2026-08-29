@@ -116,12 +116,10 @@ adjacency, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
-boundaries, and source provenance. The #157 lexical production slice is
-implemented as recorded in the audit below. The remaining five bounded
-production follow-ups are:
+boundaries, and source provenance. The #157 and #158 lexical/frontend
+production slices are implemented as recorded in the audit below. The
+remaining four bounded production follow-ups are:
 
-- [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) — preserve
-  nested tight-call wrappers inside content arguments;
 - [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) — retain
   source after malformed inline-call recovery; and
 - [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) — preserve
