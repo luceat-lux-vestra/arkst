@@ -655,11 +655,8 @@ fn qd251_plaintext_keeps_existing_scalar_and_content_argument_classification() {
     ] {
         let output = parse_with_mode(source, Mode::Quarkdown);
         assert!(
-            output
-                .diagnostics
-                .iter()
-                .all(|diagnostic| diagnostic.code == "E3010"),
-            "unexpected diagnostics: {output:?}"
+            output.diagnostics.is_empty(),
+            "unexpected diagnostics after source-backed content conversion: {output:?}"
         );
         let document = output.document;
         assert_document_spans(&document, source);

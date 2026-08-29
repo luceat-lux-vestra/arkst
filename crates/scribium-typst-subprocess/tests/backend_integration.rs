@@ -75,6 +75,19 @@ where
     }
 }
 
+fn assert_inline_raw_html_output_boundary(result: &scribium_core::CompileResult, expected: usize) {
+    assert_eq!(
+        result.diagnostics.len(),
+        expected,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code == "E8001"));
+}
+
 #[test]
 fn integration_compile_produces_valid_pdf() {
     with_typst("compile", |backend| {
@@ -812,11 +825,7 @@ fn target_specific_html_is_omitted_without_typst_source_or_source_map_entries() 
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
-    assert!(
-        result.diagnostics.is_empty(),
-        "unexpected: {:?}",
-        result.diagnostics
-    );
+    assert_inline_raw_html_output_boundary(&result, 4);
 
     let target_span = result
         .ir
@@ -869,11 +878,7 @@ fn target_specific_html_typst_and_pdf_smoke() {
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
-    assert!(
-        result.diagnostics.is_empty(),
-        "unexpected: {:?}",
-        result.diagnostics
-    );
+    assert_inline_raw_html_output_boundary(&result, 2);
     let typst = lower_to_typst_code(&result.ir);
     assert!(typst.contains("Before."));
     assert!(typst.contains("After."));
@@ -1282,21 +1287,15 @@ fn integration_variable_evaluation_before_lowering() {
         .unwrap();
     let result = compile(&project, &CompileOptions::default());
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E3010"),
-        "expected an explicit unsupported content diagnostic: {:?}",
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics for source-backed rich content: {:?}",
         result.diagnostics
     );
 
     let typst_code = scribium_typst::lowering::lower_to_typst_code(&result.ir);
-    // The source-backed content is retained as literal text; Typst markup
-    // delimiters are escaped at the backend boundary rather than being
-    // falsely represented as Strong after synthetic reparsing was removed.
     assert!(
-        typst_code.contains("\\*\\*Scribium\\*\\*"),
-        "unsupported rich content must remain source text: {}",
+        typst_code.contains("Scribium"),
+        "source-backed rich content should reach the existing lowering path: {}",
         typst_code
     );
     assert!(

@@ -290,15 +290,17 @@ fn audit_keeps_ordinary_braces_as_content_and_does_not_promote_markdown() {
     else {
         panic!("expected outer content argument")
     };
-    let [Inline::Text {
-        content: text,
-        span,
-    }] = content.as_slice()
-    else {
-        panic!("expected ordinary braces to remain one text inline")
-    };
-    assert_eq!(text, "H{ordinary}O");
-    assert_eq!(source_slice(source, *span), text);
+    assert!(content
+        .iter()
+        .all(|inline| matches!(inline, Inline::Text { .. })));
+    let text_slices: Vec<_> = content
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text { span, .. } => source_slice(source, *span),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(text_slices.concat(), "H{ordinary}O");
     assert_markdown_isolated(source);
 
     let markdown = parse_with_mode(".outer {H{.inner {x}}O}\n", Mode::Markdown);
@@ -487,10 +489,11 @@ fn audit_records_current_escaped_delimiter_gap() {
     assert!(matches!(
         positional_args.as_slice(),
         [Value::Content(content)]
-            if content.iter().any(|inline| matches!(
-                inline,
-                Inline::Text { span, .. } if source_slice(escaped_closing, *span) == r"a \"
-            ))
+            if content.iter().all(|inline| matches!(inline, Inline::Text { .. }))
+                && content.iter().map(|inline| match inline {
+                    Inline::Text { span, .. } => source_slice(escaped_closing, *span),
+                    _ => unreachable!(),
+                }).collect::<Vec<_>>().concat() == r"a \"
     ));
 
     let escaped_opening = r".foo {a \{ b}";

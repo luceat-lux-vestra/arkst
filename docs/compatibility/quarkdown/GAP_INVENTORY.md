@@ -91,7 +91,7 @@ parser-only surface, 13 partial surfaces, 37 unsupported surfaces, 2
 deferred surfaces, 1 blocked surface, and 1 unknown surface. The 12
 NOT_APPLICABLE rows preserve #153 global configuration, #155 resource
 environment, #149/#165–#167 binding/conversion/raw-body, #158 nested-call,
-#160 inline-content, and #180 texmacro ownership. This is an audit-only
+#158/#160 completed frontend slices, and #180 texmacro ownership. This is an audit-only
 reconciliation; no newly discovered implementation is started by this audit.
 
 The previously unresolved #154 rows now have explicit dispositions: `.match`
@@ -118,12 +118,10 @@ tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
 boundaries, and source provenance. The #157 and #158 lexical/frontend
 production slices are implemented as recorded in the audit below. The
-remaining four bounded production follow-ups are:
+remaining three bounded production follow-ups are:
 
 - [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) — retain
   source after malformed inline-call recovery; and
-- [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) — preserve
-  supported Markdown inline structure in Quarkdown content arguments.
 - [#162](https://github.com/luceat-lux-vestra/scribium/issues/162) — align
   escaped call and argument delimiter recognition/depth handling with pinned
   `GrammarUtils.kt` and `FunctionCallGrammar.kt`; bounded to

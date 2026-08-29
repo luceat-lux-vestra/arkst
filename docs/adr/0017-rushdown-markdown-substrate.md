@@ -77,12 +77,13 @@ lazy-paragraph behavior at an indented Quarkdown body boundary without
 creating a synthetic source or reparsing transformed Markdown.
 
 Quarkdown content arguments are also processed against the original document
-source. Nested Quarkdown calls are scanned with the grammar crate and retain
-their original spans. Rushdown 0.18.0 does not expose a public inline-parser
-entry point for an arbitrary original-source span, so Markdown inline markers
-inside a content argument remain source-backed text and produce explicit
-diagnostic `E3010`; the adapter does not create a sentinel prefix, copy a
-fragment, or compensate synthetic offsets.
+source. The frontend supplies the selected original source segments to the
+same Rushdown block/inline lifecycle, so supported Markdown inline nodes and
+nested Quarkdown calls retain their original spans. This source-range adapter
+does not create a sentinel prefix, copy a fragment, or compensate synthetic
+offsets. Rushdown 0.18.0 still does not expose a public arbitrary-span inline
+entry point; the adapter therefore remains private to `scribium-markdown` and
+does not broaden the public Rushdown API.
 
 ## Safety decision and containment
 
@@ -218,10 +219,12 @@ The stage-specific support status is:
 | Quarkdown block/inline | PASS | PASS | existing directive path where applicable | existing directive lowering where applicable |
 
 `PASS` at the parser or frontend stage does not claim end-to-end rendering.
-For a Quarkdown content argument containing Markdown inline markers, the
-current stage is parser/original-span preservation with `E3010`, not Strong or
-Emphasis lowering; arbitrary-span Rushdown inline parsing is not public in
-0.18.0.
+For a Quarkdown content argument containing supported Markdown inline markers,
+the demonstrated stage is parser/frontend structure and original-span
+preservation. This does not claim evaluator, IR, or output compatibility.
+Dynamic String/content conversion and other unsupported boundaries remain
+separate follow-up work; `E3010` is not emitted for the supported static
+frontend cases covered by #160.
 
 The acceptance decision is `RUSHDOWN_SELECTED` under this ADR. This is a
 substrate adoption decision only; it does not select a future architecture

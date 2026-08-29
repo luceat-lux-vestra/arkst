@@ -2,16 +2,18 @@ use std::fmt::{self, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use rushdown::ast::{
-    Arena, CodeBlockKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TableCellAlignment,
-    Task, TextQualifier, TypeData,
+    Arena, CodeBlockKind, KindData, NodeKind, NodeRef, NodeType, Paragraph, PrettyPrint,
+    TableCellAlignment, Task, TextQualifier, TypeData,
 };
 use rushdown::parser::{
-    gfm, parser_extension, BlockParser, Context, GfmOptions, InlineParser, NoParserOptions,
-    Options, Parser, ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
+    gfm, BlockParser, Context, GfmOptions, InlineParser, NoParserOptions, Options, Parser,
+    ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
 };
 use rushdown::text::{BasicReader, BlockReader, Lines, Reader, Segment};
 use rushdown::util::{indent_position, indent_width, is_blank};
-use rushdown::{as_extension_data, as_extension_data_mut, matches_extension_kind};
+use rushdown::{
+    as_extension_data, as_extension_data_mut, as_type_data_mut, matches_extension_kind,
+};
 use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue};
 use scribium_source::ByteSpan;
 
@@ -290,6 +292,98 @@ impl InlineParser for QuarkdownInlineParser {
     }
 }
 
+// Feed a selected range of the complete document back through Rushdown's
+// normal block/inline lifecycle while retaining the original source segments.
+// This is a source-range adapter, not a fragment parser or a copied buffer.
+#[derive(Debug)]
+struct ContentRangeBlockParser {
+    range: ByteSpan,
+    trigger: [u8; 1],
+}
+
+impl BlockParser for ContentRangeBlockParser {
+    fn trigger(&self) -> &[u8] {
+        &self.trigger
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<(NodeRef, State)> {
+        let segment = reader.peek_line_segment()?;
+        if segment.start() != self.range.start {
+            return None;
+        }
+        let source = reader.source();
+        let segments = source_range_segments(source, self.range)?;
+        if segments.is_empty() {
+            return None;
+        }
+
+        let node_ref = arena.new_node(Paragraph::new());
+        let block = as_type_data_mut!(arena, node_ref, Block);
+        for segment in segments {
+            block.append_source_line(segment);
+        }
+        reader.advance(self.range.end - self.range.start);
+        Some((node_ref, State::NO_CHILDREN))
+    }
+
+    fn cont(
+        &self,
+        _arena: &mut Arena,
+        _node_ref: NodeRef,
+        _reader: &mut BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<State> {
+        None
+    }
+}
+
+#[derive(Debug)]
+struct FrontendParserExtension {
+    mode: Mode,
+    content_range: Option<(ByteSpan, u8)>,
+}
+
+impl ParserExtension for FrontendParserExtension {
+    fn apply(self, parser: &mut Parser) {
+        if let Some((range, trigger)) = self.content_range {
+            parser.add_block_parser(
+                move || -> Box<dyn BlockParser> {
+                    Box::new(ContentRangeBlockParser {
+                        range,
+                        trigger: [trigger],
+                    })
+                },
+                NoParserOptions,
+                0,
+            );
+        }
+
+        if self.mode == Mode::Quarkdown {
+            parser.add_block_parser(
+                || -> Box<dyn BlockParser> { Box::new(QuarkdownBlockParser) },
+                NoParserOptions,
+                PRIORITY_FENCED_CODE_BLOCK + 1,
+            );
+            parser.add_inline_parser(
+                || -> Box<dyn InlineParser> { Box::new(QuarkdownInlineParser) },
+                NoParserOptions,
+                PRIORITY_CODE_SPAN + 1,
+            );
+            parser.add_inline_parser(
+                || -> Box<dyn InlineParser> { Box::new(QuarkdownTightInlineParser) },
+                NoParserOptions,
+                PRIORITY_CODE_SPAN + 1,
+            );
+        }
+    }
+}
+
 #[derive(Debug)]
 struct QuarkdownTightInlineParser;
 
@@ -320,31 +414,24 @@ impl InlineParser for QuarkdownTightInlineParser {
 }
 
 fn parser(mode: Mode, profile: MarkdownProfile) -> Parser {
+    parser_with_content_range(mode, profile, None)
+}
+
+fn parser_with_content_range(
+    mode: Mode,
+    profile: MarkdownProfile,
+    content_range: Option<(ByteSpan, u8)>,
+) -> Parser {
+    let extension = FrontendParserExtension {
+        mode,
+        content_range,
+    };
     if mode == Mode::Markdown && profile == MarkdownProfile::CommonMark {
-        return Parser::with_options(Options::default());
-    }
-    if mode == Mode::Markdown {
-        return Parser::with_extensions(Options::default(), gfm(GfmOptions::default()));
+        return Parser::with_extensions(Options::default(), extension);
     }
     Parser::with_extensions(
         Options::default(),
-        gfm(GfmOptions::default()).and(parser_extension(|parser| {
-            parser.add_block_parser(
-                || -> Box<dyn BlockParser> { Box::new(QuarkdownBlockParser) },
-                NoParserOptions,
-                PRIORITY_FENCED_CODE_BLOCK + 1,
-            );
-            parser.add_inline_parser(
-                || -> Box<dyn InlineParser> { Box::new(QuarkdownInlineParser) },
-                NoParserOptions,
-                PRIORITY_CODE_SPAN + 1,
-            );
-            parser.add_inline_parser(
-                || -> Box<dyn InlineParser> { Box::new(QuarkdownTightInlineParser) },
-                NoParserOptions,
-                PRIORITY_CODE_SPAN + 1,
-            );
-        })),
+        gfm(GfmOptions::default()).and(extension),
     )
 }
 
@@ -1240,6 +1327,7 @@ fn convert_inline(
         KindData::Link(link) => link_span(arena, node, link, source),
         KindData::Image(image) => image_span(arena, node, image, source),
         KindData::Strikethrough(_) => strikethrough_span(arena, node, source),
+        KindData::Emphasis(_) | KindData::Strong(_) => delimited_inline_span(arena, node, source),
         _ => node_span(arena, node, source),
     }?;
     let span = offset_span(local_span, base)?;
@@ -1448,81 +1536,71 @@ fn parse_original_content(
     let Some(_) = source.get(span.start..span.end) else {
         return Vec::new();
     };
-    let mut inlines = Vec::new();
-    let mut cursor = span.start;
-    let mut text_start = cursor;
-    let mut has_unsupported_markdown = false;
-    while cursor < span.end {
-        let byte = source.as_bytes()[cursor];
-        if byte == b'`' {
-            has_unsupported_markdown = true;
-            let delimiter_len = source.as_bytes()[cursor..span.end]
-                .iter()
-                .take_while(|byte| **byte == b'`')
-                .count();
-            if delimiter_len == 0 {
-                cursor += 1;
-                continue;
-            }
-            cursor += delimiter_len;
-            while cursor + delimiter_len <= span.end {
-                if source.as_bytes()[cursor..span.end]
-                    .starts_with(&source.as_bytes()[cursor - delimiter_len..cursor])
-                {
-                    cursor += delimiter_len;
-                    break;
-                }
-                cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
-            }
-            continue;
+    let trigger = source.as_bytes().get(span.start).copied();
+    if let Some(trigger) = trigger {
+        if let Some(inlines) = parse_source_backed_content(source, span, base, trigger, diagnostics)
+        {
+            return inlines;
         }
-        if byte == b'.' {
-            match scribium_quarkdown::parse_inline_call(source, cursor) {
-                Ok(Some((call, end))) if end <= span.end => {
-                    push_content_text(&mut inlines, source, text_start, cursor, base);
-                    inlines.push(convert_content_call(call, source, base, diagnostics));
-                    cursor = end;
-                    text_start = cursor;
-                    continue;
-                }
-                Err(error) => diagnostics.push(ParserDiagnostic {
-                    code: error.code,
-                    message: error.message,
-                    span: offset_span(error.span, base).unwrap_or(ByteSpan::new(0, 0)),
-                }),
-                _ => {}
-            }
-        }
-        if byte == b'{' {
-            match scribium_quarkdown::parse_tight_call(source, cursor) {
-                Ok(Some((call, end))) if end <= span.end => {
-                    push_content_text(&mut inlines, source, text_start, cursor, base);
-                    inlines.push(convert_content_call(call, source, base, diagnostics));
-                    cursor = end;
-                    text_start = cursor;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        // Angle-bracket text remains an exact source-backed String boundary;
-        // it does not require the unavailable Quarkdown inline-fragment
-        // parser. Keep E3010 for Markdown constructs whose structure would be
-        // lost by preserving the original text.
-        if matches!(byte, b'*' | b'_' | b'[' | b']' | b'~') {
-            has_unsupported_markdown = true;
-        }
-        cursor += source[cursor..].chars().next().map_or(1, char::len_utf8);
     }
-    push_content_text(&mut inlines, source, text_start, span.end, base);
-    if has_unsupported_markdown {
+
+    let mut inlines = Vec::new();
+    push_content_text(&mut inlines, source, span.start, span.end, base);
+    inlines
+}
+
+fn parse_source_backed_content(
+    source: &str,
+    span: ByteSpan,
+    base: usize,
+    trigger: u8,
+    diagnostics: &mut Vec<ParserDiagnostic>,
+) -> Option<Vec<Inline>> {
+    // The reader still owns the complete document. Its active segment is only
+    // narrowed to the argument range, so every Rushdown node remains indexed
+    // into the original source and no offset-reconstructed fragment exists.
+    let parser =
+        parser_with_content_range(Mode::Quarkdown, MarkdownProfile::Gfm, Some((span, trigger)));
+    let mut reader = BasicReader::new(source);
+    reader.set_position(0, Segment::new(span.start, span.end));
+    let parsed = catch_unwind(AssertUnwindSafe(|| parser.parse(&mut reader)));
+    let Ok((arena, root)) = parsed else {
         diagnostics.push(ParserDiagnostic {
-            code: "E3010",
-            message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because Rushdown exposes no original-span inline-fragment parser".to_string(),
+            code: "E9003",
+            message: "Rushdown panicked while parsing a Quarkdown content argument".to_string(),
             span: offset_span(span, base).unwrap_or(ByteSpan::new(0, 0)),
         });
+        return None;
+    };
+
+    let paragraph = arena[root].children(&arena).find(|node| {
+        matches!(arena[*node].kind_data(), KindData::Paragraph(_))
+            && node_span(&arena, *node, source) == Some(span)
+    })?;
+    Some(convert_inlines(
+        &arena,
+        paragraph,
+        source,
+        base,
+        diagnostics,
+    ))
+}
+
+fn source_range_segments(source: &str, span: ByteSpan) -> Option<Vec<Segment>> {
+    if !span.is_valid_for(source) {
+        return None;
     }
-    inlines
+    let mut segments = Vec::new();
+    let mut start = span.start;
+    while start < span.end {
+        let end = source
+            .get(start..span.end)?
+            .find('\n')
+            .map_or(span.end, |offset| (start + offset + 1).min(span.end));
+        segments.push(Segment::new(start, end));
+        start = end;
+    }
+    Some(segments)
 }
 
 fn push_content_text(
@@ -1542,37 +1620,6 @@ fn push_content_text(
                 span,
             });
         }
-    }
-}
-
-fn convert_content_call(
-    call: QuarkdownCall,
-    source: &str,
-    base: usize,
-    diagnostics: &mut Vec<ParserDiagnostic>,
-) -> Inline {
-    let span = offset_span(call.span, base).unwrap_or(ByteSpan::new(0, 0));
-    let call_name = call.name.clone();
-    Inline::DirectiveCall {
-        name: call.name,
-        name_span: offset_span(call.name_span, base).unwrap_or(ByteSpan::new(0, 0)),
-        head_span: offset_span(call.head_span, base).unwrap_or(ByteSpan::new(0, 0)),
-        arguments: convert_call_arguments(
-            &call.arguments,
-            &call_name,
-            source,
-            base,
-            0,
-            diagnostics,
-            is_contextual_inline_body_position,
-        ),
-        chain: call
-            .chain
-            .iter()
-            .map(|segment| convert_call_segment(segment, source, base, 0, diagnostics))
-            .collect(),
-        body: None,
-        span,
     }
 }
 
@@ -1836,6 +1883,103 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     }
     let span = ByteSpan::new(start?, end?);
     span.is_valid_for(source).then_some(span)
+}
+
+fn delimited_inline_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
+    // Rushdown keeps the delimiter semantics in its AST but omits the closing
+    // delimiter from the node span. Complete only an already accepted node's
+    // source range; this does not recognize or create Markdown structure.
+    let span = node_span(arena, node, source)?;
+    let Some((delimiter, width)) = emphasis_delimiter(arena, node, source) else {
+        return Some(span);
+    };
+    let limit = delimited_inline_boundary(arena, node, source);
+    let Some((run_start, run_len)) = find_delimiter_run(source, span.end, limit, delimiter) else {
+        return Some(span);
+    };
+    let nested_width = nested_delimiter_width(arena, node, source, delimiter, run_start);
+    let consumed = width.saturating_add(nested_width).min(run_len);
+    let end = run_start.checked_add(consumed)?;
+    let complete = ByteSpan::new(span.start, end);
+    complete.is_valid_for(source).then_some(complete)
+}
+
+fn emphasis_delimiter(arena: &Arena, node: NodeRef, source: &str) -> Option<(u8, usize)> {
+    let width = match arena[node].kind_data() {
+        KindData::Emphasis(_) => 1,
+        KindData::Strong(_) => 2,
+        _ => return None,
+    };
+    let start = arena[node].pos()?;
+    let delimiter = *source.as_bytes().get(start)?;
+    matches!(delimiter, b'*' | b'_').then_some((delimiter, width))
+}
+
+fn delimited_inline_boundary(arena: &Arena, node: NodeRef, source: &str) -> usize {
+    if let Some(sibling) = arena[node]
+        .next_sibling()
+        .and_then(|sibling| arena[sibling].pos())
+    {
+        return sibling;
+    }
+    let Some(parent) = arena[node].parent() else {
+        return source.len();
+    };
+    match arena[parent].kind_data() {
+        KindData::Emphasis(_) | KindData::Strong(_) => source.len(),
+        _ => {
+            node_span(arena, parent, source).map_or(source.len(), |span| span.end.min(source.len()))
+        }
+    }
+}
+
+fn find_delimiter_run(
+    source: &str,
+    start: usize,
+    limit: usize,
+    delimiter: u8,
+) -> Option<(usize, usize)> {
+    let bytes = source.as_bytes();
+    let mut cursor = start.min(limit).min(bytes.len());
+    let limit = limit.min(bytes.len());
+    while cursor < limit {
+        if bytes[cursor] != delimiter {
+            cursor += 1;
+            continue;
+        }
+        let run_start = cursor;
+        while cursor < limit && bytes[cursor] == delimiter {
+            cursor += 1;
+        }
+        return Some((run_start, cursor - run_start));
+    }
+    None
+}
+
+fn nested_delimiter_width(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    delimiter: u8,
+    run_start: usize,
+) -> usize {
+    let mut width: usize = 0;
+    for child in arena[node].children(arena) {
+        let Some((_, child_width)) = emphasis_delimiter(arena, child, source) else {
+            continue;
+        };
+        let Some(child_span) = node_span(arena, child, source) else {
+            continue;
+        };
+        if find_delimiter_run(source, child_span.end, source.len(), delimiter)
+            .is_some_and(|(child_run, _)| child_run == run_start)
+        {
+            width = width.saturating_add(child_width.saturating_add(nested_delimiter_width(
+                arena, child, source, delimiter, run_start,
+            )));
+        }
+    }
+    width
 }
 
 fn positioned_block_span(start: usize, source: &str) -> Option<ByteSpan> {
@@ -2666,13 +2810,17 @@ mod tests {
         let Value::Content(content) = positional_args[0] else {
             panic!("expected CRLF content argument")
         };
-        assert_eq!(
-            content[0],
-            Inline::Text {
-                content: "\r\n  한글\r\n".to_string(),
-                span: ByteSpan::new(7, 19),
-            }
-        );
+        assert!(content.iter().any(|inline| {
+            matches!(inline, Inline::SoftBreak { span } if &crlf[span.start..span.end] == "\r\n")
+        }));
+        let text_slices: Vec<_> = content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text { span, .. } => Some(&crlf[span.start..span.end]),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text_slices.concat(), "  한글");
 
         let malformed = concat!(".call {a} \\", "\n\nfollowing\n");
         let malformed_output = parse_with_diagnostics(malformed);
@@ -2867,16 +3015,12 @@ mod tests {
     }
 
     #[test]
-    fn content_argument_preserves_original_span_and_reports_markdown_gap() {
+    fn content_argument_preserves_supported_markdown_structure_and_spans() {
         let source = ".text {**한글**}\n";
         let content_start = source.find("**").unwrap();
         let content_end = content_start + "**한글**".len();
         let output = parse_with_diagnostics(source);
-        assert!(output.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E3010"
-                && diagnostic.span == ByteSpan::new(content_start, content_end)
-                && diagnostic.message.contains("original text")
-        }));
+        assert!(output.diagnostics.is_empty(), "{output:?}");
         let Block::DirectiveCall { arguments, .. } = &output.document.nodes[0] else {
             panic!("expected directive block")
         };
@@ -2884,13 +3028,24 @@ mod tests {
         let Value::Content(content) = positional_args[0] else {
             panic!("expected content argument")
         };
-        assert!(matches!(content.as_slice(), [Inline::Text { .. }]));
-        let Inline::Text { span, content } = &content[0] else {
-            unreachable!()
+        let [Inline::Strong {
+            content: strong_content,
+            span: strong_span,
+        }] = content.as_slice()
+        else {
+            panic!("expected one strong inline, got {content:?}");
         };
-        assert_eq!(*span, ByteSpan::new(content_start, content_end));
-        assert_eq!(content, "**한글**");
-        assert_eq!(&source[span.start..span.end], content);
+        assert_eq!(*strong_span, ByteSpan::new(content_start, content_end));
+        assert_eq!(&source[strong_span.start..strong_span.end], "**한글**");
+        let [Inline::Text {
+            content: text,
+            span: text_span,
+        }] = strong_content.as_slice()
+        else {
+            panic!("expected strong text child, got {strong_content:?}");
+        };
+        assert_eq!(text, "한글");
+        assert_eq!(&source[text_span.start..text_span.end], text);
     }
 
     #[test]

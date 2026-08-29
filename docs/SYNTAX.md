@@ -171,9 +171,10 @@ Call syntax has the following properties:
   resulting UTF-8/CRLF truncation and malformed behavior are tracked by #162.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
   arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
-  The current frontend preserves original text for Markdown inline structure
-  inside content arguments and reports `E3010`; the bounded preservation gap is
-  tracked by #160.
+  Supported Markdown inline structure in static content arguments is retained
+  as the existing source-backed `Inline` nodes, including nested calls. This is
+  parser/frontend evidence only; dynamic String/content conversion remains a
+  separate boundary.
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
