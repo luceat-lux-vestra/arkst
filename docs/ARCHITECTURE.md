@@ -213,6 +213,12 @@ compensate offsets. The range adapter is private to `scribium-markdown`; it does
 not add an arbitrary-span API to Rushdown or claim evaluator, IR, or output
 compatibility.
 
+When the selected content range contains Rushdown raw HTML or the established
+opaque angle-text boundary, the adapter retains the complete original range as
+source-backed text and keeps the existing `E3010` fallback policy where it
+applies. This preserves target-specific `.html` String bytes without turning
+raw HTML into a new #160 structured or output contract.
+
 Raw inline and block HTML recognized by Rushdown is preserved by
 `scribium-markdown` at the frontend boundary. The frontend preserves the
 original HTML content, its block or inline context, and its original

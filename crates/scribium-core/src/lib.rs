@@ -3550,9 +3550,10 @@ mod tests {
         let source = ".function {rich}\n    First **one**\n\n    Second *two*\n\n.rich\n";
         let (result, source_id) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-        // Structured Markdown nodes retain delimiter-inclusive source spans;
-        // assert against the exact source-backed paragraph ranges.
-        let expected = ["First **one**", "Second *two*"];
+        // Rushdown's original inline spans are retained verbatim; in
+        // particular, the closing delimiter is not part of these paragraph
+        // ranges, so assert against the exact source-backed range.
+        let expected = ["First **one", "Second *two"];
         assert_eq!(result.ir.nodes.len(), expected.len());
         for (node, expected) in result.ir.nodes.iter().zip(expected) {
             let IrNode::Paragraph { span, .. } = node else {

@@ -790,12 +790,26 @@ fn convert_block(
     let span = node_span(arena, node, source).and_then(|span| offset_span(span, base))?;
     match arena[node].kind_data() {
         KindData::Paragraph(_) => Some(Block::Paragraph {
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(
+                arena,
+                node,
+                source,
+                base,
+                diagnostics,
+                InlineConversionContext::Document,
+            ),
             span,
         }),
         KindData::Heading(heading) => Some(Block::Heading {
             level: heading.level() as usize,
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(
+                arena,
+                node,
+                source,
+                base,
+                diagnostics,
+                InlineConversionContext::Document,
+            ),
             span,
         }),
         KindData::ThematicBreak(_) => Some(Block::ThematicBreak { span }),
@@ -976,7 +990,14 @@ fn convert_table_row(
         .children(arena)
         .filter_map(|cell| match arena[cell].kind_data() {
             KindData::TableCell(table_cell) => Some(TableCell {
-                content: convert_inlines(arena, cell, source, base, diagnostics),
+                content: convert_inlines(
+                    arena,
+                    cell,
+                    source,
+                    base,
+                    diagnostics,
+                    InlineConversionContext::Document,
+                ),
                 alignment: match table_cell.alignment() {
                     TableCellAlignment::Left => crate::ast::TableAlignment::Left,
                     TableCellAlignment::Center => crate::ast::TableAlignment::Center,
@@ -1060,12 +1081,19 @@ fn convert_children_blocks(
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InlineConversionContext {
+    Document,
+    ContentArgument,
+}
+
 fn convert_inlines(
     arena: &Arena,
     node: NodeRef,
     source: &str,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    context: InlineConversionContext,
 ) -> Vec<Inline> {
     let mut inlines = Vec::new();
     let mut previous = None;
@@ -1078,7 +1106,7 @@ fn convert_inlines(
             previous = Some(child);
             continue;
         }
-        if let Some(inline) = convert_inline(arena, child, source, base, diagnostics) {
+        if let Some(inline) = convert_inline(arena, child, source, base, diagnostics, context) {
             // Rushdown represents the line break between adjacent code spans
             // as a zero-width text node plus a soft-break qualifier. It has no
             // semantic text and belongs to neither code span.
@@ -1320,6 +1348,7 @@ fn convert_inline(
     source: &str,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    context: InlineConversionContext,
 ) -> Option<Inline> {
     let local_span = match arena[node].kind_data() {
         KindData::CodeSpan(_) => code_span_span(arena, node, source),
@@ -1327,7 +1356,11 @@ fn convert_inline(
         KindData::Link(link) => link_span(arena, node, link, source),
         KindData::Image(image) => image_span(arena, node, image, source),
         KindData::Strikethrough(_) => strikethrough_span(arena, node, source),
-        KindData::Emphasis(_) | KindData::Strong(_) => delimited_inline_span(arena, node, source),
+        KindData::Emphasis(_) | KindData::Strong(_)
+            if context == InlineConversionContext::ContentArgument =>
+        {
+            content_delimited_inline_span(arena, node, source)
+        }
         _ => node_span(arena, node, source),
     }?;
     let span = offset_span(local_span, base)?;
@@ -1343,11 +1376,11 @@ fn convert_inline(
             })
         }
         KindData::Emphasis(_) => Some(Inline::Emphasis {
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(arena, node, source, base, diagnostics, context),
             span,
         }),
         KindData::Strong(_) => Some(Inline::Strong {
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(arena, node, source, base, diagnostics, context),
             span,
         }),
         KindData::CodeSpan(code) => Some(Inline::Code {
@@ -1356,7 +1389,7 @@ fn convert_inline(
         }),
         KindData::Link(link) => Some(Inline::Link {
             content: {
-                let content = convert_inlines(arena, node, source, base, diagnostics);
+                let content = convert_inlines(arena, node, source, base, diagnostics, context);
                 if matches!(link.link_kind(), rushdown::ast::LinkKind::Auto(_)) {
                     auto_link_content(link, source, base).unwrap_or(content)
                 } else {
@@ -1370,7 +1403,7 @@ fn convert_inline(
             span,
         }),
         KindData::Image(image) => Some(Inline::Image {
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(arena, node, source, base, diagnostics, context),
             destination: checked_value(image.destination(), source)?.to_string(),
             title: image.title_str(source).map(|title| title.into_owned()),
             span,
@@ -1382,7 +1415,7 @@ fn convert_inline(
             span,
         }),
         KindData::Strikethrough(_) => Some(Inline::Strikethrough {
-            content: convert_inlines(arena, node, source, base, diagnostics),
+            content: convert_inlines(arena, node, source, base, diagnostics, context),
             span,
         }),
         KindData::Extension(_) if matches_extension_kind!(arena, node, QuarkdownInline) => {
@@ -1546,6 +1579,13 @@ fn parse_original_content(
 
     let mut inlines = Vec::new();
     push_content_text(&mut inlines, source, span.start, span.end, base);
+    if content_requires_e3010(source, span) {
+        diagnostics.push(ParserDiagnostic {
+            code: "E3010",
+            message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because the content contains an unsupported inline construct".to_string(),
+            span: offset_span(span, base).unwrap_or(ByteSpan::new(0, 0)),
+        });
+    }
     inlines
 }
 
@@ -1577,13 +1617,39 @@ fn parse_source_backed_content(
         matches!(arena[*node].kind_data(), KindData::Paragraph(_))
             && node_span(&arena, *node, source) == Some(span)
     })?;
-    Some(convert_inlines(
+    if contains_raw_html(&arena, paragraph) {
+        return None;
+    }
+    let inlines = convert_inlines(
         &arena,
         paragraph,
         source,
         base,
         diagnostics,
-    ))
+        InlineConversionContext::ContentArgument,
+    );
+    if content_has_legacy_opaque_angle_text(source, span, &inlines) {
+        return None;
+    }
+    Some(inlines)
+}
+
+fn contains_raw_html(arena: &Arena, node: NodeRef) -> bool {
+    matches!(arena[node].kind_data(), KindData::RawHtml(_))
+        || arena[node]
+            .children(arena)
+            .any(|child| contains_raw_html(arena, child))
+}
+
+fn content_requires_e3010(source: &str, span: ByteSpan) -> bool {
+    source
+        .as_bytes()
+        .get(span.start..span.end)
+        .is_some_and(|bytes| {
+            bytes
+                .iter()
+                .any(|byte| matches!(byte, b'`' | b'*' | b'_' | b'[' | b']' | b'~'))
+        })
 }
 
 fn source_range_segments(source: &str, span: ByteSpan) -> Option<Vec<Segment>> {
@@ -1621,6 +1687,33 @@ fn push_content_text(
             });
         }
     }
+}
+
+fn content_has_legacy_opaque_angle_text(source: &str, span: ByteSpan, inlines: &[Inline]) -> bool {
+    // Preserve the established opaque-content boundary for marker-bearing
+    // text that Rushdown leaves as ordinary angle-bracket text. This is a
+    // post-parse policy check, not HTML or Markdown recognition; links and
+    // code spans keep their structured metadata because only Text nodes are
+    // inspected here.
+    content_requires_e3010(source, span)
+        && inlines.iter().any(|inline| match inline {
+            Inline::Text { span, .. } => source
+                .get(span.start..span.end)
+                .is_some_and(|text| text.contains(['<', '>'])),
+            Inline::Emphasis { content, .. }
+            | Inline::Strong { content, .. }
+            | Inline::Link { content, .. }
+            | Inline::Image { content, .. }
+            | Inline::Strikethrough { content, .. } => {
+                content_has_legacy_opaque_angle_text(source, span, content)
+            }
+            Inline::DirectiveCall { .. }
+            | Inline::Code { .. }
+            | Inline::RawHtml { .. }
+            | Inline::Unsupported { .. }
+            | Inline::HardBreak { .. }
+            | Inline::SoftBreak { .. } => false,
+        })
 }
 
 fn convert_call_segment(
@@ -1885,10 +1978,12 @@ fn node_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     span.is_valid_for(source).then_some(span)
 }
 
-fn delimited_inline_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
+fn content_delimited_inline_span(arena: &Arena, node: NodeRef, source: &str) -> Option<ByteSpan> {
     // Rushdown keeps the delimiter semantics in its AST but omits the closing
-    // delimiter from the node span. Complete only an already accepted node's
-    // source range; this does not recognize or create Markdown structure.
+    // delimiter from the node span. Content arguments need the complete
+    // source-backed range for their preserved Markdown nodes. Complete only an
+    // already accepted node's range; this does not recognize or create
+    // Markdown structure for ordinary document conversion.
     let span = node_span(arena, node, source)?;
     let Some((delimiter, width)) = emphasis_delimiter(arena, node, source) else {
         return Some(span);

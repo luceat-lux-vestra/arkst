@@ -41,28 +41,19 @@ fn target_block(node: &IrNode) -> (&str, scribium_core::SourceSpan) {
     (&content.content, content.span)
 }
 
-fn assert_inline_raw_html_output_boundary(result: &scribium_core::CompileResult) {
-    assert_eq!(
-        result.diagnostics.len(),
-        2,
-        "diagnostics: {:?}",
-        result.diagnostics
-    );
-    assert!(result
-        .diagnostics
-        .iter()
-        .all(|diagnostic| diagnostic.code == "E8001"));
-}
-
 #[test]
 fn default_compile_grants_native_content_and_evaluates_block_html() {
     let source = ".html {<div>Hello</div>}\n";
     let result = compile_source(source);
 
-    assert_inline_raw_html_output_boundary(&result);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
     assert_eq!(result.ir.nodes.len(), 1);
     let (content, span) = target_block(&result.ir.nodes[0]);
-    assert_eq!(content, "Hello");
+    assert_eq!(content, "<div>Hello</div>");
     assert_eq!(&source[span.start..span.end], ".html {<div>Hello</div>}");
 }
 
@@ -71,7 +62,11 @@ fn inline_html_preserves_order_and_utf8_surrounding_content() {
     let source = "한글 **Hello** .html {<em>world</em>}!\n";
     let result = compile_source(source);
 
-    assert_inline_raw_html_output_boundary(&result);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
     let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
         panic!("expected one paragraph, got {:?}", result.ir.nodes);
     };
@@ -87,7 +82,7 @@ fn inline_html_preserves_order_and_utf8_surrounding_content() {
             ] if before == " "
                 && after == "!"
                 && content.target == NativeTarget::Html
-                && content.content == "world"
+                && content.content == "<em>world</em>"
         ),
         "content: {content:?}"
     );
@@ -106,9 +101,13 @@ fn html_named_and_nested_arguments_use_the_normal_string_boundary() {
     assert_eq!(content, "before WORLD after");
 
     let result = compile_source(".html content:{<em>world</em>}\n");
-    assert_inline_raw_html_output_boundary(&result);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
     let (content, _) = target_block(&result.ir.nodes[0]);
-    assert_eq!(content, "world");
+    assert_eq!(content, "<em>world</em>");
 }
 
 #[test]
@@ -116,11 +115,15 @@ fn html_crlf_and_utf8_provenance_remain_source_backed() {
     let source = "한글\r\n.html {<em>세계</em>}\r\n";
     let result = compile_source(source);
 
-    assert_inline_raw_html_output_boundary(&result);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
     let IrNode::TargetSpecificContent { content } = &result.ir.nodes[1] else {
         panic!("expected target-specific block, got {:?}", result.ir.nodes);
     };
-    assert_eq!(content.content, "세계");
+    assert_eq!(content.content, "<em>세계</em>");
     assert_eq!(
         &source[content.span.start..content.span.end],
         ".html {<em>세계</em>}"
@@ -184,28 +187,8 @@ fn native_content_denial_is_one_source_backed_error_before_node_creation() {
     let result = compile_source_with_capabilities(source, Capabilities::none());
 
     assert_eq!(result.ir.nodes, Vec::<IrNode>::new());
-    assert_eq!(
-        result
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code == "E3004")
-            .count(),
-        1
-    );
-    assert_eq!(result.diagnostics.len(), 3);
-    assert_eq!(
-        result
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code == "E8001")
-            .count(),
-        2
-    );
-    let diagnostic = result
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "E3004")
-        .expect("native content denial diagnostic");
+    assert_eq!(result.diagnostics.len(), 1);
+    let diagnostic = &result.diagnostics[0];
     assert_eq!(diagnostic.code, "E3004");
     assert!(matches!(diagnostic.severity, Severity::Error));
     assert_eq!(

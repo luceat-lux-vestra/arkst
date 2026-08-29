@@ -75,19 +75,6 @@ where
     }
 }
 
-fn assert_inline_raw_html_output_boundary(result: &scribium_core::CompileResult, expected: usize) {
-    assert_eq!(
-        result.diagnostics.len(),
-        expected,
-        "diagnostics: {:?}",
-        result.diagnostics
-    );
-    assert!(result
-        .diagnostics
-        .iter()
-        .all(|diagnostic| diagnostic.code == "E8001"));
-}
-
 #[test]
 fn integration_compile_produces_valid_pdf() {
     with_typst("compile", |backend| {
@@ -825,7 +812,11 @@ fn target_specific_html_is_omitted_without_typst_source_or_source_map_entries() 
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
-    assert_inline_raw_html_output_boundary(&result, 4);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
 
     let target_span = result
         .ir
@@ -878,7 +869,11 @@ fn target_specific_html_typst_and_pdf_smoke() {
         .build()
         .expect("valid project");
     let result = compile(&project, &CompileOptions::default());
-    assert_inline_raw_html_output_boundary(&result, 2);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
     let typst = lower_to_typst_code(&result.ir);
     assert!(typst.contains("Before."));
     assert!(typst.contains("After."));

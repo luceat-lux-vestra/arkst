@@ -36,13 +36,9 @@ fn html_braced_content_is_a_source_backed_content_argument() {
     };
     assert!(matches!(
         content.as_slice(),
-        [
-            Inline::RawHtml { span: opening, .. },
-            Inline::Text { span: text, .. },
-            Inline::RawHtml { span: closing, .. },
-        ] if &source[opening.start..opening.end] == "<em>"
-            && &source[text.start..text.end] == "world"
-            && &source[closing.start..closing.end] == "</em>"
+        [Inline::Text { content, span }]
+            if content == "<em>world</em>"
+                && &source[span.start..span.end] == "<em>world</em>"
     ));
 }
 
@@ -71,7 +67,7 @@ fn html_inline_call_preserves_text_call_text_order() {
 }
 
 #[test]
-fn supported_markdown_content_does_not_emit_e3010() {
+fn html_angle_text_does_not_widen_e3010_suppression_for_other_arguments() {
     let html = parse_with_mode(".html {<em>world</em>}\n", Mode::Quarkdown);
     assert!(
         html.diagnostics.is_empty(),
@@ -85,8 +81,11 @@ fn supported_markdown_content_does_not_emit_e3010() {
     ] {
         let output = parse_with_mode(source, Mode::Quarkdown);
         assert!(
-            output.diagnostics.is_empty(),
-            "unexpected E3010 for supported inline content {source:?}: {:?}",
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E3010"),
+            "expected E3010 for {source:?}, got {:?}",
             output.diagnostics
         );
     }

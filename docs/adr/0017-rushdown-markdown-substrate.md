@@ -223,8 +223,10 @@ For a Quarkdown content argument containing supported Markdown inline markers,
 the demonstrated stage is parser/frontend structure and original-span
 preservation. This does not claim evaluator, IR, or output compatibility.
 Dynamic String/content conversion and other unsupported boundaries remain
-separate follow-up work; `E3010` is not emitted for the supported static
-frontend cases covered by #160.
+separate follow-up work. Raw HTML and the established opaque angle-text
+fallback remain source-backed text boundaries, with `E3010` retained where the
+pre-existing marker-bearing fallback requires it; `E3010` is not emitted for
+the supported static frontend cases covered by #160.
 
 The acceptance decision is `RUSHDOWN_SELECTED` under this ADR. This is a
 substrate adoption decision only; it does not select a future architecture

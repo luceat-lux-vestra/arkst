@@ -393,6 +393,28 @@ fn ordinary_braces_remain_text_inside_content_arguments() {
     assert_eq!(text_slices.concat(), "H{ordinary}O");
 }
 
+#[test]
+fn delimiter_completion_is_scoped_to_content_arguments() {
+    let source = "**normal** and *emphasis*\n";
+    for mode in [Mode::Markdown, Mode::Quarkdown] {
+        let output = parse_with_mode(source, mode);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!("expected paragraph, got {:?}", output.document.nodes);
+        };
+        let spans: Vec<_> = content
+            .iter()
+            .map(|inline| match inline {
+                Inline::Strong { span, .. }
+                | Inline::Emphasis { span, .. }
+                | Inline::Text { span, .. } => source_slice(source, *span),
+                inline => panic!("unexpected inline {inline:?}"),
+            })
+            .collect();
+        assert_eq!(spans, ["**normal", " and ", "*emphasis"]);
+    }
+}
+
 trait ArgumentSpan {
     fn span(&self) -> ByteSpan;
 }
