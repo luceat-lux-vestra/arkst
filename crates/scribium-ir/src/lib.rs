@@ -402,6 +402,12 @@ fn rewrite_raw_body_source(
     };
     match rewrite {
         SourceRewrite::Marker => {
+            if raw_body.pending_source_ref.is_some() {
+                return Err(
+                    "IR raw-body source_ref cannot be re-serialized outside its document wire context"
+                        .to_string(),
+                );
+            }
             if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
                 return Err("IR raw-body span is outside its source buffer".to_string());
             }
@@ -783,6 +789,11 @@ impl serde::Serialize for IrRawBody {
     where
         S: serde::Serializer,
     {
+        if self.pending_source_ref.is_some() {
+            return Err(serde::ser::Error::custom(
+                "IR raw-body source_ref requires a document-level serializer",
+            ));
+        }
         if self.source.slice(self.span.byte_span()).is_none() {
             return Err(serde::ser::Error::custom(
                 "IR raw-body span is outside its source buffer",
