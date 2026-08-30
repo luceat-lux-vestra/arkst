@@ -653,7 +653,11 @@ struct EvaluationContext<'a> {
     invocation_depth: Rc<RefCell<usize>>,
     transaction: Rc<RefCell<InvocationTransaction>>,
     scope_identity: Rc<ScopeIdentity>,
-    journalable: bool,
+    /// The savepoint at which this scope was created as an ephemeral scope.
+    /// Writes made by that scope at its own savepoint are dead with the scope,
+    /// while writes made from a deeper savepoint can still need rollback while
+    /// this scope remains live.
+    journal_floor: Option<usize>,
     assigned_variables: BTreeMap<String, IrValue>,
     variable_owners: BTreeSet<String>,
     forwarded_variable_owners: BTreeSet<String>,
@@ -668,6 +672,8 @@ struct ScopeIdentity {
 struct InvocationTransaction {
     savepoints: Vec<InvocationSavepoint>,
     next_scope_key: usize,
+    #[cfg(test)]
+    document_state_copy_work: usize,
 }
 
 #[derive(Default)]
@@ -678,35 +684,63 @@ struct InvocationSavepoint {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum UndoKey {
-    DocumentState,
+    DocumentState { field: DocumentStateField },
     Variable { scope: usize, name: String },
     AssignedVariable { scope: usize, name: String },
     VariableOwner { scope: usize, name: String },
     Function { scope: usize, name: String },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DocumentStateField {
+    Name,
+    Description,
+    DocumentType,
+    Authors,
+    Keywords,
+    Theme,
+    Locale,
+    CaptionPosition,
+}
+
+enum DocumentStateUndo {
+    Name(String),
+    Description(String),
+    DocumentType(scribium_ir::IrDocumentType),
+    AuthorsLen(usize),
+    Keywords(Vec<String>),
+    Theme(Option<IrDocumentTheme>),
+    Locale(Option<scribium_ir::IrDocumentLocale>),
+    CaptionPosition(IrCaptionPositionInfo),
+}
+
 enum InvocationUndo {
     DocumentState {
-        previous: DocumentState,
+        field: DocumentStateField,
+        previous: DocumentStateUndo,
     },
     Variable {
         scope: usize,
         name: String,
+        journal_floor: Option<usize>,
         previous: Option<VariableValue>,
     },
     AssignedVariable {
         scope: usize,
         name: String,
+        journal_floor: Option<usize>,
         previous: Option<IrValue>,
     },
     VariableOwner {
         scope: usize,
         name: String,
+        journal_floor: Option<usize>,
         was_present: bool,
     },
     Function {
         scope: usize,
         name: String,
+        journal_floor: Option<usize>,
         previous: Option<FunctionBinding>,
     },
 }
@@ -714,7 +748,7 @@ enum InvocationUndo {
 impl InvocationUndo {
     fn key(&self) -> UndoKey {
         match self {
-            Self::DocumentState { .. } => UndoKey::DocumentState,
+            Self::DocumentState { field, .. } => UndoKey::DocumentState { field: *field },
             Self::Variable { scope, name, .. } => UndoKey::Variable {
                 scope: *scope,
                 name: name.clone(),
@@ -743,6 +777,20 @@ impl InvocationUndo {
             | Self::Function { scope, .. } => Some(*scope),
         }
     }
+
+    fn journal_floor(&self) -> Option<usize> {
+        match self {
+            Self::DocumentState { .. } => None,
+            Self::Variable { journal_floor, .. }
+            | Self::AssignedVariable { journal_floor, .. }
+            | Self::VariableOwner { journal_floor, .. }
+            | Self::Function { journal_floor, .. } => *journal_floor,
+        }
+    }
+
+    fn is_dead_at(&self, savepoint: usize) -> bool {
+        self.journal_floor() == Some(savepoint)
+    }
 }
 
 impl InvocationTransaction {
@@ -755,6 +803,10 @@ impl InvocationTransaction {
     fn begin(&mut self, outermost: bool) {
         debug_assert_eq!(self.savepoints.is_empty(), outermost);
         self.savepoints.push(InvocationSavepoint::default());
+    }
+
+    fn current_savepoint_index(&self) -> Option<usize> {
+        self.savepoints.len().checked_sub(1)
     }
 
     fn first_write(&mut self, key: UndoKey) -> bool {
@@ -774,10 +826,16 @@ impl InvocationTransaction {
             debug_assert!(false, "invocation savepoint must be active");
             return;
         };
+        let Some(parent_index) = self.savepoints.len().checked_sub(1) else {
+            return;
+        };
         let Some(parent) = self.savepoints.last_mut() else {
             return;
         };
         for entry in child.entries {
+            if entry.is_dead_at(parent_index) {
+                continue;
+            }
             if parent.first_writes.insert(entry.key()) {
                 parent.entries.push(entry);
             }
@@ -798,6 +856,16 @@ impl InvocationTransaction {
             .iter()
             .map(|savepoint| savepoint.entries.len())
             .sum()
+    }
+
+    #[cfg(test)]
+    fn record_document_state_copy_work(&mut self, units: usize) {
+        self.document_state_copy_work = self.document_state_copy_work.saturating_add(units);
+    }
+
+    #[cfg(test)]
+    fn document_state_copy_work(&self) -> usize {
+        self.document_state_copy_work
     }
 }
 
@@ -846,7 +914,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::new(RefCell::new(0)),
             transaction,
             scope_identity,
-            journalable: true,
+            journal_floor: None,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -857,17 +925,18 @@ impl<'a> EvaluationContext<'a> {
     /// Creates a child scope with parent-visible bindings and isolated locals.
     #[allow(dead_code)]
     fn child(&self) -> Self {
-        self.child_with_journalable(self.journalable)
+        self.child_with_journal_floor(self.journal_floor)
     }
 
     /// Creates a scope whose local bindings cannot outlive this invocation.
     /// Caller-visible owner writes still travel to their real owner and are
     /// journaled there; only dead local bindings skip the transaction log.
     fn ephemeral_child(&self) -> Self {
-        self.child_with_journalable(false)
+        let journal_floor = self.transaction.borrow().current_savepoint_index();
+        self.child_with_journal_floor(journal_floor)
     }
 
-    fn child_with_journalable(&self, journalable: bool) -> Self {
+    fn child_with_journal_floor(&self, journal_floor: Option<usize>) -> Self {
         Self {
             parent: Some(Box::new(self.clone_scope_tree())),
             variables: BTreeMap::new(),
@@ -883,7 +952,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&self.invocation_depth),
             transaction: Rc::clone(&self.transaction),
             scope_identity: Self::new_scope_identity(&self.transaction),
-            journalable,
+            journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -966,7 +1035,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&self.invocation_depth),
             transaction: Rc::clone(&self.transaction),
             scope_identity: Self::new_scope_identity(&self.transaction),
-            journalable: self.journalable,
+            journal_floor: self.journal_floor,
             assigned_variables: self.assigned_variables.clone(),
             variable_owners: self.variable_owners.clone(),
             forwarded_variable_owners: self.forwarded_variable_owners.clone(),
@@ -983,11 +1052,22 @@ impl<'a> EvaluationContext<'a> {
         Rc::new(ScopeIdentity { key })
     }
 
+    fn should_journal_scope_write(&self) -> bool {
+        let Some(floor) = self.journal_floor else {
+            return true;
+        };
+        self.transaction
+            .borrow()
+            .current_savepoint_index()
+            .is_some_and(|current| current > floor)
+    }
+
     fn record_variable_before(&self, name: &str) {
-        if !self.journalable {
+        if !self.should_journal_scope_write() {
             return;
         }
         let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
         let key = UndoKey::Variable {
             scope,
             name: name.to_string(),
@@ -999,16 +1079,18 @@ impl<'a> EvaluationContext<'a> {
                 .push(InvocationUndo::Variable {
                     scope,
                     name: name.to_string(),
+                    journal_floor,
                     previous,
                 });
         }
     }
 
     fn record_assigned_variable_before(&self, name: &str) {
-        if !self.journalable {
+        if !self.should_journal_scope_write() {
             return;
         }
         let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
         let key = UndoKey::AssignedVariable {
             scope,
             name: name.to_string(),
@@ -1020,16 +1102,18 @@ impl<'a> EvaluationContext<'a> {
                 .push(InvocationUndo::AssignedVariable {
                     scope,
                     name: name.to_string(),
+                    journal_floor,
                     previous,
                 });
         }
     }
 
     fn record_variable_owner_before(&self, name: &str) {
-        if !self.journalable {
+        if !self.should_journal_scope_write() {
             return;
         }
         let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
         let key = UndoKey::VariableOwner {
             scope,
             name: name.to_string(),
@@ -1041,16 +1125,18 @@ impl<'a> EvaluationContext<'a> {
                 .push(InvocationUndo::VariableOwner {
                     scope,
                     name: name.to_string(),
+                    journal_floor,
                     was_present,
                 });
         }
     }
 
     fn record_function_before(&self, name: &str) {
-        if !self.journalable {
+        if !self.should_journal_scope_write() {
             return;
         }
         let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
         let key = UndoKey::Function {
             scope,
             name: name.to_string(),
@@ -1062,6 +1148,7 @@ impl<'a> EvaluationContext<'a> {
                 .push(InvocationUndo::Function {
                     scope,
                     name: name.to_string(),
+                    journal_floor,
                     previous,
                 });
         }
@@ -1081,8 +1168,8 @@ impl<'a> EvaluationContext<'a> {
             }
         }
         match undo {
-            InvocationUndo::DocumentState { previous } => {
-                self.restore_document_state(previous);
+            InvocationUndo::DocumentState { previous, .. } => {
+                self.restore_document_state_undo(previous);
             }
             InvocationUndo::Variable { name, previous, .. } => match previous {
                 Some(previous) => {
@@ -1121,16 +1208,22 @@ impl<'a> EvaluationContext<'a> {
         true
     }
 
-    fn record_document_state_before(&self) {
-        if self
-            .transaction
-            .borrow_mut()
-            .first_write(UndoKey::DocumentState)
-        {
-            let previous = self.document_state.borrow().clone();
+    fn record_document_state_undo<F>(&self, field: DocumentStateField, previous: F)
+    where
+        F: FnOnce() -> (DocumentStateUndo, usize),
+    {
+        let key = UndoKey::DocumentState { field };
+        if self.transaction.borrow_mut().first_write(key) {
+            let (previous, copied_units) = previous();
+            #[cfg(test)]
             self.transaction
                 .borrow_mut()
-                .push(InvocationUndo::DocumentState { previous });
+                .record_document_state_copy_work(copied_units);
+            #[cfg(not(test))]
+            let _ = copied_units;
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState { field, previous });
         }
     }
 
@@ -1317,6 +1410,10 @@ impl<'a> EvaluationContext<'a> {
         caller_context.collect_bindings(&mut variables, &mut functions);
         let mut forwarded_variable_owners = BTreeSet::new();
         caller_context.collect_variable_owners(&mut forwarded_variable_owners);
+        let journal_floor = caller_context
+            .transaction
+            .borrow()
+            .current_savepoint_index();
 
         Self {
             parent: Some(Box::new(definition_context)),
@@ -1339,7 +1436,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&caller_context.invocation_depth),
             transaction: Rc::clone(&caller_context.transaction),
             scope_identity: Self::new_scope_identity(&caller_context.transaction),
-            journalable: false,
+            journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners,
@@ -1415,27 +1512,59 @@ impl<'a> EvaluationContext<'a> {
         self.document_state.borrow().authors.clone()
     }
 
-    fn restore_document_state(&self, snapshot: DocumentState) {
-        *self.document_state.borrow_mut() = snapshot;
+    fn restore_document_state_undo(&self, undo: DocumentStateUndo) {
+        let mut state = self.document_state.borrow_mut();
+        match undo {
+            DocumentStateUndo::Name(previous) => state.name = previous,
+            DocumentStateUndo::Description(previous) => state.description = previous,
+            DocumentStateUndo::DocumentType(previous) => state.document_type = previous,
+            DocumentStateUndo::AuthorsLen(previous) => state.authors.truncate(previous),
+            DocumentStateUndo::Keywords(previous) => state.keywords = previous,
+            DocumentStateUndo::Theme(previous) => state.theme = previous,
+            DocumentStateUndo::Locale(previous) => state.locale = previous,
+            DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
+        }
     }
 
     fn set_document_state_value(&self, name: &str, value: String) {
-        self.record_document_state_before();
-        let mut state = self.document_state.borrow_mut();
         match name {
-            "docname" => state.name = value,
-            "docdescription" => state.description = value,
+            "docname" => {
+                self.record_document_state_undo(DocumentStateField::Name, || {
+                    let previous = self.document_state.borrow().name.clone();
+                    let copied_units = previous.len();
+                    (DocumentStateUndo::Name(previous), copied_units)
+                });
+                self.document_state.borrow_mut().name = value;
+            }
+            "docdescription" => {
+                self.record_document_state_undo(DocumentStateField::Description, || {
+                    let previous = self.document_state.borrow().description.clone();
+                    let copied_units = previous.len();
+                    (DocumentStateUndo::Description(previous), copied_units)
+                });
+                self.document_state.borrow_mut().description = value;
+            }
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
 
     fn set_document_type(&self, value: scribium_ir::IrDocumentType) {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::DocumentType, || {
+            (
+                DocumentStateUndo::DocumentType(self.document_state.borrow().document_type),
+                0,
+            )
+        });
         self.document_state.borrow_mut().document_type = value;
     }
 
     fn append_document_author(&self, name: String) {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::Authors, || {
+            (
+                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                0,
+            )
+        });
         self.document_state
             .borrow_mut()
             .authors
@@ -1446,31 +1575,76 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn replace_document_keywords(&self, keywords: Vec<String>) {
-        self.record_document_state_before();
-        self.document_state.borrow_mut().keywords = keywords;
+        let first_write = self
+            .transaction
+            .borrow_mut()
+            .first_write(UndoKey::DocumentState {
+                field: DocumentStateField::Keywords,
+            });
+        let previous = {
+            let mut state = self.document_state.borrow_mut();
+            if first_write {
+                Some(std::mem::replace(&mut state.keywords, keywords))
+            } else {
+                state.keywords = keywords;
+                None
+            }
+        };
+        if let Some(previous) = previous {
+            #[cfg(test)]
+            self.transaction
+                .borrow_mut()
+                .record_document_state_copy_work(0);
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState {
+                    field: DocumentStateField::Keywords,
+                    previous: DocumentStateUndo::Keywords(previous),
+                });
+        }
     }
 
     fn set_document_theme(&self, theme: IrDocumentTheme) {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::Theme, || {
+            (
+                DocumentStateUndo::Theme(self.document_state.borrow().theme.clone()),
+                0,
+            )
+        });
         self.document_state.borrow_mut().theme = Some(theme);
     }
 
     fn set_document_locale(&self, locale: scribium_ir::IrDocumentLocale) {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::Locale, || {
+            (
+                DocumentStateUndo::Locale(self.document_state.borrow().locale.clone()),
+                0,
+            )
+        });
         self.document_state.borrow_mut().locale = Some(locale);
     }
 
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::CaptionPosition, || {
+            (
+                DocumentStateUndo::CaptionPosition(self.document_state.borrow().caption_position),
+                0,
+            )
+        });
         self.document_state.borrow_mut().caption_position = caption_position;
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
-        self.record_document_state_before();
+        self.record_document_state_undo(DocumentStateField::Authors, || {
+            (
+                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                0,
+            )
+        });
         let mut state = self.document_state.borrow_mut();
         state
             .authors
-            .try_reserve_exact(authors.len())
+            .try_reserve(authors.len())
             .map_err(|error| format!("document authors cannot be allocated: {error}"))?;
         state.authors.extend(authors);
         Ok(())
@@ -8117,6 +8291,44 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
+        // Preservation evaluates nested argument/body syntax to retain the
+        // same structured form as ordinary output evaluation. It must not
+        // publish mutations from an invocation that already returned
+        // `Unresolved`; keep those evaluation effects in a disposable
+        // savepoint even when preservation itself succeeds.
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let result = self.preserve_block_call_inner(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+            diagnostics,
+            context,
+        );
+        checkpoint.restore(context);
+        context.end_invocation();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_block_call_inner(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
+        body: Option<&[IrNode]>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         validate_ordered_invocation(
             name,
             ordered_args,
@@ -8153,6 +8365,35 @@ impl Evaluator {
 
     #[allow(clippy::too_many_arguments)]
     fn preserve_inline_call(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<&[IrInline]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let result = self.preserve_inline_call_inner(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            body,
+            span,
+            diagnostics,
+            context,
+        );
+        checkpoint.restore(context);
+        context.end_invocation();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_inline_call_inner(
         &self,
         name: &str,
         ordered_args: Option<&[IrCallArgument]>,
@@ -18026,6 +18267,87 @@ mod tests {
     }
 
     #[test]
+    fn issue_167_nested_unresolved_transform_restores_live_ephemeral_owner() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.assign_value("observed".to_string(), IrValue::Number(-1.0));
+
+        let unresolved_callback = IrNode::FunctionCall {
+            name: "not_implemented".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(30, 45),
+        };
+        let callback = IrCallable {
+            parameters: Some(vec![lambda_parameter("item", 10)]),
+            body: vec![
+                var_reassignment("x", IrValue::Number(1.0)),
+                IrNode::FunctionCall {
+                    name: "ifpresent".to_string(),
+                    positional_args: vec![call_value("item", Vec::new())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: Some(vec![unresolved_callback]),
+                    raw_body: None,
+                    span: span(20, 45),
+                },
+            ],
+            span: span(10, 45),
+            capture: None,
+        };
+        let transform = IrValue::Content(vec![foreach_call(
+            IrValue::Collection(vec![IrValue::None, IrValue::String("trigger".to_string())]),
+            Some(callback.parameters.clone().unwrap()),
+            callback.body.clone(),
+        )]);
+        let otherwise = IrNode::FunctionCall {
+            name: "otherwise".to_string(),
+            positional_args: vec![transform, IrValue::String("fallback".to_string())],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(0, 50),
+        };
+        context.set_function_binding(
+            "outer".to_string(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![
+                var_declaration("x", IrValue::Number(0.0)),
+                otherwise,
+                var_reassignment("observed", call_value("x", Vec::new())),
+            ],
+            span(0, 60),
+            None,
+        );
+
+        let outcome = evaluator.evaluate_call_value(
+            "outer",
+            &[],
+            &[],
+            None,
+            None,
+            &span(0, 60),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Value(_)));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            context.get("observed").map(VariableValue::to_value),
+            Some(IrValue::Number(0.0))
+        );
+    }
+
+    #[test]
     fn issue_167_discarded_callable_locals_do_not_grow_transaction_metadata() {
         let evaluator = Evaluator::new();
         let span = span(0, 20);
@@ -18060,6 +18382,64 @@ mod tests {
         assert_eq!(values.len(), elements.len());
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        checkpoint.commit(&context);
+        context.end_invocation();
+    }
+
+    #[test]
+    fn issue_167_repeated_document_state_appends_use_bounded_undo_metadata() {
+        let evaluator = Evaluator::new();
+        let span = span(0, 20);
+        let callable = IrCallable {
+            parameters: Some(vec![lambda_parameter("value", 4)]),
+            body: vec![
+                IrNode::FunctionCall {
+                    name: "docauthor".to_string(),
+                    positional_args: vec![IrValue::String("author".to_string())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span,
+                },
+                var_ref("value"),
+            ],
+            span,
+            capture: None,
+        };
+        let elements = (0..4096)
+            .map(|value| IrValue::Number(value as f64))
+            .collect::<Vec<_>>();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let copy_work_before = context.transaction.borrow().document_state_copy_work();
+        let outcome = evaluator.map_callable_values(
+            &elements,
+            &callable,
+            IterationOptions {
+                span,
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut context,
+        );
+
+        let CallOutcome::Value(IrValue::Collection(values)) = outcome else {
+            panic!("expected a materialized callback result: {outcome:?}");
+        };
+        assert_eq!(values.len(), elements.len());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.document_authors_snapshot().len(), elements.len());
+        assert_eq!(
+            context.transaction.borrow().document_state_copy_work() - copy_work_before,
+            0,
+            "author appends must journal only the pre-append length"
+        );
+        assert_eq!(context.transaction.borrow().pending_entry_count(), 1);
         checkpoint.commit(&context);
         context.end_invocation();
     }
