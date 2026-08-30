@@ -111,7 +111,7 @@ remain compatibility debt for M3+ and later convergence.
 
 ## M3 — Programmable Documents
 
-**Status:** In progress (bounded document-state slices)
+**Status:** In progress (bounded document-state and callable slices)
 
 **Objective:** Broader components/style/layout families, remaining data loading,
 and later programmable-document convergence beyond the evidenced M2 slices.
@@ -124,6 +124,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded `.doclang` document-state semantics | Completed (bounded deterministic evaluator/IR slice; localization and rendering deferred) |
 | Bounded `.theme` document-state semantics | Completed (bounded evaluator/IR boundary; upstream block-body fallback deferred) |
 | Bounded `.captionposition` document-state semantics | Completed (bounded evaluator/IR snapshot; caption rendering deferred) |
+| Bounded Quarkdown v2.5.1 `.extend` / `.super` evaluator semantics (#169) | Completed (source-defined and regular scalar-native targets; specialized native owners and renderer/output compatibility deferred) |
 | Quarkdown v2.5.1 layout/document-configuration audit (#153) | Completed (20-row canonical inventory; #175–#178 follow the dependency bands in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
 | Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; #181–#185 and the bounded #198–#199 follow the shared engine/backend/content prerequisites in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
 | Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; implementation ordering, including #187 as the next technical work, is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md) |

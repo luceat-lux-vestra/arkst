@@ -815,7 +815,7 @@ fn normalize_children(
 fn has_lambda_body_semantics(name: &str) -> bool {
     matches!(
         name,
-        "function" | "let" | "foreach" | "repeat" | "map" | "filter" | "sorted"
+        "function" | "extend" | "let" | "foreach" | "repeat" | "map" | "filter" | "sorted"
     )
 }
 
@@ -2050,8 +2050,9 @@ fn convert_named_arg(
     call_name: Option<&str>,
 ) -> NamedArg {
     let offset = base.checked_add(call_base).unwrap_or(base);
-    let callback_lambda = arg.name == "by"
-        && call_name.is_some_and(|name| matches!(name, "map" | "filter" | "sorted"));
+    let callback_lambda = (arg.name == "by"
+        && call_name.is_some_and(|name| matches!(name, "map" | "filter" | "sorted")))
+        || (arg.name == "where" && call_name == Some("extend"));
     NamedArg {
         name: arg.name.clone(),
         name_span: offset_span(arg.name_span, offset).unwrap_or(ByteSpan::new(0, 0)),
@@ -3890,6 +3891,36 @@ mod tests {
         assert!(source.is_char_boundary(header.span.end));
         assert!(source.is_char_boundary(span.start));
         assert!(source.is_char_boundary(span.end));
+    }
+
+    #[test]
+    fn extend_body_and_where_condition_keep_contextual_lambda_metadata() {
+        let source = ".extend {greet} where:{name: .name}\n    name:\n    extended .name\n";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            lambda_header: Some(header),
+            arguments,
+            body: Some(body),
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected extend lambda metadata")
+        };
+        assert_eq!(header.parameters[0].name, "name");
+        assert_eq!(paragraph_text(&body[0]), "extended .name");
+        let where_argument = named_args(arguments)
+            .into_iter()
+            .find(|argument| argument.name == "where")
+            .expect("where condition");
+        assert!(matches!(
+            &where_argument.value,
+            Value::Lambda {
+                parameters: Some(condition_header),
+                body,
+                ..
+            } if condition_header.parameters[0].name == "name" && !body.is_empty()
+        ));
     }
 
     #[test]

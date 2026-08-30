@@ -444,6 +444,39 @@ parameter precedence, implicit-parameter precedence, and scoped owner writeback
 are implemented. Definition-capture mutation and broader mutable scope/library
 parity remain partial/deferred.
 
+### Bounded extension and `.super` evaluator slice (#169)
+
+The evaluator now implements the v2.5.1 extension contract at a bounded
+semantic boundary. `.extend` resolves a visible source-defined callable or a
+regular scalar builtin through the existing dispatch and binder paths, copies
+the target parameter contract into the wrapper, and retains the target link
+behind evaluator-owned runtime state. `where` receives the same named
+parameters as the wrapper; a false condition delegates to the current parent
+target, while a true condition invokes the wrapper body with `.super` available
+only in that active extension context.
+
+Repeated extensions insert a new wrapper immediately before the existing parent
+link, so declaration order is preserved and each `.super` call reaches the
+immediately preceding callable. Override arguments are validated by the shared
+binder and replace forwarded names without changing other target parameters.
+Definition capture, caller-visible lookup, extension-local parameters, and
+original target parameters use the ordinary single-evaluator scope layers.
+
+Registration and invocation use the existing invocation savepoints. Failed or
+unresolved extension work rolls back variable, function, callable-link, and
+field-specific `DocumentState` undo records; successful nested work merges its
+first-write records into the enclosing invocation. No extension IR, backend
+type, environment clone, or second evaluator is introduced. Independent
+regressions are in
+`crates/scribium-core/tests/quarkdown_function_extension.rs`, with contextual
+body/condition metadata covered in
+`crates/scribium-markdown/src/parser.rs`.
+
+This slice does not claim specialized layout/resource/document-state/native
+targets, generic conversion, complete upstream partial-effect behavior, or
+renderer/output compatibility. Those remain owned by their existing
+workstreams.
+
 `InvocationValue` and `ValueOrigin` from PR #105 remain mandatory. Dynamic
 textual values may use bounded target adapters; static `StringValue` does not
 gain arbitrary typed meaning. In particular, dynamic `"2"` and `"2.0"` can
@@ -491,9 +524,9 @@ The currently evidenced foundations are:
 |---|---|
 | Target behavior is classified against public Quarkdown behavior | `README.md` Feature Matrix, `GAP_INVENTORY.md`, pinned v2.5.1 sources, and `crates/scribium-test-support/src/lib.rs::ConformanceCase::verify` compatibility-level checks |
 | Evaluator contracts are documented | `ADR-0020`, this document's Normative evaluator rules, `crates/scribium-engine/src/evaluator.rs`, and `CallOutcome::{Value, NoValue, Failed, Unresolved}` |
-| Scoping and evaluation order are tested | `crates/scribium-core/src/lib.rs::compile_captured_callable_uses_definition_fallback_and_caller_shadowing`, `compile_invocation_parameters_shadow_caller_and_definition_bindings`, `compile_callable_var_updates_owner_without_overwriting_shadowing_parameter`, and `crates/scribium-engine/src/evaluator.rs::foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local` |
+| Scoping and evaluation order are tested | `crates/scribium-core/src/lib.rs::compile_captured_callable_uses_definition_fallback_and_caller_shadowing`, `compile_invocation_parameters_shadow_caller_and_definition_bindings`, `compile_callable_var_updates_owner_without_overwriting_shadowing_parameter`, `crates/scribium-core/tests/quarkdown_function_extension.rs`, and `crates/scribium-engine/src/evaluator.rs::foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local` |
 | Nested and inline/block contexts are covered | `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, and `crates/scribium-markdown/src/parser.rs::iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion` |
-| Diagnostics reference original Scribium spans | `compile_inline_foreach_failure_is_atomic_and_source_backed`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`, stacked invalid-argument/body tests in `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, and source-span assertions in the frontend/AST-to-IR tests |
+| Diagnostics reference original Scribium spans | `compile_inline_foreach_failure_is_atomic_and_source_backed`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`, extension UTF-8/CRLF and nested-diagnostic tests in `crates/scribium-core/tests/quarkdown_function_extension.rs`, stacked invalid-argument/body tests in `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, and source-span assertions in the frontend/AST-to-IR tests |
 | AST → evaluator → IR behavior is deterministic | `crates/scribium-core/src/lib.rs::source_ids_are_independent_of_builder_insertion_order`, `compile_result_is_independent_of_source_insertion_order`, `crates/scribium-engine/src/evaluator.rs::evaluation_is_immutable_and_deterministic`, and `crates/scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels` |
 | Compatibility docs distinguish supported semantics from parsed-only syntax | README compatibility levels and Feature Matrix, `GAP_INVENTORY.md` classification rows, and semantic IR/Typst/diagnostic golden requirements in `fixtures/quarkdown-conformance/README.md` |
 | Implemented component slices cross the backend boundary | `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, `crates/scribium-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, and `crates/scribium-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` |
@@ -504,8 +537,8 @@ v2.5.1 compatibility.
 
 Major deferred families remain separately tracked: the complete public
 stdlib/component/style/layout surface; generalized DynamicValue conversion and
-arbitrary inline component/callback bodies; `.extend`, `.box`, `.clip`,
-`.figure`, `.float`, `.fullspan`, and broader layout families; remaining
+arbitrary inline component/callback bodies; `.box`, `.clip`, `.figure`, `.float`,
+`.fullspan`, and broader layout families; remaining
 document-context and data-loading functions; host/process/environment
 semantics; and unrelated M3+ work. Raw HTML policy and behavior in issue #58
 are separate and are not part of this closure audit.

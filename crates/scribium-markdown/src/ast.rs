@@ -76,7 +76,7 @@ pub enum Block {
         body: Option<Vec<Block>>,
         raw_body: Option<RawBody>,
         /// Contextual lambda metadata for calls with lambda body semantics
-        /// (`.function`, `.let`, `.foreach`, and `.repeat`). Other call bodies deliberately
+        /// (`.function`, `.extend`, `.let`, `.foreach`, and `.repeat`). Other call bodies deliberately
         /// remain ordinary Markdown structures.
         lambda_header: Option<LambdaHeader>,
         span: ByteSpan,
