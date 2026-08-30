@@ -11,7 +11,8 @@ use crate::value_conversion::ValueOrigin;
 use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
 use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
-use scribium_source::{SourceId, SourceSpan};
+use scribium_source::SourceId;
+use scribium_source::SourceSpan;
 
 #[cfg(test)]
 type Arguments<'a> = &'a [InvocationValue];
@@ -29,6 +30,8 @@ pub(crate) struct BuiltinError {
 pub(crate) struct BuiltinConversionFailure {
     pub(crate) parameter: String,
     pub(crate) error: value_conversion::ConversionError,
+    pub(crate) candidate_span: Option<SourceSpan>,
+    pub(crate) parameter_span: Option<SourceSpan>,
 }
 
 impl BuiltinError {
@@ -526,7 +529,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, &bound)
+    evaluate_bound(builtin, bound)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
@@ -534,17 +537,30 @@ pub(crate) fn evaluate_with_origins(
 /// positional/named assignment or argument-count validation.
 pub(crate) fn evaluate_bound(
     builtin: &BuiltinSpec,
-    bound: &BoundInvocation<InvocationValue>,
+    bound: BoundInvocation<InvocationValue>,
 ) -> Result<IrValue, BuiltinError> {
-    let arguments = bound
+    let candidate_spans = bound
         .slots
         .iter()
         .map(|slot| match slot {
-            BoundSlot::Explicit { value, .. } => Some(value.clone()),
+            BoundSlot::Explicit { span, .. } => Some(*span),
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        })
+        .collect::<Vec<_>>();
+    let parameter_spans = bound
+        .parameters
+        .iter()
+        .map(|parameter| parameter.name_span)
+        .collect::<Vec<_>>();
+    let arguments = bound
+        .slots
+        .into_iter()
+        .map(|slot| match slot {
+            BoundSlot::Explicit { value, .. } => Some(value),
             BoundSlot::Omitted | BoundSlot::Defaulted => None,
         })
         .collect::<BoundArguments>();
-    match builtin.kind {
+    let result = match builtin.kind {
         BuiltinKind::Sum
         | BuiltinKind::Subtract
         | BuiltinKind::Multiply
@@ -574,7 +590,21 @@ pub(crate) fn evaluate_bound(
         BuiltinKind::IsLower | BuiltinKind::IsGreater => evaluate_ordering(builtin, arguments),
         BuiltinKind::Equals => evaluate_equals(builtin, arguments),
         BuiltinKind::Not => evaluate_not(builtin, arguments),
-    }
+    };
+    result.map_err(|mut error| {
+        if let Some(conversion) = error.conversion.as_mut() {
+            let parameter_index = builtin
+                .signature
+                .parameter_names
+                .iter()
+                .position(|name| *name == conversion.parameter);
+            conversion.candidate_span =
+                parameter_index.and_then(|index| candidate_spans.get(index).copied().flatten());
+            conversion.parameter_span =
+                parameter_index.and_then(|index| parameter_spans.get(index).copied().flatten());
+        }
+        error
+    })
 }
 
 fn evaluate_ordering(
@@ -1265,6 +1295,8 @@ fn conversion_error(
         conversion: Some(BuiltinConversionFailure {
             parameter: parameter.to_string(),
             error,
+            candidate_span: None,
+            parameter_span: None,
         }),
     }
 }

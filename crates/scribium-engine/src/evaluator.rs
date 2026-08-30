@@ -638,7 +638,6 @@ impl Drop for EvaluationDepthGuard {
 /// published at the callable boundary. The snapshot is deliberate: a lambda
 /// observes the bindings visible when it is entered, while new locals cannot
 /// leak back.
-#[derive(Clone)]
 struct EvaluationContext<'a> {
     parent: Option<Box<EvaluationContext<'a>>>,
     variables: BTreeMap<String, VariableValue>,
@@ -652,47 +651,126 @@ struct EvaluationContext<'a> {
     limits: EvaluationLimits,
     runtime: Rc<RefCell<EvaluationRuntime>>,
     invocation_depth: Rc<RefCell<usize>>,
+    transaction: Rc<RefCell<InvocationTransaction>>,
+    scope_identity: Rc<ScopeIdentity>,
     assigned_variables: BTreeMap<String, IrValue>,
     variable_owners: BTreeSet<String>,
     forwarded_variable_owners: BTreeSet<String>,
     parameter_names: BTreeSet<String>,
 }
 
-#[derive(Clone)]
-struct VariableStateSnapshot {
-    variables: BTreeMap<String, VariableValue>,
-    assigned_variables: BTreeMap<String, IrValue>,
-    variable_owners: BTreeSet<String>,
-    forwarded_variable_owners: BTreeSet<String>,
-    parent: Option<Box<VariableStateSnapshot>>,
+struct ScopeIdentity {
+    key: usize,
 }
 
-/// Evaluator-private invocation checkpoint. Only mutable evaluator state is
-/// captured; the IR, resource provider, runtime depth counter, and backend
-/// state are deliberately outside this transaction boundary. Calls are
-/// fail-fast, so one checkpoint is owned by the outermost invocation in a
-/// call tree; successful nested calls contribute to that same eventual commit
-/// and do not create nested state clones.
-#[derive(Clone)]
+#[derive(Default)]
+struct InvocationTransaction {
+    active: bool,
+    entries: Vec<InvocationUndo>,
+    first_writes: BTreeSet<UndoKey>,
+    next_scope_key: usize,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum UndoKey {
+    Variable { scope: usize, name: String },
+    AssignedVariable { scope: usize, name: String },
+    VariableOwner { scope: usize, name: String },
+    Function { scope: usize, name: String },
+}
+
+enum InvocationUndo {
+    Variable {
+        scope: usize,
+        name: String,
+        previous: Option<VariableValue>,
+    },
+    AssignedVariable {
+        scope: usize,
+        name: String,
+        previous: Option<IrValue>,
+    },
+    VariableOwner {
+        scope: usize,
+        name: String,
+        was_present: bool,
+    },
+    Function {
+        scope: usize,
+        name: String,
+        previous: Option<FunctionBinding>,
+    },
+}
+
+impl InvocationUndo {
+    fn scope(&self) -> usize {
+        match self {
+            Self::Variable { scope, .. }
+            | Self::AssignedVariable { scope, .. }
+            | Self::VariableOwner { scope, .. }
+            | Self::Function { scope, .. } => *scope,
+        }
+    }
+}
+
+impl InvocationTransaction {
+    fn allocate_scope_key(&mut self) -> usize {
+        let key = self.next_scope_key;
+        self.next_scope_key += 1;
+        key
+    }
+
+    fn begin(&mut self) {
+        debug_assert!(!self.active);
+        self.active = true;
+        self.entries.clear();
+        self.first_writes.clear();
+    }
+
+    fn first_write(&mut self, key: UndoKey) -> bool {
+        self.active && self.first_writes.insert(key)
+    }
+
+    fn finish(&mut self) {
+        self.active = false;
+        self.entries.clear();
+        self.first_writes.clear();
+    }
+
+    fn take_entries(&mut self) -> Vec<InvocationUndo> {
+        self.active = false;
+        self.first_writes.clear();
+        std::mem::take(&mut self.entries)
+    }
+}
+
+/// Evaluator-private invocation checkpoint. The bounded document state is
+/// snapshotted once; variables, writeback metadata, and function bindings use
+/// the shared first-write journal below. The IR, resource provider, runtime
+/// depth counter, and backend state are deliberately outside this transaction
+/// boundary. Calls are fail-fast, so one checkpoint is owned by the outermost
+/// invocation in a call tree.
 struct InvocationCheckpoint {
     document_state: Option<DocumentState>,
-    variables: Option<VariableStateSnapshot>,
 }
 
 impl InvocationCheckpoint {
-    fn capture(context: &EvaluationContext<'_>, capture_variables: bool) -> Self {
+    fn capture(context: &EvaluationContext<'_>, outermost: bool) -> Self {
         Self {
-            document_state: capture_variables.then(|| context.document_state.borrow().clone()),
-            variables: capture_variables.then(|| context.snapshot_variables()),
+            document_state: outermost.then(|| context.document_state.borrow().clone()),
         }
     }
 
     fn restore(self, context: &mut EvaluationContext<'_>) {
         if let Some(document_state) = self.document_state {
             context.restore_document_state(document_state);
+            context.rollback_transaction();
         }
-        if let Some(variables) = self.variables {
-            context.restore_variables(&variables);
+    }
+
+    fn commit(self, context: &EvaluationContext<'_>) {
+        if self.document_state.is_some() {
+            context.commit_transaction();
         }
     }
 }
@@ -703,6 +781,8 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn with_limits(limits: EvaluationLimits) -> Self {
+        let transaction = Rc::new(RefCell::new(InvocationTransaction::default()));
+        let scope_identity = Self::new_scope_identity(&transaction);
         Self {
             parent: None,
             variables: BTreeMap::new(),
@@ -716,6 +796,8 @@ impl<'a> EvaluationContext<'a> {
             limits,
             runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
             invocation_depth: Rc::new(RefCell::new(0)),
+            transaction,
+            scope_identity,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -727,7 +809,7 @@ impl<'a> EvaluationContext<'a> {
     #[allow(dead_code)]
     fn child(&self) -> Self {
         Self {
-            parent: Some(Box::new(self.clone())),
+            parent: Some(Box::new(self.clone_scope_tree())),
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             lambda_scope: None,
@@ -739,6 +821,8 @@ impl<'a> EvaluationContext<'a> {
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
             invocation_depth: Rc::clone(&self.invocation_depth),
+            transaction: Rc::clone(&self.transaction),
+            scope_identity: Self::new_scope_identity(&self.transaction),
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -784,6 +868,9 @@ impl<'a> EvaluationContext<'a> {
     fn begin_invocation(&self) -> bool {
         let mut depth = self.invocation_depth.borrow_mut();
         let outermost = *depth == 0;
+        if outermost {
+            self.transaction.borrow_mut().begin();
+        }
         *depth += 1;
         outermost
     }
@@ -794,8 +881,180 @@ impl<'a> EvaluationContext<'a> {
         *depth = depth.saturating_sub(1);
     }
 
+    fn commit_transaction(&self) {
+        self.transaction.borrow_mut().finish();
+    }
+
+    fn rollback_transaction(&mut self) {
+        let entries = self.transaction.borrow_mut().take_entries();
+        for entry in entries.into_iter().rev() {
+            self.restore_undo(entry);
+        }
+    }
+
+    fn clone_scope_tree(&self) -> Self {
+        Self {
+            parent: self
+                .parent
+                .as_deref()
+                .map(|parent| Box::new(parent.clone_scope_tree())),
+            variables: self.variables.clone(),
+            functions: self.functions.clone(),
+            lambda_scope: self.lambda_scope.clone(),
+            resources: self.resources,
+            metadata_defaults: self.metadata_defaults.clone(),
+            current_source: self.current_source,
+            active_sources: self.active_sources.clone(),
+            document_state: Rc::clone(&self.document_state),
+            limits: self.limits,
+            runtime: Rc::clone(&self.runtime),
+            invocation_depth: Rc::clone(&self.invocation_depth),
+            transaction: Rc::clone(&self.transaction),
+            scope_identity: Self::new_scope_identity(&self.transaction),
+            assigned_variables: self.assigned_variables.clone(),
+            variable_owners: self.variable_owners.clone(),
+            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
+            parameter_names: self.parameter_names.clone(),
+        }
+    }
+
+    fn scope_key(&self) -> usize {
+        self.scope_identity.key
+    }
+
+    fn new_scope_identity(transaction: &Rc<RefCell<InvocationTransaction>>) -> Rc<ScopeIdentity> {
+        let key = transaction.borrow_mut().allocate_scope_key();
+        Rc::new(ScopeIdentity { key })
+    }
+
+    fn record_variable_before(&self, name: &str) {
+        let scope = self.scope_key();
+        let key = UndoKey::Variable {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.variables.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .entries
+                .push(InvocationUndo::Variable {
+                    scope,
+                    name: name.to_string(),
+                    previous,
+                });
+        }
+    }
+
+    fn record_assigned_variable_before(&self, name: &str) {
+        let scope = self.scope_key();
+        let key = UndoKey::AssignedVariable {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.assigned_variables.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .entries
+                .push(InvocationUndo::AssignedVariable {
+                    scope,
+                    name: name.to_string(),
+                    previous,
+                });
+        }
+    }
+
+    fn record_variable_owner_before(&self, name: &str) {
+        let scope = self.scope_key();
+        let key = UndoKey::VariableOwner {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let was_present = self.variable_owners.contains(name);
+            self.transaction
+                .borrow_mut()
+                .entries
+                .push(InvocationUndo::VariableOwner {
+                    scope,
+                    name: name.to_string(),
+                    was_present,
+                });
+        }
+    }
+
+    fn record_function_before(&self, name: &str) {
+        let scope = self.scope_key();
+        let key = UndoKey::Function {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.functions.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .entries
+                .push(InvocationUndo::Function {
+                    scope,
+                    name: name.to_string(),
+                    previous,
+                });
+        }
+    }
+
+    fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
+        if self.scope_key() != undo.scope() {
+            // Callable-local scope trees may be dropped before the outer
+            // invocation rolls back. Those writes are already unreachable;
+            // caller-visible scopes remain rooted at this context and are
+            // restored by their stable scope identity.
+            return self
+                .parent
+                .as_mut()
+                .is_some_and(|parent| parent.restore_undo(undo));
+        }
+        match undo {
+            InvocationUndo::Variable { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.variables.insert(name, previous);
+                }
+                None => {
+                    self.variables.remove(&name);
+                }
+            },
+            InvocationUndo::AssignedVariable { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.assigned_variables.insert(name, previous);
+                }
+                None => {
+                    self.assigned_variables.remove(&name);
+                }
+            },
+            InvocationUndo::VariableOwner {
+                name, was_present, ..
+            } => {
+                if was_present {
+                    self.variable_owners.insert(name);
+                } else {
+                    self.variable_owners.remove(&name);
+                }
+            }
+            InvocationUndo::Function { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.functions.insert(name, previous);
+                }
+                None => {
+                    self.functions.remove(&name);
+                }
+            },
+        }
+        true
+    }
+
     /// Declares or reassigns a variable from an evaluated IrValue, preserving content semantics.
     fn set_value(&mut self, name: String, value: IrValue) {
+        self.record_variable_before(&name);
         self.variables
             .insert(name, VariableValue::from_evaluated_value(value));
     }
@@ -817,9 +1076,11 @@ impl<'a> EvaluationContext<'a> {
                 self.set_value(name.clone(), value.clone());
             }
             if !has_forwarded_owner {
+                self.record_variable_owner_before(&name);
                 self.variable_owners.insert(name.clone());
             }
         }
+        self.record_assigned_variable_before(&name);
         self.assigned_variables.insert(name, value);
     }
 
@@ -836,6 +1097,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.assign_to_owner(&name, value.clone()) {
             return false;
         }
+        self.record_assigned_variable_before(&name);
         self.assigned_variables.insert(name, value);
         true
     }
@@ -888,31 +1150,6 @@ impl<'a> EvaluationContext<'a> {
         owners.extend(self.forwarded_variable_owners.iter().cloned());
     }
 
-    fn snapshot_variables(&self) -> VariableStateSnapshot {
-        VariableStateSnapshot {
-            variables: self.variables.clone(),
-            assigned_variables: self.assigned_variables.clone(),
-            variable_owners: self.variable_owners.clone(),
-            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
-            parent: self
-                .parent
-                .as_deref()
-                .map(|parent| Box::new(parent.snapshot_variables())),
-        }
-    }
-
-    fn restore_variables(&mut self, snapshot: &VariableStateSnapshot) {
-        self.variables = snapshot.variables.clone();
-        self.assigned_variables = snapshot.assigned_variables.clone();
-        self.variable_owners = snapshot.variable_owners.clone();
-        self.forwarded_variable_owners = snapshot.forwarded_variable_owners.clone();
-        match (&mut self.parent, &snapshot.parent) {
-            (Some(parent), Some(snapshot)) => parent.restore_variables(snapshot),
-            (None, None) => {}
-            _ => unreachable!("variable snapshot must match its context shape"),
-        }
-    }
-
     /// Installs a user-function binding in the current local scope.
     fn set_function_binding(
         &mut self,
@@ -922,6 +1159,7 @@ impl<'a> EvaluationContext<'a> {
         declaration_span: SourceSpan,
         capture: Option<Box<IrCallableCapture>>,
     ) {
+        self.record_function_before(&name);
         self.functions.insert(
             name,
             FunctionBinding {
@@ -1017,6 +1255,8 @@ impl<'a> EvaluationContext<'a> {
             limits: caller_context.limits,
             runtime: Rc::clone(&caller_context.runtime),
             invocation_depth: Rc::clone(&caller_context.invocation_depth),
+            transaction: Rc::clone(&caller_context.transaction),
+            scope_identity: Self::new_scope_identity(&caller_context.transaction),
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners,
@@ -2013,6 +2253,8 @@ impl Evaluator {
         );
         if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
             checkpoint.restore(context);
+        } else {
+            checkpoint.commit(context);
         }
         context.end_invocation();
         outcome
@@ -2544,30 +2786,16 @@ impl Evaluator {
                     Ok(bound) => bound,
                     Err(outcome) => return outcome,
                 };
-            return match builtins::evaluate_bound(builtin, &bound) {
+            return match builtins::evaluate_bound(builtin, bound) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {
                     if let Some(conversion) = error.conversion {
-                        let parameter_index = builtin
-                            .signature
-                            .parameter_names
-                            .iter()
-                            .position(|name| *name == conversion.parameter);
-                        let candidate_span = parameter_index.and_then(|index| {
-                            bound.slots.get(index).and_then(|slot| match slot {
-                                BoundSlot::Explicit { span, .. } => Some(*span),
-                                BoundSlot::Omitted | BoundSlot::Defaulted => None,
-                            })
-                        });
-                        let parameter_span = parameter_index
-                            .and_then(|index| bound.parameters.get(index))
-                            .and_then(|parameter| parameter.name_span);
                         diagnostics.push(conversion_failure_diagnostic(
                             value_conversion::ConversionFailure::new(
                                 conversion.error,
-                                candidate_span,
+                                conversion.candidate_span,
                                 Some(conversion.parameter),
-                                parameter_span,
+                                conversion.parameter_span,
                                 *span,
                             ),
                             Some(error.message.as_str()),
@@ -4414,7 +4642,7 @@ impl Evaluator {
                         return CallOutcome::Failed;
                     }
                     Err(error) => {
-                        diagnostics.push(conversion_failure_diagnostic(
+                        diagnostics.push(conversion_failure_diagnostic_with_detail(
                             value_conversion::ConversionFailure::new(
                                 error,
                                 Some(argument_span),
@@ -4423,6 +4651,7 @@ impl Evaluator {
                                 *span,
                             ),
                             Some("`.captionposition`"),
+                            Some("allowed values are `top` or `bottom`"),
                         ));
                         return CallOutcome::Failed;
                     }
@@ -6355,7 +6584,6 @@ impl Evaluator {
                 callback
             }
         };
-        let variable_snapshot = context.snapshot_variables();
         let callback_result = match self.invoke_callable(
             &callable,
             vec![value.clone()],
@@ -6369,17 +6597,10 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(callable.span));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
-            CallOutcome::Failed => {
-                context.restore_variables(&variable_snapshot);
-                return CallOutcome::Failed;
-            }
-            CallOutcome::Unresolved => {
-                context.restore_variables(&variable_snapshot);
-                return CallOutcome::Unresolved;
-            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+            CallOutcome::Unresolved => return CallOutcome::Unresolved,
         };
 
         if name == "ifpresent" {
@@ -6391,7 +6612,6 @@ impl Evaluator {
                 "`.takeif` condition must return Boolean".to_string(),
                 value_source_span(&callback_result, &callable.span),
             ));
-            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         };
         if condition {
@@ -6639,7 +6859,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6659,17 +6878,10 @@ impl Evaluator {
                 CallOutcome::Value(value) => results.push(value),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(options.span));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Unresolved => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Unresolved;
-                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
             }
         }
         CallOutcome::Value(IrValue::Collection(results))
@@ -6688,7 +6900,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6711,24 +6922,16 @@ impl Evaluator {
                 CallOutcome::Value(value) => value,
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(callable.span));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Unresolved => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Unresolved;
-                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
             };
             let Some(keep) = scalar_boolean_value(&predicate) else {
                 diagnostics.push(iteration_error(
                     "`.filter` predicate must return Boolean".to_string(),
                     value_source_span(&predicate, &callable.span),
                 ));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             };
             if keep {
@@ -6751,7 +6954,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut keyed = Vec::new();
         if let Err(error) = keyed.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6775,17 +6977,10 @@ impl Evaluator {
                     CallOutcome::Value(value) => value,
                     CallOutcome::NoValue => {
                         diagnostics.push(no_value_required(callable.span));
-                        context.restore_variables(&variable_snapshot);
                         return CallOutcome::Failed;
                     }
-                    CallOutcome::Failed => {
-                        context.restore_variables(&variable_snapshot);
-                        return CallOutcome::Failed;
-                    }
-                    CallOutcome::Unresolved => {
-                        context.restore_variables(&variable_snapshot);
-                        return CallOutcome::Unresolved;
-                    }
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
                 },
                 None => element.clone(),
             };
@@ -6793,7 +6988,6 @@ impl Evaluator {
                 Ok(key) => key,
                 Err(message) => {
                     diagnostics.push(iteration_error(message, value_source_span(&key, &span)));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
             };
@@ -6809,7 +7003,6 @@ impl Evaluator {
                     "`.sorted` does not compare heterogeneous key types".to_string(),
                     span,
                 ));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
         }
@@ -6820,7 +7013,6 @@ impl Evaluator {
                 format!("sorted result collection cannot be allocated: {error}"),
                 span,
             ));
-            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         }
         sorted.extend(keyed.into_iter().map(|(value, _)| value));
@@ -11257,6 +11449,14 @@ fn conversion_failure_diagnostic(
     failure: value_conversion::ConversionFailure,
     context: Option<&str>,
 ) -> Diagnostic {
+    conversion_failure_diagnostic_with_detail(failure, context, None)
+}
+
+fn conversion_failure_diagnostic_with_detail(
+    failure: value_conversion::ConversionFailure,
+    context: Option<&str>,
+    detail: Option<&str>,
+) -> Diagnostic {
     let (reason, target) = match failure.error {
         value_conversion::ConversionError::InvalidText { target } => {
             ("invalid text", target.label())
@@ -11270,11 +11470,14 @@ fn conversion_failure_diagnostic(
         .as_deref()
         .map(|name| format!(" for parameter `{name}`"))
         .unwrap_or_default();
+    let detail = detail
+        .map(|detail| format!("; {detail}"))
+        .unwrap_or_default();
     let message = match context {
         Some(context) => {
-            format!("{context}: {reason} for target {target}{parameter}")
+            format!("{context}: {reason} for target {target}{parameter}{detail}")
         }
-        None => format!("target conversion: {reason} for target {target}{parameter}"),
+        None => format!("target conversion: {reason} for target {target}{parameter}{detail}"),
     };
     let primary = failure
         .candidate_span
@@ -17511,6 +17714,30 @@ mod tests {
         assert_eq!(diagnostics[0].primary, Some(candidate_span));
 
         diagnostics.clear();
+        let invalid_caption = evaluator.evaluate_call_value(
+            "captionposition",
+            &[],
+            &[named_arg_at(
+                "default",
+                IrValue::String("middle".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid_caption, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert!(diagnostics[0]
+            .message
+            .contains("allowed values are `top` or `bottom`"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+
+        diagnostics.clear();
         let wrong_domain = evaluator.evaluate_call_value(
             "align",
             &[],
@@ -17563,6 +17790,84 @@ mod tests {
             .message
             .contains("unsupported value category"));
         assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_function_bindings_roll_back_in_local_and_parent_scopes() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 80);
+        let mut diagnostics = Vec::new();
+        let mut parent = EvaluationContext::new();
+        parent.set_function("parent_fn".to_string(), Vec::new());
+        let mut context = parent.child();
+        context.set_function("local_fn".to_string(), Vec::new());
+        let body = vec![
+            IrNode::FunctionDeclaration {
+                name: IrValue::Identifier("leaked".to_string()),
+                parameters: Vec::new(),
+                body: vec![text_paragraph("leaked")],
+                span: span(10, 20),
+            },
+            IrNode::FunctionDeclaration {
+                name: IrValue::Identifier("local_fn".to_string()),
+                parameters: Vec::new(),
+                body: vec![text_paragraph("replacement")],
+                span: span(21, 31),
+            },
+            IrNode::FunctionCall {
+                name: "sum".to_string(),
+                positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(32, 48),
+            },
+        ];
+
+        let outcome = evaluator.evaluate_call_value(
+            "container",
+            &[],
+            &[],
+            Some(CallBody::Block(&body)),
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(context.get_function("leaked").is_none());
+        assert_eq!(
+            context.get_function("local_fn").unwrap().declaration_span,
+            SourceSpan::new(SourceId(0), 0, 0)
+        );
+        assert!(context.get_function("parent_fn").is_some());
+        assert!(parent.get_function("leaked").is_none());
+        assert!(parent.get_function("parent_fn").is_some());
+    }
+
+    #[test]
+    fn issue_167_function_binding_undo_reaches_parent_scope() {
+        let mut context = EvaluationContext::new().child();
+        let outermost = context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture(&context, outermost);
+        context
+            .parent
+            .as_mut()
+            .expect("child has a parent scope")
+            .set_function("parent_leaked".to_string(), Vec::new());
+
+        checkpoint.restore(&mut context);
+        context.end_invocation();
+
+        assert!(context.get_function("parent_leaked").is_none());
+        assert!(context
+            .parent
+            .as_deref()
+            .is_some_and(|parent| parent.get_function("parent_leaked").is_none()));
     }
 
     fn mutating_typed_candidate(variable_name: &str) -> IrValue {
