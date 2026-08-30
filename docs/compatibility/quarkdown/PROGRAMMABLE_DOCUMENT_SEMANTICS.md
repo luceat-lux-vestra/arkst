@@ -449,8 +449,8 @@ parity remain partial/deferred.
 The evaluator now implements the v2.5.1 extension contract at a bounded
 semantic boundary. `.extend` resolves a visible source-defined callable or a
 regular scalar builtin through the existing dispatch and binder paths, copies
-the target parameter contract into the wrapper, and retains the target link
-behind evaluator-owned runtime state. `where` receives the same named
+the target parameter contract into the wrapper, and retains an immutable
+declaration-time parent link plus a scope-local evaluator overlay. `where` receives the same named
 parameters as the wrapper; a false condition delegates to the current parent
 target, while a true condition invokes the wrapper body with `.super` available
 only in that active extension context.
@@ -463,10 +463,11 @@ Definition capture, caller-visible lookup, extension-local parameters, and
 original target parameters use the ordinary single-evaluator scope layers.
 
 Registration and invocation use the existing invocation savepoints. Failed or
-unresolved extension work rolls back variable, function, callable-link, and
-field-specific `DocumentState` undo records; successful nested work merges its
-first-write records into the enclosing invocation. No extension IR, backend
-type, environment clone, or second evaluator is introduced. Independent
+unresolved extension work rolls back variable, function, scope-local link
+overlay, and field-specific `DocumentState` undo records; successful nested
+work merges its first-write records into the enclosing invocation without
+restoring a live overlay at child commit. No extension IR, backend type,
+environment clone, or second evaluator is introduced. Independent
 regressions are in
 `crates/scribium-core/tests/quarkdown_function_extension.rs`, with contextual
 body/condition metadata covered in

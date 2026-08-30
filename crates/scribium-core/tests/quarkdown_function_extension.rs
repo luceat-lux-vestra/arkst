@@ -159,6 +159,14 @@ fn super_outside_extension_is_deterministic_failure() {
 }
 
 #[test]
+fn source_defined_super_is_callable_outside_but_shadowed_inside_extensions() {
+    let source = ".function {super}\n    value:\n    source .value\n\n.function {greet}\n    name:\n    base .name\n\n.extend {greet}\n    name:\n    .super\n\n.super {outside}\n.greet {inside}\n";
+    let result = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_texts(&result), ["source outside", "base inside"]);
+}
+
+#[test]
 fn extension_condition_failure_is_not_double_wrapped() {
     let source = ".function {greet}\n    name:\n    base .name\n\n.extend {greet} where:{name: .sum {true} {2}}\n    name:\n    extended\n\n.greet {world}\n";
     let result = compile_source(source);
@@ -227,11 +235,14 @@ fn extension_can_write_a_caller_visible_variable_on_success() {
 }
 
 #[test]
-fn chained_extension_registration_in_a_local_scope_does_not_leak() {
-    let source = ".function {greet}\n    name:\n    base .name\n\n.extend {greet}\n    name:\n    first\n    .super\n\n.function {register}\n    .extend {greet}\n        name:\n        leaked .super\n\n.register\n.greet {world}\n";
+fn local_chained_extension_is_visible_until_the_callable_scope_ends() {
+    let source = ".function {greet}\n    name:\n    base .name\n\n.extend {greet}\n    name:\n    first\n    .super\n\n.function {register}\n    name:\n    .extend {greet}\n        name:\n        local .super\n    .greet {.name}\n\n.register {world}\n.greet {world}\n";
     let result = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert_eq!(paragraph_texts(&result), ["first", "base world"]);
+    assert_eq!(
+        paragraph_texts(&result),
+        ["first", "local base world", "first", "base world"]
+    );
 }
 
 #[test]
