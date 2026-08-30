@@ -111,6 +111,15 @@ impl<T> Candidate<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundInvocation<T> {
     pub(crate) slots: Vec<BoundSlot<T>>,
+    /// Parameter identity remains aligned with `slots` so later target
+    /// conversion can retain declaration or named-argument provenance.
+    pub(crate) parameters: Vec<BoundParameter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BoundParameter {
+    pub(crate) name: String,
+    pub(crate) name_span: Option<SourceSpan>,
 }
 
 /// A structural binding decision that can be carried across candidate
@@ -119,6 +128,7 @@ pub(crate) struct BoundInvocation<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BindingPlan {
     slots: Vec<PlannedSlot>,
+    parameters: Vec<BoundParameter>,
     candidate_count: usize,
     binds_body: bool,
 }
@@ -346,6 +356,13 @@ pub(crate) fn plan<T>(
     }
     Ok(BindingPlan {
         slots: planned,
+        parameters: parameters
+            .iter()
+            .map(|parameter| BoundParameter {
+                name: parameter.name.to_string(),
+                name_span: parameter.name_span,
+            })
+            .collect(),
         candidate_count: candidates.len(),
         binds_body: matches!(body_policy, BodyPolicy::BindFinal) && body.is_some(),
     })
@@ -364,33 +381,64 @@ impl BindingPlan {
             return Err(plan_mismatch(call_span));
         }
         let mut slots = Vec::with_capacity(self.slots.len());
-        for source in &self.slots {
+        let mut bound_parameters = Vec::with_capacity(self.slots.len());
+        for (slot_index, source) in self.slots.iter().enumerate() {
+            let Some(parameter) = self.parameters.get(slot_index) else {
+                return Err(plan_mismatch(call_span));
+            };
             match source {
                 PlannedSlot::Candidate(index) => {
                     let Some(candidate) = candidates.get(*index) else {
                         return Err(plan_mismatch(call_span));
                     };
-                    let (value, span) = match candidate {
-                        Candidate::Positional { value, span }
-                        | Candidate::Named { value, span, .. } => (value.clone(), *span),
+                    let (value, span, name_span) = match candidate {
+                        Candidate::Positional { value, span } => (value.clone(), *span, None),
+                        Candidate::Named {
+                            value,
+                            span,
+                            name_span,
+                            ..
+                        } => (value.clone(), *span, Some(*name_span)),
                     };
                     slots.push(BoundSlot::Explicit { value, span });
+                    bound_parameters.push(BoundParameter {
+                        name: parameter.name.clone(),
+                        name_span: name_span.or(parameter.name_span),
+                    });
                 }
                 PlannedSlot::Body => {
                     let Some(candidate) = body else {
                         return Err(plan_mismatch(call_span));
                     };
-                    let (value, span) = match candidate {
-                        Candidate::Positional { value, span }
-                        | Candidate::Named { value, span, .. } => (value.clone(), *span),
+                    let (value, span, name_span) = match candidate {
+                        Candidate::Positional { value, span } => (value.clone(), *span, None),
+                        Candidate::Named {
+                            value,
+                            span,
+                            name_span,
+                            ..
+                        } => (value.clone(), *span, Some(*name_span)),
                     };
                     slots.push(BoundSlot::Explicit { value, span });
+                    bound_parameters.push(BoundParameter {
+                        name: parameter.name.clone(),
+                        name_span: name_span.or(parameter.name_span),
+                    });
                 }
-                PlannedSlot::Omitted => slots.push(BoundSlot::Omitted),
-                PlannedSlot::Defaulted => slots.push(BoundSlot::Defaulted),
+                PlannedSlot::Omitted => {
+                    slots.push(BoundSlot::Omitted);
+                    bound_parameters.push(parameter.clone());
+                }
+                PlannedSlot::Defaulted => {
+                    slots.push(BoundSlot::Defaulted);
+                    bound_parameters.push(parameter.clone());
+                }
             }
         }
-        Ok(BoundInvocation { slots })
+        Ok(BoundInvocation {
+            slots,
+            parameters: bound_parameters,
+        })
     }
 }
 
@@ -540,6 +588,13 @@ mod tests {
                 value: 1,
                 span: span(20, 22)
             }
+        );
+        assert_eq!(
+            aliased.parameters,
+            [BoundParameter {
+                name: "value".to_string(),
+                name_span: Some(span(20, 21)),
+            }]
         );
     }
 

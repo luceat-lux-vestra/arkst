@@ -211,6 +211,7 @@ enum IterationBody<'a> {
 struct StackedArgument {
     value: InvocationValue,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
 }
 
 struct BoundStackedArguments {
@@ -221,18 +222,21 @@ struct BoundStackedArguments {
 struct AlignArgument {
     value: InvocationValue,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
 }
 
 #[derive(Clone)]
 struct ContainerArgument {
     value: InvocationValue,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
 }
 
 #[derive(Clone)]
 struct WhitespaceArgument {
     value: InvocationValue,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
 }
 
 struct BoundContainerArguments {
@@ -634,7 +638,6 @@ impl Drop for EvaluationDepthGuard {
 /// published at the callable boundary. The snapshot is deliberate: a lambda
 /// observes the bindings visible when it is entered, while new locals cannot
 /// leak back.
-#[derive(Clone)]
 struct EvaluationContext<'a> {
     parent: Option<Box<EvaluationContext<'a>>>,
     variables: BTreeMap<String, VariableValue>,
@@ -647,19 +650,245 @@ struct EvaluationContext<'a> {
     document_state: Rc<RefCell<DocumentState>>,
     limits: EvaluationLimits,
     runtime: Rc<RefCell<EvaluationRuntime>>,
+    invocation_depth: Rc<RefCell<usize>>,
+    transaction: Rc<RefCell<InvocationTransaction>>,
+    scope_identity: Rc<ScopeIdentity>,
+    /// The savepoint at which this scope was created as an ephemeral scope.
+    /// Writes made by that scope at its own savepoint are dead with the scope,
+    /// while writes made from a deeper savepoint can still need rollback while
+    /// this scope remains live.
+    journal_floor: Option<usize>,
     assigned_variables: BTreeMap<String, IrValue>,
     variable_owners: BTreeSet<String>,
     forwarded_variable_owners: BTreeSet<String>,
     parameter_names: BTreeSet<String>,
 }
 
-#[derive(Clone)]
-struct VariableStateSnapshot {
-    variables: BTreeMap<String, VariableValue>,
-    assigned_variables: BTreeMap<String, IrValue>,
-    variable_owners: BTreeSet<String>,
-    forwarded_variable_owners: BTreeSet<String>,
-    parent: Option<Box<VariableStateSnapshot>>,
+struct ScopeIdentity {
+    key: usize,
+}
+
+#[derive(Default)]
+struct InvocationTransaction {
+    savepoints: Vec<InvocationSavepoint>,
+    next_scope_key: usize,
+    #[cfg(test)]
+    document_state_copy_work: usize,
+}
+
+#[derive(Default)]
+struct InvocationSavepoint {
+    entries: Vec<InvocationUndo>,
+    first_writes: BTreeSet<UndoKey>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum UndoKey {
+    DocumentState { field: DocumentStateField },
+    Variable { scope: usize, name: String },
+    AssignedVariable { scope: usize, name: String },
+    VariableOwner { scope: usize, name: String },
+    Function { scope: usize, name: String },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DocumentStateField {
+    Name,
+    Description,
+    DocumentType,
+    Authors,
+    Keywords,
+    Theme,
+    Locale,
+    CaptionPosition,
+}
+
+enum DocumentStateUndo {
+    Name(String),
+    Description(String),
+    DocumentType(scribium_ir::IrDocumentType),
+    AuthorsLen(usize),
+    Keywords(Vec<String>),
+    Theme(Option<IrDocumentTheme>),
+    Locale(Option<scribium_ir::IrDocumentLocale>),
+    CaptionPosition(IrCaptionPositionInfo),
+}
+
+enum InvocationUndo {
+    DocumentState {
+        field: DocumentStateField,
+        previous: DocumentStateUndo,
+    },
+    Variable {
+        scope: usize,
+        name: String,
+        journal_floor: Option<usize>,
+        previous: Option<VariableValue>,
+    },
+    AssignedVariable {
+        scope: usize,
+        name: String,
+        journal_floor: Option<usize>,
+        previous: Option<IrValue>,
+    },
+    VariableOwner {
+        scope: usize,
+        name: String,
+        journal_floor: Option<usize>,
+        was_present: bool,
+    },
+    Function {
+        scope: usize,
+        name: String,
+        journal_floor: Option<usize>,
+        previous: Option<FunctionBinding>,
+    },
+}
+
+impl InvocationUndo {
+    fn key(&self) -> UndoKey {
+        match self {
+            Self::DocumentState { field, .. } => UndoKey::DocumentState { field: *field },
+            Self::Variable { scope, name, .. } => UndoKey::Variable {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::AssignedVariable { scope, name, .. } => UndoKey::AssignedVariable {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::VariableOwner { scope, name, .. } => UndoKey::VariableOwner {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::Function { scope, name, .. } => UndoKey::Function {
+                scope: *scope,
+                name: name.clone(),
+            },
+        }
+    }
+
+    fn scope(&self) -> Option<usize> {
+        match self {
+            Self::DocumentState { .. } => None,
+            Self::Variable { scope, .. }
+            | Self::AssignedVariable { scope, .. }
+            | Self::VariableOwner { scope, .. }
+            | Self::Function { scope, .. } => Some(*scope),
+        }
+    }
+
+    fn journal_floor(&self) -> Option<usize> {
+        match self {
+            Self::DocumentState { .. } => None,
+            Self::Variable { journal_floor, .. }
+            | Self::AssignedVariable { journal_floor, .. }
+            | Self::VariableOwner { journal_floor, .. }
+            | Self::Function { journal_floor, .. } => *journal_floor,
+        }
+    }
+
+    fn is_dead_at(&self, savepoint: usize) -> bool {
+        self.journal_floor() == Some(savepoint)
+    }
+}
+
+impl InvocationTransaction {
+    fn allocate_scope_key(&mut self) -> usize {
+        let key = self.next_scope_key;
+        self.next_scope_key += 1;
+        key
+    }
+
+    fn begin(&mut self, outermost: bool) {
+        debug_assert_eq!(self.savepoints.is_empty(), outermost);
+        self.savepoints.push(InvocationSavepoint::default());
+    }
+
+    fn current_savepoint_index(&self) -> Option<usize> {
+        self.savepoints.len().checked_sub(1)
+    }
+
+    fn first_write(&mut self, key: UndoKey) -> bool {
+        self.savepoints
+            .last_mut()
+            .is_some_and(|savepoint| savepoint.first_writes.insert(key))
+    }
+
+    fn push(&mut self, entry: InvocationUndo) {
+        if let Some(savepoint) = self.savepoints.last_mut() {
+            savepoint.entries.push(entry);
+        }
+    }
+
+    fn commit_savepoint(&mut self) {
+        let Some(child) = self.savepoints.pop() else {
+            debug_assert!(false, "invocation savepoint must be active");
+            return;
+        };
+        let Some(parent_index) = self.savepoints.len().checked_sub(1) else {
+            return;
+        };
+        let Some(parent) = self.savepoints.last_mut() else {
+            return;
+        };
+        for entry in child.entries {
+            if entry.is_dead_at(parent_index) {
+                continue;
+            }
+            if parent.first_writes.insert(entry.key()) {
+                parent.entries.push(entry);
+            }
+        }
+    }
+
+    fn rollback_savepoint(&mut self) -> Vec<InvocationUndo> {
+        let Some(savepoint) = self.savepoints.pop() else {
+            debug_assert!(false, "invocation savepoint must be active");
+            return Vec::new();
+        };
+        savepoint.entries
+    }
+
+    #[cfg(test)]
+    fn pending_entry_count(&self) -> usize {
+        self.savepoints
+            .iter()
+            .map(|savepoint| savepoint.entries.len())
+            .sum()
+    }
+
+    #[cfg(test)]
+    fn record_document_state_copy_work(&mut self, units: usize) {
+        self.document_state_copy_work = self.document_state_copy_work.saturating_add(units);
+    }
+
+    #[cfg(test)]
+    fn document_state_copy_work(&self) -> usize {
+        self.document_state_copy_work
+    }
+}
+
+/// Evaluator-private invocation savepoint. Mutations are recorded only on the
+/// first write in each savepoint, and nested success merges only writes not
+/// already owned by the parent. Nested failure therefore restores just its
+/// own mutations, while the outer invocation can continue successfully.
+struct InvocationCheckpoint {}
+
+impl InvocationCheckpoint {
+    fn capture() -> Self {
+        Self {}
+    }
+
+    fn restore(self, context: &mut EvaluationContext<'_>) {
+        for entry in context.rollback_transaction().into_iter().rev() {
+            context.restore_undo(entry);
+        }
+    }
+
+    fn commit(self, context: &EvaluationContext<'_>) {
+        context.commit_transaction();
+    }
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -668,6 +897,8 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn with_limits(limits: EvaluationLimits) -> Self {
+        let transaction = Rc::new(RefCell::new(InvocationTransaction::default()));
+        let scope_identity = Self::new_scope_identity(&transaction);
         Self {
             parent: None,
             variables: BTreeMap::new(),
@@ -680,6 +911,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::new(RefCell::new(DocumentState::default())),
             limits,
             runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
+            invocation_depth: Rc::new(RefCell::new(0)),
+            transaction,
+            scope_identity,
+            journal_floor: None,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -690,8 +925,20 @@ impl<'a> EvaluationContext<'a> {
     /// Creates a child scope with parent-visible bindings and isolated locals.
     #[allow(dead_code)]
     fn child(&self) -> Self {
+        self.child_with_journal_floor(self.journal_floor)
+    }
+
+    /// Creates a scope whose local bindings cannot outlive this invocation.
+    /// Caller-visible owner writes still travel to their real owner and are
+    /// journaled there; only dead local bindings skip the transaction log.
+    fn ephemeral_child(&self) -> Self {
+        let journal_floor = self.transaction.borrow().current_savepoint_index();
+        self.child_with_journal_floor(journal_floor)
+    }
+
+    fn child_with_journal_floor(&self, journal_floor: Option<usize>) -> Self {
         Self {
-            parent: Some(Box::new(self.clone())),
+            parent: Some(Box::new(self.clone_scope_tree())),
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             lambda_scope: None,
@@ -702,6 +949,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
+            invocation_depth: Rc::clone(&self.invocation_depth),
+            transaction: Rc::clone(&self.transaction),
+            scope_identity: Self::new_scope_identity(&self.transaction),
+            journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -744,8 +995,241 @@ impl<'a> EvaluationContext<'a> {
         })
     }
 
+    fn begin_invocation(&self) {
+        let mut depth = self.invocation_depth.borrow_mut();
+        let outermost = *depth == 0;
+        self.transaction.borrow_mut().begin(outermost);
+        *depth += 1;
+    }
+
+    fn end_invocation(&self) {
+        let mut depth = self.invocation_depth.borrow_mut();
+        debug_assert!(*depth > 0);
+        *depth = depth.saturating_sub(1);
+    }
+
+    fn commit_transaction(&self) {
+        self.transaction.borrow_mut().commit_savepoint();
+    }
+
+    fn rollback_transaction(&mut self) -> Vec<InvocationUndo> {
+        self.transaction.borrow_mut().rollback_savepoint()
+    }
+
+    fn clone_scope_tree(&self) -> Self {
+        Self {
+            parent: self
+                .parent
+                .as_deref()
+                .map(|parent| Box::new(parent.clone_scope_tree())),
+            variables: self.variables.clone(),
+            functions: self.functions.clone(),
+            lambda_scope: self.lambda_scope.clone(),
+            resources: self.resources,
+            metadata_defaults: self.metadata_defaults.clone(),
+            current_source: self.current_source,
+            active_sources: self.active_sources.clone(),
+            document_state: Rc::clone(&self.document_state),
+            limits: self.limits,
+            runtime: Rc::clone(&self.runtime),
+            invocation_depth: Rc::clone(&self.invocation_depth),
+            transaction: Rc::clone(&self.transaction),
+            scope_identity: Self::new_scope_identity(&self.transaction),
+            journal_floor: self.journal_floor,
+            assigned_variables: self.assigned_variables.clone(),
+            variable_owners: self.variable_owners.clone(),
+            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
+            parameter_names: self.parameter_names.clone(),
+        }
+    }
+
+    fn scope_key(&self) -> usize {
+        self.scope_identity.key
+    }
+
+    fn new_scope_identity(transaction: &Rc<RefCell<InvocationTransaction>>) -> Rc<ScopeIdentity> {
+        let key = transaction.borrow_mut().allocate_scope_key();
+        Rc::new(ScopeIdentity { key })
+    }
+
+    fn should_journal_scope_write(&self) -> bool {
+        let Some(floor) = self.journal_floor else {
+            return true;
+        };
+        self.transaction
+            .borrow()
+            .current_savepoint_index()
+            .is_some_and(|current| current > floor)
+    }
+
+    fn record_variable_before(&self, name: &str) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::Variable {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.variables.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::Variable {
+                    scope,
+                    name: name.to_string(),
+                    journal_floor,
+                    previous,
+                });
+        }
+    }
+
+    fn record_assigned_variable_before(&self, name: &str) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::AssignedVariable {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.assigned_variables.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::AssignedVariable {
+                    scope,
+                    name: name.to_string(),
+                    journal_floor,
+                    previous,
+                });
+        }
+    }
+
+    fn record_variable_owner_before(&self, name: &str) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::VariableOwner {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let was_present = self.variable_owners.contains(name);
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::VariableOwner {
+                    scope,
+                    name: name.to_string(),
+                    journal_floor,
+                    was_present,
+                });
+        }
+    }
+
+    fn record_function_before(&self, name: &str) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::Function {
+            scope,
+            name: name.to_string(),
+        };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.functions.get(name).cloned();
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::Function {
+                    scope,
+                    name: name.to_string(),
+                    journal_floor,
+                    previous,
+                });
+        }
+    }
+
+    fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
+        if let Some(scope) = undo.scope() {
+            if self.scope_key() != scope {
+                // Callable-local scope trees may be dropped before the outer
+                // invocation rolls back. Those writes are already
+                // unreachable; caller-visible scopes remain rooted at this
+                // context and are restored by their stable scope identity.
+                return self
+                    .parent
+                    .as_mut()
+                    .is_some_and(|parent| parent.restore_undo(undo));
+            }
+        }
+        match undo {
+            InvocationUndo::DocumentState { previous, .. } => {
+                self.restore_document_state_undo(previous);
+            }
+            InvocationUndo::Variable { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.variables.insert(name, previous);
+                }
+                None => {
+                    self.variables.remove(&name);
+                }
+            },
+            InvocationUndo::AssignedVariable { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.assigned_variables.insert(name, previous);
+                }
+                None => {
+                    self.assigned_variables.remove(&name);
+                }
+            },
+            InvocationUndo::VariableOwner {
+                name, was_present, ..
+            } => {
+                if was_present {
+                    self.variable_owners.insert(name);
+                } else {
+                    self.variable_owners.remove(&name);
+                }
+            }
+            InvocationUndo::Function { name, previous, .. } => match previous {
+                Some(previous) => {
+                    self.functions.insert(name, previous);
+                }
+                None => {
+                    self.functions.remove(&name);
+                }
+            },
+        }
+        true
+    }
+
+    fn record_document_state_undo<F>(&self, field: DocumentStateField, previous: F)
+    where
+        F: FnOnce() -> (DocumentStateUndo, usize),
+    {
+        let key = UndoKey::DocumentState { field };
+        if self.transaction.borrow_mut().first_write(key) {
+            let (previous, copied_units) = previous();
+            #[cfg(test)]
+            self.transaction
+                .borrow_mut()
+                .record_document_state_copy_work(copied_units);
+            #[cfg(not(test))]
+            let _ = copied_units;
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState { field, previous });
+        }
+    }
+
     /// Declares or reassigns a variable from an evaluated IrValue, preserving content semantics.
     fn set_value(&mut self, name: String, value: IrValue) {
+        self.record_variable_before(&name);
         self.variables
             .insert(name, VariableValue::from_evaluated_value(value));
     }
@@ -767,9 +1251,11 @@ impl<'a> EvaluationContext<'a> {
                 self.set_value(name.clone(), value.clone());
             }
             if !has_forwarded_owner {
+                self.record_variable_owner_before(&name);
                 self.variable_owners.insert(name.clone());
             }
         }
+        self.record_assigned_variable_before(&name);
         self.assigned_variables.insert(name, value);
     }
 
@@ -786,6 +1272,7 @@ impl<'a> EvaluationContext<'a> {
         if !self.assign_to_owner(&name, value.clone()) {
             return false;
         }
+        self.record_assigned_variable_before(&name);
         self.assigned_variables.insert(name, value);
         true
     }
@@ -838,31 +1325,6 @@ impl<'a> EvaluationContext<'a> {
         owners.extend(self.forwarded_variable_owners.iter().cloned());
     }
 
-    fn snapshot_variables(&self) -> VariableStateSnapshot {
-        VariableStateSnapshot {
-            variables: self.variables.clone(),
-            assigned_variables: self.assigned_variables.clone(),
-            variable_owners: self.variable_owners.clone(),
-            forwarded_variable_owners: self.forwarded_variable_owners.clone(),
-            parent: self
-                .parent
-                .as_deref()
-                .map(|parent| Box::new(parent.snapshot_variables())),
-        }
-    }
-
-    fn restore_variables(&mut self, snapshot: &VariableStateSnapshot) {
-        self.variables = snapshot.variables.clone();
-        self.assigned_variables = snapshot.assigned_variables.clone();
-        self.variable_owners = snapshot.variable_owners.clone();
-        self.forwarded_variable_owners = snapshot.forwarded_variable_owners.clone();
-        match (&mut self.parent, &snapshot.parent) {
-            (Some(parent), Some(snapshot)) => parent.restore_variables(snapshot),
-            (None, None) => {}
-            _ => unreachable!("variable snapshot must match its context shape"),
-        }
-    }
-
     /// Installs a user-function binding in the current local scope.
     fn set_function_binding(
         &mut self,
@@ -872,6 +1334,7 @@ impl<'a> EvaluationContext<'a> {
         declaration_span: SourceSpan,
         capture: Option<Box<IrCallableCapture>>,
     ) {
+        self.record_function_before(&name);
         self.functions.insert(
             name,
             FunctionBinding {
@@ -947,6 +1410,10 @@ impl<'a> EvaluationContext<'a> {
         caller_context.collect_bindings(&mut variables, &mut functions);
         let mut forwarded_variable_owners = BTreeSet::new();
         caller_context.collect_variable_owners(&mut forwarded_variable_owners);
+        let journal_floor = caller_context
+            .transaction
+            .borrow()
+            .current_savepoint_index();
 
         Self {
             parent: Some(Box::new(definition_context)),
@@ -966,6 +1433,10 @@ impl<'a> EvaluationContext<'a> {
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
             runtime: Rc::clone(&caller_context.runtime),
+            invocation_depth: Rc::clone(&caller_context.invocation_depth),
+            transaction: Rc::clone(&caller_context.transaction),
+            scope_identity: Self::new_scope_identity(&caller_context.transaction),
+            journal_floor,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners,
@@ -1041,24 +1512,59 @@ impl<'a> EvaluationContext<'a> {
         self.document_state.borrow().authors.clone()
     }
 
-    fn restore_document_state(&self, snapshot: DocumentState) {
-        *self.document_state.borrow_mut() = snapshot;
+    fn restore_document_state_undo(&self, undo: DocumentStateUndo) {
+        let mut state = self.document_state.borrow_mut();
+        match undo {
+            DocumentStateUndo::Name(previous) => state.name = previous,
+            DocumentStateUndo::Description(previous) => state.description = previous,
+            DocumentStateUndo::DocumentType(previous) => state.document_type = previous,
+            DocumentStateUndo::AuthorsLen(previous) => state.authors.truncate(previous),
+            DocumentStateUndo::Keywords(previous) => state.keywords = previous,
+            DocumentStateUndo::Theme(previous) => state.theme = previous,
+            DocumentStateUndo::Locale(previous) => state.locale = previous,
+            DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
+        }
     }
 
     fn set_document_state_value(&self, name: &str, value: String) {
-        let mut state = self.document_state.borrow_mut();
         match name {
-            "docname" => state.name = value,
-            "docdescription" => state.description = value,
+            "docname" => {
+                self.record_document_state_undo(DocumentStateField::Name, || {
+                    let previous = self.document_state.borrow().name.clone();
+                    let copied_units = previous.len();
+                    (DocumentStateUndo::Name(previous), copied_units)
+                });
+                self.document_state.borrow_mut().name = value;
+            }
+            "docdescription" => {
+                self.record_document_state_undo(DocumentStateField::Description, || {
+                    let previous = self.document_state.borrow().description.clone();
+                    let copied_units = previous.len();
+                    (DocumentStateUndo::Description(previous), copied_units)
+                });
+                self.document_state.borrow_mut().description = value;
+            }
             _ => unreachable!("document state field must be validated by the caller"),
         }
     }
 
     fn set_document_type(&self, value: scribium_ir::IrDocumentType) {
+        self.record_document_state_undo(DocumentStateField::DocumentType, || {
+            (
+                DocumentStateUndo::DocumentType(self.document_state.borrow().document_type),
+                0,
+            )
+        });
         self.document_state.borrow_mut().document_type = value;
     }
 
     fn append_document_author(&self, name: String) {
+        self.record_document_state_undo(DocumentStateField::Authors, || {
+            (
+                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                0,
+            )
+        });
         self.document_state
             .borrow_mut()
             .authors
@@ -1069,26 +1575,76 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn replace_document_keywords(&self, keywords: Vec<String>) {
-        self.document_state.borrow_mut().keywords = keywords;
+        let first_write = self
+            .transaction
+            .borrow_mut()
+            .first_write(UndoKey::DocumentState {
+                field: DocumentStateField::Keywords,
+            });
+        let previous = {
+            let mut state = self.document_state.borrow_mut();
+            if first_write {
+                Some(std::mem::replace(&mut state.keywords, keywords))
+            } else {
+                state.keywords = keywords;
+                None
+            }
+        };
+        if let Some(previous) = previous {
+            #[cfg(test)]
+            self.transaction
+                .borrow_mut()
+                .record_document_state_copy_work(0);
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState {
+                    field: DocumentStateField::Keywords,
+                    previous: DocumentStateUndo::Keywords(previous),
+                });
+        }
     }
 
     fn set_document_theme(&self, theme: IrDocumentTheme) {
+        self.record_document_state_undo(DocumentStateField::Theme, || {
+            (
+                DocumentStateUndo::Theme(self.document_state.borrow().theme.clone()),
+                0,
+            )
+        });
         self.document_state.borrow_mut().theme = Some(theme);
     }
 
     fn set_document_locale(&self, locale: scribium_ir::IrDocumentLocale) {
+        self.record_document_state_undo(DocumentStateField::Locale, || {
+            (
+                DocumentStateUndo::Locale(self.document_state.borrow().locale.clone()),
+                0,
+            )
+        });
         self.document_state.borrow_mut().locale = Some(locale);
     }
 
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
+        self.record_document_state_undo(DocumentStateField::CaptionPosition, || {
+            (
+                DocumentStateUndo::CaptionPosition(self.document_state.borrow().caption_position),
+                0,
+            )
+        });
         self.document_state.borrow_mut().caption_position = caption_position;
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
+        self.record_document_state_undo(DocumentStateField::Authors, || {
+            (
+                DocumentStateUndo::AuthorsLen(self.document_state.borrow().authors.len()),
+                0,
+            )
+        });
         let mut state = self.document_state.borrow_mut();
         state
             .authors
-            .try_reserve_exact(authors.len())
+            .try_reserve(authors.len())
             .map_err(|error| format!("document authors cannot be allocated: {error}"))?;
         state.authors.extend(authors);
         Ok(())
@@ -1944,6 +2500,47 @@ impl Evaluator {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
         };
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = self.evaluate_call_value_with_first_origin_inner(
+            name,
+            positional_args,
+            named_args,
+            body,
+            raw_body,
+            lambda_parameters,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            ordered_args,
+            implicit_argument,
+        );
+        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+            checkpoint.restore(context);
+        } else {
+            checkpoint.commit(context);
+        }
+        context.end_invocation();
+        outcome
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_call_value_with_first_origin_inner(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        first_origin: Option<ValueOrigin>,
+        ordered_args: Option<&[IrCallArgument]>,
+        implicit_argument: Option<InvocationValue>,
+    ) -> CallOutcome {
         if let Err(outcome) = validate_ordered_invocation(
             name,
             ordered_args,
@@ -1994,6 +2591,7 @@ impl Evaluator {
             let condition = match self.resolve_call_condition(
                 name,
                 bound.slots.first(),
+                bound.parameters.first(),
                 span,
                 diagnostics,
                 context,
@@ -2456,7 +3054,20 @@ impl Evaluator {
             return match builtins::evaluate_bound(builtin, bound) {
                 Ok(value) => CallOutcome::Value(value),
                 Err(error) => {
-                    diagnostics.push(chain_evaluation_error(error.message, *span));
+                    if let Some(conversion) = error.conversion {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                conversion.error,
+                                conversion.candidate_span,
+                                Some(conversion.parameter),
+                                conversion.parameter_span,
+                                *span,
+                            ),
+                            Some(error.message.as_str()),
+                        ));
+                    } else {
+                        diagnostics.push(chain_evaluation_error(error.message, *span));
+                    }
                     CallOutcome::Failed
                 }
             };
@@ -2483,7 +3094,7 @@ impl Evaluator {
             return Ok(bound);
         }
 
-        for slot in &mut bound.slots {
+        for (index, slot) in bound.slots.iter_mut().enumerate() {
             let BoundSlot::Explicit { value, span } = slot else {
                 continue;
             };
@@ -2494,10 +3105,16 @@ impl Evaluator {
             ) {
                 Ok(value) => value,
                 Err(error) => {
-                    diagnostics.push(target_conversion_error(
-                        "`.plaintext` content",
-                        call_span,
-                        error,
+                    let parameter = bound.parameters.get(index);
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(*span),
+                            parameter.map(|parameter| parameter.name.clone()),
+                            parameter.and_then(|parameter| parameter.name_span),
+                            call_span,
+                        ),
+                        Some("`.plaintext` content"),
                     ));
                     return Err(CallOutcome::Failed);
                 }
@@ -2803,6 +3420,7 @@ impl Evaluator {
             .map(|(value, source)| WhitespaceArgument {
                 value,
                 span: value_source_span(source, span),
+                parameter_span: None,
             })
             .collect();
         let Some(binding_plan) = binding_plan else {
@@ -2823,7 +3441,12 @@ impl Evaluator {
             Some(argument) => match convert_whitespace_size(&argument.value) {
                 Ok(value) => value,
                 Err(error) => {
-                    diagnostics.push(whitespace_conversion_error("width", argument.span, error));
+                    diagnostics.push(whitespace_conversion_error(
+                        "width",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
                     return CallOutcome::Failed;
                 }
             },
@@ -2833,7 +3456,12 @@ impl Evaluator {
             Some(argument) => match convert_whitespace_size(&argument.value) {
                 Ok(value) => value,
                 Err(error) => {
-                    diagnostics.push(whitespace_conversion_error("height", argument.span, error));
+                    diagnostics.push(whitespace_conversion_error(
+                        "height",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
                     return CallOutcome::Failed;
                 }
             },
@@ -2899,6 +3527,7 @@ impl Evaluator {
             .map(|(value, source)| AlignArgument {
                 value,
                 span: value_source_span(source, span),
+                parameter_span: None,
             })
             .collect();
         let Some(binding_plan) = binding_plan else {
@@ -2912,7 +3541,11 @@ impl Evaluator {
         let alignment = match convert_align_alignment(&alignment.value) {
             Ok(value) => value,
             Err(error) => {
-                diagnostics.push(align_conversion_error(alignment.span, error));
+                diagnostics.push(align_conversion_error(
+                    alignment.span,
+                    alignment.parameter_span,
+                    error,
+                ));
                 return CallOutcome::Failed;
             }
         };
@@ -2991,6 +3624,7 @@ impl Evaluator {
             .map(|(value, source)| ContainerArgument {
                 value,
                 span: value_source_span(source, span),
+                parameter_span: None,
             })
             .collect();
         let Some(binding_plan) = binding_plan else {
@@ -3012,7 +3646,12 @@ impl Evaluator {
             Some(argument) => match convert_container_size(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
-                    diagnostics.push(container_conversion_error("width", argument.span, error));
+                    diagnostics.push(container_conversion_error(
+                        "width",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
                     return CallOutcome::Failed;
                 }
             },
@@ -3023,7 +3662,12 @@ impl Evaluator {
             Some(argument) => match convert_container_size(&argument.value) {
                 Ok(value) => Some(value),
                 Err(error) => {
-                    diagnostics.push(container_conversion_error("height", argument.span, error));
+                    diagnostics.push(container_conversion_error(
+                        "height",
+                        argument.span,
+                        argument.parameter_span,
+                        error,
+                    ));
                     return CallOutcome::Failed;
                 }
             },
@@ -3036,6 +3680,7 @@ impl Evaluator {
                     diagnostics.push(container_conversion_error(
                         "fullwidth",
                         argument.span,
+                        argument.parameter_span,
                         error,
                     ));
                     return CallOutcome::Failed;
@@ -3117,6 +3762,7 @@ impl Evaluator {
             .map(|(value, source)| StackedArgument {
                 value,
                 span: value_source_span(source, span),
+                parameter_span: None,
             })
             .collect();
         let Some(binding_plan) = binding_plan else {
@@ -3137,6 +3783,7 @@ impl Evaluator {
         let default = |value| StackedArgument {
             value: InvocationValue::static_value(value),
             span: *span,
+            parameter_span: None,
         };
 
         let (layout, main_axis, cross_axis, row_gap, column_gap) = match name {
@@ -3159,6 +3806,7 @@ impl Evaluator {
                             name,
                             "alignment",
                             alignment.span,
+                            alignment.parameter_span,
                             error,
                         ));
                         return CallOutcome::Failed;
@@ -3167,15 +3815,26 @@ impl Evaluator {
                 let cross_axis = match convert_stacked_cross_axis(&cross.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics
-                            .push(stacked_conversion_error(name, "cross", cross.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "cross",
+                            cross.span,
+                            cross.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
                 let gap = match convert_optional_stacked_size(&gap.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics.push(stacked_conversion_error(name, "gap", gap.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "gap",
+                            gap.span,
+                            gap.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
@@ -3216,6 +3875,7 @@ impl Evaluator {
                             name,
                             "columns",
                             columns.span,
+                            columns.parameter_span,
                             error,
                         ));
                         return CallOutcome::Failed;
@@ -3246,6 +3906,7 @@ impl Evaluator {
                             name,
                             "alignment",
                             alignment.span,
+                            alignment.parameter_span,
                             error,
                         ));
                         return CallOutcome::Failed;
@@ -3254,29 +3915,52 @@ impl Evaluator {
                 let cross_axis = match convert_stacked_cross_axis(&cross.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics
-                            .push(stacked_conversion_error(name, "cross", cross.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "cross",
+                            cross.span,
+                            cross.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
                 let gap = match convert_optional_stacked_size(&gap.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics.push(stacked_conversion_error(name, "gap", gap.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "gap",
+                            gap.span,
+                            gap.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
                 let vgap = match convert_optional_stacked_size(&vgap.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics.push(stacked_conversion_error(name, "vgap", vgap.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "vgap",
+                            vgap.span,
+                            vgap.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
                 let hgap = match convert_optional_stacked_size(&hgap.value) {
                     Ok(value) => value,
                     Err(error) => {
-                        diagnostics.push(stacked_conversion_error(name, "hgap", hgap.span, error));
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "hgap",
+                            hgap.span,
+                            hgap.parameter_span,
+                            error,
+                        ));
                         return CallOutcome::Failed;
                     }
                 };
@@ -3478,6 +4162,10 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 }
             };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
             let Some(BoundSlot::Explicit {
                 value: argument,
                 span: argument_span,
@@ -3486,12 +4174,21 @@ impl Evaluator {
                 return CallOutcome::Failed;
             };
 
-            let Some(value) = builtins::scalar_string_argument(&argument) else {
-                diagnostics.push(document_state_conversion_error(
-                    "`.docauthor` requires a value that converts to String".to_string(),
-                    argument_span,
-                ));
-                return CallOutcome::Failed;
+            let value = match builtins::scalar_string_conversion(&argument) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("value"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.docauthor`"),
+                    ));
+                    return CallOutcome::Failed;
+                }
             };
 
             context.append_document_author(value);
@@ -3532,6 +4229,10 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 }
             };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
             let Some(BoundSlot::Explicit {
                 value: argument,
                 span: argument_span,
@@ -3549,11 +4250,23 @@ impl Evaluator {
                 Ok(value_conversion::DomainValue::Enum(
                     scribium_ir::IrEnumValue::DocumentType(value),
                 )) => value,
-                Ok(_) | Err(_) => {
+                Ok(_) => {
                     diagnostics.push(document_state_conversion_error(
-                        "`.doctype` requires one of `plain`, `paged`, `slides`, or `docs` from a dynamic argument"
-                            .to_string(),
+                        "`.doctype` produced an unexpected enum value".to_string(),
                         argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("value"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.doctype`"),
                     ));
                     return CallOutcome::Failed;
                 }
@@ -3579,6 +4292,10 @@ impl Evaluator {
                 return CallOutcome::Failed;
             }
         };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
         let Some(BoundSlot::Explicit {
             value: argument,
             span: argument_span,
@@ -3586,12 +4303,21 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let Some(value) = builtins::scalar_string_argument(&argument) else {
-            diagnostics.push(document_state_conversion_error(
-                format!("`.{name}` requires a value that converts to String"),
-                argument_span,
-            ));
-            return CallOutcome::Failed;
+        let value = match builtins::scalar_string_conversion(&argument) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("value"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some(name),
+                ));
+                return CallOutcome::Failed;
+            }
         };
 
         if name == "docname" && value.trim().is_empty() {
@@ -3642,11 +4368,6 @@ impl Evaluator {
             Err(outcome) => return outcome,
         };
 
-        let previous_state = context.document_state.borrow().clone();
-        let restore_on_failure = |context: &EvaluationContext<'_>| {
-            context.restore_document_state(previous_state.clone());
-        };
-
         let evaluated_positional = match self.evaluate_invocation_values(
             positional_args,
             span,
@@ -3655,18 +4376,12 @@ impl Evaluator {
             first_origin,
         ) {
             Ok(values) => values,
-            Err(outcome) => {
-                restore_on_failure(context);
-                return outcome;
-            }
+            Err(outcome) => return outcome,
         };
         let evaluated_named =
             match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                 Ok(values) => values,
-                Err(outcome) => {
-                    restore_on_failure(context);
-                    return outcome;
-                }
+                Err(outcome) => return outcome,
             };
         let bound = match bind_evaluated_arguments(
             binding_plan,
@@ -3682,16 +4397,18 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(error) => {
                 diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
-                restore_on_failure(context);
                 return CallOutcome::Failed;
             }
         };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
         let Some(BoundSlot::Explicit {
             value: argument,
             span: argument_span,
         }) = bound.slots.into_iter().next()
         else {
-            restore_on_failure(context);
             return CallOutcome::Failed;
         };
 
@@ -3701,13 +4418,21 @@ impl Evaluator {
             return CallOutcome::Value(context.document_state_value("doclang"));
         }
 
-        let Some(identifier) = builtins::scalar_string_argument(&argument) else {
-            diagnostics.push(document_state_conversion_error(
-                "`.doclang` requires a value that converts to String".to_string(),
-                argument_span,
-            ));
-            restore_on_failure(context);
-            return CallOutcome::Failed;
+        let identifier = match builtins::scalar_string_conversion(&argument) {
+            Ok(identifier) => identifier,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("value"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some("`.doclang`"),
+                ));
+                return CallOutcome::Failed;
+            }
         };
 
         let Some(locale) = crate::locale::resolve(&identifier) else {
@@ -3715,7 +4440,6 @@ impl Evaluator {
                 format!("`.doclang` locale `{identifier}` was not found"),
                 argument_span,
             ));
-            restore_on_failure(context);
             return CallOutcome::Failed;
         };
 
@@ -3748,12 +4472,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
 
-        let previous_state = context.document_state.borrow().clone();
-        let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
-            context.restore_document_state(state.clone());
-        };
-
-        let (candidate, candidate_span) = if body.is_some() {
+        let (candidate, candidate_span, parameter_span) = if body.is_some() {
             let body_candidate = match source_backed_body_candidate(
                 body.as_ref()
                     .map(|body| call_body_source_span(*body, *span)),
@@ -3763,7 +4482,6 @@ impl Evaluator {
             ) {
                 Ok(Some(candidate)) => candidate,
                 Ok(None) | Err(_) => {
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
@@ -3771,59 +4489,70 @@ impl Evaluator {
                 Ok(bound) => bound,
                 Err(error) => {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
-            let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
-                restore_on_failure(context, &previous_state);
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
+            let Some(BoundSlot::Explicit {
+                value,
+                span: candidate_span,
+            }) = bound.slots.into_iter().next()
+            else {
                 return CallOutcome::Failed;
             };
             let candidate = match value_conversion::convert_target_with_origin(
                 &value,
                 value_conversion::ConversionTarget::Dictionary,
-                span,
+                candidate_span,
             ) {
                 Ok(value_conversion::TargetValue::Value(value)) => value,
                 Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
                     let nodes = match self.parse_dynamic_markdown_content(
                         &text,
-                        span,
+                        candidate_span,
                         value_conversion::RawMarkdownTarget::Dictionary,
                         diagnostics,
                     ) {
                         Ok(nodes) => nodes,
                         Err(outcome) => {
-                            restore_on_failure(context, &previous_state);
                             return outcome;
                         }
                     };
                     let entries = match self.evaluate_dictionary_entries(
                         &nodes,
-                        span,
+                        candidate_span,
                         diagnostics,
                         context,
                         ".docauthors",
                     ) {
                         Ok(entries) => entries,
                         Err(outcome) => {
-                            restore_on_failure(context, &previous_state);
                             return outcome;
                         }
                     };
-                    IrValue::Dictionary(IrDictionary { entries, span })
+                    IrValue::Dictionary(IrDictionary {
+                        entries,
+                        span: candidate_span,
+                    })
                 }
-                Err(_) => {
-                    diagnostics.push(document_state_conversion_error(
-                        "`.docauthors` requires a Dictionary<String, Dictionary<String, String>> value"
-                            .to_string(),
-                        span,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(candidate_span),
+                            Some("authors"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.docauthors`"),
                     ));
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
-            (candidate, span)
+            (candidate, candidate_span, parameter_span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3834,7 +4563,6 @@ impl Evaluator {
             ) {
                 Ok(values) => values,
                 Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
                     return outcome;
                 }
             };
@@ -3842,7 +4570,6 @@ impl Evaluator {
                 match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                     Ok(values) => values,
                     Err(outcome) => {
-                        restore_on_failure(context, &previous_state);
                         return outcome;
                     }
                 };
@@ -3860,28 +4587,34 @@ impl Evaluator {
                 Ok(bound) => bound,
                 Err(error) => {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
             let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
-                restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
-            (value.value, span)
+            (value.value, span, parameter_span)
         };
 
-        let authors = match self.validate_document_authors(candidate, candidate_span, diagnostics) {
+        let authors = match self.validate_document_authors(
+            candidate,
+            candidate_span,
+            parameter_span,
+            *span,
+            diagnostics,
+        ) {
             Ok(authors) => authors,
             Err(outcome) => {
-                restore_on_failure(context, &previous_state);
                 return outcome;
             }
         };
 
         if let Err(error) = context.append_document_authors(authors) {
             diagnostics.push(document_state_conversion_error(error, *span));
-            restore_on_failure(context, &previous_state);
             return CallOutcome::Failed;
         }
         CallOutcome::NoValue
@@ -3911,12 +4644,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
 
-        let previous_state = context.document_state.borrow().clone();
-        let restore_on_failure = |context: &EvaluationContext<'_>, state: &DocumentState| {
-            context.restore_document_state(state.clone());
-        };
-
-        let (candidate, candidate_span) = if body.is_some() {
+        let (candidate, candidate_span, parameter_span) = if body.is_some() {
             let raw_body_candidate = match source_backed_body_candidate(
                 body.as_ref()
                     .map(|body| call_body_source_span(*body, *span)),
@@ -3926,7 +4654,6 @@ impl Evaluator {
             ) {
                 Ok(Some(candidate)) => candidate,
                 Ok(None) | Err(_) => {
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
@@ -3934,22 +4661,23 @@ impl Evaluator {
                 Ok(bound) => bound,
                 Err(error) => {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
             let Some(BoundSlot::Explicit { value, span }) = bound.slots.into_iter().next() else {
-                restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
             let values = match self.coerce_iterable(value, &span, diagnostics, context) {
                 Ok(values) => values.into_iter().map(|value| (value, span)).collect(),
                 Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
                     return outcome;
                 }
             };
-            (values, span)
+            (values, span, parameter_span)
         } else {
             let evaluated_positional = match self.evaluate_invocation_values(
                 positional_args,
@@ -3960,7 +4688,6 @@ impl Evaluator {
             ) {
                 Ok(values) => values,
                 Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
                     return outcome;
                 }
             };
@@ -3968,7 +4695,6 @@ impl Evaluator {
                 match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                     Ok(values) => values,
                     Err(outcome) => {
-                        restore_on_failure(context, &previous_state);
                         return outcome;
                     }
                 };
@@ -3986,23 +4712,24 @@ impl Evaluator {
                 Ok(bound) => bound,
                 Err(error) => {
                     diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
-                    restore_on_failure(context, &previous_state);
                     return CallOutcome::Failed;
                 }
             };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
             let Some(BoundSlot::Explicit {
                 value: argument,
                 span: argument_span,
             }) = bound.slots.into_iter().next()
             else {
-                restore_on_failure(context, &previous_state);
                 return CallOutcome::Failed;
             };
             let values = match self.coerce_iterable(argument, &argument_span, diagnostics, context)
             {
                 Ok(values) => values,
                 Err(outcome) => {
-                    restore_on_failure(context, &previous_state);
                     return outcome;
                 }
             };
@@ -4015,14 +4742,19 @@ impl Evaluator {
                     })
                     .collect(),
                 argument_span,
+                parameter_span,
             )
         };
 
-        let keywords = match self.validate_document_keywords(candidate, candidate_span, diagnostics)
-        {
+        let keywords = match self.validate_document_keywords(
+            candidate,
+            candidate_span,
+            parameter_span,
+            *span,
+            diagnostics,
+        ) {
             Ok(keywords) => keywords,
             Err(outcome) => {
-                restore_on_failure(context, &previous_state);
                 return outcome;
             }
         };
@@ -4086,11 +4818,6 @@ impl Evaluator {
             Err(outcome) => return outcome,
         };
 
-        let previous_state = context.document_state.borrow().clone();
-        let restore_on_failure = |context: &EvaluationContext<'_>| {
-            context.restore_document_state(previous_state.clone());
-        };
-
         let evaluated_positional = match self.evaluate_invocation_values(
             positional_args,
             span,
@@ -4100,7 +4827,6 @@ impl Evaluator {
         ) {
             Ok(values) => values,
             Err(outcome) => {
-                restore_on_failure(context);
                 return outcome;
             }
         };
@@ -4108,7 +4834,6 @@ impl Evaluator {
             match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                 Ok(values) => values,
                 Err(outcome) => {
-                    restore_on_failure(context);
                     return outcome;
                 }
             };
@@ -4116,8 +4841,8 @@ impl Evaluator {
         // Nested argument evaluation shares the document state handle. Use the
         // post-evaluation state as the merge base so a successful inner
         // `.captionposition` mutation is preserved by the outer commit. The
-        // pre-evaluation snapshot above remains the rollback target for any
-        // later conversion failure.
+        // invocation checkpoint in the central call boundary is the rollback
+        // target for any later conversion failure.
         let mut candidate = context.document_state.borrow().caption_position;
         for (parameter, location) in [
             (CaptionPositionParameter::Default, bindings.default),
@@ -4128,10 +4853,11 @@ impl Evaluator {
             let Some(location) = location else {
                 continue;
             };
-            let (argument, argument_span) = match location {
+            let (argument, argument_span, parameter_span) = match location {
                 CaptionPositionArgumentLocation::Positional(index) => (
                     evaluated_positional[index].clone(),
                     value_source_span(&positional_args[index], span),
+                    None,
                 ),
                 CaptionPositionArgumentLocation::Named(index) => {
                     let argument = &evaluated_named[index];
@@ -4141,20 +4867,20 @@ impl Evaluator {
                             origin: argument.origin,
                         },
                         argument.span,
+                        Some(argument.name_span),
                     )
                 }
                 CaptionPositionArgumentLocation::Body => {
                     let Some(raw_body) = raw_body else {
-                        restore_on_failure(context);
                         return CallOutcome::Failed;
                     };
                     let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
-                        restore_on_failure(context);
                         return CallOutcome::Failed;
                     };
                     (
                         InvocationValue::dynamic_value(IrValue::String(body_text)),
                         *span,
+                        None,
                     )
                 }
             };
@@ -4170,7 +4896,7 @@ impl Evaluator {
                     Ok(value_conversion::DomainValue::Enum(IrEnumValue::CaptionPosition(
                         value,
                     ))) => Some(value),
-                    Ok(_) | Err(_) => {
+                    Ok(_) => {
                         diagnostics.push(document_state_conversion_error(
                             format!(
                                 "`.captionposition` {} must be `top` or `bottom`",
@@ -4178,7 +4904,20 @@ impl Evaluator {
                             ),
                             argument_span,
                         ));
-                        restore_on_failure(context);
+                        return CallOutcome::Failed;
+                    }
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic_with_detail(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some(parameter.name()),
+                                parameter_span,
+                                *span,
+                            ),
+                            Some("`.captionposition`"),
+                            Some("allowed values are `top` or `bottom`"),
+                        ));
                         return CallOutcome::Failed;
                     }
                 },
@@ -4246,11 +4985,6 @@ impl Evaluator {
             Err(outcome) => return outcome,
         };
 
-        let previous_state = context.document_state.borrow().clone();
-        let restore_on_failure = |context: &EvaluationContext<'_>| {
-            context.restore_document_state(previous_state.clone());
-        };
-
         let evaluated_positional = match self.evaluate_invocation_values(
             positional_args,
             span,
@@ -4260,7 +4994,6 @@ impl Evaluator {
         ) {
             Ok(values) => values,
             Err(outcome) => {
-                restore_on_failure(context);
                 return outcome;
             }
         };
@@ -4268,7 +5001,6 @@ impl Evaluator {
             match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
                 Ok(values) => values,
                 Err(outcome) => {
-                    restore_on_failure(context);
                     return outcome;
                 }
             };
@@ -4310,19 +5042,25 @@ impl Evaluator {
                 let mut diagnostic = binding_diagnostic_with_code(error, "E3003");
                 diagnostic.message = message;
                 diagnostics.push(diagnostic);
-                restore_on_failure(context);
                 return CallOutcome::Failed;
             }
         };
-        let mut slots = bound.slots.into_iter();
-        let to_argument = |slot: Option<BoundSlot<InvocationValue>>| match slot {
-            Some(BoundSlot::Explicit { value, span }) => Some((value, span)),
-            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter().enumerate();
+        let to_argument = |slot: Option<(usize, BoundSlot<InvocationValue>)>| match slot {
+            Some((index, BoundSlot::Explicit { value, span })) => Some((
+                value,
+                span,
+                parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.name_span),
+            )),
+            Some((_, BoundSlot::Omitted | BoundSlot::Defaulted)) | None => None,
         };
         let color = to_argument(slots.next());
         let layout = to_argument(slots.next());
 
-        let normalize = |argument: InvocationValue, argument_span: SourceSpan| {
+        let normalize = |argument: InvocationValue| {
             if matches!(argument.value, IrValue::None) {
                 return Ok(None);
             }
@@ -4333,22 +5071,27 @@ impl Evaluator {
                     | IrValue::Number(_)
                     | IrValue::Boolean(_)
             ) {
-                return Err(argument_span);
+                return Err(value_conversion::ConversionError::UnsupportedValue {
+                    target: value_conversion::ConversionTarget::String,
+                });
             }
-            builtins::scalar_string_argument(&argument)
-                .map(|value| Some(value.to_lowercase()))
-                .ok_or(argument_span)
+            builtins::scalar_string_conversion(&argument).map(|value| Some(value.to_lowercase()))
         };
 
         let color = match color {
-            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+            Some((argument, argument_span, parameter_span)) => match normalize(argument) {
                 Ok(value) => Some(value),
-                Err(argument_span) => {
-                    diagnostics.push(document_state_conversion_error(
-                        "`.theme` color requires a bounded scalar String value".to_string(),
-                        argument_span,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("color"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.theme`"),
                     ));
-                    restore_on_failure(context);
                     return CallOutcome::Failed;
                 }
             },
@@ -4356,14 +5099,19 @@ impl Evaluator {
         }
         .flatten();
         let layout = match layout {
-            Some((argument, argument_span)) => match normalize(argument, argument_span) {
+            Some((argument, argument_span, parameter_span)) => match normalize(argument) {
                 Ok(value) => Some(value),
-                Err(argument_span) => {
-                    diagnostics.push(document_state_conversion_error(
-                        "`.theme` layout requires a bounded scalar String value".to_string(),
-                        argument_span,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("layout"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.theme`"),
                     ));
-                    restore_on_failure(context);
                     return CallOutcome::Failed;
                 }
             },
@@ -4378,25 +5126,36 @@ impl Evaluator {
     fn validate_document_keywords(
         &self,
         values: Vec<(IrValue, SourceSpan)>,
-        span: SourceSpan,
+        candidate_span: SourceSpan,
+        parameter_span: Option<SourceSpan>,
+        call_span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<String>, CallOutcome> {
-        self.check_materialized_elements_len(values.len(), span, diagnostics)?;
+        self.check_materialized_elements_len(values.len(), candidate_span, diagnostics)?;
         let mut keywords = Vec::new();
         if let Err(error) = keywords.try_reserve_exact(values.len()) {
             diagnostics.push(document_state_conversion_error(
                 format!("document keywords cannot be allocated: {error}"),
-                span,
+                candidate_span,
             ));
             return Err(CallOutcome::Failed);
         }
         for (value, value_span) in values {
-            let Some(keyword) = bounded_document_keyword_string(&value) else {
-                diagnostics.push(document_state_conversion_error(
-                    "`.dockeywords` elements must be bounded scalar strings".to_string(),
-                    value_span,
-                ));
-                return Err(CallOutcome::Failed);
+            let keyword = match bounded_document_keyword_string(&value) {
+                Ok(keyword) => keyword,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(value_span),
+                            Some("keywords"),
+                            parameter_span,
+                            call_span,
+                        ),
+                        Some("`.dockeywords`"),
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
             };
             keywords.push(keyword);
         }
@@ -4407,13 +5166,23 @@ impl Evaluator {
         &self,
         value: IrValue,
         value_span: SourceSpan,
+        parameter_span: Option<SourceSpan>,
+        call_span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrDocumentAuthor>, CallOutcome> {
+        let candidate_span = value_source_span(&value, &value_span);
         let IrValue::Dictionary(dictionary) = value else {
-            diagnostics.push(document_state_conversion_error(
-                "`.docauthors` requires a Dictionary<String, Dictionary<String, String>> value"
-                    .to_string(),
-                value_source_span(&value, &value_span),
+            diagnostics.push(conversion_failure_diagnostic(
+                value_conversion::ConversionFailure::new(
+                    value_conversion::ConversionError::UnsupportedValue {
+                        target: value_conversion::ConversionTarget::Dictionary,
+                    },
+                    Some(candidate_span),
+                    Some("authors"),
+                    parameter_span,
+                    call_span,
+                ),
+                Some("`.docauthors`"),
             ));
             return Err(CallOutcome::Failed);
         };
@@ -4430,18 +5199,41 @@ impl Evaluator {
         for pair in dictionary.entries {
             let author_name = match pair.first.as_ref() {
                 IrValue::String(name) if !name.is_empty() => name.clone(),
-                _ => {
+                IrValue::String(_) => {
                     diagnostics.push(document_state_conversion_error(
                         "`.docauthors` author keys must be non-empty strings".to_string(),
                         value_source_span(pair.first.as_ref(), &pair.span),
                     ));
                     return Err(CallOutcome::Failed);
                 }
+                _ => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            value_conversion::ConversionError::UnsupportedValue {
+                                target: value_conversion::ConversionTarget::String,
+                            },
+                            Some(value_source_span(pair.first.as_ref(), &pair.span)),
+                            Some("authors"),
+                            parameter_span,
+                            call_span,
+                        ),
+                        Some("`.docauthors`"),
+                    ));
+                    return Err(CallOutcome::Failed);
+                }
             };
             let IrValue::Dictionary(info_dictionary) = pair.second.as_ref() else {
-                diagnostics.push(document_state_conversion_error(
-                    "Each `.docauthors` author value must be a nested dictionary".to_string(),
-                    value_source_span(pair.second.as_ref(), &pair.span),
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        value_conversion::ConversionError::UnsupportedValue {
+                            target: value_conversion::ConversionTarget::Dictionary,
+                        },
+                        Some(value_source_span(pair.second.as_ref(), &pair.span)),
+                        Some("authors"),
+                        parameter_span,
+                        call_span,
+                    ),
+                    Some("`.docauthors`"),
                 ));
                 return Err(CallOutcome::Failed);
             };
@@ -4461,23 +5253,45 @@ impl Evaluator {
             for info_pair in &info_dictionary.entries {
                 let info_name = match info_pair.first.as_ref() {
                     IrValue::String(name) if !name.is_empty() => name.clone(),
-                    _ => {
+                    IrValue::String(_) => {
                         diagnostics.push(document_state_conversion_error(
                             "`.docauthors` information keys must be non-empty strings".to_string(),
                             value_source_span(info_pair.first.as_ref(), &info_pair.span),
                         ));
                         return Err(CallOutcome::Failed);
                     }
+                    _ => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                value_conversion::ConversionError::UnsupportedValue {
+                                    target: value_conversion::ConversionTarget::String,
+                                },
+                                Some(value_source_span(info_pair.first.as_ref(), &info_pair.span)),
+                                Some("authors"),
+                                parameter_span,
+                                call_span,
+                            ),
+                            Some("`.docauthors`"),
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
                 };
                 let info_value_span = value_source_span(info_pair.second.as_ref(), &info_pair.span);
-                let Some(info_value) = bounded_document_author_string(info_pair.second.as_ref())
-                else {
-                    diagnostics.push(document_state_conversion_error(
-                        "`.docauthors` information values must be bounded scalar strings"
-                            .to_string(),
-                        info_value_span,
-                    ));
-                    return Err(CallOutcome::Failed);
+                let info_value = match bounded_document_author_string(info_pair.second.as_ref()) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(info_value_span),
+                                Some("authors"),
+                                parameter_span,
+                                call_span,
+                            ),
+                            Some("`.docauthors`"),
+                        ));
+                        return Err(CallOutcome::Failed);
+                    }
                 };
                 upsert_ordered_string_pair(&mut info, info_name, info_value);
             }
@@ -5101,7 +5915,7 @@ impl Evaluator {
                 result
             }
             IncludeSandbox::Scope | IncludeSandbox::Subdocument => {
-                let mut child = context.child();
+                let mut child = context.ephemeral_child();
                 child.current_source = Some(target_id);
                 child.active_sources = context.active_sources.clone();
                 self.evaluate_nodes(&document.nodes, diagnostics, &mut child)
@@ -6035,7 +6849,6 @@ impl Evaluator {
                 callback
             }
         };
-        let variable_snapshot = context.snapshot_variables();
         let callback_result = match self.invoke_callable(
             &callable,
             vec![value.clone()],
@@ -6049,17 +6862,10 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             CallOutcome::NoValue => {
                 diagnostics.push(no_value_required(callable.span));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
-            CallOutcome::Failed => {
-                context.restore_variables(&variable_snapshot);
-                return CallOutcome::Failed;
-            }
-            CallOutcome::Unresolved => {
-                context.restore_variables(&variable_snapshot);
-                return CallOutcome::Unresolved;
-            }
+            CallOutcome::Failed => return CallOutcome::Failed,
+            CallOutcome::Unresolved => return CallOutcome::Unresolved,
         };
 
         if name == "ifpresent" {
@@ -6071,7 +6877,6 @@ impl Evaluator {
                 "`.takeif` condition must return Boolean".to_string(),
                 value_source_span(&callback_result, &callable.span),
             ));
-            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         };
         if condition {
@@ -6106,8 +6911,14 @@ impl Evaluator {
             };
         let start = match start {
             Some(value) => {
-                match self.evaluate_range_endpoint(&value, span, diagnostics, context, first_origin)
-                {
+                match self.evaluate_range_endpoint(
+                    &value,
+                    "start",
+                    span,
+                    diagnostics,
+                    context,
+                    first_origin,
+                ) {
                     Ok(value) => Some(value),
                     Err(outcome) => return outcome,
                 }
@@ -6116,7 +6927,8 @@ impl Evaluator {
         };
         let end = match end {
             Some(value) => {
-                match self.evaluate_range_endpoint(&value, span, diagnostics, context, None) {
+                match self.evaluate_range_endpoint(&value, "end", span, diagnostics, context, None)
+                {
                     Ok(value) => Some(value),
                     Err(outcome) => return outcome,
                 }
@@ -6133,6 +6945,7 @@ impl Evaluator {
     fn evaluate_range_endpoint(
         &self,
         value: &IrValue,
+        parameter: &str,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -6149,8 +6962,18 @@ impl Evaluator {
             .into_iter()
             .next()
             .ok_or(CallOutcome::Failed)?;
-        number_to_range_endpoint(&evaluated).map_err(|message| {
-            diagnostics.push(iteration_error(message, value_source_span(value, span)));
+        number_to_range_endpoint(&evaluated).map_err(|error| {
+            let candidate_span = value_source_span(value, span);
+            diagnostics.push(conversion_failure_diagnostic(
+                value_conversion::ConversionFailure::new(
+                    error,
+                    Some(candidate_span),
+                    Some(parameter),
+                    None,
+                    *span,
+                ),
+                Some("`.range`"),
+            ));
             CallOutcome::Failed
         })
     }
@@ -6253,38 +7076,51 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let definition_context = callable
-            .capture
-            .as_deref()
-            .map(EvaluationContext::from_capture)
-            .unwrap_or_else(EvaluationContext::new);
-        // Preserve the definition snapshot as the lexical base, then add only
-        // caller-visible lookup bindings. Invocation parameters are installed
-        // in the child below, after both layers, so they have highest
-        // precedence. Document state is shared separately by the overlay.
-        let invocation_base =
-            EvaluationContext::with_caller_overlay(definition_context, caller_context);
-        let mut child = invocation_base.child();
-        match bound {
-            BoundLambdaArguments::Explicit(values) => {
-                child.set_lambda_scope(LambdaScope::Explicit);
-                if let Some(parameters) = callable.parameters.as_deref() {
-                    for (parameter, value) in parameters.iter().zip(values) {
-                        child.parameter_names.insert(parameter.name.clone());
-                        child.set_value(parameter.name.clone(), value);
+        caller_context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = {
+            let definition_context = callable
+                .capture
+                .as_deref()
+                .map(EvaluationContext::from_capture)
+                .unwrap_or_else(EvaluationContext::new);
+            // Preserve the definition snapshot as the lexical base, then add
+            // only caller-visible lookup bindings. Invocation parameters are
+            // installed in the child below, after both layers, so they have
+            // highest precedence. Document state is shared separately by the
+            // overlay.
+            let invocation_base =
+                EvaluationContext::with_caller_overlay(definition_context, caller_context);
+            let mut child = invocation_base.child();
+            match bound {
+                BoundLambdaArguments::Explicit(values) => {
+                    child.set_lambda_scope(LambdaScope::Explicit);
+                    if let Some(parameters) = callable.parameters.as_deref() {
+                        for (parameter, value) in parameters.iter().zip(values) {
+                            child.parameter_names.insert(parameter.name.clone());
+                            child.set_value(parameter.name.clone(), value);
+                        }
                     }
                 }
+                BoundLambdaArguments::Implicit(values) => {
+                    child.set_lambda_scope(LambdaScope::Implicit(values));
+                }
             }
-            BoundLambdaArguments::Implicit(values) => {
-                child.set_lambda_scope(LambdaScope::Implicit(values));
+            let outcome =
+                self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
+            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
+                for (name, value) in child.assigned_values() {
+                    caller_context.apply_callable_assignment(name, value);
+                }
             }
+            outcome
+        };
+        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+            checkpoint.restore(caller_context);
+        } else {
+            checkpoint.commit(caller_context);
         }
-        let outcome = self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
-        if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
-            for (name, value) in child.assigned_values() {
-                caller_context.apply_callable_assignment(name, value);
-            }
-        }
+        caller_context.end_invocation();
         outcome
     }
 
@@ -6301,7 +7137,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6321,17 +7156,10 @@ impl Evaluator {
                 CallOutcome::Value(value) => results.push(value),
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(options.span));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Unresolved => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Unresolved;
-                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
             }
         }
         CallOutcome::Value(IrValue::Collection(results))
@@ -6350,7 +7178,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut results = Vec::new();
         if let Err(error) = results.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6373,24 +7200,16 @@ impl Evaluator {
                 CallOutcome::Value(value) => value,
                 CallOutcome::NoValue => {
                     diagnostics.push(no_value_required(callable.span));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
-                CallOutcome::Failed => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Failed;
-                }
-                CallOutcome::Unresolved => {
-                    context.restore_variables(&variable_snapshot);
-                    return CallOutcome::Unresolved;
-                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
             };
             let Some(keep) = scalar_boolean_value(&predicate) else {
                 diagnostics.push(iteration_error(
                     "`.filter` predicate must return Boolean".to_string(),
                     value_source_span(&predicate, &callable.span),
                 ));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             };
             if keep {
@@ -6413,7 +7232,6 @@ impl Evaluator {
         {
             return outcome;
         }
-        let variable_snapshot = context.snapshot_variables();
         let mut keyed = Vec::new();
         if let Err(error) = keyed.try_reserve_exact(elements.len()) {
             diagnostics.push(iteration_error(
@@ -6437,17 +7255,10 @@ impl Evaluator {
                     CallOutcome::Value(value) => value,
                     CallOutcome::NoValue => {
                         diagnostics.push(no_value_required(callable.span));
-                        context.restore_variables(&variable_snapshot);
                         return CallOutcome::Failed;
                     }
-                    CallOutcome::Failed => {
-                        context.restore_variables(&variable_snapshot);
-                        return CallOutcome::Failed;
-                    }
-                    CallOutcome::Unresolved => {
-                        context.restore_variables(&variable_snapshot);
-                        return CallOutcome::Unresolved;
-                    }
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
                 },
                 None => element.clone(),
             };
@@ -6455,7 +7266,6 @@ impl Evaluator {
                 Ok(key) => key,
                 Err(message) => {
                     diagnostics.push(iteration_error(message, value_source_span(&key, &span)));
-                    context.restore_variables(&variable_snapshot);
                     return CallOutcome::Failed;
                 }
             };
@@ -6471,7 +7281,6 @@ impl Evaluator {
                     "`.sorted` does not compare heterogeneous key types".to_string(),
                     span,
                 ));
-                context.restore_variables(&variable_snapshot);
                 return CallOutcome::Failed;
             }
         }
@@ -6482,7 +7291,6 @@ impl Evaluator {
                 format!("sorted result collection cannot be allocated: {error}"),
                 span,
             ));
-            context.restore_variables(&variable_snapshot);
             return CallOutcome::Failed;
         }
         sorted.extend(keyed.into_iter().map(|(value, _)| value));
@@ -6552,11 +7360,16 @@ impl Evaluator {
                     }
                 }
             }
-            Err(_) => {
-                diagnostics.push(iteration_error(
-                    "Value is not an iterable Range, Collection, Pair, Dictionary, or exactly one Markdown list"
-                        .to_string(),
-                    *span,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(*span),
+                        None::<String>,
+                        None,
+                        *span,
+                    ),
+                    Some("iterable target"),
                 ));
                 return Err(CallOutcome::Failed);
             }
@@ -7020,21 +7833,12 @@ impl Evaluator {
                     diagnostics,
                     context,
                 ) {
-                    CallOutcome::Unresolved => self
-                        .preserve_block_call(
-                            name,
-                            ordered_args.as_deref(),
-                            positional_args,
-                            named_args,
-                            lambda_parameters.as_deref(),
-                            body.as_deref(),
-                            raw_body.as_ref(),
-                            span,
-                            diagnostics,
-                            context,
-                        )
-                        .map(IrValue::Content)
-                        .map_or(CallOutcome::Failed, CallOutcome::Value),
+                    // Keep the callable invocation unresolved so its
+                    // savepoint rolls back. The enclosing value/output
+                    // boundary owns preservation of an unresolved call;
+                    // preserving it here would make a failed callable
+                    // look successful and publish its earlier writes.
+                    CallOutcome::Unresolved => CallOutcome::Unresolved,
                     outcome => outcome,
                 }
             }
@@ -7252,6 +8056,7 @@ impl Evaluator {
         &self,
         name: &str,
         condition_slot: Option<&BoundSlot<IrValue>>,
+        parameter: Option<&invocation_binder::BoundParameter>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -7259,7 +8064,7 @@ impl Evaluator {
     ) -> Result<bool, CallOutcome> {
         let Some(BoundSlot::Explicit {
             value: raw_condition,
-            ..
+            span: condition_span,
         }) = condition_slot
         else {
             diagnostics.push(unresolvable_condition(name, span));
@@ -7291,9 +8096,18 @@ impl Evaluator {
             condition
         };
         match resolve_boolean_value(&condition) {
-            Some(value) => Ok(value),
-            None => {
-                diagnostics.push(unresolvable_condition(name, span));
+            Ok(value) => Ok(value),
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(*condition_span),
+                        parameter.map(|parameter| parameter.name.clone()),
+                        parameter.and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some(name),
+                ));
                 Err(CallOutcome::Failed)
             }
         }
@@ -7477,6 +8291,44 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
+        // Preservation evaluates nested argument/body syntax to retain the
+        // same structured form as ordinary output evaluation. It must not
+        // publish mutations from an invocation that already returned
+        // `Unresolved`; keep those evaluation effects in a disposable
+        // savepoint even when preservation itself succeeds.
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let result = self.preserve_block_call_inner(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+            diagnostics,
+            context,
+        );
+        checkpoint.restore(context);
+        context.end_invocation();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_block_call_inner(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        lambda_parameters: Option<&[IrParameter]>,
+        body: Option<&[IrNode]>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrNode>, CallOutcome> {
         validate_ordered_invocation(
             name,
             ordered_args,
@@ -7513,6 +8365,35 @@ impl Evaluator {
 
     #[allow(clippy::too_many_arguments)]
     fn preserve_inline_call(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<&[IrInline]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Result<Vec<IrInline>, CallOutcome> {
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let result = self.preserve_inline_call_inner(
+            name,
+            ordered_args,
+            positional_args,
+            named_args,
+            body,
+            span,
+            diagnostics,
+            context,
+        );
+        checkpoint.restore(context);
+        context.end_invocation();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn preserve_inline_call_inner(
         &self,
         name: &str,
         ordered_args: Option<&[IrCallArgument]>,
@@ -8512,9 +9393,16 @@ fn bind_whitespace_arguments(
         diagnostics.push(binding_diagnostic(error));
         CallOutcome::Failed
     })?;
-    let mut slots = bound.slots.into_iter();
-    let to_argument = |slot: BoundSlot<InvocationValue>| match slot {
-        BoundSlot::Explicit { value, span } => Some(WhitespaceArgument { value, span }),
+    let mut slots = bound.slots.into_iter().enumerate();
+    let parameters = bound.parameters;
+    let to_argument = |(index, slot): (usize, BoundSlot<InvocationValue>)| match slot {
+        BoundSlot::Explicit { value, span } => Some(WhitespaceArgument {
+            value,
+            span,
+            parameter_span: parameters
+                .get(index)
+                .and_then(|parameter| parameter.name_span),
+        }),
         BoundSlot::Omitted | BoundSlot::Defaulted => None,
     };
     Ok(BoundWhitespaceArguments {
@@ -8580,10 +9468,17 @@ fn bind_container_arguments(
         diagnostics.push(diagnostic);
         CallOutcome::Failed
     })?;
-    let mut slots = bound.slots.into_iter();
-    let take = |slot: Option<BoundSlot<InvocationValue>>| match slot {
-        Some(BoundSlot::Explicit { value, span }) => Some(ContainerArgument { value, span }),
-        Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+    let mut slots = bound.slots.into_iter().enumerate();
+    let parameters = bound.parameters;
+    let take = |slot: Option<(usize, BoundSlot<InvocationValue>)>| match slot {
+        Some((index, BoundSlot::Explicit { value, span })) => Some(ContainerArgument {
+            value,
+            span,
+            parameter_span: parameters
+                .get(index)
+                .and_then(|parameter| parameter.name_span),
+        }),
+        Some((_, BoundSlot::Omitted | BoundSlot::Defaulted)) | None => None,
     };
     let width = take(slots.next());
     let height = take(slots.next());
@@ -8628,19 +9523,18 @@ fn convert_container_boolean(
 fn container_conversion_error(
     parameter: &str,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
-    let detail = match error {
-        value_conversion::ConversionError::InvalidText { .. } => {
-            "value is invalid for the typed parameter"
-        }
-        value_conversion::ConversionError::UnsupportedValue { .. } => {
-            "value has the wrong typed domain or origin"
-        }
-    };
-    container_argument_error_at(
-        format!("`.container` parameter `{parameter}`: {detail}"),
-        span,
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(
+            error,
+            Some(span),
+            Some(parameter),
+            parameter_span,
+            span,
+        ),
+        Some("`.container`"),
     )
 }
 
@@ -8696,8 +9590,16 @@ fn bind_align_argument(
         diagnostics.push(diagnostic);
         CallOutcome::Failed
     })?;
+    let parameter_span = bound
+        .parameters
+        .first()
+        .and_then(|parameter| parameter.name_span);
     match bound.slots.into_iter().next() {
-        Some(BoundSlot::Explicit { value, span }) => Ok(AlignArgument { value, span }),
+        Some(BoundSlot::Explicit { value, span }) => Ok(AlignArgument {
+            value,
+            span,
+            parameter_span,
+        }),
         _ => Err(CallOutcome::Failed),
     }
 }
@@ -8757,11 +9659,19 @@ fn bind_stacked_arguments(
         diagnostics.push(diagnostic);
         CallOutcome::Failed
     })?;
+    let parameters = bound.parameters;
     let values = bound
         .slots
         .into_iter()
-        .map(|slot| match slot {
-            BoundSlot::Explicit { value, span } => Some(StackedArgument { value, span }),
+        .enumerate()
+        .map(|(index, slot)| match slot {
+            BoundSlot::Explicit { value, span } => Some(StackedArgument {
+                value,
+                span,
+                parameter_span: parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.name_span),
+            }),
             BoundSlot::Omitted | BoundSlot::Defaulted => None,
         })
         .collect();
@@ -8842,20 +9752,19 @@ fn stacked_conversion_error(
     name: &str,
     parameter: &str,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
-    stacked_argument_error(
-        name,
-        parameter,
-        span,
-        match error {
-            value_conversion::ConversionError::InvalidText { .. } => {
-                "value is invalid for the typed parameter"
-            }
-            value_conversion::ConversionError::UnsupportedValue { .. } => {
-                "value has the wrong typed domain or origin"
-            }
-        },
+    let context = format!("`.{name}`");
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(
+            error,
+            Some(span),
+            Some(parameter),
+            parameter_span,
+            span,
+        ),
+        Some(context.as_str()),
     )
 }
 
@@ -8989,9 +9898,15 @@ fn upsert_ordered_pair(entries: &mut Vec<IrPair>, pair: IrPair) {
 
 /// Applies the bounded scalar String boundary to author information without
 /// widening it to rich content, components, callables, ranges, or collections.
-fn bounded_document_author_string(value: &IrValue) -> Option<String> {
+fn bounded_document_author_string(
+    value: &IrValue,
+) -> Result<String, value_conversion::ConversionError> {
     if matches!(value, IrValue::Content(_)) {
-        return builtins::plain_text_argument(value);
+        return builtins::plain_text_argument(value).ok_or(
+            value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::String,
+            },
+        );
     }
     if !matches!(
         value,
@@ -9001,22 +9916,28 @@ fn bounded_document_author_string(value: &IrValue) -> Option<String> {
             | IrValue::Boolean(_)
             | IrValue::Content(_)
     ) {
-        return None;
+        return Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::String,
+        });
     }
-    builtins::scalar_string_argument(&InvocationValue::static_value(value.clone()))
+    builtins::scalar_string_conversion(&InvocationValue::static_value(value.clone()))
 }
 
 /// Applies only the scalar-to-string families already evidenced by the
 /// evaluator. Ranges, collections, rich content, and other semantic values
 /// remain unsupported for the bounded `.dockeywords` adapter.
-fn bounded_document_keyword_string(value: &IrValue) -> Option<String> {
+fn bounded_document_keyword_string(
+    value: &IrValue,
+) -> Result<String, value_conversion::ConversionError> {
     if !matches!(
         value,
         IrValue::String(_) | IrValue::Identifier(_) | IrValue::Number(_) | IrValue::Boolean(_)
     ) {
-        return None;
+        return Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::String,
+        });
     }
-    builtins::scalar_string_argument(&InvocationValue::static_value(value.clone()))
+    builtins::scalar_string_conversion(&InvocationValue::static_value(value.clone()))
 }
 
 fn plain_dictionary_key(content: &[IrInline]) -> Option<String> {
@@ -10047,11 +10968,16 @@ fn repeat_count(value: &IrValue) -> Result<i32, String> {
 /// clamps finite or infinite values outside Int's domain to the nearest Int
 /// boundary. The explicit comparisons avoid relying on Rust's float-to-int
 /// cast behavior as language semantics.
-fn number_to_range_endpoint(value: &InvocationValue) -> Result<i32, String> {
-    let Ok(ScalarValue::Number(number)) =
-        value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number)
-    else {
-        return Err("`.range` bounds must be numeric".to_string());
+fn number_to_range_endpoint(
+    value: &InvocationValue,
+) -> Result<i32, value_conversion::ConversionError> {
+    let number = match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number)? {
+        ScalarValue::Number(number) => number,
+        ScalarValue::Boolean(_) | ScalarValue::String(_) => {
+            return Err(value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Number,
+            });
+        }
     };
     if number.is_nan() {
         return Ok(0);
@@ -10845,15 +11771,70 @@ fn target_conversion_error(
     span: SourceSpan,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
-    let message = match error {
-        value_conversion::ConversionError::InvalidText { .. } => {
-            format!("{target} contains text that is not valid for its target")
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(error, Some(span), None::<String>, None, span),
+        Some(target),
+    )
+}
+
+/// Emits every typed conversion failure through one provenance and
+/// classification policy. The diagnostic code remains E3001; the typed
+/// `InvalidText`/`UnsupportedValue` distinction is part of the message and
+/// is never replaced by a consumer-specific category error.
+fn conversion_failure_diagnostic(
+    failure: value_conversion::ConversionFailure,
+    context: Option<&str>,
+) -> Diagnostic {
+    conversion_failure_diagnostic_with_detail(failure, context, None)
+}
+
+fn conversion_failure_diagnostic_with_detail(
+    failure: value_conversion::ConversionFailure,
+    context: Option<&str>,
+    detail: Option<&str>,
+) -> Diagnostic {
+    let (reason, target) = match failure.error {
+        value_conversion::ConversionError::InvalidText { target } => {
+            ("invalid text", target.label())
         }
-        value_conversion::ConversionError::UnsupportedValue { .. } => {
-            format!("{target} does not support this value category")
+        value_conversion::ConversionError::UnsupportedValue { target } => {
+            ("unsupported value category", target.label())
         }
     };
-    target_conversion_error_message(target, span, message)
+    let parameter = failure
+        .parameter_name
+        .as_deref()
+        .map(|name| format!(" for parameter `{name}`"))
+        .unwrap_or_default();
+    let detail = detail
+        .map(|detail| format!("; {detail}"))
+        .unwrap_or_default();
+    let message = match context {
+        Some(context) => {
+            format!("{context}: {reason} for target {target}{parameter}{detail}")
+        }
+        None => format!("target conversion: {reason} for target {target}{parameter}{detail}"),
+    };
+    let primary = failure
+        .candidate_span
+        .or(failure.parameter_span)
+        .unwrap_or(failure.call_span);
+    let secondary = failure
+        .parameter_span
+        .filter(|span| *span != primary)
+        .into_iter()
+        .collect();
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(primary),
+        secondary,
+        hints: vec![
+            "Target conversion preserves its typed classification and candidate provenance; no generic coercion is applied."
+                .to_string(),
+        ],
+    }
 }
 
 fn target_conversion_error_message(target: &str, span: SourceSpan, message: String) -> Diagnostic {
@@ -11184,18 +12165,18 @@ fn align_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
 
 fn align_conversion_error(
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
-    align_argument_error(
-        match error {
-            value_conversion::ConversionError::InvalidText { .. } => {
-                "`.align` alignment value is invalid"
-            }
-            value_conversion::ConversionError::UnsupportedValue { .. } => {
-                "`.align` alignment value has the wrong typed domain or origin"
-            }
-        },
-        span,
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(
+            error,
+            Some(span),
+            Some("alignment"),
+            parameter_span,
+            span,
+        ),
+        Some("`.align`"),
     )
 }
 
@@ -11278,27 +12259,31 @@ fn whitespace_argument_error_at(message: String, span: SourceSpan) -> Diagnostic
 fn whitespace_conversion_error(
     parameter: &str,
     span: SourceSpan,
+    parameter_span: Option<SourceSpan>,
     error: value_conversion::ConversionError,
 ) -> Diagnostic {
-    let detail = match error {
-        value_conversion::ConversionError::InvalidText { .. } => {
-            "value is invalid for the existing Size adapter"
-        }
-        value_conversion::ConversionError::UnsupportedValue { .. } => {
-            "value has the wrong typed domain or origin"
-        }
-    };
-    whitespace_argument_error_at(
-        format!("`.whitespace` parameter `{parameter}`: {detail}"),
-        span,
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(
+            error,
+            Some(span),
+            Some(parameter),
+            parameter_span,
+            span,
+        ),
+        Some("`.whitespace`"),
     )
 }
 
 /// Resolves a value to a boolean, handling variable references.
-fn resolve_boolean_value(value: &InvocationValue) -> Option<bool> {
+fn resolve_boolean_value(
+    value: &InvocationValue,
+) -> Result<bool, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
-        Ok(ScalarValue::Boolean(value)) => Some(value),
-        Ok(_) | Err(_) => None,
+        Ok(ScalarValue::Boolean(value)) => Ok(value),
+        Ok(_) => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::Boolean,
+        }),
+        Err(error) => Err(error),
     }
 }
 
@@ -11976,8 +12961,8 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
 mod tests {
     use super::*;
     use scribium_ir::{
-        IrComponent, IrCrossAxisAlignment, IrListItem, IrMainAxisAlignment, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout,
+        IrCaptionPosition, IrColor, IrComponent, IrCrossAxisAlignment, IrListItem,
+        IrMainAxisAlignment, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
     };
     use scribium_source::SourceId;
 
@@ -12077,6 +13062,20 @@ mod tests {
             name_span: span(0, name.len()),
             value,
             span: span(0, name.len()),
+        }
+    }
+
+    fn named_arg_at(
+        name: &str,
+        value: IrValue,
+        name_span: SourceSpan,
+        argument_span: SourceSpan,
+    ) -> IrNamedArg {
+        IrNamedArg {
+            name: name.to_string(),
+            name_span,
+            value,
+            span: argument_span,
         }
     }
 
@@ -15314,7 +16313,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].code, "E3001");
         assert_eq!(diagnostics[0].primary, Some(span(7, 12)));
-        assert_paragraph_text(&nodes, "3");
+        assert_paragraph_text(&nodes, "0");
     }
 
     #[test]
@@ -15347,7 +16346,7 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].code, "E3001");
         assert_eq!(diagnostics[0].primary, Some(span(9, 14)));
-        assert_paragraph_text(&nodes, "3");
+        assert_paragraph_text(&nodes, "0");
     }
 
     #[test]
@@ -16930,5 +17929,784 @@ mod tests {
             caller_context.get("value").map(VariableValue::to_value),
             Some(IrValue::String("caller".to_string()))
         );
+    }
+
+    #[test]
+    fn issue_167_scalar_conversion_keeps_reason_and_named_provenance() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 40);
+        let parameter_span = span(20, 22);
+        let candidate_span = span(20, 34);
+        let named = named_arg_at(
+            "by",
+            IrValue::String("not-a-number".to_string()),
+            parameter_span,
+            candidate_span,
+        );
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "multiply",
+            &[IrValue::Number(2.0)],
+            &[named],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert!(diagnostics[0].message.contains("Number"));
+        assert_eq!(context.document_state_snapshot(), before);
+
+        diagnostics.clear();
+        let wrong_domain = named_arg_at(
+            "by",
+            IrValue::Color(IrColor {
+                red: 1,
+                green: 2,
+                blue: 3,
+                alpha: 1.0,
+            }),
+            parameter_span,
+            candidate_span,
+        );
+        let outcome = evaluator.evaluate_call_value(
+            "multiply",
+            &[IrValue::Number(2.0)],
+            &[wrong_domain],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0]
+            .message
+            .contains("unsupported value category"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+    }
+
+    #[test]
+    fn issue_167_domain_conversion_distinguishes_invalid_text_and_wrong_domain() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 50);
+        let parameter_span = span(7, 12);
+        let candidate_span = span(7, 24);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let invalid_size = evaluator.evaluate_call_value(
+            "container",
+            &[],
+            &[named_arg_at(
+                "width",
+                IrValue::String("not-a-size".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid_size, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert!(diagnostics[0].message.contains("Size"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
+
+        diagnostics.clear();
+        let invalid_enum = evaluator.evaluate_call_value(
+            "align",
+            &[],
+            &[named_arg_at(
+                "alignment",
+                IrValue::String("diagonal".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid_enum, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert!(diagnostics[0].message.contains("closed enum"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+
+        diagnostics.clear();
+        let invalid_caption = evaluator.evaluate_call_value(
+            "captionposition",
+            &[],
+            &[named_arg_at(
+                "default",
+                IrValue::String("middle".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(invalid_caption, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert!(diagnostics[0]
+            .message
+            .contains("allowed values are `top` or `bottom`"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+
+        diagnostics.clear();
+        let wrong_domain = evaluator.evaluate_call_value(
+            "align",
+            &[],
+            &[named_arg_at(
+                "alignment",
+                IrValue::Enum(IrEnumValue::CaptionPosition(IrCaptionPosition::Top)),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(wrong_domain, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0]
+            .message
+            .contains("unsupported value category"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+    }
+
+    #[test]
+    fn issue_167_collection_failure_does_not_publish_partial_keywords() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 40);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.replace_document_keywords(vec!["before".to_string()]);
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "dockeywords",
+            &[IrValue::Collection(vec![
+                IrValue::String("first".to_string()),
+                IrValue::None,
+            ])],
+            &[],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0]
+            .message
+            .contains("unsupported value category"));
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_function_bindings_roll_back_in_local_and_parent_scopes() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 80);
+        let mut diagnostics = Vec::new();
+        let mut parent = EvaluationContext::new();
+        parent.set_function("parent_fn".to_string(), Vec::new());
+        let mut context = parent.child();
+        context.set_function("local_fn".to_string(), Vec::new());
+        let body = vec![
+            IrNode::FunctionDeclaration {
+                name: IrValue::Identifier("leaked".to_string()),
+                parameters: Vec::new(),
+                body: vec![text_paragraph("leaked")],
+                span: span(10, 20),
+            },
+            IrNode::FunctionDeclaration {
+                name: IrValue::Identifier("local_fn".to_string()),
+                parameters: Vec::new(),
+                body: vec![text_paragraph("replacement")],
+                span: span(21, 31),
+            },
+            IrNode::FunctionCall {
+                name: "sum".to_string(),
+                positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(32, 48),
+            },
+        ];
+
+        let outcome = evaluator.evaluate_call_value(
+            "container",
+            &[],
+            &[],
+            Some(CallBody::Block(&body)),
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(context.get_function("leaked").is_none());
+        assert_eq!(
+            context.get_function("local_fn").unwrap().declaration_span,
+            SourceSpan::new(SourceId(0), 0, 0)
+        );
+        assert!(context.get_function("parent_fn").is_some());
+        assert!(parent.get_function("leaked").is_none());
+        assert!(parent.get_function("parent_fn").is_some());
+    }
+
+    #[test]
+    fn issue_167_function_binding_undo_reaches_parent_scope() {
+        let mut context = EvaluationContext::new().child();
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        context
+            .parent
+            .as_mut()
+            .expect("child has a parent scope")
+            .set_function("parent_leaked".to_string(), Vec::new());
+
+        checkpoint.restore(&mut context);
+        context.end_invocation();
+
+        assert!(context.get_function("parent_leaked").is_none());
+        assert!(context
+            .parent
+            .as_deref()
+            .is_some_and(|parent| parent.get_function("parent_leaked").is_none()));
+    }
+
+    #[test]
+    fn issue_167_nested_unresolved_callable_does_not_publish_document_state() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        let declaration = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("mutate_then_unresolved".to_string()),
+            parameters: Vec::new(),
+            body: vec![
+                IrNode::FunctionCall {
+                    name: "docname".to_string(),
+                    positional_args: vec![IrValue::String("mutated".to_string())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(10, 20),
+                },
+                IrNode::FunctionCall {
+                    name: "not_implemented".to_string(),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(21, 35),
+                },
+            ],
+            span: span(5, 35),
+        };
+        evaluator.evaluate_node(&declaration, &mut diagnostics, &mut context);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "otherwise",
+            &[
+                call_value("mutate_then_unresolved", Vec::new()),
+                IrValue::String("fallback".into()),
+            ],
+            &[],
+            None,
+            None,
+            &span(0, 50),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Content(nodes))
+                if matches!(nodes.as_slice(), [IrNode::FunctionCall { name, .. }] if name == "mutate_then_unresolved")
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_nested_unresolved_transform_restores_live_ephemeral_owner() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.assign_value("observed".to_string(), IrValue::Number(-1.0));
+
+        let unresolved_callback = IrNode::FunctionCall {
+            name: "not_implemented".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(30, 45),
+        };
+        let callback = IrCallable {
+            parameters: Some(vec![lambda_parameter("item", 10)]),
+            body: vec![
+                var_reassignment("x", IrValue::Number(1.0)),
+                IrNode::FunctionCall {
+                    name: "ifpresent".to_string(),
+                    positional_args: vec![call_value("item", Vec::new())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: Some(vec![unresolved_callback]),
+                    raw_body: None,
+                    span: span(20, 45),
+                },
+            ],
+            span: span(10, 45),
+            capture: None,
+        };
+        let transform = IrValue::Content(vec![foreach_call(
+            IrValue::Collection(vec![IrValue::None, IrValue::String("trigger".to_string())]),
+            Some(callback.parameters.clone().unwrap()),
+            callback.body.clone(),
+        )]);
+        let otherwise = IrNode::FunctionCall {
+            name: "otherwise".to_string(),
+            positional_args: vec![transform, IrValue::String("fallback".to_string())],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(0, 50),
+        };
+        context.set_function_binding(
+            "outer".to_string(),
+            LambdaParameters::Explicit(Vec::new()),
+            vec![
+                var_declaration("x", IrValue::Number(0.0)),
+                otherwise,
+                var_reassignment("observed", call_value("x", Vec::new())),
+            ],
+            span(0, 60),
+            None,
+        );
+
+        let outcome = evaluator.evaluate_call_value(
+            "outer",
+            &[],
+            &[],
+            None,
+            None,
+            &span(0, 60),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Value(_)));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            context.get("observed").map(VariableValue::to_value),
+            Some(IrValue::Number(0.0))
+        );
+    }
+
+    #[test]
+    fn issue_167_discarded_callable_locals_do_not_grow_transaction_metadata() {
+        let evaluator = Evaluator::new();
+        let span = span(0, 20);
+        let callable = IrCallable {
+            parameters: Some(vec![lambda_parameter("value", 4)]),
+            body: vec![var_ref("value")],
+            span,
+            capture: None,
+        };
+        let elements = (0..4096)
+            .map(|value| IrValue::Number(value as f64))
+            .collect::<Vec<_>>();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = evaluator.map_callable_values(
+            &elements,
+            &callable,
+            IterationOptions {
+                span,
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut context,
+        );
+
+        let CallOutcome::Value(IrValue::Collection(values)) = outcome else {
+            panic!("expected a materialized callback result: {outcome:?}");
+        };
+        assert_eq!(values.len(), elements.len());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        checkpoint.commit(&context);
+        context.end_invocation();
+    }
+
+    #[test]
+    fn issue_167_repeated_document_state_appends_use_bounded_undo_metadata() {
+        let evaluator = Evaluator::new();
+        let span = span(0, 20);
+        let callable = IrCallable {
+            parameters: Some(vec![lambda_parameter("value", 4)]),
+            body: vec![
+                IrNode::FunctionCall {
+                    name: "docauthor".to_string(),
+                    positional_args: vec![IrValue::String("author".to_string())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span,
+                },
+                var_ref("value"),
+            ],
+            span,
+            capture: None,
+        };
+        let elements = (0..4096)
+            .map(|value| IrValue::Number(value as f64))
+            .collect::<Vec<_>>();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let copy_work_before = context.transaction.borrow().document_state_copy_work();
+        let outcome = evaluator.map_callable_values(
+            &elements,
+            &callable,
+            IterationOptions {
+                span,
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut context,
+        );
+
+        let CallOutcome::Value(IrValue::Collection(values)) = outcome else {
+            panic!("expected a materialized callback result: {outcome:?}");
+        };
+        assert_eq!(values.len(), elements.len());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.document_authors_snapshot().len(), elements.len());
+        assert_eq!(
+            context.transaction.borrow().document_state_copy_work() - copy_work_before,
+            0,
+            "author appends must journal only the pre-append length"
+        );
+        assert_eq!(context.transaction.borrow().pending_entry_count(), 1);
+        checkpoint.commit(&context);
+        context.end_invocation();
+    }
+
+    fn mutating_typed_candidate(variable_name: &str) -> IrValue {
+        IrValue::Content(vec![let_call(
+            Some(IrValue::None),
+            None,
+            Some(vec![
+                IrNode::FunctionCall {
+                    name: "docname".to_string(),
+                    positional_args: vec![IrValue::String("mutated".to_string())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(10, 20),
+                },
+                var_ref(variable_name),
+            ]),
+        )])
+    }
+
+    #[test]
+    fn issue_167_document_state_conversion_rolls_back_nested_candidate_mutation() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 70);
+        let parameter_span = span(32, 39);
+        let candidate_span = span(32, 48);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        context.set_value(
+            "caption_value".to_string(),
+            IrValue::Enum(IrEnumValue::CaptionPosition(IrCaptionPosition::Top)),
+        );
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "captionposition",
+            &[mutating_typed_candidate("caption_value")],
+            &[named_arg_at(
+                "figures",
+                IrValue::String("diagonal".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_component_conversion_is_validate_then_commit() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 70);
+        let parameter_span = span(40, 46);
+        let candidate_span = span(40, 58);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        context.set_value(
+            "container_size".to_string(),
+            IrValue::Size(IrSize {
+                value: 12.0,
+                unit: IrSizeUnit::Px,
+            }),
+        );
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "container",
+            &[],
+            &[
+                named_arg_at(
+                    "width",
+                    mutating_typed_candidate("container_size"),
+                    span(7, 12),
+                    span(7, 32),
+                ),
+                named_arg_at(
+                    "height",
+                    IrValue::String("not-a-size".to_string()),
+                    parameter_span,
+                    candidate_span,
+                ),
+            ],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(diagnostics[0].message.contains("invalid text"));
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_body_failure_rolls_back_state_after_lazy_body_selection() {
+        let evaluator = Evaluator::new();
+        let call_span = span(0, 60);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        let before = context.document_state_snapshot();
+        let body = vec![
+            IrNode::FunctionCall {
+                name: "docname".to_string(),
+                positional_args: vec![IrValue::String("body mutation".to_string())],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(10, 25),
+            },
+            IrNode::FunctionCall {
+                name: "sum".to_string(),
+                positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: span(26, 42),
+            },
+        ];
+
+        let outcome = evaluator.evaluate_call_value(
+            "container",
+            &[],
+            &[],
+            Some(CallBody::Block(&body)),
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_nested_failure_emits_only_the_causal_diagnostic() {
+        let evaluator = Evaluator::new();
+        let nested_span = span(22, 36);
+        let nested = IrValue::Content(vec![IrNode::FunctionCall {
+            name: "multiply".to_string(),
+            positional_args: vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: nested_span,
+        }]);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let outcome = evaluator.evaluate_call_value(
+            "sum",
+            &[nested, IrValue::Number(1.0)],
+            &[],
+            None,
+            None,
+            &span(0, 45),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(nested_span));
+        assert!(diagnostics[0]
+            .message
+            .contains("unsupported value category"));
+    }
+
+    #[test]
+    fn issue_167_utf8_candidate_provenance_uses_byte_offsets() {
+        let source = "文 .container width=not-a-size";
+        let candidate_start = source.find("width").expect("candidate in source");
+        let candidate_end = source.len();
+        let name_end = candidate_start + "width".len();
+        let source_id = SourceId(167);
+        let call_span = SourceSpan::new(source_id, 0, source.len());
+        let candidate_span = SourceSpan::new(source_id, candidate_start, candidate_end);
+        let parameter_span = SourceSpan::new(source_id, candidate_start, name_end);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let outcome = Evaluator::new().evaluate_call_value(
+            "container",
+            &[],
+            &[named_arg_at(
+                "width",
+                IrValue::String("not-a-size".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
+        assert_eq!(
+            candidate_start, 15,
+            "the leading character is three UTF-8 bytes"
+        );
+    }
+
+    #[test]
+    fn issue_167_crlf_candidate_provenance_keeps_original_coordinates() {
+        let source = ".container width=not-a-size\r\n  body";
+        let candidate_start = source.find("width").expect("candidate in source");
+        let candidate_end = source.find("\r\n").expect("CRLF in source");
+        let name_end = candidate_start + "width".len();
+        let source_id = SourceId(168);
+        let call_span = SourceSpan::new(source_id, 0, source.len());
+        let candidate_span = SourceSpan::new(source_id, candidate_start, candidate_end);
+        let parameter_span = SourceSpan::new(source_id, candidate_start, name_end);
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        let outcome = Evaluator::new().evaluate_call_value(
+            "container",
+            &[],
+            &[named_arg_at(
+                "width",
+                IrValue::String("not-a-size".to_string()),
+                parameter_span,
+                candidate_span,
+            )],
+            None,
+            None,
+            &call_span,
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(candidate_span));
+        assert_eq!(diagnostics[0].secondary, vec![parameter_span]);
+        assert_eq!((candidate_start, candidate_end), (11, 27));
     }
 }

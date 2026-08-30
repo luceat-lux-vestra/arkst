@@ -1097,15 +1097,15 @@ mod tests {
     fn compile_inline_foreach_failure_is_atomic_and_source_backed() {
         let source = "prefix\n.foreach {1..3} {x: .sum {.x} {true}}\ntail\n";
         let (result, source_id) = compile_source(source);
-        let sum_start = source.find(".sum").expect("failing body call");
+        let true_start = source.find("{true}").expect("failing body argument");
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
-                sum_start,
-                sum_start + ".sum {.x} {true}".len()
+                true_start,
+                true_start + "{true}".len()
             ))
         );
         assert_eq!(output_text(&result), "prefix\ntail");
@@ -1631,14 +1631,14 @@ mod tests {
         let source = "앞 문장\r\n.range from:{.multiply {true} {2}} to:{3}\r\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        let nested_start = source.find(".multiply").expect("nested bound");
-        let nested_end = nested_start + ".multiply {true} {2}".len();
+        let candidate_start = source.find("{true}").expect("boolean candidate");
+        let candidate_end = candidate_start + "{true}".len();
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
-                nested_start,
-                nested_end
+                candidate_start,
+                candidate_end
             ))
         );
 
@@ -3204,13 +3204,14 @@ mod tests {
     fn compile_plaintext_preserves_targeted_dynamic_content_and_rejects_unsupported_values() {
         for source in [".plaintext {.pair {a} {b}}\n", ".plaintext {1..2}\n"] {
             let (result, source_id) = compile_source(source);
+            let candidate_start = source.find('{').expect("content candidate");
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
             assert_eq!(
                 result.diagnostics[0].primary,
                 Some(scribium_source::SourceSpan::new(
                     source_id,
-                    0,
+                    candidate_start,
                     source.trim_end().len(),
                 )),
                 "{source:?}"
@@ -3324,12 +3325,13 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
+        let candidate_start = source.find("{.value}").expect("missing value candidate");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
-                source.find(".sum").expect("predicate call"),
-                source.find(".sum").expect("predicate call") + ".sum {.value} {1}".len()
+                candidate_start,
+                candidate_start + "{.value}".len()
             ))
         );
         assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -3398,9 +3400,8 @@ mod tests {
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
-                source.find(".divide").expect("nested divide call"),
-                source.find(".divide").expect("nested divide call")
-                    + ".divide {10} by:{true}".len(),
+                source.find("by:{true}").expect("boolean candidate"),
+                source.find("by:{true}").expect("boolean candidate") + "by:{true}".len(),
             ))
         );
         assert_eq!(output_text(&result), "앞 문장\n뒤 문장");
@@ -3413,8 +3414,8 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
-        let call_start = source.find(".truncate").expect("nested truncate call");
-        let call_end = call_start + ".truncate {12.34} decimals:{1.5}".len();
+        let call_start = source.find("decimals:{1.5}").expect("decimal candidate");
+        let call_end = call_start + "decimals:{1.5}".len();
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
@@ -3431,8 +3432,8 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
-        let call_start = source.find(".multiply").expect("nested multiply call");
-        let call_end = call_start + ".multiply {10} by:{true}".len();
+        let call_start = source.find("by:{true}").expect("boolean candidate");
+        let call_end = call_start + "by:{true}".len();
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
@@ -3450,8 +3451,10 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         let diagnostic = &result.diagnostics[0];
         assert_eq!(diagnostic.code, "E3001");
-        let call_start = source.find(".startswith").expect("startswith call");
-        let call_end = call_start + ".startswith {Hello} {he} ignorecase:{maybe}".len();
+        let call_start = source
+            .find("ignorecase:{maybe}")
+            .expect("boolean candidate");
+        let call_end = call_start + "ignorecase:{maybe}".len();
         assert_eq!(
             diagnostic.primary,
             Some(scribium_source::SourceSpan::new(
@@ -4147,13 +4150,13 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
-        let failure_start = source.find(".sum").expect("callback failure span");
+        let failure_start = source.find("{true}").expect("boolean candidate span");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
-                failure_start + ".sum {true} {2}".len()
+                failure_start + "{true}".len()
             ))
         );
         assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -4165,13 +4168,13 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
-        let failure_start = source.find(".sum").expect("callback failure span");
+        let failure_start = source.find("{true}").expect("boolean candidate span");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
-                failure_start + ".sum {true} {2}".len()
+                failure_start + "{true}".len()
             ))
         );
         assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -4183,13 +4186,13 @@ mod tests {
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         assert_eq!(result.diagnostics[0].code, "E3001");
-        let failure_start = source.find(".sum").expect("callback failure span");
+        let failure_start = source.find("{true}").expect("boolean candidate span");
         assert_eq!(
             result.diagnostics[0].primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
                 failure_start,
-                failure_start + ".sum {true} {2}".len()
+                failure_start + "{true}".len()
             ))
         );
         assert!(result.ir.nodes.is_empty(), "{result:?}");
@@ -4305,7 +4308,7 @@ mod tests {
         let (nested_result, _) = compile_source(".var {x} {0}\n.multiply {.x {3}} {2}\n.x\n");
         assert_eq!(nested_result.diagnostics.len(), 1, "{nested_result:?}");
         assert_eq!(nested_result.diagnostics[0].code, "E3001");
-        assert_eq!(output_text(&nested_result), "3");
+        assert_eq!(output_text(&nested_result), "0");
 
         let (failed_child, _) = compile_source(".multiply {.sum {true}} {2}\n");
         assert_eq!(failed_child.diagnostics.len(), 1, "{failed_child:?}");
@@ -5306,14 +5309,14 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
         let diagnostic = &result.diagnostics[0];
         assert_eq!(diagnostic.code, "E3001");
-        let comparison_start = source.find(".islower").expect("comparison call");
-        let comparison_end = comparison_start + ".islower {not-a-number} than:{3}".len();
+        let candidate_start = source.find("{not-a-number}").expect("numeric candidate");
+        let candidate_end = candidate_start + "{not-a-number}".len();
         assert_eq!(
             diagnostic.primary,
             Some(scribium_source::SourceSpan::new(
                 source_id,
-                comparison_start,
-                comparison_end,
+                candidate_start,
+                candidate_end,
             ))
         );
         assert_eq!(output_text(&result), "앞 문장");

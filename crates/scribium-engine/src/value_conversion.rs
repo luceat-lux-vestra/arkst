@@ -200,6 +200,28 @@ pub(crate) enum ConversionTarget {
     Callable,
 }
 
+impl ConversionTarget {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Dynamic => "dynamic value",
+            Self::Number => "Number",
+            Self::Integer => "Integer",
+            Self::Boolean => "Boolean",
+            Self::String => "String",
+            Self::Range => "Range",
+            Self::Size => "Size",
+            Self::Color => "Color",
+            Self::Enum => "closed enum",
+            Self::InlineContent => "inline content",
+            Self::BlockContent => "block content",
+            Self::Node => "Node",
+            Self::Iterable => "iterable",
+            Self::Dictionary => "dictionary",
+            Self::Callable => "callable",
+        }
+    }
+}
+
 impl From<ScalarTarget> for ConversionTarget {
     fn from(target: ScalarTarget) -> Self {
         match target {
@@ -382,6 +404,39 @@ static CONTAINER_ALIGNMENT_SPEC: ClosedEnumSpec<'static, IrContainerAlignment> =
 pub(crate) enum ConversionError {
     InvalidText { target: ConversionTarget },
     UnsupportedValue { target: ConversionTarget },
+}
+
+/// The complete evaluator-private provenance carried by a failed conversion.
+///
+/// Conversion itself remains source-independent. This representation is
+/// created at the target boundary and is consumed only when the evaluator
+/// emits a diagnostic, so builtin adapters cannot accidentally replace the
+/// typed reason with a call-level string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConversionFailure {
+    pub(crate) error: ConversionError,
+    pub(crate) candidate_span: Option<SourceSpan>,
+    pub(crate) parameter_name: Option<String>,
+    pub(crate) parameter_span: Option<SourceSpan>,
+    pub(crate) call_span: SourceSpan,
+}
+
+impl ConversionFailure {
+    pub(crate) fn new(
+        error: ConversionError,
+        candidate_span: Option<SourceSpan>,
+        parameter_name: Option<impl Into<String>>,
+        parameter_span: Option<SourceSpan>,
+        call_span: SourceSpan,
+    ) -> Self {
+        Self {
+            error,
+            candidate_span,
+            parameter_name: parameter_name.map(Into::into),
+            parameter_span,
+            call_span,
+        }
+    }
 }
 
 /// A context-sensitive conversion result. `Value` is already typed or

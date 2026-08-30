@@ -245,7 +245,7 @@ fn nested_include_callback_failure_keeps_child_source_and_atomic_output() {
             .primary
             .as_ref()
             .map(|span| span.start),
-        Some(child.find(".sum").expect("nested callback failure"))
+        Some(child.find("{true}").expect("nested callback failure"))
     );
     assert!(result.ir.nodes.is_empty());
 }
