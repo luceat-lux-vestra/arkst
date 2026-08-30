@@ -170,8 +170,10 @@ invocation. It does not claim specialized layout/resource/document-state/native
 owners, renderer compatibility, or upstream partial-effects parity.
 
 The implementation keeps extension links and invocation bodies evaluator-owned;
-it adds no extension IR, backend type, environment snapshot, or second
-evaluator. The contextual frontend metadata needed to identify an extension
+it assigns monotonic evaluator-local link identities, validates weak owners,
+and retires overlays reachable from a replaced function root through the
+existing savepoint journal. It adds no extension IR, backend type, environment
+snapshot, or second evaluator. The contextual frontend metadata needed to identify an extension
 body and `where` lambda is covered by the existing parser path. Invocation
 savepoints use the existing #167 transaction journal, including field-specific
 `DocumentState` undo and function/link writeback. Independent evidence is in

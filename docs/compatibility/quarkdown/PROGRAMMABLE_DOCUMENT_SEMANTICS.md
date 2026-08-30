@@ -451,7 +451,12 @@ The evaluator now implements the v2.5.1 extension contract at a bounded
 semantic boundary. `.extend` resolves a visible source-defined callable or a
 regular scalar builtin through the existing dispatch and binder paths, copies
 the target parameter contract into the wrapper, and retains an immutable
-declaration-time parent link plus a scope-local evaluator overlay. `where` receives the same named
+declaration-time parent link plus a scope-local evaluator overlay. Each link
+has a monotonic evaluator-issued identity; overlays validate their weak owner
+before use and are retired when a same-scope root binding is replaced. The
+retirement is journaled with the existing savepoint, so rollback restores the
+old chain without retaining dead overlays or relying on allocation addresses.
+`where` receives the same named
 parameters as the wrapper; a false condition delegates to the current parent
 target, while a true condition invokes the wrapper body with `.super` available
 only in that active extension context.

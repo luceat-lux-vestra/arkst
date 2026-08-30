@@ -240,6 +240,27 @@ fn source_defined_target_precedes_a_same_named_native_builtin() {
 }
 
 #[test]
+fn replacement_retires_the_old_extension_chain_before_new_extension() {
+    let source = ".function {greet}\n    name:\n    original .name\n\n.extend {greet}\n    name:\n    old .super\n\n.extend {greet}\n    name:\n    older .super\n\n.function {greet}\n    name:\n    replacement .name\n\n.extend {greet}\n    name:\n    new .super\n\n.greet {world}\n";
+    let result = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(
+        paragraph_texts(&result),
+        ["new replacement world"],
+        "the replacement must not re-enter the retired extension chain"
+    );
+}
+
+#[test]
+fn failed_replacement_restores_the_previous_extension_chain() {
+    let source = ".function {greet}\n    name:\n    original .name\n\n.extend {greet}\n    name:\n    old .super\n\n.function {replace}\n    name:\n    .function {greet}\n        value:\n        replacement .value\n    .sum {true} {2}\n\n.replace {world}\n.greet {world}\n";
+    let result = compile_source(source);
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(result.diagnostics[0].message.contains("numeric arguments"));
+    assert_eq!(paragraph_text(&result), "old original world");
+}
+
+#[test]
 fn native_extension_raw_body_stays_lazy_and_is_not_reparsed_as_nested_state() {
     let source = ".var {state} {before}\n.extend {lowercase}\n    .super\n\n.lowercase\n    .state {changed}\n\n.state\n";
     let result = compile_source(source);

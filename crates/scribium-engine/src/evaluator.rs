@@ -70,7 +70,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 /// A resolved variable value stored in the evaluation environment.
 ///
@@ -123,6 +123,9 @@ impl FunctionBinding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ExtensionId(u64);
+
 /// The evaluator-owned link used by a function extension. The wrapper body
 /// remains an ordinary `FunctionBinding`; only its immutable declaration-time
 /// parent target is extra runtime state. Scope-local chain overlays live on
@@ -130,6 +133,7 @@ impl FunctionBinding {
 /// mutating a link that another invocation may still own.
 #[derive(Debug, Clone, PartialEq)]
 struct FunctionExtension {
+    id: ExtensionId,
     condition: Option<IrCallable>,
     super_target: FunctionTarget,
     body_policy: ExtensionBodyPolicy,
@@ -157,6 +161,18 @@ impl ExtensionBodyPolicy {
 enum FunctionTarget {
     Binding(Rc<FunctionBinding>),
     Native(String),
+}
+
+/// A scope-local successor for an extension link. The stable ID is the map
+/// identity; the weak owner prevents an unrelated link from being accepted if
+/// a corrupted or mixed context presents the same ID. The target stays strong
+/// while the link is live so chained wrappers remain callable. Replaced root
+/// bindings explicitly retire their reachable overlays, which breaks that
+/// otherwise unbounded retention chain.
+#[derive(Debug, Clone)]
+struct ExtensionOverlay {
+    owner: Weak<FunctionExtension>,
+    target: FunctionTarget,
 }
 
 /// Source-backed call data retained while an extension body evaluates. The
@@ -706,7 +722,7 @@ struct EvaluationContext<'a> {
     parent: Option<Box<EvaluationContext<'a>>>,
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
-    extension_targets: BTreeMap<usize, FunctionTarget>,
+    extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
     lambda_scope: Option<LambdaScope>,
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
@@ -738,6 +754,7 @@ struct ScopeIdentity {
 struct InvocationTransaction {
     savepoints: Vec<InvocationSavepoint>,
     next_scope_key: usize,
+    next_extension_id: u64,
     #[cfg(test)]
     document_state_copy_work: usize,
 }
@@ -750,12 +767,29 @@ struct InvocationSavepoint {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum UndoKey {
-    DocumentState { field: DocumentStateField },
-    Variable { scope: usize, name: String },
-    AssignedVariable { scope: usize, name: String },
-    VariableOwner { scope: usize, name: String },
-    Function { scope: usize, name: String },
-    ExtensionTarget { scope: usize, extension: usize },
+    DocumentState {
+        field: DocumentStateField,
+    },
+    Variable {
+        scope: usize,
+        name: String,
+    },
+    AssignedVariable {
+        scope: usize,
+        name: String,
+    },
+    VariableOwner {
+        scope: usize,
+        name: String,
+    },
+    Function {
+        scope: usize,
+        name: String,
+    },
+    ExtensionTarget {
+        scope: usize,
+        extension: ExtensionId,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -812,9 +846,9 @@ enum InvocationUndo {
     },
     ExtensionTarget {
         scope: usize,
-        extension: Rc<FunctionExtension>,
+        extension: ExtensionId,
         journal_floor: Option<usize>,
-        previous: Option<FunctionTarget>,
+        previous: Option<ExtensionOverlay>,
     },
 }
 
@@ -842,7 +876,7 @@ impl InvocationUndo {
                 scope, extension, ..
             } => UndoKey::ExtensionTarget {
                 scope: *scope,
-                extension: Rc::as_ptr(extension) as usize,
+                extension: *extension,
             },
         }
     }
@@ -879,6 +913,12 @@ impl InvocationTransaction {
         let key = self.next_scope_key;
         self.next_scope_key += 1;
         key
+    }
+
+    fn allocate_extension_id(&mut self) -> Option<ExtensionId> {
+        let id = self.next_extension_id;
+        self.next_extension_id = self.next_extension_id.checked_add(1)?;
+        Some(ExtensionId(id))
     }
 
     fn begin(&mut self, outermost: bool) {
@@ -1134,9 +1174,18 @@ impl<'a> EvaluationContext<'a> {
         self.scope_identity.key
     }
 
+    #[cfg(test)]
+    fn extension_target_count(&self) -> usize {
+        self.extension_targets.len()
+    }
+
     fn new_scope_identity(transaction: &Rc<RefCell<InvocationTransaction>>) -> Rc<ScopeIdentity> {
         let key = transaction.borrow_mut().allocate_scope_key();
         Rc::new(ScopeIdentity { key })
+    }
+
+    fn allocate_extension_id(&self) -> Option<ExtensionId> {
+        self.transaction.borrow_mut().allocate_extension_id()
     }
 
     fn should_journal_scope_write(&self) -> bool {
@@ -1242,10 +1291,16 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
-        let key = Rc::as_ptr(extension) as usize;
+        let key = extension.id;
         self.extension_targets
             .get(&key)
-            .cloned()
+            .and_then(|overlay| {
+                overlay
+                    .owner
+                    .upgrade()
+                    .filter(|owner| Rc::ptr_eq(owner, extension))
+                    .map(|_| overlay.target.clone())
+            })
             .or_else(|| {
                 self.parent
                     .as_deref()
@@ -1254,36 +1309,67 @@ impl<'a> EvaluationContext<'a> {
             .unwrap_or_else(|| extension.super_target.clone())
     }
 
-    fn record_extension_target_before(&self, extension: &Rc<FunctionExtension>) {
+    fn record_extension_target_before_id(&self, extension: ExtensionId) {
         if !self.should_journal_scope_write() {
             return;
         }
         let scope = self.scope_key();
         let journal_floor = self.journal_floor;
-        let key = UndoKey::ExtensionTarget {
-            scope,
-            extension: Rc::as_ptr(extension) as usize,
-        };
+        let key = UndoKey::ExtensionTarget { scope, extension };
         if self.transaction.borrow_mut().first_write(key) {
-            let previous = self
-                .extension_targets
-                .get(&(Rc::as_ptr(extension) as usize))
-                .cloned();
+            let previous = self.extension_targets.get(&extension).cloned();
             self.transaction
                 .borrow_mut()
                 .push(InvocationUndo::ExtensionTarget {
                     scope,
-                    extension: Rc::clone(extension),
+                    extension,
                     journal_floor,
                     previous,
                 });
         }
     }
 
+    fn record_extension_target_before(&self, extension: &Rc<FunctionExtension>) {
+        self.record_extension_target_before_id(extension.id);
+    }
+
     fn set_extension_target(&mut self, extension: &Rc<FunctionExtension>, target: FunctionTarget) {
         self.record_extension_target_before(extension);
-        self.extension_targets
-            .insert(Rc::as_ptr(extension) as usize, target);
+        self.extension_targets.insert(
+            extension.id,
+            ExtensionOverlay {
+                owner: Rc::downgrade(extension),
+                target,
+            },
+        );
+    }
+
+    fn remove_extension_target(&mut self, extension: ExtensionId) {
+        if self.extension_targets.contains_key(&extension) {
+            self.record_extension_target_before_id(extension);
+            self.extension_targets.remove(&extension);
+        }
+    }
+
+    /// Retires the overlays that make an old root binding reach its chained
+    /// wrappers. Function replacement is the lifecycle boundary: after it,
+    /// the old root is no longer visible from this scope, so retaining those
+    /// overlays would keep the old chain alive indefinitely.
+    fn retire_extension_chain(&mut self, root: &Rc<FunctionBinding>) {
+        let mut current = FunctionTarget::Binding(Rc::clone(root));
+        let mut extension_ids = BTreeSet::new();
+        while let FunctionTarget::Binding(binding) = current {
+            let Some(extension) = binding.extension.as_ref() else {
+                break;
+            };
+            if !extension_ids.insert(extension.id) {
+                break;
+            }
+            current = self.get_extension_target(extension);
+        }
+        for extension in extension_ids {
+            self.remove_extension_target(extension);
+        }
     }
 
     fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
@@ -1340,17 +1426,14 @@ impl<'a> EvaluationContext<'a> {
                 extension,
                 previous,
                 ..
-            } => {
-                let key = Rc::as_ptr(&extension) as usize;
-                match previous {
-                    Some(previous) => {
-                        self.extension_targets.insert(key, previous);
-                    }
-                    None => {
-                        self.extension_targets.remove(&key);
-                    }
+            } => match previous {
+                Some(previous) => {
+                    self.extension_targets.insert(extension, previous);
                 }
-            }
+                None => {
+                    self.extension_targets.remove(&extension);
+                }
+            },
         }
         true
     }
@@ -1481,17 +1564,23 @@ impl<'a> EvaluationContext<'a> {
         declaration_span: SourceSpan,
         capture: Option<Box<IrCallableCapture>>,
     ) {
+        let binding = Rc::new(FunctionBinding {
+            parameters,
+            body,
+            declaration_span,
+            capture,
+            extension: None,
+        });
+        self.replace_function_binding(name, binding);
+    }
+
+    fn replace_function_binding(&mut self, name: String, binding: Rc<FunctionBinding>) {
+        let previous = self.functions.get(&name).cloned();
         self.record_function_before(&name);
-        self.functions.insert(
-            name,
-            Rc::new(FunctionBinding {
-                parameters,
-                body,
-                declaration_span,
-                capture,
-                extension: None,
-            }),
-        );
+        if let Some(previous) = previous.as_ref() {
+            self.retire_extension_chain(previous);
+        }
+        self.functions.insert(name, binding);
     }
 
     fn capture_snapshot(&self) -> IrCallableCapture {
@@ -1529,7 +1618,7 @@ impl<'a> EvaluationContext<'a> {
         functions.extend(self.functions.clone());
     }
 
-    fn collect_extension_targets(&self, targets: &mut BTreeMap<usize, FunctionTarget>) {
+    fn collect_extension_targets(&self, targets: &mut BTreeMap<ExtensionId, ExtensionOverlay>) {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_extension_targets(targets);
         }
@@ -8152,7 +8241,16 @@ impl Evaluator {
         };
 
         let (super_target, innermost) = split_extension_target(existing_target, context);
+        let Some(id) = context.allocate_extension_id() else {
+            diagnostics.push(extension_error(
+                "`.extend` exceeded the evaluator's extension identity limit".to_string(),
+                *span,
+                Some(*target_span),
+            ));
+            return CallOutcome::Failed;
+        };
         let extension = Rc::new(FunctionExtension {
+            id,
             condition,
             super_target,
             body_policy,
@@ -8168,8 +8266,7 @@ impl Evaluator {
         if let Some(innermost) = innermost {
             context.set_extension_target(&innermost, FunctionTarget::Binding(wrapper));
         } else {
-            context.record_function_before(&target_name);
-            context.functions.insert(target_name, wrapper);
+            context.replace_function_binding(target_name, wrapper);
         }
         CallOutcome::NoValue
     }
@@ -19884,6 +19981,7 @@ mod tests {
             );
             assert!(matches!(outcome, CallOutcome::NoValue));
         }
+        assert_eq!(context.extension_target_count(), 2);
 
         for _ in 0..4096 {
             let outcome = evaluator.evaluate_call_value(
@@ -19902,7 +20000,54 @@ mod tests {
             ));
         }
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.extension_target_count(), 2);
         assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+    }
+
+    #[test]
+    fn issue_169_replaced_function_prunes_old_extension_overlays() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let extension_parameters = vec![lambda_parameter("value", 24)];
+        let extension_body = vec![IrNode::FunctionCall {
+            name: "super".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(30, 36),
+        }];
+
+        for _ in 0..1024 {
+            context.set_function_binding(
+                "repeatable".to_string(),
+                LambdaParameters::Explicit(vec![lambda_parameter("value", 4)]),
+                vec![var_ref("value")],
+                span(0, 20),
+                None,
+            );
+            assert_eq!(context.extension_target_count(), 0);
+            for _ in 0..3 {
+                let outcome = evaluator.evaluate_call_value(
+                    "extend",
+                    &[IrValue::Identifier("repeatable".to_string())],
+                    &[],
+                    Some(CallBody::Block(&extension_body)),
+                    Some(&extension_parameters),
+                    &span(20, 40),
+                    &mut diagnostics,
+                    &mut context,
+                );
+                assert!(matches!(outcome, CallOutcome::NoValue));
+            }
+            assert_eq!(context.extension_target_count(), 2);
+            assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        }
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
