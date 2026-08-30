@@ -343,7 +343,12 @@ The demonstrated consumers are dynamic String to inline Markdown through
 `.plaintext`, typed and Markdown-list iterable conversion, and regular
 document-state body fallback for `.theme`, `.doclang`, and `.captionposition`.
 The retained body source range is the complete upstream body token, including
-leading/trailing blank lines; its target value applies `trimIndent().trimEnd()`.
+leading/trailing blank lines; each non-blank continuation line independently
+requires the pinned two-space-or-tab prefix, and its target value applies
+`trimIndent().trimEnd()`. JSON serialization of an `IrDocument` stores each
+distinct source buffer once in a document-scoped source table while retaining
+raw-body spans, so inspect output does not repeat the full document for every
+unresolved call.
 Source-backed body fallback does not evaluate or stringify the parsed nested
 body. Dynamic iterable conversion evaluates one raw expression in context and
 uses typed Iterable/Dictionary results before its Markdown-list fallback.

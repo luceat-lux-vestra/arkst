@@ -66,8 +66,9 @@ struct QuarkdownBlock {
     call_start: usize,
     header_pending: bool,
     continuation_pending: bool,
-    /// The first qualifying body's visual indentation in the current reader
-    /// context. This is never an absolute source-column measurement.
+    /// Indentation used only to preserve relative Markdown structure while
+    /// feeding accepted lines to Rushdown. Body ownership is decided by
+    /// `body_line_prefix` for every line and never by this value.
     body_indent: Option<usize>,
     /// Original reader segments accepted as body lines. These preserve parser
     /// ownership for the frontend's lazy-paragraph normalization.
@@ -115,6 +116,42 @@ fn skip_argument_separator(source: &str, start: usize) -> usize {
         cursor += 1;
     }
     cursor
+}
+
+/// Returns whether a non-blank line satisfies Quarkdown's body token prefix.
+///
+/// Rushdown may have already consumed an enclosing container's indentation
+/// before invoking a nested block parser. In that case `line` starts at the
+/// remaining text and the original prefix is recovered from the source line.
+fn body_line_prefix(line: &[u8], source: &str, segment: Segment, call_start: usize) -> Option<()> {
+    let line_start = source[..segment.start()]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let call_line_start = source[..call_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let call_prefix = source.get(call_line_start..call_start)?.as_bytes();
+    let body_line = source.get(line_start..segment.stop())?.as_bytes();
+    let whitespace = |prefix: &[u8]| prefix.iter().all(|byte| matches!(byte, b' ' | b'\t'));
+
+    // When both source lines are ordinary indented lines, compare the body
+    // line with the call's own logical indentation. This prevents a sibling
+    // at the call's depth from becoming that call's body after an enclosing
+    // parser has already consumed its indentation.
+    if whitespace(call_prefix) {
+        let call_indent = indent_width(call_prefix, 0).0;
+        let body_indent = indent_width(body_line, 0).0;
+        if body_indent < call_indent + 2 {
+            return None;
+        }
+        return Some(());
+    }
+
+    if segment.padding() == 0 && (line.starts_with(b"  ") || line.starts_with(b"\t")) {
+        return Some(());
+    }
+
+    None
 }
 
 #[derive(Debug)]
@@ -231,23 +268,21 @@ impl BlockParser for QuarkdownBlockParser {
             return Some(State::HAS_CHILDREN);
         }
 
-        let (actual_indent, _) = indent_width(&line, reader.line_offset());
+        let line_offset = reader.line_offset();
+        // Quarkdown's bodyArgContent applies this predicate to every
+        // non-blank line independently. It does not carry the first body's
+        // indentation forward as a continuation threshold. `line` starts at
+        // the reader's current position; `line_offset` is the already
+        // consumed outer-container offset and must not be applied twice.
+        let call_start = as_extension_data!(arena, node_ref, QuarkdownBlock)
+            .call
+            .start();
+        body_line_prefix(&line, reader.source(), segment, call_start)?;
+        let actual_indent = indent_width(&line, line_offset).0;
         let body_indent = {
             let block = as_extension_data!(arena, node_ref, QuarkdownBlock);
-            if let Some(body_indent) = block.body_indent {
-                if actual_indent < body_indent {
-                    return None;
-                }
-                body_indent
-            } else {
-                let has_minimum_indent = actual_indent >= 2 || line.first() == Some(&b'\t');
-                if !has_minimum_indent {
-                    return None;
-                }
-                actual_indent
-            }
+            block.body_indent.unwrap_or(actual_indent)
         };
-
         if as_extension_data!(arena, node_ref, QuarkdownBlock)
             .body_indent
             .is_none()
@@ -260,7 +295,8 @@ impl BlockParser for QuarkdownBlockParser {
         block.body_lines.push(segment);
         block.raw_body_end = segment.stop();
 
-        let (position, padding) = indent_position(&line, reader.line_offset(), body_indent)?;
+        let strip_indent = actual_indent.min(body_indent);
+        let (position, padding) = indent_position(&line, line_offset, strip_indent)?;
         reader.advance_and_set_padding(position, padding);
         Some(State::HAS_CHILDREN)
     }
@@ -4205,7 +4241,7 @@ mod tests {
     }
 
     #[test]
-    fn quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed() {
+    fn quarkdown_body_accepts_a_shallower_qualifying_line() {
         let output = parse_with_diagnostics(".note\n    first\n  second\n\noutside\n");
         let Block::DirectiveCall {
             body: Some(body), ..
@@ -4214,9 +4250,8 @@ mod tests {
             panic!("expected directive body")
         };
         assert_eq!(body.len(), 1);
-        assert_eq!(paragraph_text(&body[0]), "first");
-        assert_eq!(paragraph_text(&output.document.nodes[1]), "second");
-        assert_eq!(paragraph_text(&output.document.nodes[2]), "outside");
+        assert_eq!(paragraph_text(&body[0]), "firstsecond");
+        assert_eq!(paragraph_text(&output.document.nodes[1]), "outside");
     }
 
     #[test]

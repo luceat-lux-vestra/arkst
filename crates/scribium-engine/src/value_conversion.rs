@@ -2137,6 +2137,21 @@ mod tests {
     }
 
     #[test]
+    fn raw_body_dynamic_text_uses_the_minimum_indent_of_all_body_lines() {
+        let source = ".theme\n    first\n  second\n";
+        let body_end = source.len();
+        let body = IrRawBody {
+            source: scribium_source::SourceText::new(source),
+            span: SourceSpan::new(SourceId(1), 7, body_end),
+        };
+
+        assert_eq!(
+            raw_body_dynamic_text(&body).as_deref(),
+            Some("  first\nsecond")
+        );
+    }
+
+    #[test]
     fn raw_body_dynamic_text_is_derived_only_from_a_valid_source_span() {
         let body = IrRawBody {
             source: SourceText::new("body".to_string()),

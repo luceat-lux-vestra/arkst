@@ -9,19 +9,422 @@
 //! unresolved IR is a separate concern from semantic evaluation.
 
 use scribium_source::{SourceSpan, SourceText};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
 
 /// A compiled document in intermediate representation.
 ///
 /// Produced initially by frontend-to-IR lowering, progressively normalized by
 /// semantic evaluation, and consumed by backend lowering. The IR is
-/// serializable for `scribium inspect --emit ir` output.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+/// serializable for `scribium inspect --emit ir` output. Its JSON form stores
+/// source-backed raw-body text once in a document-level `sources` table;
+/// individual raw bodies retain their source span and refer to that table by
+/// `source_ref`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct IrDocument {
     /// Ordered list of IR nodes.
     pub nodes: Vec<IrNode>,
     /// Metadata extracted from front matter or document-level directives.
     pub metadata: IrMetadata,
+}
+
+#[derive(serde::Serialize)]
+struct IrDocumentFields<'a> {
+    nodes: &'a [IrNode],
+    metadata: &'a IrMetadata,
+}
+
+#[derive(serde::Serialize)]
+struct IrDocumentFieldsWithSources<'a> {
+    nodes: &'a [IrNode],
+    metadata: &'a IrMetadata,
+    sources: &'a [SourceText],
+}
+
+#[derive(serde::Deserialize)]
+struct IrDocumentFieldsOwned {
+    nodes: Vec<IrNode>,
+    metadata: IrMetadata,
+    #[serde(default)]
+    sources: Vec<SourceText>,
+}
+
+impl serde::Serialize for IrDocument {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut wire = self.clone();
+        let mut sources = SourceTable::default();
+        rewrite_document_sources(&mut wire.nodes, &mut sources, &SourceRewrite::Marker)
+            .map_err(serde::ser::Error::custom)?;
+
+        if sources.sources.is_empty() {
+            IrDocumentFields {
+                nodes: &wire.nodes,
+                metadata: &wire.metadata,
+            }
+            .serialize(serializer)
+        } else {
+            IrDocumentFieldsWithSources {
+                nodes: &wire.nodes,
+                metadata: &wire.metadata,
+                sources: &sources.sources,
+            }
+            .serialize(serializer)
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IrDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let IrDocumentFieldsOwned {
+            nodes,
+            metadata,
+            sources,
+        } = IrDocumentFieldsOwned::deserialize(deserializer)?;
+        let mut document = Self { nodes, metadata };
+        if sources.is_empty() {
+            let mut sources = SourceTable::default();
+            rewrite_document_sources(
+                &mut document.nodes,
+                &mut sources,
+                &SourceRewrite::Canonicalize,
+            )
+            .map_err(serde::de::Error::custom)?;
+        } else {
+            resolve_document_sources(&mut document.nodes, &sources)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Ok(document)
+    }
+}
+
+#[derive(Default)]
+struct SourceTable {
+    sources: Vec<SourceText>,
+    indices: HashMap<u64, Vec<usize>>,
+}
+
+impl SourceTable {
+    fn intern(&mut self, source: &SourceText) -> usize {
+        let mut hasher = DefaultHasher::new();
+        source.as_str().hash(&mut hasher);
+        let hash = hasher.finish();
+        if let Some(candidates) = self.indices.get(&hash) {
+            if let Some(index) = candidates
+                .iter()
+                .copied()
+                .find(|index| self.sources[*index].as_str() == source.as_str())
+            {
+                return index;
+            }
+        }
+        let index = self.sources.len();
+        self.sources.push(source.clone());
+        self.indices.entry(hash).or_default().push(index);
+        index
+    }
+}
+
+enum SourceRewrite<'a> {
+    Marker,
+    Canonicalize,
+    Resolve(&'a [SourceText]),
+}
+
+const SOURCE_MARKER_PREFIX: &str = "\0scribium-source-ref:";
+
+fn source_marker(index: usize) -> String {
+    format!("{SOURCE_MARKER_PREFIX}{index}")
+}
+
+fn source_marker_index(source: &str) -> Option<Result<usize, String>> {
+    let index = source.strip_prefix(SOURCE_MARKER_PREFIX)?;
+    Some(
+        index
+            .parse()
+            .map_err(|_| "IR raw-body source marker must contain an unsigned integer".to_string()),
+    )
+}
+
+fn rewrite_document_sources(
+    nodes: &mut [IrNode],
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    for node in nodes {
+        rewrite_node_sources(node, sources, rewrite)?;
+    }
+    Ok(())
+}
+
+fn rewrite_node_sources(
+    node: &mut IrNode,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    match node {
+        IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
+            rewrite_inline_sources(content, sources, rewrite)?;
+        }
+        IrNode::Blockquote { content, .. } => rewrite_document_sources(content, sources, rewrite)?,
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+            for item in items {
+                rewrite_document_sources(&mut item.nodes, sources, rewrite)?;
+            }
+        }
+        IrNode::Table { header, rows, .. } => {
+            rewrite_inline_sources_in_row(header, sources, rewrite)?;
+            for row in rows {
+                rewrite_inline_sources_in_row(row, sources, rewrite)?;
+            }
+        }
+        IrNode::Component { component } => rewrite_component_sources(component, sources, rewrite)?,
+        IrNode::FunctionCall {
+            positional_args,
+            named_args,
+            body,
+            raw_body,
+            ..
+        } => {
+            for value in positional_args {
+                rewrite_value_sources(value, sources, rewrite)?;
+            }
+            for argument in named_args {
+                rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+            }
+            if let Some(body) = body {
+                rewrite_document_sources(body, sources, rewrite)?;
+            }
+            rewrite_raw_body_source(raw_body, sources, rewrite)?;
+        }
+        IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body,
+            raw_body,
+            ..
+        } => {
+            rewrite_call_segment_sources(head, sources, rewrite)?;
+            for segment in chain {
+                rewrite_call_segment_sources(segment, sources, rewrite)?;
+            }
+            if let Some(body) = body {
+                rewrite_document_sources(body, sources, rewrite)?;
+            }
+            rewrite_raw_body_source(raw_body, sources, rewrite)?;
+        }
+        IrNode::FunctionDeclaration { name, body, .. } => {
+            rewrite_value_sources(name, sources, rewrite)?;
+            rewrite_document_sources(body, sources, rewrite)?;
+        }
+        IrNode::CodeBlock { .. }
+        | IrNode::RawHtml { .. }
+        | IrNode::TargetSpecificContent { .. }
+        | IrNode::ThematicBreak { .. }
+        | IrNode::Math { .. } => {}
+    }
+    Ok(())
+}
+
+fn rewrite_component_sources(
+    component: &mut IrComponent,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    match component {
+        IrComponent::Stacked(component) => {
+            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+        }
+        IrComponent::Container(component) => {
+            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+        }
+        IrComponent::Landscape(component) => {
+            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_inline_sources(
+    inlines: &mut [IrInline],
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    for inline in inlines {
+        match inline {
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. }
+            | IrInline::Image { content, .. } => {
+                rewrite_inline_sources(content, sources, rewrite)?;
+            }
+            IrInline::DirectiveCall {
+                positional_args,
+                named_args,
+                body,
+                ..
+            } => {
+                for value in positional_args {
+                    rewrite_value_sources(value, sources, rewrite)?;
+                }
+                for argument in named_args {
+                    rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+                }
+                if let Some(body) = body {
+                    rewrite_inline_sources(body, sources, rewrite)?;
+                }
+            }
+            IrInline::ChainedDirectiveCall {
+                head, chain, body, ..
+            } => {
+                rewrite_call_segment_sources(head, sources, rewrite)?;
+                for segment in chain {
+                    rewrite_call_segment_sources(segment, sources, rewrite)?;
+                }
+                if let Some(body) = body {
+                    rewrite_inline_sources(body, sources, rewrite)?;
+                }
+            }
+            IrInline::Text { .. }
+            | IrInline::Whitespace { .. }
+            | IrInline::Code { .. }
+            | IrInline::SoftBreak { .. }
+            | IrInline::HardBreak { .. }
+            | IrInline::RawHtml { .. }
+            | IrInline::TargetSpecificContent { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_inline_sources_in_row(
+    row: &mut IrTableRow,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    for cell in &mut row.cells {
+        rewrite_inline_sources(&mut cell.content, sources, rewrite)?;
+    }
+    Ok(())
+}
+
+fn rewrite_call_segment_sources(
+    segment: &mut IrCallSegment,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    for value in &mut segment.positional_args {
+        rewrite_value_sources(value, sources, rewrite)?;
+    }
+    for argument in &mut segment.named_args {
+        rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+    }
+    Ok(())
+}
+
+fn rewrite_value_sources(
+    value: &mut IrValue,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    match value {
+        IrValue::Collection(values) => {
+            for value in values {
+                rewrite_value_sources(value, sources, rewrite)?;
+            }
+        }
+        IrValue::Pair(pair) => {
+            rewrite_value_sources(&mut pair.first, sources, rewrite)?;
+            rewrite_value_sources(&mut pair.second, sources, rewrite)?;
+        }
+        IrValue::Dictionary(dictionary) => {
+            for pair in &mut dictionary.entries {
+                rewrite_value_sources(&mut pair.first, sources, rewrite)?;
+                rewrite_value_sources(&mut pair.second, sources, rewrite)?;
+            }
+        }
+        IrValue::Content(nodes) => rewrite_document_sources(nodes, sources, rewrite)?,
+        IrValue::Component(component) => rewrite_component_sources(component, sources, rewrite)?,
+        IrValue::Callable(callable) => rewrite_callable_sources(callable, sources, rewrite)?,
+        IrValue::InlineBody(body) => {
+            rewrite_document_sources(&mut body.content, sources, rewrite)?;
+            rewrite_document_sources(&mut body.body, sources, rewrite)?;
+        }
+        IrValue::String(_)
+        | IrValue::Number(_)
+        | IrValue::Boolean(_)
+        | IrValue::Identifier(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_)
+        | IrValue::Range(_)
+        | IrValue::None => {}
+    }
+    Ok(())
+}
+
+fn rewrite_callable_sources(
+    callable: &mut IrCallable,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    rewrite_document_sources(&mut callable.body, sources, rewrite)?;
+    if let Some(capture) = &mut callable.capture {
+        for variable in &mut capture.variables {
+            rewrite_value_sources(&mut variable.value, sources, rewrite)?;
+        }
+        for function in &mut capture.functions {
+            rewrite_callable_sources(&mut function.callable, sources, rewrite)?;
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_raw_body_source(
+    raw_body: &mut Option<IrRawBody>,
+    sources: &mut SourceTable,
+    rewrite: &SourceRewrite<'_>,
+) -> Result<(), String> {
+    let Some(raw_body) = raw_body else {
+        return Ok(());
+    };
+    match rewrite {
+        SourceRewrite::Marker => {
+            let source_ref = sources.intern(&raw_body.source);
+            raw_body.source = SourceText::new(source_marker(source_ref));
+        }
+        SourceRewrite::Canonicalize => {
+            let source_ref = sources.intern(&raw_body.source);
+            raw_body.source = sources.sources[source_ref].clone();
+        }
+        SourceRewrite::Resolve(document_sources) => {
+            let Some(source_ref) = source_marker_index(raw_body.source.as_str()) else {
+                return Err("IR raw-body wire source is missing its source marker".to_string());
+            };
+            let source_ref = source_ref?;
+            raw_body.source = document_sources
+                .get(source_ref)
+                .ok_or_else(|| format!("IR raw-body source_ref {source_ref} is out of range"))?
+                .clone();
+        }
+    }
+    Ok(())
+}
+
+fn resolve_document_sources(nodes: &mut [IrNode], sources: &[SourceText]) -> Result<(), String> {
+    let mut unused_table = SourceTable::default();
+    for node in nodes {
+        rewrite_node_sources(node, &mut unused_table, &SourceRewrite::Resolve(sources))?;
+    }
+    Ok(())
 }
 
 /// Document-level metadata extracted during evaluation.
@@ -312,10 +715,77 @@ pub struct TargetSpecificContent {
 /// the exact upstream body-token range. Evaluator target consumers derive
 /// their own value lazily from this source slice; no target-specific or
 /// evaluator-only state is stored here.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IrRawBody {
     pub source: SourceText,
     pub span: SourceSpan,
+}
+
+#[derive(serde::Serialize)]
+struct IrRawBodySourceFields<'a> {
+    source: &'a SourceText,
+    span: SourceSpan,
+}
+
+#[derive(serde::Serialize)]
+struct IrRawBodySourceRefFields {
+    source_ref: usize,
+    span: SourceSpan,
+}
+
+#[derive(serde::Deserialize)]
+struct IrRawBodyFields {
+    #[serde(default)]
+    source: Option<SourceText>,
+    #[serde(default)]
+    source_ref: Option<usize>,
+    span: SourceSpan,
+}
+
+impl serde::Serialize for IrRawBody {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if let Some(source_ref) = source_marker_index(self.source.as_str()) {
+            IrRawBodySourceRefFields {
+                source_ref: source_ref.map_err(serde::ser::Error::custom)?,
+                span: self.span,
+            }
+            .serialize(serializer)
+        } else {
+            IrRawBodySourceFields {
+                source: &self.source,
+                span: self.span,
+            }
+            .serialize(serializer)
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IrRawBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let fields = IrRawBodyFields::deserialize(deserializer)?;
+        match (fields.source, fields.source_ref) {
+            (Some(source), None) => Ok(Self {
+                source,
+                span: fields.span,
+            }),
+            (None, Some(source_ref)) => Ok(Self {
+                source: SourceText::new(source_marker(source_ref)),
+                span: fields.span,
+            }),
+            (Some(_), Some(_)) => Err(serde::de::Error::custom(
+                "IR raw body cannot contain both source and source_ref",
+            )),
+            (None, None) => Err(serde::de::Error::custom(
+                "IR raw body requires source or source_ref",
+            )),
+        }
+    }
 }
 
 /// A backend-neutral block-level IR node.
@@ -732,13 +1202,13 @@ pub enum IrValue {
 mod tests {
     use super::{
         IrCaptionPosition, IrCaptionPositionInfo, IrComponent, IrContainerAlignment,
-        IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocumentAuthor,
+        IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor,
         IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
-        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrSize,
-        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody,
+        IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
         TargetSpecificContent,
     };
-    use scribium_source::{SourceId, SourceSpan};
+    use scribium_source::{SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
 
     #[test]
@@ -749,6 +1219,59 @@ mod tests {
             serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
             IrValue::None
         );
+    }
+
+    #[test]
+    fn document_serde_uses_one_source_table_for_many_raw_bodies() {
+        let source = format!(".calls\n{}", "x".repeat(16 * 1024));
+        let source_text = SourceText::new(source.clone());
+        let nodes = (0..64)
+            .map(|index| IrNode::FunctionCall {
+                name: format!("call{index}"),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: Some(IrRawBody {
+                    source: source_text.clone(),
+                    span: SourceSpan::new(SourceId(7), 7 + index, 7 + index + 1),
+                }),
+                span: SourceSpan::new(SourceId(7), 0, source.len()),
+            })
+            .collect();
+        let document = IrDocument {
+            nodes,
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_value(&document).expect("document serializes");
+        let sources = encoded
+            .get("sources")
+            .and_then(serde_json::Value::as_array)
+            .expect("raw-body document has a source table");
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0], source);
+        let first_body = &encoded["nodes"][0]["FunctionCall"]["raw_body"];
+        assert!(first_body.get("source").is_none());
+        assert_eq!(first_body["source_ref"], 0);
+        assert!(
+            serde_json::to_vec(&encoded)
+                .expect("encoded document is JSON")
+                .len()
+                < source.len() * 3
+        );
+
+        let decoded = serde_json::from_value::<IrDocument>(encoded).expect("document deserializes");
+        assert_eq!(decoded, document);
+        let IrNode::FunctionCall {
+            raw_body: Some(raw_body),
+            ..
+        } = &decoded.nodes[0]
+        else {
+            panic!("expected decoded raw body")
+        };
+        assert_eq!(raw_body.source.slice(raw_body.span.byte_span()), Some("x"));
     }
 
     #[test]

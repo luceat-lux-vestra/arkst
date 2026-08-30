@@ -234,7 +234,10 @@ lossless source buffer and the exact body-token span beside the parsed
 `CallBody`; the bounded setter derives the semantic value at the final
 `codeBlocks` conversion boundary without evaluating nested body calls. The
 existing `.html` native-content path derives its separate source-preserving
-line representation in the evaluator consumer.
+line representation in the evaluator consumer. Each non-blank continuation
+line independently uses the pinned two-space-or-tab prefix. `IrDocument` JSON
+keeps source-backed raw-body text in one document-scoped source table rather
+than repeating the full source for every unresolved call.
 Invalid raw enum text still fails before state publication. Complete body
 fallback coverage for the remaining layout/document consumers and caption
 rendering remains open.
