@@ -653,6 +653,7 @@ struct EvaluationContext<'a> {
     invocation_depth: Rc<RefCell<usize>>,
     transaction: Rc<RefCell<InvocationTransaction>>,
     scope_identity: Rc<ScopeIdentity>,
+    journalable: bool,
     assigned_variables: BTreeMap<String, IrValue>,
     variable_owners: BTreeSet<String>,
     forwarded_variable_owners: BTreeSet<String>,
@@ -665,14 +666,19 @@ struct ScopeIdentity {
 
 #[derive(Default)]
 struct InvocationTransaction {
-    active: bool,
+    savepoints: Vec<InvocationSavepoint>,
+    next_scope_key: usize,
+}
+
+#[derive(Default)]
+struct InvocationSavepoint {
     entries: Vec<InvocationUndo>,
     first_writes: BTreeSet<UndoKey>,
-    next_scope_key: usize,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum UndoKey {
+    DocumentState,
     Variable { scope: usize, name: String },
     AssignedVariable { scope: usize, name: String },
     VariableOwner { scope: usize, name: String },
@@ -680,6 +686,9 @@ enum UndoKey {
 }
 
 enum InvocationUndo {
+    DocumentState {
+        previous: DocumentState,
+    },
     Variable {
         scope: usize,
         name: String,
@@ -703,12 +712,35 @@ enum InvocationUndo {
 }
 
 impl InvocationUndo {
-    fn scope(&self) -> usize {
+    fn key(&self) -> UndoKey {
         match self {
+            Self::DocumentState { .. } => UndoKey::DocumentState,
+            Self::Variable { scope, name, .. } => UndoKey::Variable {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::AssignedVariable { scope, name, .. } => UndoKey::AssignedVariable {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::VariableOwner { scope, name, .. } => UndoKey::VariableOwner {
+                scope: *scope,
+                name: name.clone(),
+            },
+            Self::Function { scope, name, .. } => UndoKey::Function {
+                scope: *scope,
+                name: name.clone(),
+            },
+        }
+    }
+
+    fn scope(&self) -> Option<usize> {
+        match self {
+            Self::DocumentState { .. } => None,
             Self::Variable { scope, .. }
             | Self::AssignedVariable { scope, .. }
             | Self::VariableOwner { scope, .. }
-            | Self::Function { scope, .. } => *scope,
+            | Self::Function { scope, .. } => Some(*scope),
         }
     }
 }
@@ -720,58 +752,74 @@ impl InvocationTransaction {
         key
     }
 
-    fn begin(&mut self) {
-        debug_assert!(!self.active);
-        self.active = true;
-        self.entries.clear();
-        self.first_writes.clear();
+    fn begin(&mut self, outermost: bool) {
+        debug_assert_eq!(self.savepoints.is_empty(), outermost);
+        self.savepoints.push(InvocationSavepoint::default());
     }
 
     fn first_write(&mut self, key: UndoKey) -> bool {
-        self.active && self.first_writes.insert(key)
+        self.savepoints
+            .last_mut()
+            .is_some_and(|savepoint| savepoint.first_writes.insert(key))
     }
 
-    fn finish(&mut self) {
-        self.active = false;
-        self.entries.clear();
-        self.first_writes.clear();
-    }
-
-    fn take_entries(&mut self) -> Vec<InvocationUndo> {
-        self.active = false;
-        self.first_writes.clear();
-        std::mem::take(&mut self.entries)
-    }
-}
-
-/// Evaluator-private invocation checkpoint. The bounded document state is
-/// snapshotted once; variables, writeback metadata, and function bindings use
-/// the shared first-write journal below. The IR, resource provider, runtime
-/// depth counter, and backend state are deliberately outside this transaction
-/// boundary. Calls are fail-fast, so one checkpoint is owned by the outermost
-/// invocation in a call tree.
-struct InvocationCheckpoint {
-    document_state: Option<DocumentState>,
-}
-
-impl InvocationCheckpoint {
-    fn capture(context: &EvaluationContext<'_>, outermost: bool) -> Self {
-        Self {
-            document_state: outermost.then(|| context.document_state.borrow().clone()),
+    fn push(&mut self, entry: InvocationUndo) {
+        if let Some(savepoint) = self.savepoints.last_mut() {
+            savepoint.entries.push(entry);
         }
     }
 
+    fn commit_savepoint(&mut self) {
+        let Some(child) = self.savepoints.pop() else {
+            debug_assert!(false, "invocation savepoint must be active");
+            return;
+        };
+        let Some(parent) = self.savepoints.last_mut() else {
+            return;
+        };
+        for entry in child.entries {
+            if parent.first_writes.insert(entry.key()) {
+                parent.entries.push(entry);
+            }
+        }
+    }
+
+    fn rollback_savepoint(&mut self) -> Vec<InvocationUndo> {
+        let Some(savepoint) = self.savepoints.pop() else {
+            debug_assert!(false, "invocation savepoint must be active");
+            return Vec::new();
+        };
+        savepoint.entries
+    }
+
+    #[cfg(test)]
+    fn pending_entry_count(&self) -> usize {
+        self.savepoints
+            .iter()
+            .map(|savepoint| savepoint.entries.len())
+            .sum()
+    }
+}
+
+/// Evaluator-private invocation savepoint. Mutations are recorded only on the
+/// first write in each savepoint, and nested success merges only writes not
+/// already owned by the parent. Nested failure therefore restores just its
+/// own mutations, while the outer invocation can continue successfully.
+struct InvocationCheckpoint {}
+
+impl InvocationCheckpoint {
+    fn capture() -> Self {
+        Self {}
+    }
+
     fn restore(self, context: &mut EvaluationContext<'_>) {
-        if let Some(document_state) = self.document_state {
-            context.restore_document_state(document_state);
-            context.rollback_transaction();
+        for entry in context.rollback_transaction().into_iter().rev() {
+            context.restore_undo(entry);
         }
     }
 
     fn commit(self, context: &EvaluationContext<'_>) {
-        if self.document_state.is_some() {
-            context.commit_transaction();
-        }
+        context.commit_transaction();
     }
 }
 
@@ -798,6 +846,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::new(RefCell::new(0)),
             transaction,
             scope_identity,
+            journalable: true,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -808,6 +857,17 @@ impl<'a> EvaluationContext<'a> {
     /// Creates a child scope with parent-visible bindings and isolated locals.
     #[allow(dead_code)]
     fn child(&self) -> Self {
+        self.child_with_journalable(self.journalable)
+    }
+
+    /// Creates a scope whose local bindings cannot outlive this invocation.
+    /// Caller-visible owner writes still travel to their real owner and are
+    /// journaled there; only dead local bindings skip the transaction log.
+    fn ephemeral_child(&self) -> Self {
+        self.child_with_journalable(false)
+    }
+
+    fn child_with_journalable(&self, journalable: bool) -> Self {
         Self {
             parent: Some(Box::new(self.clone_scope_tree())),
             variables: BTreeMap::new(),
@@ -823,6 +883,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&self.invocation_depth),
             transaction: Rc::clone(&self.transaction),
             scope_identity: Self::new_scope_identity(&self.transaction),
+            journalable,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners: BTreeSet::new(),
@@ -865,14 +926,11 @@ impl<'a> EvaluationContext<'a> {
         })
     }
 
-    fn begin_invocation(&self) -> bool {
+    fn begin_invocation(&self) {
         let mut depth = self.invocation_depth.borrow_mut();
         let outermost = *depth == 0;
-        if outermost {
-            self.transaction.borrow_mut().begin();
-        }
+        self.transaction.borrow_mut().begin(outermost);
         *depth += 1;
-        outermost
     }
 
     fn end_invocation(&self) {
@@ -882,14 +940,11 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn commit_transaction(&self) {
-        self.transaction.borrow_mut().finish();
+        self.transaction.borrow_mut().commit_savepoint();
     }
 
-    fn rollback_transaction(&mut self) {
-        let entries = self.transaction.borrow_mut().take_entries();
-        for entry in entries.into_iter().rev() {
-            self.restore_undo(entry);
-        }
+    fn rollback_transaction(&mut self) -> Vec<InvocationUndo> {
+        self.transaction.borrow_mut().rollback_savepoint()
     }
 
     fn clone_scope_tree(&self) -> Self {
@@ -911,6 +966,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&self.invocation_depth),
             transaction: Rc::clone(&self.transaction),
             scope_identity: Self::new_scope_identity(&self.transaction),
+            journalable: self.journalable,
             assigned_variables: self.assigned_variables.clone(),
             variable_owners: self.variable_owners.clone(),
             forwarded_variable_owners: self.forwarded_variable_owners.clone(),
@@ -928,6 +984,9 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn record_variable_before(&self, name: &str) {
+        if !self.journalable {
+            return;
+        }
         let scope = self.scope_key();
         let key = UndoKey::Variable {
             scope,
@@ -937,7 +996,6 @@ impl<'a> EvaluationContext<'a> {
             let previous = self.variables.get(name).cloned();
             self.transaction
                 .borrow_mut()
-                .entries
                 .push(InvocationUndo::Variable {
                     scope,
                     name: name.to_string(),
@@ -947,6 +1005,9 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn record_assigned_variable_before(&self, name: &str) {
+        if !self.journalable {
+            return;
+        }
         let scope = self.scope_key();
         let key = UndoKey::AssignedVariable {
             scope,
@@ -956,7 +1017,6 @@ impl<'a> EvaluationContext<'a> {
             let previous = self.assigned_variables.get(name).cloned();
             self.transaction
                 .borrow_mut()
-                .entries
                 .push(InvocationUndo::AssignedVariable {
                     scope,
                     name: name.to_string(),
@@ -966,6 +1026,9 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn record_variable_owner_before(&self, name: &str) {
+        if !self.journalable {
+            return;
+        }
         let scope = self.scope_key();
         let key = UndoKey::VariableOwner {
             scope,
@@ -975,7 +1038,6 @@ impl<'a> EvaluationContext<'a> {
             let was_present = self.variable_owners.contains(name);
             self.transaction
                 .borrow_mut()
-                .entries
                 .push(InvocationUndo::VariableOwner {
                     scope,
                     name: name.to_string(),
@@ -985,6 +1047,9 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn record_function_before(&self, name: &str) {
+        if !self.journalable {
+            return;
+        }
         let scope = self.scope_key();
         let key = UndoKey::Function {
             scope,
@@ -994,7 +1059,6 @@ impl<'a> EvaluationContext<'a> {
             let previous = self.functions.get(name).cloned();
             self.transaction
                 .borrow_mut()
-                .entries
                 .push(InvocationUndo::Function {
                     scope,
                     name: name.to_string(),
@@ -1004,17 +1068,22 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
-        if self.scope_key() != undo.scope() {
-            // Callable-local scope trees may be dropped before the outer
-            // invocation rolls back. Those writes are already unreachable;
-            // caller-visible scopes remain rooted at this context and are
-            // restored by their stable scope identity.
-            return self
-                .parent
-                .as_mut()
-                .is_some_and(|parent| parent.restore_undo(undo));
+        if let Some(scope) = undo.scope() {
+            if self.scope_key() != scope {
+                // Callable-local scope trees may be dropped before the outer
+                // invocation rolls back. Those writes are already
+                // unreachable; caller-visible scopes remain rooted at this
+                // context and are restored by their stable scope identity.
+                return self
+                    .parent
+                    .as_mut()
+                    .is_some_and(|parent| parent.restore_undo(undo));
+            }
         }
         match undo {
+            InvocationUndo::DocumentState { previous } => {
+                self.restore_document_state(previous);
+            }
             InvocationUndo::Variable { name, previous, .. } => match previous {
                 Some(previous) => {
                     self.variables.insert(name, previous);
@@ -1050,6 +1119,19 @@ impl<'a> EvaluationContext<'a> {
             },
         }
         true
+    }
+
+    fn record_document_state_before(&self) {
+        if self
+            .transaction
+            .borrow_mut()
+            .first_write(UndoKey::DocumentState)
+        {
+            let previous = self.document_state.borrow().clone();
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState { previous });
+        }
     }
 
     /// Declares or reassigns a variable from an evaluated IrValue, preserving content semantics.
@@ -1257,6 +1339,7 @@ impl<'a> EvaluationContext<'a> {
             invocation_depth: Rc::clone(&caller_context.invocation_depth),
             transaction: Rc::clone(&caller_context.transaction),
             scope_identity: Self::new_scope_identity(&caller_context.transaction),
+            journalable: false,
             assigned_variables: BTreeMap::new(),
             variable_owners: BTreeSet::new(),
             forwarded_variable_owners,
@@ -1337,6 +1420,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn set_document_state_value(&self, name: &str, value: String) {
+        self.record_document_state_before();
         let mut state = self.document_state.borrow_mut();
         match name {
             "docname" => state.name = value,
@@ -1346,10 +1430,12 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn set_document_type(&self, value: scribium_ir::IrDocumentType) {
+        self.record_document_state_before();
         self.document_state.borrow_mut().document_type = value;
     }
 
     fn append_document_author(&self, name: String) {
+        self.record_document_state_before();
         self.document_state
             .borrow_mut()
             .authors
@@ -1360,22 +1446,27 @@ impl<'a> EvaluationContext<'a> {
     }
 
     fn replace_document_keywords(&self, keywords: Vec<String>) {
+        self.record_document_state_before();
         self.document_state.borrow_mut().keywords = keywords;
     }
 
     fn set_document_theme(&self, theme: IrDocumentTheme) {
+        self.record_document_state_before();
         self.document_state.borrow_mut().theme = Some(theme);
     }
 
     fn set_document_locale(&self, locale: scribium_ir::IrDocumentLocale) {
+        self.record_document_state_before();
         self.document_state.borrow_mut().locale = Some(locale);
     }
 
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
+        self.record_document_state_before();
         self.document_state.borrow_mut().caption_position = caption_position;
     }
 
     fn append_document_authors(&self, authors: Vec<IrDocumentAuthor>) -> Result<(), String> {
+        self.record_document_state_before();
         let mut state = self.document_state.borrow_mut();
         state
             .authors
@@ -2235,8 +2326,8 @@ impl Evaluator {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
         };
-        let outermost = context.begin_invocation();
-        let checkpoint = InvocationCheckpoint::capture(context, outermost);
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
         let outcome = self.evaluate_call_value_with_first_origin_inner(
             name,
             positional_args,
@@ -5650,7 +5741,7 @@ impl Evaluator {
                 result
             }
             IncludeSandbox::Scope | IncludeSandbox::Subdocument => {
-                let mut child = context.child();
+                let mut child = context.ephemeral_child();
                 child.current_source = Some(target_id);
                 child.active_sources = context.active_sources.clone();
                 self.evaluate_nodes(&document.nodes, diagnostics, &mut child)
@@ -6811,38 +6902,51 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let definition_context = callable
-            .capture
-            .as_deref()
-            .map(EvaluationContext::from_capture)
-            .unwrap_or_else(EvaluationContext::new);
-        // Preserve the definition snapshot as the lexical base, then add only
-        // caller-visible lookup bindings. Invocation parameters are installed
-        // in the child below, after both layers, so they have highest
-        // precedence. Document state is shared separately by the overlay.
-        let invocation_base =
-            EvaluationContext::with_caller_overlay(definition_context, caller_context);
-        let mut child = invocation_base.child();
-        match bound {
-            BoundLambdaArguments::Explicit(values) => {
-                child.set_lambda_scope(LambdaScope::Explicit);
-                if let Some(parameters) = callable.parameters.as_deref() {
-                    for (parameter, value) in parameters.iter().zip(values) {
-                        child.parameter_names.insert(parameter.name.clone());
-                        child.set_value(parameter.name.clone(), value);
+        caller_context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = {
+            let definition_context = callable
+                .capture
+                .as_deref()
+                .map(EvaluationContext::from_capture)
+                .unwrap_or_else(EvaluationContext::new);
+            // Preserve the definition snapshot as the lexical base, then add
+            // only caller-visible lookup bindings. Invocation parameters are
+            // installed in the child below, after both layers, so they have
+            // highest precedence. Document state is shared separately by the
+            // overlay.
+            let invocation_base =
+                EvaluationContext::with_caller_overlay(definition_context, caller_context);
+            let mut child = invocation_base.child();
+            match bound {
+                BoundLambdaArguments::Explicit(values) => {
+                    child.set_lambda_scope(LambdaScope::Explicit);
+                    if let Some(parameters) = callable.parameters.as_deref() {
+                        for (parameter, value) in parameters.iter().zip(values) {
+                            child.parameter_names.insert(parameter.name.clone());
+                            child.set_value(parameter.name.clone(), value);
+                        }
                     }
                 }
+                BoundLambdaArguments::Implicit(values) => {
+                    child.set_lambda_scope(LambdaScope::Implicit(values));
+                }
             }
-            BoundLambdaArguments::Implicit(values) => {
-                child.set_lambda_scope(LambdaScope::Implicit(values));
+            let outcome =
+                self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
+            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
+                for (name, value) in child.assigned_values() {
+                    caller_context.apply_callable_assignment(name, value);
+                }
             }
+            outcome
+        };
+        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+            checkpoint.restore(caller_context);
+        } else {
+            checkpoint.commit(caller_context);
         }
-        let outcome = self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
-        if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
-            for (name, value) in child.assigned_values() {
-                caller_context.apply_callable_assignment(name, value);
-            }
-        }
+        caller_context.end_invocation();
         outcome
     }
 
@@ -7555,21 +7659,12 @@ impl Evaluator {
                     diagnostics,
                     context,
                 ) {
-                    CallOutcome::Unresolved => self
-                        .preserve_block_call(
-                            name,
-                            ordered_args.as_deref(),
-                            positional_args,
-                            named_args,
-                            lambda_parameters.as_deref(),
-                            body.as_deref(),
-                            raw_body.as_ref(),
-                            span,
-                            diagnostics,
-                            context,
-                        )
-                        .map(IrValue::Content)
-                        .map_or(CallOutcome::Failed, CallOutcome::Value),
+                    // Keep the callable invocation unresolved so its
+                    // savepoint rolls back. The enclosing value/output
+                    // boundary owns preservation of an unresolved call;
+                    // preserving it here would make a failed callable
+                    // look successful and publish its earlier writes.
+                    CallOutcome::Unresolved => CallOutcome::Unresolved,
                     outcome => outcome,
                 }
             }
@@ -17852,8 +17947,8 @@ mod tests {
     #[test]
     fn issue_167_function_binding_undo_reaches_parent_scope() {
         let mut context = EvaluationContext::new().child();
-        let outermost = context.begin_invocation();
-        let checkpoint = InvocationCheckpoint::capture(&context, outermost);
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
         context
             .parent
             .as_mut()
@@ -17868,6 +17963,105 @@ mod tests {
             .parent
             .as_deref()
             .is_some_and(|parent| parent.get_function("parent_leaked").is_none()));
+    }
+
+    #[test]
+    fn issue_167_nested_unresolved_callable_does_not_publish_document_state() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        context.set_document_state_value("docname", "before".to_string());
+        let declaration = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("mutate_then_unresolved".to_string()),
+            parameters: Vec::new(),
+            body: vec![
+                IrNode::FunctionCall {
+                    name: "docname".to_string(),
+                    positional_args: vec![IrValue::String("mutated".to_string())],
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(10, 20),
+                },
+                IrNode::FunctionCall {
+                    name: "not_implemented".to_string(),
+                    positional_args: Vec::new(),
+                    named_args: Vec::new(),
+                    ordered_args: None,
+                    lambda_parameters: None,
+                    body: None,
+                    raw_body: None,
+                    span: span(21, 35),
+                },
+            ],
+            span: span(5, 35),
+        };
+        evaluator.evaluate_node(&declaration, &mut diagnostics, &mut context);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let before = context.document_state_snapshot();
+
+        let outcome = evaluator.evaluate_call_value(
+            "otherwise",
+            &[
+                call_value("mutate_then_unresolved", Vec::new()),
+                IrValue::String("fallback".into()),
+            ],
+            &[],
+            None,
+            None,
+            &span(0, 50),
+            &mut diagnostics,
+            &mut context,
+        );
+
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::Content(nodes))
+                if matches!(nodes.as_slice(), [IrNode::FunctionCall { name, .. }] if name == "mutate_then_unresolved")
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.document_state_snapshot(), before);
+    }
+
+    #[test]
+    fn issue_167_discarded_callable_locals_do_not_grow_transaction_metadata() {
+        let evaluator = Evaluator::new();
+        let span = span(0, 20);
+        let callable = IrCallable {
+            parameters: Some(vec![lambda_parameter("value", 4)]),
+            body: vec![var_ref("value")],
+            span,
+            capture: None,
+        };
+        let elements = (0..4096)
+            .map(|value| IrValue::Number(value as f64))
+            .collect::<Vec<_>>();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = evaluator.map_callable_values(
+            &elements,
+            &callable,
+            IterationOptions {
+                span,
+                allow_destructuring: false,
+            },
+            &mut diagnostics,
+            &mut context,
+        );
+
+        let CallOutcome::Value(IrValue::Collection(values)) = outcome else {
+            panic!("expected a materialized callback result: {outcome:?}");
+        };
+        assert_eq!(values.len(), elements.len());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        checkpoint.commit(&context);
+        context.end_invocation();
     }
 
     fn mutating_typed_candidate(variable_name: &str) -> IrValue {
