@@ -10873,7 +10873,7 @@ fn target_conversion_error_message(target: &str, span: SourceSpan, message: Stri
 fn raw_native_body_string_value(
     raw_body: &IrRawBody,
 ) -> Result<String, value_conversion::ConversionError> {
-    let Some(source) = raw_body.source.slice(raw_body.span.byte_span()) else {
+    let Some(source) = raw_body.source.slice(raw_body.span) else {
         return Err(value_conversion::ConversionError::UnsupportedValue {
             target: value_conversion::ConversionTarget::String,
         });
@@ -12019,7 +12019,7 @@ mod tests {
             panic!("expected a reparsed block call: {nodes:?}");
         };
         assert_eq!(*outer_span, caller_span);
-        assert!(outer_raw.source.slice(outer_raw.span.byte_span()).is_some());
+        assert!(outer_raw.source.slice(outer_raw.span).is_some());
 
         let IrNode::FunctionCall {
             raw_body: Some(nested_raw),
@@ -12030,10 +12030,7 @@ mod tests {
             panic!("expected a nested reparsed block call: {body:?}");
         };
         assert_eq!(*nested_span, caller_span);
-        assert!(nested_raw
-            .source
-            .slice(nested_raw.span.byte_span())
-            .is_some());
+        assert!(nested_raw.source.slice(nested_raw.span).is_some());
 
         let mut diagnostics = Vec::new();
         let candidate = source_backed_body_candidate(
@@ -12071,10 +12068,7 @@ mod tests {
         else {
             panic!("expected a roundtripped nested call");
         };
-        assert!(nested_raw
-            .source
-            .slice(nested_raw.span.byte_span())
-            .is_some());
+        assert!(nested_raw.source.slice(nested_raw.span).is_some());
     }
 
     fn named_arg(name: &str, value: IrValue) -> IrNamedArg {

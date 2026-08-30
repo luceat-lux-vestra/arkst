@@ -21,7 +21,7 @@ use std::ops::Deref;
 pub(crate) fn raw_body_dynamic_text(raw_body: &IrRawBody) -> Option<String> {
     raw_body
         .source
-        .slice(raw_body.span.byte_span())
+        .slice(raw_body.span)
         .map(trim_indent_and_end)
 }
 
@@ -2117,7 +2117,7 @@ mod tests {
         IrDocumentType, IrEnumValue, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair,
         IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
     };
-    use scribium_source::{SourceId, SourceSpan, SourceText};
+    use scribium_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
     fn span() -> SourceSpan {
         SourceSpan::new(SourceId(7), 10, 16)
@@ -2126,7 +2126,7 @@ mod tests {
     fn raw_body(source: &str) -> IrRawBody {
         IrRawBody::new(
             SourceText::new(source.to_owned()),
-            SourceSpan::new(SourceId(7), 0, source.len()),
+            ByteSpan::new(0, source.len()),
         )
     }
 
@@ -2152,7 +2152,7 @@ mod tests {
         let body_end = source.len();
         let body = IrRawBody::new(
             scribium_source::SourceText::new(source),
-            SourceSpan::new(SourceId(1), 7, body_end),
+            ByteSpan::new(7, body_end),
         );
 
         assert_eq!(
@@ -2163,10 +2163,7 @@ mod tests {
 
     #[test]
     fn raw_body_dynamic_text_is_derived_only_from_a_valid_source_span() {
-        let body = IrRawBody::new(
-            SourceText::new("body".to_string()),
-            SourceSpan::new(SourceId(7), 1, 5),
-        );
+        let body = IrRawBody::new(SourceText::new("body".to_string()), ByteSpan::new(1, 5));
         assert!(raw_body_dynamic_text(&body).is_none());
     }
 

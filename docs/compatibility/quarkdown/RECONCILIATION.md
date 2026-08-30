@@ -332,7 +332,8 @@ freeze wording is no longer a complete status. After
 The bounded #166 engine slice closes the raw-body prerequisite for the
 reviewed conversion consumers. `scribium-markdown` retains one shared,
 immutable source buffer and the exact body-token span beside the structured
-body; `scribium-ir` carries that durable source data as `IrRawBody`, never as
+body; `scribium-ir` carries that durable source data as `IrRawBody`, with a
+source-local `ByteSpan` and caller provenance on the containing node, never as
 `IrValue` state or `ValueOrigin`. The engine-owned `value_conversion` target
 boundary preserves
 typed scalar/content/node/iterable/dictionary/callable distinctions, returns an
@@ -348,7 +349,8 @@ requires the pinned two-space-or-tab prefix, and its target value applies
 `trimIndent().trimEnd()`. JSON serialization of an `IrDocument` stores each
 distinct source buffer once in a document-scoped source table while retaining
 raw-body spans, so inspect output does not repeat the full document for every
-unresolved call.
+unresolved call. The source-table `source_ref` is private to the document wire
+model; standalone `IrRawBody` and `IrNode` values reject unresolved references.
 Source-backed body fallback does not evaluate or stringify the parsed nested
 body. Dynamic iterable conversion evaluates one raw expression in context and
 uses typed Iterable/Dictionary results before its Markdown-list fallback.

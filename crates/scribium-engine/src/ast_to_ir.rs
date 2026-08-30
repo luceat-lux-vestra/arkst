@@ -220,9 +220,7 @@ fn block_to_ir(
                         .as_ref()
                         .map(|header| lambda_parameters_to_ir(header, source_id)),
                     body: ir_body,
-                    raw_body: raw_body
-                        .as_ref()
-                        .map(|raw_body| raw_body_to_ir(raw_body, source_id)),
+                    raw_body: raw_body.as_ref().map(raw_body_to_ir),
                     span: byte_to_source_span(span, source_id),
                 })
             } else {
@@ -242,9 +240,7 @@ fn block_to_ir(
                         })
                         .collect::<Option<Vec<_>>>()?,
                     body: ir_body,
-                    raw_body: raw_body
-                        .as_ref()
-                        .map(|raw_body| raw_body_to_ir(raw_body, source_id)),
+                    raw_body: raw_body.as_ref().map(raw_body_to_ir),
                     span: byte_to_source_span(span, source_id),
                 })
             }
@@ -1114,11 +1110,8 @@ fn byte_to_source_span(byte_span: &scribium_source::ByteSpan, source_id: SourceI
     SourceSpan::new(source_id, byte_span.start, byte_span.end)
 }
 
-fn raw_body_to_ir(raw_body: &scribium_markdown::ast::RawBody, source_id: SourceId) -> IrRawBody {
-    IrRawBody::new(
-        raw_body.source.clone(),
-        byte_to_source_span(&raw_body.span, source_id),
-    )
+fn raw_body_to_ir(raw_body: &scribium_markdown::ast::RawBody) -> IrRawBody {
+    IrRawBody::new(raw_body.source.clone(), raw_body.span)
 }
 #[cfg(test)]
 mod tests {

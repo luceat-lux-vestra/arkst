@@ -8,8 +8,7 @@
 //! receives normalized IR; its defensive handling of manually constructed or
 //! unresolved IR is a separate concern from semantic evaluation.
 
-use scribium_source::{SourceSpan, SourceText};
-use serde::{Deserialize, Serialize};
+use scribium_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -21,8 +20,8 @@ use std::num::NonZeroU32;
 /// semantic evaluation, and consumed by backend lowering. The IR is
 /// serializable for `scribium inspect --emit ir` output. Its JSON form stores
 /// source-backed raw-body text once in a document-level `sources` table;
-/// individual raw bodies retain their source span and refer to that table by
-/// `source_ref`.
+/// individual raw bodies retain a source-local byte range and refer to that
+/// table by `source_ref`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IrDocument {
     /// Ordered list of IR nodes.
@@ -31,51 +30,25 @@ pub struct IrDocument {
     pub metadata: IrMetadata,
 }
 
-#[derive(serde::Serialize)]
-struct IrDocumentFields<'a> {
-    nodes: &'a [IrNode],
-    metadata: &'a IrMetadata,
-}
-
-#[derive(serde::Serialize)]
-struct IrDocumentFieldsWithSources<'a> {
-    nodes: &'a [IrNode],
-    metadata: &'a IrMetadata,
-    sources: &'a [SourceText],
-}
-
-#[derive(serde::Deserialize)]
-struct IrDocumentFieldsOwned {
-    nodes: Vec<IrNode>,
-    metadata: IrMetadata,
-    #[serde(default)]
-    sources: Vec<SourceText>,
-}
-
 impl serde::Serialize for IrDocument {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let mut wire = self.clone();
         let mut sources = SourceTable::default();
-        rewrite_document_sources(&mut wire.nodes, &mut sources, &SourceRewrite::Marker)
+        collect_document_sources(&self.nodes, &mut sources).map_err(serde::ser::Error::custom)?;
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|node| node_to_wire(node, &sources))
+            .collect::<Result<Vec<_>, _>>()
             .map_err(serde::ser::Error::custom)?;
-
-        if sources.sources.is_empty() {
-            IrDocumentFields {
-                nodes: &wire.nodes,
-                metadata: &wire.metadata,
-            }
-            .serialize(serializer)
-        } else {
-            IrDocumentFieldsWithSources {
-                nodes: &wire.nodes,
-                metadata: &wire.metadata,
-                sources: &sources.sources,
-            }
-            .serialize(serializer)
+        IrDocumentWire {
+            nodes,
+            metadata: self.metadata.clone(),
+            sources: (!sources.sources.is_empty()).then_some(sources.sources),
         }
+        .serialize(serializer)
     }
 }
 
@@ -84,26 +57,26 @@ impl<'de> serde::Deserialize<'de> for IrDocument {
     where
         D: serde::Deserializer<'de>,
     {
-        let IrDocumentFieldsOwned {
+        let IrDocumentWire {
             nodes,
             metadata,
             sources,
-        } = IrDocumentFieldsOwned::deserialize(deserializer)?;
-        let mut document = Self { nodes, metadata };
-        if sources.is_empty() {
-            let mut sources = SourceTable::default();
-            rewrite_document_sources(
-                &mut document.nodes,
-                &mut sources,
-                &SourceRewrite::Canonicalize,
-            )
+        } = IrDocumentWire::deserialize(deserializer)?;
+        let nodes = nodes
+            .into_iter()
+            .map(|node| wire_node_to_ir(node, sources.as_deref()))
+            .collect::<Result<Vec<_>, _>>()
             .map_err(serde::de::Error::custom)?;
-        } else {
-            resolve_document_sources(&mut document.nodes, &sources)
-                .map_err(serde::de::Error::custom)?;
-        }
-        Ok(document)
+        Ok(Self { nodes, metadata })
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IrDocumentWire {
+    nodes: Vec<WireNode>,
+    metadata: IrMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sources: Option<Vec<SourceText>>,
 }
 
 #[derive(Default)]
@@ -149,47 +122,49 @@ impl SourceTable {
         self.indices.entry(hash).or_default().push(index);
         index
     }
+
+    fn index_of(&self, source: &SourceText) -> Option<usize> {
+        let identity = (source.as_str().as_ptr() as usize, source.as_str().len());
+        if let Some(index) = self.identities.get(&identity).copied() {
+            return Some(index);
+        }
+
+        let mut hasher = DefaultHasher::new();
+        source.as_str().hash(&mut hasher);
+        let hash = hasher.finish();
+        self.indices
+            .get(&hash)?
+            .iter()
+            .copied()
+            .find(|index| self.sources[*index].as_str() == source.as_str())
+    }
 }
 
-enum SourceRewrite<'a> {
-    Marker,
-    Canonicalize,
-    Resolve(&'a [SourceText]),
-}
-
-fn rewrite_document_sources(
-    nodes: &mut [IrNode],
-    sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
-) -> Result<(), String> {
+fn collect_document_sources(nodes: &[IrNode], sources: &mut SourceTable) -> Result<(), String> {
     for node in nodes {
-        rewrite_node_sources(node, sources, rewrite)?;
+        collect_node_sources(node, sources)?;
     }
     Ok(())
 }
 
-fn rewrite_node_sources(
-    node: &mut IrNode,
-    sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
-) -> Result<(), String> {
+fn collect_node_sources(node: &IrNode, sources: &mut SourceTable) -> Result<(), String> {
     match node {
         IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
-            rewrite_inline_sources(content, sources, rewrite)?;
+            collect_inline_sources(content, sources)?;
         }
-        IrNode::Blockquote { content, .. } => rewrite_document_sources(content, sources, rewrite)?,
+        IrNode::Blockquote { content, .. } => collect_document_sources(content, sources)?,
         IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
             for item in items {
-                rewrite_document_sources(&mut item.nodes, sources, rewrite)?;
+                collect_document_sources(&item.nodes, sources)?;
             }
         }
         IrNode::Table { header, rows, .. } => {
-            rewrite_inline_sources_in_row(header, sources, rewrite)?;
+            collect_inline_sources_in_row(header, sources)?;
             for row in rows {
-                rewrite_inline_sources_in_row(row, sources, rewrite)?;
+                collect_inline_sources_in_row(row, sources)?;
             }
         }
-        IrNode::Component { component } => rewrite_component_sources(component, sources, rewrite)?,
+        IrNode::Component { component } => collect_component_sources(component, sources)?,
         IrNode::FunctionCall {
             positional_args,
             named_args,
@@ -198,15 +173,15 @@ fn rewrite_node_sources(
             ..
         } => {
             for value in positional_args {
-                rewrite_value_sources(value, sources, rewrite)?;
+                collect_value_sources(value, sources)?;
             }
             for argument in named_args {
-                rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+                collect_value_sources(&argument.value, sources)?;
             }
             if let Some(body) = body {
-                rewrite_document_sources(body, sources, rewrite)?;
+                collect_document_sources(body, sources)?;
             }
-            rewrite_raw_body_source(raw_body, sources, rewrite)?;
+            collect_raw_body_source(raw_body, sources)?;
         }
         IrNode::ChainedFunctionCall {
             head,
@@ -215,18 +190,18 @@ fn rewrite_node_sources(
             raw_body,
             ..
         } => {
-            rewrite_call_segment_sources(head, sources, rewrite)?;
+            collect_call_segment_sources(head, sources)?;
             for segment in chain {
-                rewrite_call_segment_sources(segment, sources, rewrite)?;
+                collect_call_segment_sources(segment, sources)?;
             }
             if let Some(body) = body {
-                rewrite_document_sources(body, sources, rewrite)?;
+                collect_document_sources(body, sources)?;
             }
-            rewrite_raw_body_source(raw_body, sources, rewrite)?;
+            collect_raw_body_source(raw_body, sources)?;
         }
         IrNode::FunctionDeclaration { name, body, .. } => {
-            rewrite_value_sources(name, sources, rewrite)?;
-            rewrite_document_sources(body, sources, rewrite)?;
+            collect_value_sources(name, sources)?;
+            collect_document_sources(body, sources)?;
         }
         IrNode::CodeBlock { .. }
         | IrNode::RawHtml { .. }
@@ -237,30 +212,25 @@ fn rewrite_node_sources(
     Ok(())
 }
 
-fn rewrite_component_sources(
-    component: &mut IrComponent,
+fn collect_component_sources(
+    component: &IrComponent,
     sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
 ) -> Result<(), String> {
     match component {
         IrComponent::Stacked(component) => {
-            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+            collect_document_sources(&component.children, sources)?;
         }
         IrComponent::Container(component) => {
-            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+            collect_document_sources(&component.children, sources)?;
         }
         IrComponent::Landscape(component) => {
-            rewrite_document_sources(&mut component.children, sources, rewrite)?;
+            collect_document_sources(&component.children, sources)?;
         }
     }
     Ok(())
 }
 
-fn rewrite_inline_sources(
-    inlines: &mut [IrInline],
-    sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
-) -> Result<(), String> {
+fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Result<(), String> {
     for inline in inlines {
         match inline {
             IrInline::Emphasis { content, .. }
@@ -268,7 +238,7 @@ fn rewrite_inline_sources(
             | IrInline::Strikethrough { content, .. }
             | IrInline::Link { content, .. }
             | IrInline::Image { content, .. } => {
-                rewrite_inline_sources(content, sources, rewrite)?;
+                collect_inline_sources(content, sources)?;
             }
             IrInline::DirectiveCall {
                 positional_args,
@@ -277,24 +247,24 @@ fn rewrite_inline_sources(
                 ..
             } => {
                 for value in positional_args {
-                    rewrite_value_sources(value, sources, rewrite)?;
+                    collect_value_sources(value, sources)?;
                 }
                 for argument in named_args {
-                    rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+                    collect_value_sources(&argument.value, sources)?;
                 }
                 if let Some(body) = body {
-                    rewrite_inline_sources(body, sources, rewrite)?;
+                    collect_inline_sources(body, sources)?;
                 }
             }
             IrInline::ChainedDirectiveCall {
                 head, chain, body, ..
             } => {
-                rewrite_call_segment_sources(head, sources, rewrite)?;
+                collect_call_segment_sources(head, sources)?;
                 for segment in chain {
-                    rewrite_call_segment_sources(segment, sources, rewrite)?;
+                    collect_call_segment_sources(segment, sources)?;
                 }
                 if let Some(body) = body {
-                    rewrite_inline_sources(body, sources, rewrite)?;
+                    collect_inline_sources(body, sources)?;
                 }
             }
             IrInline::Text { .. }
@@ -309,58 +279,52 @@ fn rewrite_inline_sources(
     Ok(())
 }
 
-fn rewrite_inline_sources_in_row(
-    row: &mut IrTableRow,
+fn collect_inline_sources_in_row(
+    row: &IrTableRow,
     sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
 ) -> Result<(), String> {
-    for cell in &mut row.cells {
-        rewrite_inline_sources(&mut cell.content, sources, rewrite)?;
+    for cell in &row.cells {
+        collect_inline_sources(&cell.content, sources)?;
     }
     Ok(())
 }
 
-fn rewrite_call_segment_sources(
-    segment: &mut IrCallSegment,
+fn collect_call_segment_sources(
+    segment: &IrCallSegment,
     sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
 ) -> Result<(), String> {
-    for value in &mut segment.positional_args {
-        rewrite_value_sources(value, sources, rewrite)?;
+    for value in &segment.positional_args {
+        collect_value_sources(value, sources)?;
     }
-    for argument in &mut segment.named_args {
-        rewrite_value_sources(&mut argument.value, sources, rewrite)?;
+    for argument in &segment.named_args {
+        collect_value_sources(&argument.value, sources)?;
     }
     Ok(())
 }
 
-fn rewrite_value_sources(
-    value: &mut IrValue,
-    sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
-) -> Result<(), String> {
+fn collect_value_sources(value: &IrValue, sources: &mut SourceTable) -> Result<(), String> {
     match value {
         IrValue::Collection(values) => {
             for value in values {
-                rewrite_value_sources(value, sources, rewrite)?;
+                collect_value_sources(value, sources)?;
             }
         }
         IrValue::Pair(pair) => {
-            rewrite_value_sources(&mut pair.first, sources, rewrite)?;
-            rewrite_value_sources(&mut pair.second, sources, rewrite)?;
+            collect_value_sources(&pair.first, sources)?;
+            collect_value_sources(&pair.second, sources)?;
         }
         IrValue::Dictionary(dictionary) => {
-            for pair in &mut dictionary.entries {
-                rewrite_value_sources(&mut pair.first, sources, rewrite)?;
-                rewrite_value_sources(&mut pair.second, sources, rewrite)?;
+            for pair in &dictionary.entries {
+                collect_value_sources(&pair.first, sources)?;
+                collect_value_sources(&pair.second, sources)?;
             }
         }
-        IrValue::Content(nodes) => rewrite_document_sources(nodes, sources, rewrite)?,
-        IrValue::Component(component) => rewrite_component_sources(component, sources, rewrite)?,
-        IrValue::Callable(callable) => rewrite_callable_sources(callable, sources, rewrite)?,
+        IrValue::Content(nodes) => collect_document_sources(nodes, sources)?,
+        IrValue::Component(component) => collect_component_sources(component, sources)?,
+        IrValue::Callable(callable) => collect_callable_sources(callable, sources)?,
         IrValue::InlineBody(body) => {
-            rewrite_document_sources(&mut body.content, sources, rewrite)?;
-            rewrite_document_sources(&mut body.body, sources, rewrite)?;
+            collect_document_sources(&body.content, sources)?;
+            collect_document_sources(&body.body, sources)?;
         }
         IrValue::String(_)
         | IrValue::Number(_)
@@ -375,76 +339,68 @@ fn rewrite_value_sources(
     Ok(())
 }
 
-fn rewrite_callable_sources(
-    callable: &mut IrCallable,
+fn collect_callable_sources(
+    callable: &IrCallable,
     sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
 ) -> Result<(), String> {
-    rewrite_document_sources(&mut callable.body, sources, rewrite)?;
-    if let Some(capture) = &mut callable.capture {
-        for variable in &mut capture.variables {
-            rewrite_value_sources(&mut variable.value, sources, rewrite)?;
+    collect_document_sources(&callable.body, sources)?;
+    if let Some(capture) = &callable.capture {
+        for variable in &capture.variables {
+            collect_value_sources(&variable.value, sources)?;
         }
-        for function in &mut capture.functions {
-            rewrite_callable_sources(&mut function.callable, sources, rewrite)?;
+        for function in &capture.functions {
+            collect_callable_sources(&function.callable, sources)?;
         }
     }
     Ok(())
 }
 
-fn rewrite_raw_body_source(
-    raw_body: &mut Option<IrRawBody>,
+fn collect_raw_body_source(
+    raw_body: &Option<IrRawBody>,
     sources: &mut SourceTable,
-    rewrite: &SourceRewrite<'_>,
 ) -> Result<(), String> {
     let Some(raw_body) = raw_body else {
         return Ok(());
     };
-    match rewrite {
-        SourceRewrite::Marker => {
-            if raw_body.pending_source_ref.is_some() {
-                return Err(
-                    "IR raw-body source_ref cannot be re-serialized outside its document wire context"
-                        .to_string(),
-                );
-            }
-            if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
-                return Err("IR raw-body span is outside its source buffer".to_string());
-            }
-            let source_ref = sources.intern(&raw_body.source);
-            raw_body.pending_source_ref = Some(source_ref);
-        }
-        SourceRewrite::Canonicalize => {
-            if raw_body.pending_source_ref.is_some() {
-                return Err(
-                    "IR raw-body source_ref requires a document-level sources table".to_string(),
-                );
-            }
-            let source_ref = sources.intern(&raw_body.source);
-            raw_body.source = sources.sources[source_ref].clone();
-        }
-        SourceRewrite::Resolve(document_sources) => {
-            let Some(source_ref) = raw_body.pending_source_ref.take() else {
-                return Err("IR raw-body wire source is missing its source reference".to_string());
-            };
-            raw_body.source = document_sources
-                .get(source_ref)
-                .ok_or_else(|| format!("IR raw-body source_ref {source_ref} is out of range"))?
-                .clone();
-            if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
-                return Err("IR raw-body span is outside its source buffer".to_string());
-            }
-        }
+    if raw_body.source.slice(raw_body.span).is_none() {
+        return Err("IR raw-body span is outside its source buffer".to_string());
     }
+    sources.intern(&raw_body.source);
     Ok(())
 }
 
-fn resolve_document_sources(nodes: &mut [IrNode], sources: &[SourceText]) -> Result<(), String> {
-    let mut unused_table = SourceTable::default();
-    for node in nodes {
-        rewrite_node_sources(node, &mut unused_table, &SourceRewrite::Resolve(sources))?;
+fn raw_body_source_ref(raw_body: &IrRawBody, sources: &SourceTable) -> Result<usize, String> {
+    sources.index_of(&raw_body.source).ok_or_else(|| {
+        "IR raw-body source was not collected before document serialization".to_string()
+    })
+}
+
+fn source_from_wire(
+    source: Option<SourceText>,
+    source_ref: Option<usize>,
+    sources: Option<&[SourceText]>,
+    span: ByteSpan,
+) -> Result<IrRawBody, String> {
+    let source = match (source, source_ref, sources) {
+        (Some(source), None, _) => source,
+        (None, Some(source_ref), Some(sources)) => sources
+            .get(source_ref)
+            .ok_or_else(|| format!("IR raw-body source_ref {source_ref} is out of range"))?
+            .clone(),
+        (None, Some(_), None) => {
+            return Err(
+                "IR raw-body source_ref requires a document-level sources table".to_string(),
+            )
+        }
+        (Some(_), Some(_), _) => {
+            return Err("IR raw body cannot contain both source and source_ref".to_string())
+        }
+        (None, None, _) => return Err("IR raw body requires source or source_ref".to_string()),
+    };
+    if source.slice(span).is_none() {
+        return Err("IR raw-body span is outside its source buffer".to_string());
     }
-    Ok(())
+    Ok(IrRawBody::new(source, span))
 }
 
 /// Document-level metadata extracted during evaluation.
@@ -738,41 +694,21 @@ pub struct TargetSpecificContent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IrRawBody {
     pub source: SourceText,
-    pub span: SourceSpan,
-    /// Document-deserialization staging only. A valid runtime raw body has
-    /// this unset; keeping the reference out of `SourceText` prevents a wire
-    /// reference from being mistaken for source provenance.
-    pending_source_ref: Option<usize>,
+    /// A byte range local to `source`. Caller/document provenance belongs to
+    /// the containing IR node and is deliberately not encoded in this range.
+    pub span: ByteSpan,
 }
 
 impl IrRawBody {
-    pub fn new(source: SourceText, span: SourceSpan) -> Self {
-        Self {
-            source,
-            span,
-            pending_source_ref: None,
-        }
-    }
-
-    fn from_pending_source_ref(source_ref: usize, span: SourceSpan) -> Self {
-        Self {
-            source: SourceText::default(),
-            span,
-            pending_source_ref: Some(source_ref),
-        }
+    pub fn new(source: SourceText, span: ByteSpan) -> Self {
+        Self { source, span }
     }
 }
 
 #[derive(serde::Serialize)]
 struct IrRawBodySourceFields<'a> {
     source: &'a SourceText,
-    span: SourceSpan,
-}
-
-#[derive(serde::Serialize)]
-struct IrRawBodySourceRefFields {
-    source_ref: usize,
-    span: SourceSpan,
+    span: ByteSpan,
 }
 
 #[derive(serde::Deserialize)]
@@ -781,7 +717,7 @@ struct IrRawBodyFields {
     source: Option<SourceText>,
     #[serde(default)]
     source_ref: Option<usize>,
-    span: SourceSpan,
+    span: RawBodySpan,
 }
 
 impl serde::Serialize for IrRawBody {
@@ -789,12 +725,7 @@ impl serde::Serialize for IrRawBody {
     where
         S: serde::Serializer,
     {
-        if self.pending_source_ref.is_some() {
-            return Err(serde::ser::Error::custom(
-                "IR raw-body source_ref requires a document-level serializer",
-            ));
-        }
-        if self.source.slice(self.span.byte_span()).is_none() {
+        if self.source.slice(self.span).is_none() {
             return Err(serde::ser::Error::custom(
                 "IR raw-body span is outside its source buffer",
             ));
@@ -813,79 +744,1246 @@ impl<'de> serde::Deserialize<'de> for IrRawBody {
         D: serde::Deserializer<'de>,
     {
         let fields = IrRawBodyFields::deserialize(deserializer)?;
-        decode_raw_body_fields(fields, false).map_err(serde::de::Error::custom)
+        decode_raw_body_fields(fields).map_err(serde::de::Error::custom)
     }
 }
 
-/// The document serializer uses this narrow adapter for raw-body fields. A
-/// source reference is a document-wire concept, not a valid standalone
-/// `IrRawBody` value. It is staged in a private field during document
-/// deserialization and resolved before `IrDocument` is returned.
-fn serialize_document_raw_body<S>(
-    raw_body: &Option<IrRawBody>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match raw_body {
-        Some(raw_body) => {
-            if let Some(source_ref) = raw_body.pending_source_ref {
-                IrRawBodySourceRefFields {
-                    source_ref,
-                    span: raw_body.span,
-                }
-                .serialize(serializer)
-            } else {
-                if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
-                    return Err(serde::ser::Error::custom(
-                        "IR raw-body span is outside its source buffer",
-                    ));
-                }
-                IrRawBodySourceFields {
-                    source: &raw_body.source,
-                    span: raw_body.span,
-                }
-                .serialize(serializer)
-            }
+fn decode_raw_body_fields(fields: IrRawBodyFields) -> Result<IrRawBody, String> {
+    source_from_wire(
+        fields.source,
+        fields.source_ref,
+        None,
+        fields.span.into_byte_span(),
+    )
+}
+
+/// The current raw-body wire range is source-local. The optional source ID is
+/// accepted only for decoding the pre-ByteSpan inline-source format; it is
+/// deliberately discarded because a raw body no longer carries caller
+/// provenance.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RawBodySpan {
+    start: usize,
+    end: usize,
+    #[serde(default)]
+    source_id: Option<SourceId>,
+}
+
+impl RawBodySpan {
+    fn into_byte_span(self) -> ByteSpan {
+        let _ = self.source_id;
+        ByteSpan::new(self.start, self.end)
+    }
+}
+
+impl From<ByteSpan> for RawBodySpan {
+    fn from(span: ByteSpan) -> Self {
+        Self {
+            start: span.start,
+            end: span.end,
+            source_id: None,
         }
-        None => serializer.serialize_none(),
     }
 }
 
-fn deserialize_document_raw_body<'de, D>(deserializer: D) -> Result<Option<IrRawBody>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let fields = Option::<IrRawBodyFields>::deserialize(deserializer)?;
-    fields
-        .map(|fields| decode_raw_body_fields(fields, true))
-        .transpose()
-        .map_err(serde::de::Error::custom)
+impl serde::Serialize for RawBodySpan {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        ByteSpan::new(self.start, self.end).serialize(serializer)
+    }
 }
 
-fn decode_raw_body_fields(
-    fields: IrRawBodyFields,
-    allow_document_source_ref: bool,
+/// Private document wire representation. `source_ref` exists only here: a
+/// standalone `IrNode` always uses the inline `IrRawBody` representation and
+/// therefore cannot manufacture a source-backed value without its source.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireRawBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<SourceText>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_ref: Option<usize>,
+    span: RawBodySpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum WireNode {
+    Heading {
+        level: usize,
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    Paragraph {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    Blockquote {
+        content: Vec<WireNode>,
+        span: SourceSpan,
+    },
+    UnorderedList {
+        items: Vec<WireListItem>,
+        span: SourceSpan,
+    },
+    OrderedList {
+        items: Vec<WireListItem>,
+        start: usize,
+        span: SourceSpan,
+    },
+    Table {
+        header: WireTableRow,
+        rows: Vec<WireTableRow>,
+        span: SourceSpan,
+    },
+    CodeBlock {
+        language: Option<String>,
+        info: Option<String>,
+        source: String,
+        span: SourceSpan,
+    },
+    RawHtml {
+        source: String,
+        span: SourceSpan,
+    },
+    TargetSpecificContent {
+        content: TargetSpecificContent,
+    },
+    Component {
+        component: WireComponent,
+    },
+    FunctionCall {
+        name: String,
+        positional_args: Vec<WireValue>,
+        named_args: Vec<WireNamedArg>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordered_args: Option<Vec<IrCallArgument>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lambda_parameters: Option<Vec<IrParameter>>,
+        body: Option<Vec<WireNode>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_body: Option<WireRawBody>,
+        span: SourceSpan,
+    },
+    ChainedFunctionCall {
+        head: WireCallSegment,
+        chain: Vec<WireCallSegment>,
+        body: Option<Vec<WireNode>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_body: Option<WireRawBody>,
+        span: SourceSpan,
+    },
+    FunctionDeclaration {
+        name: WireValue,
+        parameters: Vec<IrParameter>,
+        body: Vec<WireNode>,
+        span: SourceSpan,
+    },
+    ThematicBreak {
+        span: SourceSpan,
+    },
+    Math {
+        source: String,
+        display: bool,
+        span: SourceSpan,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum WireInline {
+    Text {
+        content: String,
+        span: SourceSpan,
+    },
+    Whitespace {
+        width: Option<IrSize>,
+        height: Option<IrSize>,
+        span: SourceSpan,
+    },
+    Emphasis {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    Strong {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    Strikethrough {
+        content: Vec<WireInline>,
+        span: SourceSpan,
+    },
+    DirectiveCall {
+        name: String,
+        positional_args: Vec<WireValue>,
+        named_args: Vec<WireNamedArg>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordered_args: Option<Vec<IrCallArgument>>,
+        body: Option<Vec<WireInline>>,
+        span: SourceSpan,
+    },
+    ChainedDirectiveCall {
+        head: WireCallSegment,
+        chain: Vec<WireCallSegment>,
+        body: Option<Vec<WireInline>>,
+        span: SourceSpan,
+    },
+    Link {
+        content: Vec<WireInline>,
+        destination: String,
+        title: Option<String>,
+        span: SourceSpan,
+    },
+    Image {
+        content: Vec<WireInline>,
+        destination: String,
+        title: Option<String>,
+        span: SourceSpan,
+    },
+    Code {
+        content: String,
+        span: SourceSpan,
+    },
+    SoftBreak {
+        span: SourceSpan,
+    },
+    HardBreak {
+        span: SourceSpan,
+    },
+    RawHtml {
+        content: String,
+        span: SourceSpan,
+    },
+    TargetSpecificContent {
+        content: TargetSpecificContent,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum WireValue {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Identifier(String),
+    Size(IrSize),
+    Color(IrColor),
+    Enum(IrEnumValue),
+    Range(IrRange),
+    Collection(Vec<WireValue>),
+    Pair(WirePair),
+    Dictionary(WireDictionary),
+    Content(Vec<WireNode>),
+    Component(WireComponent),
+    None,
+    Callable(WireCallable),
+    InlineBody(WireInlineBody),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WirePair {
+    first: Box<WireValue>,
+    second: Box<WireValue>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireDictionary {
+    entries: Vec<WirePair>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireNamedArg {
+    name: String,
+    name_span: SourceSpan,
+    value: WireValue,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCallSegment {
+    name: String,
+    name_span: SourceSpan,
+    positional_args: Vec<WireValue>,
+    named_args: Vec<WireNamedArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ordered_args: Option<Vec<IrCallArgument>>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireListItem {
+    nodes: Vec<WireNode>,
+    task: Option<IrTaskStatus>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireTableRow {
+    cells: Vec<WireTableCell>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireTableCell {
+    content: Vec<WireInline>,
+    alignment: IrTableAlignment,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum WireComponent {
+    Stacked(WireStackedComponent),
+    Container(WireContainerComponent),
+    Landscape(WireLandscapeComponent),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireStackedComponent {
+    layout: IrStackedLayout,
+    main_axis_alignment: IrMainAxisAlignment,
+    cross_axis_alignment: IrCrossAxisAlignment,
+    row_gap: Option<IrSize>,
+    column_gap: Option<IrSize>,
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireContainerComponent {
+    #[serde(default)]
+    width: Option<IrSize>,
+    #[serde(default)]
+    height: Option<IrSize>,
+    full_width: bool,
+    #[serde(default)]
+    alignment: Option<IrContainerAlignment>,
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireLandscapeComponent {
+    children: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCallable {
+    parameters: Option<Vec<IrParameter>>,
+    body: Vec<WireNode>,
+    span: SourceSpan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capture: Option<Box<WireCallableCapture>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireInlineBody {
+    content: Vec<WireNode>,
+    parameters: Option<Vec<IrParameter>>,
+    body: Vec<WireNode>,
+    span: SourceSpan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCallableCapture {
+    variables: Vec<WireCapturedVariable>,
+    functions: Vec<WireCapturedFunction>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCapturedVariable {
+    name: String,
+    value: WireValue,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WireCapturedFunction {
+    name: String,
+    callable: WireCallable,
+}
+
+fn wire_nodes(nodes: &[IrNode], sources: &SourceTable) -> Result<Vec<WireNode>, String> {
+    nodes
+        .iter()
+        .map(|node| node_to_wire(node, sources))
+        .collect()
+}
+
+fn wire_inlines(inlines: &[IrInline], sources: &SourceTable) -> Result<Vec<WireInline>, String> {
+    inlines
+        .iter()
+        .map(|inline| inline_to_wire(inline, sources))
+        .collect()
+}
+
+fn wire_values(values: &[IrValue], sources: &SourceTable) -> Result<Vec<WireValue>, String> {
+    values
+        .iter()
+        .map(|value| value_to_wire(value, sources))
+        .collect()
+}
+
+fn raw_body_to_wire(raw_body: &IrRawBody, sources: &SourceTable) -> Result<WireRawBody, String> {
+    if raw_body.source.slice(raw_body.span).is_none() {
+        return Err("IR raw-body span is outside its source buffer".to_string());
+    }
+    Ok(WireRawBody {
+        source: None,
+        source_ref: Some(raw_body_source_ref(raw_body, sources)?),
+        span: raw_body.span.into(),
+    })
+}
+
+fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String> {
+    Ok(match node {
+        IrNode::Heading {
+            level,
+            content,
+            span,
+        } => WireNode::Heading {
+            level: *level,
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrNode::Paragraph { content, span } => WireNode::Paragraph {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrNode::Blockquote { content, span } => WireNode::Blockquote {
+            content: wire_nodes(content, sources)?,
+            span: *span,
+        },
+        IrNode::UnorderedList { items, span } => WireNode::UnorderedList {
+            items: items
+                .iter()
+                .map(|item| list_item_to_wire(item, sources))
+                .collect::<Result<_, _>>()?,
+            span: *span,
+        },
+        IrNode::OrderedList { items, start, span } => WireNode::OrderedList {
+            items: items
+                .iter()
+                .map(|item| list_item_to_wire(item, sources))
+                .collect::<Result<_, _>>()?,
+            start: *start,
+            span: *span,
+        },
+        IrNode::Table { header, rows, span } => WireNode::Table {
+            header: table_row_to_wire(header, sources)?,
+            rows: rows
+                .iter()
+                .map(|row| table_row_to_wire(row, sources))
+                .collect::<Result<_, _>>()?,
+            span: *span,
+        },
+        IrNode::CodeBlock {
+            language,
+            info,
+            source,
+            span,
+        } => WireNode::CodeBlock {
+            language: language.clone(),
+            info: info.clone(),
+            source: source.clone(),
+            span: *span,
+        },
+        IrNode::RawHtml { source, span } => WireNode::RawHtml {
+            source: source.clone(),
+            span: *span,
+        },
+        IrNode::TargetSpecificContent { content } => WireNode::TargetSpecificContent {
+            content: content.clone(),
+        },
+        IrNode::Component { component } => WireNode::Component {
+            component: component_to_wire(component, sources)?,
+        },
+        IrNode::FunctionCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+        } => WireNode::FunctionCall {
+            name: name.clone(),
+            positional_args: wire_values(positional_args, sources)?,
+            named_args: named_args
+                .iter()
+                .map(|argument| named_arg_to_wire(argument, sources))
+                .collect::<Result<_, _>>()?,
+            ordered_args: ordered_args.clone(),
+            lambda_parameters: lambda_parameters.clone(),
+            body: body
+                .as_deref()
+                .map(|body| wire_nodes(body, sources))
+                .transpose()?,
+            raw_body: raw_body
+                .as_ref()
+                .map(|raw_body| raw_body_to_wire(raw_body, sources))
+                .transpose()?,
+            span: *span,
+        },
+        IrNode::ChainedFunctionCall {
+            head,
+            chain,
+            body,
+            raw_body,
+            span,
+        } => WireNode::ChainedFunctionCall {
+            head: call_segment_to_wire(head, sources)?,
+            chain: chain
+                .iter()
+                .map(|segment| call_segment_to_wire(segment, sources))
+                .collect::<Result<_, _>>()?,
+            body: body
+                .as_deref()
+                .map(|body| wire_nodes(body, sources))
+                .transpose()?,
+            raw_body: raw_body
+                .as_ref()
+                .map(|raw_body| raw_body_to_wire(raw_body, sources))
+                .transpose()?,
+            span: *span,
+        },
+        IrNode::FunctionDeclaration {
+            name,
+            parameters,
+            body,
+            span,
+        } => WireNode::FunctionDeclaration {
+            name: value_to_wire(name, sources)?,
+            parameters: parameters.clone(),
+            body: wire_nodes(body, sources)?,
+            span: *span,
+        },
+        IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },
+        IrNode::Math {
+            source,
+            display,
+            span,
+        } => WireNode::Math {
+            source: source.clone(),
+            display: *display,
+            span: *span,
+        },
+    })
+}
+
+fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline, String> {
+    Ok(match inline {
+        IrInline::Text { content, span } => WireInline::Text {
+            content: content.clone(),
+            span: *span,
+        },
+        IrInline::Whitespace {
+            width,
+            height,
+            span,
+        } => WireInline::Whitespace {
+            width: width.clone(),
+            height: height.clone(),
+            span: *span,
+        },
+        IrInline::Emphasis { content, span } => WireInline::Emphasis {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::Strong { content, span } => WireInline::Strong {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::Strikethrough { content, span } => WireInline::Strikethrough {
+            content: wire_inlines(content, sources)?,
+            span: *span,
+        },
+        IrInline::DirectiveCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            body,
+            span,
+        } => WireInline::DirectiveCall {
+            name: name.clone(),
+            positional_args: wire_values(positional_args, sources)?,
+            named_args: named_args
+                .iter()
+                .map(|argument| named_arg_to_wire(argument, sources))
+                .collect::<Result<_, _>>()?,
+            ordered_args: ordered_args.clone(),
+            body: body
+                .as_deref()
+                .map(|body| wire_inlines(body, sources))
+                .transpose()?,
+            span: *span,
+        },
+        IrInline::ChainedDirectiveCall {
+            head,
+            chain,
+            body,
+            span,
+        } => WireInline::ChainedDirectiveCall {
+            head: call_segment_to_wire(head, sources)?,
+            chain: chain
+                .iter()
+                .map(|segment| call_segment_to_wire(segment, sources))
+                .collect::<Result<_, _>>()?,
+            body: body
+                .as_deref()
+                .map(|body| wire_inlines(body, sources))
+                .transpose()?,
+            span: *span,
+        },
+        IrInline::Link {
+            content,
+            destination,
+            title,
+            span,
+        } => WireInline::Link {
+            content: wire_inlines(content, sources)?,
+            destination: destination.clone(),
+            title: title.clone(),
+            span: *span,
+        },
+        IrInline::Image {
+            content,
+            destination,
+            title,
+            span,
+        } => WireInline::Image {
+            content: wire_inlines(content, sources)?,
+            destination: destination.clone(),
+            title: title.clone(),
+            span: *span,
+        },
+        IrInline::Code { content, span } => WireInline::Code {
+            content: content.clone(),
+            span: *span,
+        },
+        IrInline::SoftBreak { span } => WireInline::SoftBreak { span: *span },
+        IrInline::HardBreak { span } => WireInline::HardBreak { span: *span },
+        IrInline::RawHtml { content, span } => WireInline::RawHtml {
+            content: content.clone(),
+            span: *span,
+        },
+        IrInline::TargetSpecificContent { content } => WireInline::TargetSpecificContent {
+            content: content.clone(),
+        },
+    })
+}
+
+fn value_to_wire(value: &IrValue, sources: &SourceTable) -> Result<WireValue, String> {
+    Ok(match value {
+        IrValue::String(value) => WireValue::String(value.clone()),
+        IrValue::Number(value) => WireValue::Number(*value),
+        IrValue::Boolean(value) => WireValue::Boolean(*value),
+        IrValue::Identifier(value) => WireValue::Identifier(value.clone()),
+        IrValue::Size(value) => WireValue::Size(value.clone()),
+        IrValue::Color(value) => WireValue::Color(value.clone()),
+        IrValue::Enum(value) => WireValue::Enum(*value),
+        IrValue::Range(value) => WireValue::Range(value.clone()),
+        IrValue::Collection(values) => WireValue::Collection(wire_values(values, sources)?),
+        IrValue::Pair(pair) => WireValue::Pair(WirePair {
+            first: Box::new(value_to_wire(&pair.first, sources)?),
+            second: Box::new(value_to_wire(&pair.second, sources)?),
+            span: pair.span,
+        }),
+        IrValue::Dictionary(dictionary) => WireValue::Dictionary(WireDictionary {
+            entries: dictionary
+                .entries
+                .iter()
+                .map(|pair| {
+                    Ok(WirePair {
+                        first: Box::new(value_to_wire(&pair.first, sources)?),
+                        second: Box::new(value_to_wire(&pair.second, sources)?),
+                        span: pair.span,
+                    })
+                })
+                .collect::<Result<_, String>>()?,
+            span: dictionary.span,
+        }),
+        IrValue::Content(nodes) => WireValue::Content(wire_nodes(nodes, sources)?),
+        IrValue::Component(component) => {
+            WireValue::Component(component_to_wire(component, sources)?)
+        }
+        IrValue::None => WireValue::None,
+        IrValue::Callable(callable) => WireValue::Callable(callable_to_wire(callable, sources)?),
+        IrValue::InlineBody(body) => WireValue::InlineBody(WireInlineBody {
+            content: wire_nodes(&body.content, sources)?,
+            parameters: body.parameters.clone(),
+            body: wire_nodes(&body.body, sources)?,
+            span: body.span,
+        }),
+    })
+}
+
+fn named_arg_to_wire(argument: &IrNamedArg, sources: &SourceTable) -> Result<WireNamedArg, String> {
+    Ok(WireNamedArg {
+        name: argument.name.clone(),
+        name_span: argument.name_span,
+        value: value_to_wire(&argument.value, sources)?,
+        span: argument.span,
+    })
+}
+
+fn call_segment_to_wire(
+    segment: &IrCallSegment,
+    sources: &SourceTable,
+) -> Result<WireCallSegment, String> {
+    Ok(WireCallSegment {
+        name: segment.name.clone(),
+        name_span: segment.name_span,
+        positional_args: wire_values(&segment.positional_args, sources)?,
+        named_args: segment
+            .named_args
+            .iter()
+            .map(|argument| named_arg_to_wire(argument, sources))
+            .collect::<Result<_, _>>()?,
+        ordered_args: segment.ordered_args.clone(),
+        span: segment.span,
+    })
+}
+
+fn list_item_to_wire(item: &IrListItem, sources: &SourceTable) -> Result<WireListItem, String> {
+    Ok(WireListItem {
+        nodes: wire_nodes(&item.nodes, sources)?,
+        task: item.task,
+        span: item.span,
+    })
+}
+
+fn table_row_to_wire(row: &IrTableRow, sources: &SourceTable) -> Result<WireTableRow, String> {
+    Ok(WireTableRow {
+        cells: row
+            .cells
+            .iter()
+            .map(|cell| {
+                Ok(WireTableCell {
+                    content: wire_inlines(&cell.content, sources)?,
+                    alignment: cell.alignment,
+                    span: cell.span,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        span: row.span,
+    })
+}
+
+fn component_to_wire(
+    component: &IrComponent,
+    sources: &SourceTable,
+) -> Result<WireComponent, String> {
+    Ok(match component {
+        IrComponent::Stacked(component) => WireComponent::Stacked(WireStackedComponent {
+            layout: component.layout.clone(),
+            main_axis_alignment: component.main_axis_alignment,
+            cross_axis_alignment: component.cross_axis_alignment,
+            row_gap: component.row_gap.clone(),
+            column_gap: component.column_gap.clone(),
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
+        IrComponent::Container(component) => WireComponent::Container(WireContainerComponent {
+            width: component.width.clone(),
+            height: component.height.clone(),
+            full_width: component.full_width,
+            alignment: component.alignment,
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
+        IrComponent::Landscape(component) => WireComponent::Landscape(WireLandscapeComponent {
+            children: wire_nodes(&component.children, sources)?,
+            span: component.span,
+        }),
+    })
+}
+
+fn callable_to_wire(callable: &IrCallable, sources: &SourceTable) -> Result<WireCallable, String> {
+    Ok(WireCallable {
+        parameters: callable.parameters.clone(),
+        body: wire_nodes(&callable.body, sources)?,
+        span: callable.span,
+        capture: callable
+            .capture
+            .as_deref()
+            .map(|capture| callable_capture_to_wire(capture, sources))
+            .transpose()?
+            .map(Box::new),
+    })
+}
+
+fn callable_capture_to_wire(
+    capture: &IrCallableCapture,
+    sources: &SourceTable,
+) -> Result<WireCallableCapture, String> {
+    Ok(WireCallableCapture {
+        variables: capture
+            .variables
+            .iter()
+            .map(|variable| {
+                Ok(WireCapturedVariable {
+                    name: variable.name.clone(),
+                    value: value_to_wire(&variable.value, sources)?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        functions: capture
+            .functions
+            .iter()
+            .map(|function| {
+                Ok(WireCapturedFunction {
+                    name: function.name.clone(),
+                    callable: callable_to_wire(&function.callable, sources)?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+    })
+}
+
+fn raw_body_from_wire(
+    raw_body: WireRawBody,
+    sources: Option<&[SourceText]>,
 ) -> Result<IrRawBody, String> {
-    match (fields.source, fields.source_ref) {
-        (Some(source), None) => {
-            if source.slice(fields.span.byte_span()).is_none() {
-                return Err("IR raw-body span is outside its source buffer".to_string());
-            }
-            Ok(IrRawBody::new(source, fields.span))
+    source_from_wire(
+        raw_body.source,
+        raw_body.source_ref,
+        sources,
+        raw_body.span.into_byte_span(),
+    )
+}
+
+fn nodes_from_wire(
+    nodes: Vec<WireNode>,
+    sources: Option<&[SourceText]>,
+) -> Result<Vec<IrNode>, String> {
+    nodes
+        .into_iter()
+        .map(|node| wire_node_to_ir(node, sources))
+        .collect()
+}
+
+fn inlines_from_wire(
+    inlines: Vec<WireInline>,
+    sources: Option<&[SourceText]>,
+) -> Result<Vec<IrInline>, String> {
+    inlines
+        .into_iter()
+        .map(|inline| wire_inline_to_ir(inline, sources))
+        .collect()
+}
+
+fn values_from_wire(
+    values: Vec<WireValue>,
+    sources: Option<&[SourceText]>,
+) -> Result<Vec<IrValue>, String> {
+    values
+        .into_iter()
+        .map(|value| wire_value_to_ir(value, sources))
+        .collect()
+}
+
+fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrNode, String> {
+    Ok(match node {
+        WireNode::Heading {
+            level,
+            content,
+            span,
+        } => IrNode::Heading {
+            level,
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireNode::Paragraph { content, span } => IrNode::Paragraph {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireNode::Blockquote { content, span } => IrNode::Blockquote {
+            content: nodes_from_wire(content, sources)?,
+            span,
+        },
+        WireNode::UnorderedList { items, span } => IrNode::UnorderedList {
+            items: items
+                .into_iter()
+                .map(|item| list_item_from_wire(item, sources))
+                .collect::<Result<_, _>>()?,
+            span,
+        },
+        WireNode::OrderedList { items, start, span } => IrNode::OrderedList {
+            items: items
+                .into_iter()
+                .map(|item| list_item_from_wire(item, sources))
+                .collect::<Result<_, _>>()?,
+            start,
+            span,
+        },
+        WireNode::Table { header, rows, span } => IrNode::Table {
+            header: table_row_from_wire(header, sources)?,
+            rows: rows
+                .into_iter()
+                .map(|row| table_row_from_wire(row, sources))
+                .collect::<Result<_, _>>()?,
+            span,
+        },
+        WireNode::CodeBlock {
+            language,
+            info,
+            source,
+            span,
+        } => IrNode::CodeBlock {
+            language,
+            info,
+            source,
+            span,
+        },
+        WireNode::RawHtml { source, span } => IrNode::RawHtml { source, span },
+        WireNode::TargetSpecificContent { content } => IrNode::TargetSpecificContent { content },
+        WireNode::Component { component } => IrNode::Component {
+            component: component_from_wire(component, sources)?,
+        },
+        WireNode::FunctionCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            lambda_parameters,
+            body,
+            raw_body,
+            span,
+        } => IrNode::FunctionCall {
+            name,
+            positional_args: values_from_wire(positional_args, sources)?,
+            named_args: named_args
+                .into_iter()
+                .map(|argument| named_arg_from_wire(argument, sources))
+                .collect::<Result<_, _>>()?,
+            ordered_args,
+            lambda_parameters,
+            body: body
+                .map(|body| nodes_from_wire(body, sources))
+                .transpose()?,
+            raw_body: raw_body
+                .map(|raw_body| raw_body_from_wire(raw_body, sources))
+                .transpose()?,
+            span,
+        },
+        WireNode::ChainedFunctionCall {
+            head,
+            chain,
+            body,
+            raw_body,
+            span,
+        } => IrNode::ChainedFunctionCall {
+            head: call_segment_from_wire(head, sources)?,
+            chain: chain
+                .into_iter()
+                .map(|segment| call_segment_from_wire(segment, sources))
+                .collect::<Result<_, _>>()?,
+            body: body
+                .map(|body| nodes_from_wire(body, sources))
+                .transpose()?,
+            raw_body: raw_body
+                .map(|raw_body| raw_body_from_wire(raw_body, sources))
+                .transpose()?,
+            span,
+        },
+        WireNode::FunctionDeclaration {
+            name,
+            parameters,
+            body,
+            span,
+        } => IrNode::FunctionDeclaration {
+            name: wire_value_to_ir(name, sources)?,
+            parameters,
+            body: nodes_from_wire(body, sources)?,
+            span,
+        },
+        WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },
+        WireNode::Math {
+            source,
+            display,
+            span,
+        } => IrNode::Math {
+            source,
+            display,
+            span,
+        },
+    })
+}
+
+fn wire_inline_to_ir(
+    inline: WireInline,
+    sources: Option<&[SourceText]>,
+) -> Result<IrInline, String> {
+    Ok(match inline {
+        WireInline::Text { content, span } => IrInline::Text { content, span },
+        WireInline::Whitespace {
+            width,
+            height,
+            span,
+        } => IrInline::Whitespace {
+            width,
+            height,
+            span,
+        },
+        WireInline::Emphasis { content, span } => IrInline::Emphasis {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireInline::Strong { content, span } => IrInline::Strong {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireInline::Strikethrough { content, span } => IrInline::Strikethrough {
+            content: inlines_from_wire(content, sources)?,
+            span,
+        },
+        WireInline::DirectiveCall {
+            name,
+            positional_args,
+            named_args,
+            ordered_args,
+            body,
+            span,
+        } => IrInline::DirectiveCall {
+            name,
+            positional_args: values_from_wire(positional_args, sources)?,
+            named_args: named_args
+                .into_iter()
+                .map(|argument| named_arg_from_wire(argument, sources))
+                .collect::<Result<_, _>>()?,
+            ordered_args,
+            body: body
+                .map(|body| inlines_from_wire(body, sources))
+                .transpose()?,
+            span,
+        },
+        WireInline::ChainedDirectiveCall {
+            head,
+            chain,
+            body,
+            span,
+        } => IrInline::ChainedDirectiveCall {
+            head: call_segment_from_wire(head, sources)?,
+            chain: chain
+                .into_iter()
+                .map(|segment| call_segment_from_wire(segment, sources))
+                .collect::<Result<_, _>>()?,
+            body: body
+                .map(|body| inlines_from_wire(body, sources))
+                .transpose()?,
+            span,
+        },
+        WireInline::Link {
+            content,
+            destination,
+            title,
+            span,
+        } => IrInline::Link {
+            content: inlines_from_wire(content, sources)?,
+            destination,
+            title,
+            span,
+        },
+        WireInline::Image {
+            content,
+            destination,
+            title,
+            span,
+        } => IrInline::Image {
+            content: inlines_from_wire(content, sources)?,
+            destination,
+            title,
+            span,
+        },
+        WireInline::Code { content, span } => IrInline::Code { content, span },
+        WireInline::SoftBreak { span } => IrInline::SoftBreak { span },
+        WireInline::HardBreak { span } => IrInline::HardBreak { span },
+        WireInline::RawHtml { content, span } => IrInline::RawHtml { content, span },
+        WireInline::TargetSpecificContent { content } => {
+            IrInline::TargetSpecificContent { content }
         }
-        (None, Some(source_ref)) if allow_document_source_ref => {
-            Ok(IrRawBody::from_pending_source_ref(source_ref, fields.span))
+    })
+}
+
+fn wire_value_to_ir(value: WireValue, sources: Option<&[SourceText]>) -> Result<IrValue, String> {
+    Ok(match value {
+        WireValue::String(value) => IrValue::String(value),
+        WireValue::Number(value) => IrValue::Number(value),
+        WireValue::Boolean(value) => IrValue::Boolean(value),
+        WireValue::Identifier(value) => IrValue::Identifier(value),
+        WireValue::Size(value) => IrValue::Size(value),
+        WireValue::Color(value) => IrValue::Color(value),
+        WireValue::Enum(value) => IrValue::Enum(value),
+        WireValue::Range(value) => IrValue::Range(value),
+        WireValue::Collection(values) => IrValue::Collection(values_from_wire(values, sources)?),
+        WireValue::Pair(pair) => IrValue::Pair(IrPair {
+            first: Box::new(wire_value_to_ir(*pair.first, sources)?),
+            second: Box::new(wire_value_to_ir(*pair.second, sources)?),
+            span: pair.span,
+        }),
+        WireValue::Dictionary(dictionary) => IrValue::Dictionary(IrDictionary {
+            entries: dictionary
+                .entries
+                .into_iter()
+                .map(|pair| {
+                    Ok(IrPair {
+                        first: Box::new(wire_value_to_ir(*pair.first, sources)?),
+                        second: Box::new(wire_value_to_ir(*pair.second, sources)?),
+                        span: pair.span,
+                    })
+                })
+                .collect::<Result<_, String>>()?,
+            span: dictionary.span,
+        }),
+        WireValue::Content(nodes) => IrValue::Content(nodes_from_wire(nodes, sources)?),
+        WireValue::Component(component) => {
+            IrValue::Component(component_from_wire(component, sources)?)
         }
-        (None, Some(_)) => {
-            Err("IR raw-body source_ref requires a document-level sources table".to_string())
-        }
-        (Some(_), Some(_)) => {
-            Err("IR raw body cannot contain both source and source_ref".to_string())
-        }
-        (None, None) => Err("IR raw body requires source or source_ref".to_string()),
-    }
+        WireValue::None => IrValue::None,
+        WireValue::Callable(callable) => IrValue::Callable(callable_from_wire(callable, sources)?),
+        WireValue::InlineBody(body) => IrValue::InlineBody(IrInlineBody {
+            content: nodes_from_wire(body.content, sources)?,
+            parameters: body.parameters,
+            body: nodes_from_wire(body.body, sources)?,
+            span: body.span,
+        }),
+    })
+}
+
+fn named_arg_from_wire(
+    argument: WireNamedArg,
+    sources: Option<&[SourceText]>,
+) -> Result<IrNamedArg, String> {
+    Ok(IrNamedArg {
+        name: argument.name,
+        name_span: argument.name_span,
+        value: wire_value_to_ir(argument.value, sources)?,
+        span: argument.span,
+    })
+}
+
+fn call_segment_from_wire(
+    segment: WireCallSegment,
+    sources: Option<&[SourceText]>,
+) -> Result<IrCallSegment, String> {
+    Ok(IrCallSegment {
+        name: segment.name,
+        name_span: segment.name_span,
+        positional_args: values_from_wire(segment.positional_args, sources)?,
+        named_args: segment
+            .named_args
+            .into_iter()
+            .map(|argument| named_arg_from_wire(argument, sources))
+            .collect::<Result<_, _>>()?,
+        ordered_args: segment.ordered_args,
+        span: segment.span,
+    })
+}
+
+fn list_item_from_wire(
+    item: WireListItem,
+    sources: Option<&[SourceText]>,
+) -> Result<IrListItem, String> {
+    Ok(IrListItem {
+        nodes: nodes_from_wire(item.nodes, sources)?,
+        task: item.task,
+        span: item.span,
+    })
+}
+
+fn table_row_from_wire(
+    row: WireTableRow,
+    sources: Option<&[SourceText]>,
+) -> Result<IrTableRow, String> {
+    Ok(IrTableRow {
+        cells: row
+            .cells
+            .into_iter()
+            .map(|cell| {
+                Ok(IrTableCell {
+                    content: inlines_from_wire(cell.content, sources)?,
+                    alignment: cell.alignment,
+                    span: cell.span,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        span: row.span,
+    })
+}
+
+fn component_from_wire(
+    component: WireComponent,
+    sources: Option<&[SourceText]>,
+) -> Result<IrComponent, String> {
+    Ok(match component {
+        WireComponent::Stacked(component) => IrComponent::Stacked(IrStackedComponent {
+            layout: component.layout,
+            main_axis_alignment: component.main_axis_alignment,
+            cross_axis_alignment: component.cross_axis_alignment,
+            row_gap: component.row_gap,
+            column_gap: component.column_gap,
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Container(component) => IrComponent::Container(IrContainerComponent {
+            width: component.width,
+            height: component.height,
+            full_width: component.full_width,
+            alignment: component.alignment,
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+        WireComponent::Landscape(component) => IrComponent::Landscape(IrLandscapeComponent {
+            children: nodes_from_wire(component.children, sources)?,
+            span: component.span,
+        }),
+    })
+}
+
+fn callable_from_wire(
+    callable: WireCallable,
+    sources: Option<&[SourceText]>,
+) -> Result<IrCallable, String> {
+    Ok(IrCallable {
+        parameters: callable.parameters,
+        body: nodes_from_wire(callable.body, sources)?,
+        span: callable.span,
+        capture: callable
+            .capture
+            .map(|capture| callable_capture_from_wire(*capture, sources))
+            .transpose()?
+            .map(Box::new),
+    })
+}
+
+fn callable_capture_from_wire(
+    capture: WireCallableCapture,
+    sources: Option<&[SourceText]>,
+) -> Result<IrCallableCapture, String> {
+    Ok(IrCallableCapture {
+        variables: capture
+            .variables
+            .into_iter()
+            .map(|variable| {
+                Ok(IrCapturedVariable {
+                    name: variable.name,
+                    value: wire_value_to_ir(variable.value, sources)?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+        functions: capture
+            .functions
+            .into_iter()
+            .map(|function| {
+                Ok(IrCapturedFunction {
+                    name: function.name,
+                    callable: callable_from_wire(function.callable, sources)?,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+    })
 }
 
 /// A backend-neutral block-level IR node.
@@ -971,12 +2069,7 @@ pub enum IrNode {
         /// The source-backed raw body supplied to target-driven conversion.
         /// The structured body remains authoritative for explicit Markdown
         /// body parameters and lazy semantic evaluation.
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            serialize_with = "serialize_document_raw_body",
-            deserialize_with = "deserialize_document_raw_body"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
@@ -991,12 +2084,7 @@ pub enum IrNode {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
         body: Option<Vec<IrNode>>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            serialize_with = "serialize_document_raw_body",
-            deserialize_with = "deserialize_document_raw_body"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
@@ -1318,7 +2406,7 @@ mod tests {
         IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
         SourceTable, TargetSpecificContent,
     };
-    use scribium_source::{SourceId, SourceSpan, SourceText};
+    use scribium_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
 
     #[test]
@@ -1345,7 +2433,7 @@ mod tests {
                 body: None,
                 raw_body: Some(IrRawBody::new(
                     source_text.clone(),
-                    SourceSpan::new(SourceId(7), 7 + index, 7 + index + 1),
+                    ByteSpan::new(7 + index, 7 + index + 1),
                 )),
                 span: SourceSpan::new(SourceId(7), 0, source.len()),
             })
@@ -1365,6 +2453,10 @@ mod tests {
         let first_body = &encoded["nodes"][0]["FunctionCall"]["raw_body"];
         assert!(first_body.get("source").is_none());
         assert_eq!(first_body["source_ref"], 0);
+        assert_eq!(
+            first_body["span"],
+            serde_json::json!({"start": 7, "end": 8})
+        );
         assert!(
             serde_json::to_vec(&encoded)
                 .expect("encoded document is JSON")
@@ -1383,7 +2475,7 @@ mod tests {
             else {
                 panic!("expected decoded raw body")
             };
-            assert_eq!(raw_body.source.slice(raw_body.span.byte_span()), Some("x"));
+            assert_eq!(raw_body.source.slice(raw_body.span), Some("x"));
             let identity = (
                 raw_body.source.as_str().as_ptr(),
                 raw_body.source.as_str().len(),
@@ -1414,7 +2506,7 @@ mod tests {
     fn standalone_raw_body_rejects_document_source_references() {
         let encoded = serde_json::json!({
             "source_ref": 0,
-            "span": {"source_id": 7, "start": 0, "end": 1}
+            "span": {"start": 0, "end": 1}
         });
         let error = serde_json::from_value::<IrRawBody>(encoded)
             .expect_err("a document source_ref needs its source table");
@@ -1422,12 +2514,29 @@ mod tests {
     }
 
     #[test]
+    fn standalone_ir_node_rejects_document_source_references() {
+        let encoded = serde_json::json!({
+            "FunctionCall": {
+                "name": "call",
+                "positional_args": [],
+                "named_args": [],
+                "body": null,
+                "raw_body": {
+                    "source_ref": 0,
+                    "span": {"start": 0, "end": 1}
+                },
+                "span": {"source_id": 7, "start": 0, "end": 1}
+            }
+        });
+        let error = serde_json::from_value::<IrNode>(encoded)
+            .expect_err("a public standalone node cannot resolve a document source_ref");
+        assert!(error.to_string().contains("document-level sources table"));
+    }
+
+    #[test]
     fn standalone_raw_body_preserves_a_real_marker_looking_source() {
         let source = "\0scribium-source-ref:17";
-        let body = IrRawBody::new(
-            SourceText::new(source),
-            SourceSpan::new(SourceId(7), 0, source.len()),
-        );
+        let body = IrRawBody::new(SourceText::new(source), ByteSpan::new(0, source.len()));
         let encoded = serde_json::to_value(&body).expect("standalone body serializes");
         assert_eq!(encoded["source"], source);
         assert_eq!(serde_json::from_value::<IrRawBody>(encoded).unwrap(), body);
@@ -1444,10 +2553,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
-                raw_body: Some(IrRawBody::new(
-                    source_text,
-                    SourceSpan::new(SourceId(1), 0, 4),
-                )),
+                raw_body: Some(IrRawBody::new(source_text, ByteSpan::new(0, 4))),
                 span: SourceSpan::new(SourceId(1), 0, 4),
             }],
             metadata: IrMetadata::default(),
@@ -1475,7 +2581,7 @@ mod tests {
                 body: None,
                 raw_body: Some(IrRawBody::new(
                     SourceText::new(source),
-                    SourceSpan::new(SourceId(1), 0, source.len()),
+                    ByteSpan::new(0, source.len()),
                 )),
                 span: SourceSpan::new(SourceId(1), 0, source.len()),
             }],
