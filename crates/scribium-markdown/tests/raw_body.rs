@@ -68,6 +68,19 @@ fn body_token_starts_after_header_spaces_and_tabs() {
 }
 
 #[test]
+fn body_ownership_requires_a_literal_two_space_or_tab_prefix() {
+    for (prefix, has_body) in [("  ", true), ("\t", true), (" \t", false), (" ", false)] {
+        let source = format!(".theme\n{prefix}value\n");
+        let output = parse_with_mode(&source, Mode::Quarkdown);
+        assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
+        let Block::DirectiveCall { raw_body, .. } = &output.document.nodes[0] else {
+            panic!("expected directive call, got {:?}", output.document.nodes);
+        };
+        assert_eq!(raw_body.is_some(), has_body, "prefix: {prefix:?}");
+    }
+}
+
+#[test]
 fn continued_header_uses_the_final_separator_before_the_body_token() {
     let source = concat!(
         ".docdescription {title} \\",
@@ -167,6 +180,27 @@ fn body_continuation_matches_trim_indent_after_an_indent_decrease() {
 }
 
 #[test]
+fn structured_body_keeps_relative_indentation_after_a_shallower_line() {
+    let source = ".theme\n      first\n        nested\n  sibling\n";
+    let output = parse_with_mode(source, Mode::Quarkdown);
+    assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
+    let Block::DirectiveCall {
+        body: Some(body), ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected structured body, got {:?}", output.document.nodes);
+    };
+
+    // The semantic body is equivalent to `trimIndent()` on the complete raw
+    // token: the first line keeps four spaces relative to `sibling`, rather
+    // than being flattened to the first line's indentation.
+    assert!(
+        matches!(body.first(), Some(Block::CodeBlock { source, .. }) if source == "first\n  nested\n")
+    );
+    assert!(matches!(body.last(), Some(Block::Paragraph { content, .. }) if content.len() == 1));
+}
+
+#[test]
 fn nested_body_continuation_keeps_a_shallower_line_in_the_same_token() {
     let source = ".function {wrap}\n    .theme\n\n        first\n      second\n\n";
     let output = parse_with_mode(source, Mode::Quarkdown);
@@ -186,6 +220,42 @@ fn nested_body_continuation_keeps_a_shallower_line_in_the_same_token() {
     };
 
     assert_eq!(raw_source(raw_body), "\n\n        first\n      second\n\n");
+    assert_eq!(
+        raw_source(raw_body),
+        &source[raw_body.span.start..raw_body.span.end]
+    );
+}
+
+#[test]
+fn nested_body_continuation_keeps_literal_prefix_rules_with_crlf() {
+    let source = concat!(
+        ".function {wrap}\r\n",
+        "    .theme\r\n",
+        "\r\n",
+        "        first\r\n",
+        "      second\r\n",
+        "\r\n",
+    );
+    let output = parse_with_mode(source, Mode::Quarkdown);
+    assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
+    let Block::DirectiveCall {
+        body: Some(body), ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected function body, got {:?}", output.document.nodes);
+    };
+    let [Block::DirectiveCall {
+        raw_body: Some(raw_body),
+        ..
+    }] = body.as_slice()
+    else {
+        panic!("expected nested theme body, got {body:?}");
+    };
+
+    assert_eq!(
+        raw_source(raw_body),
+        "\r\n\r\n        first\r\n      second\r\n\r\n"
+    );
     assert_eq!(
         raw_source(raw_body),
         &source[raw_body.span.start..raw_body.span.end]

@@ -2124,10 +2124,10 @@ mod tests {
     }
 
     fn raw_body(source: &str) -> IrRawBody {
-        IrRawBody {
-            source: SourceText::new(source.to_owned()),
-            span: SourceSpan::new(SourceId(7), 0, source.len()),
-        }
+        IrRawBody::new(
+            SourceText::new(source.to_owned()),
+            SourceSpan::new(SourceId(7), 0, source.len()),
+        )
     }
 
     #[test]
@@ -2137,13 +2137,23 @@ mod tests {
     }
 
     #[test]
+    fn raw_body_dynamic_text_applies_trim_indent_and_trim_end_to_the_full_token() {
+        let body = raw_body("\n\n\n  hello  \n\n\n");
+        // The first blank line is the body delimiter consumed by Kotlin's
+        // trimIndent convention; additional leading blank lines remain.
+        // trimEnd removes all trailing blank-line whitespace after the
+        // common indentation has been removed.
+        assert_eq!(raw_body_dynamic_text(&body).as_deref(), Some("\n\nhello"));
+    }
+
+    #[test]
     fn raw_body_dynamic_text_uses_the_minimum_indent_of_all_body_lines() {
         let source = ".theme\n    first\n  second\n";
         let body_end = source.len();
-        let body = IrRawBody {
-            source: scribium_source::SourceText::new(source),
-            span: SourceSpan::new(SourceId(1), 7, body_end),
-        };
+        let body = IrRawBody::new(
+            scribium_source::SourceText::new(source),
+            SourceSpan::new(SourceId(1), 7, body_end),
+        );
 
         assert_eq!(
             raw_body_dynamic_text(&body).as_deref(),
@@ -2153,10 +2163,10 @@ mod tests {
 
     #[test]
     fn raw_body_dynamic_text_is_derived_only_from_a_valid_source_span() {
-        let body = IrRawBody {
-            source: SourceText::new("body".to_string()),
-            span: SourceSpan::new(SourceId(7), 1, 5),
-        };
+        let body = IrRawBody::new(
+            SourceText::new("body".to_string()),
+            SourceSpan::new(SourceId(7), 1, 5),
+        );
         assert!(raw_body_dynamic_text(&body).is_none());
     }
 

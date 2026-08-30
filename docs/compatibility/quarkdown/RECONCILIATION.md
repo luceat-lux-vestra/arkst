@@ -353,7 +353,11 @@ Source-backed body fallback does not evaluate or stringify the parsed nested
 body. Dynamic iterable conversion evaluates one raw expression in context and
 uses typed Iterable/Dictionary results before its Markdown-list fallback.
 Static String content remains literal text, raw HTML keeps its existing
-source-preserving path, and #158/#160 structure remains unchanged. Callable,
+source-preserving path, and #158/#160 structure remains unchanged. The
+document-level source-table reference is a wire-only encoding: standalone
+`IrRawBody` values reject `source_ref`, missing/out-of-range table references
+are rejected, and successful deserialization restores the source-local span
+invariant. Callable,
 dictionary, remaining block-content consumers, complete upstream target
 coverage, and diagnostic/commit parity remain partial or deferred to their
 owners; #167 is not absorbed here.

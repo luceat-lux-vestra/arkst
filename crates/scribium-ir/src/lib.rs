@@ -9,6 +9,7 @@
 //! unresolved IR is a separate concern from semantic evaluation.
 
 use scribium_source::{SourceSpan, SourceText};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -108,12 +109,28 @@ impl<'de> serde::Deserialize<'de> for IrDocument {
 #[derive(Default)]
 struct SourceTable {
     sources: Vec<SourceText>,
+    /// The parser and evaluator normally clone one `SourceText` handle for
+    /// every body in a document. Use the backing-buffer identity before
+    /// falling back to content hashing so repeated raw bodies do not rescan
+    /// the complete document during serialization.
+    identities: HashMap<(usize, usize), usize>,
     indices: HashMap<u64, Vec<usize>>,
+    #[cfg(test)]
+    content_hashes: usize,
 }
 
 impl SourceTable {
     fn intern(&mut self, source: &SourceText) -> usize {
+        let identity = (source.as_str().as_ptr() as usize, source.as_str().len());
+        if let Some(index) = self.identities.get(&identity).copied() {
+            return index;
+        }
+
         let mut hasher = DefaultHasher::new();
+        #[cfg(test)]
+        {
+            self.content_hashes += 1;
+        }
         source.as_str().hash(&mut hasher);
         let hash = hasher.finish();
         if let Some(candidates) = self.indices.get(&hash) {
@@ -122,11 +139,13 @@ impl SourceTable {
                 .copied()
                 .find(|index| self.sources[*index].as_str() == source.as_str())
             {
+                self.identities.insert(identity, index);
                 return index;
             }
         }
         let index = self.sources.len();
         self.sources.push(source.clone());
+        self.identities.insert(identity, index);
         self.indices.entry(hash).or_default().push(index);
         index
     }
@@ -136,21 +155,6 @@ enum SourceRewrite<'a> {
     Marker,
     Canonicalize,
     Resolve(&'a [SourceText]),
-}
-
-const SOURCE_MARKER_PREFIX: &str = "\0scribium-source-ref:";
-
-fn source_marker(index: usize) -> String {
-    format!("{SOURCE_MARKER_PREFIX}{index}")
-}
-
-fn source_marker_index(source: &str) -> Option<Result<usize, String>> {
-    let index = source.strip_prefix(SOURCE_MARKER_PREFIX)?;
-    Some(
-        index
-            .parse()
-            .map_err(|_| "IR raw-body source marker must contain an unsigned integer".to_string()),
-    )
 }
 
 fn rewrite_document_sources(
@@ -398,22 +402,32 @@ fn rewrite_raw_body_source(
     };
     match rewrite {
         SourceRewrite::Marker => {
+            if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
+                return Err("IR raw-body span is outside its source buffer".to_string());
+            }
             let source_ref = sources.intern(&raw_body.source);
-            raw_body.source = SourceText::new(source_marker(source_ref));
+            raw_body.pending_source_ref = Some(source_ref);
         }
         SourceRewrite::Canonicalize => {
+            if raw_body.pending_source_ref.is_some() {
+                return Err(
+                    "IR raw-body source_ref requires a document-level sources table".to_string(),
+                );
+            }
             let source_ref = sources.intern(&raw_body.source);
             raw_body.source = sources.sources[source_ref].clone();
         }
         SourceRewrite::Resolve(document_sources) => {
-            let Some(source_ref) = source_marker_index(raw_body.source.as_str()) else {
-                return Err("IR raw-body wire source is missing its source marker".to_string());
+            let Some(source_ref) = raw_body.pending_source_ref.take() else {
+                return Err("IR raw-body wire source is missing its source reference".to_string());
             };
-            let source_ref = source_ref?;
             raw_body.source = document_sources
                 .get(source_ref)
                 .ok_or_else(|| format!("IR raw-body source_ref {source_ref} is out of range"))?
                 .clone();
+            if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
+                return Err("IR raw-body span is outside its source buffer".to_string());
+            }
         }
     }
     Ok(())
@@ -719,6 +733,28 @@ pub struct TargetSpecificContent {
 pub struct IrRawBody {
     pub source: SourceText,
     pub span: SourceSpan,
+    /// Document-deserialization staging only. A valid runtime raw body has
+    /// this unset; keeping the reference out of `SourceText` prevents a wire
+    /// reference from being mistaken for source provenance.
+    pending_source_ref: Option<usize>,
+}
+
+impl IrRawBody {
+    pub fn new(source: SourceText, span: SourceSpan) -> Self {
+        Self {
+            source,
+            span,
+            pending_source_ref: None,
+        }
+    }
+
+    fn from_pending_source_ref(source_ref: usize, span: SourceSpan) -> Self {
+        Self {
+            source: SourceText::default(),
+            span,
+            pending_source_ref: Some(source_ref),
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -747,19 +783,16 @@ impl serde::Serialize for IrRawBody {
     where
         S: serde::Serializer,
     {
-        if let Some(source_ref) = source_marker_index(self.source.as_str()) {
-            IrRawBodySourceRefFields {
-                source_ref: source_ref.map_err(serde::ser::Error::custom)?,
-                span: self.span,
-            }
-            .serialize(serializer)
-        } else {
-            IrRawBodySourceFields {
-                source: &self.source,
-                span: self.span,
-            }
-            .serialize(serializer)
+        if self.source.slice(self.span.byte_span()).is_none() {
+            return Err(serde::ser::Error::custom(
+                "IR raw-body span is outside its source buffer",
+            ));
         }
+        IrRawBodySourceFields {
+            source: &self.source,
+            span: self.span,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -769,22 +802,78 @@ impl<'de> serde::Deserialize<'de> for IrRawBody {
         D: serde::Deserializer<'de>,
     {
         let fields = IrRawBodyFields::deserialize(deserializer)?;
-        match (fields.source, fields.source_ref) {
-            (Some(source), None) => Ok(Self {
-                source,
-                span: fields.span,
-            }),
-            (None, Some(source_ref)) => Ok(Self {
-                source: SourceText::new(source_marker(source_ref)),
-                span: fields.span,
-            }),
-            (Some(_), Some(_)) => Err(serde::de::Error::custom(
-                "IR raw body cannot contain both source and source_ref",
-            )),
-            (None, None) => Err(serde::de::Error::custom(
-                "IR raw body requires source or source_ref",
-            )),
+        decode_raw_body_fields(fields, false).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The document serializer uses this narrow adapter for raw-body fields. A
+/// source reference is a document-wire concept, not a valid standalone
+/// `IrRawBody` value. It is staged in a private field during document
+/// deserialization and resolved before `IrDocument` is returned.
+fn serialize_document_raw_body<S>(
+    raw_body: &Option<IrRawBody>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match raw_body {
+        Some(raw_body) => {
+            if let Some(source_ref) = raw_body.pending_source_ref {
+                IrRawBodySourceRefFields {
+                    source_ref,
+                    span: raw_body.span,
+                }
+                .serialize(serializer)
+            } else {
+                if raw_body.source.slice(raw_body.span.byte_span()).is_none() {
+                    return Err(serde::ser::Error::custom(
+                        "IR raw-body span is outside its source buffer",
+                    ));
+                }
+                IrRawBodySourceFields {
+                    source: &raw_body.source,
+                    span: raw_body.span,
+                }
+                .serialize(serializer)
+            }
         }
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_document_raw_body<'de, D>(deserializer: D) -> Result<Option<IrRawBody>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let fields = Option::<IrRawBodyFields>::deserialize(deserializer)?;
+    fields
+        .map(|fields| decode_raw_body_fields(fields, true))
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn decode_raw_body_fields(
+    fields: IrRawBodyFields,
+    allow_document_source_ref: bool,
+) -> Result<IrRawBody, String> {
+    match (fields.source, fields.source_ref) {
+        (Some(source), None) => {
+            if source.slice(fields.span.byte_span()).is_none() {
+                return Err("IR raw-body span is outside its source buffer".to_string());
+            }
+            Ok(IrRawBody::new(source, fields.span))
+        }
+        (None, Some(source_ref)) if allow_document_source_ref => {
+            Ok(IrRawBody::from_pending_source_ref(source_ref, fields.span))
+        }
+        (None, Some(_)) => {
+            Err("IR raw-body source_ref requires a document-level sources table".to_string())
+        }
+        (Some(_), Some(_)) => {
+            Err("IR raw body cannot contain both source and source_ref".to_string())
+        }
+        (None, None) => Err("IR raw body requires source or source_ref".to_string()),
     }
 }
 
@@ -871,7 +960,12 @@ pub enum IrNode {
         /// The source-backed raw body supplied to target-driven conversion.
         /// The structured body remains authoritative for explicit Markdown
         /// body parameters and lazy semantic evaluation.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_document_raw_body",
+            deserialize_with = "deserialize_document_raw_body"
+        )]
         raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
@@ -886,7 +980,12 @@ pub enum IrNode {
         head: IrCallSegment,
         chain: Vec<IrCallSegment>,
         body: Option<Vec<IrNode>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_document_raw_body",
+            deserialize_with = "deserialize_document_raw_body"
+        )]
         raw_body: Option<IrRawBody>,
         span: SourceSpan,
     },
@@ -1206,7 +1305,7 @@ mod tests {
         IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
         IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody,
         IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
-        TargetSpecificContent,
+        SourceTable, TargetSpecificContent,
     };
     use scribium_source::{SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -1233,10 +1332,10 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
-                raw_body: Some(IrRawBody {
-                    source: source_text.clone(),
-                    span: SourceSpan::new(SourceId(7), 7 + index, 7 + index + 1),
-                }),
+                raw_body: Some(IrRawBody::new(
+                    source_text.clone(),
+                    SourceSpan::new(SourceId(7), 7 + index, 7 + index + 1),
+                )),
                 span: SourceSpan::new(SourceId(7), 0, source.len()),
             })
             .collect();
@@ -1264,14 +1363,168 @@ mod tests {
 
         let decoded = serde_json::from_value::<IrDocument>(encoded).expect("document deserializes");
         assert_eq!(decoded, document);
-        let IrNode::FunctionCall {
-            raw_body: Some(raw_body),
-            ..
-        } = &decoded.nodes[0]
-        else {
-            panic!("expected decoded raw body")
+        let mut shared_source = None;
+        for node in &decoded.nodes {
+            let IrNode::FunctionCall {
+                raw_body: Some(raw_body),
+                ..
+            } = node
+            else {
+                panic!("expected decoded raw body")
+            };
+            assert_eq!(raw_body.source.slice(raw_body.span.byte_span()), Some("x"));
+            let identity = (
+                raw_body.source.as_str().as_ptr(),
+                raw_body.source.as_str().len(),
+            );
+            if let Some(previous) = shared_source {
+                assert_eq!(
+                    identity, previous,
+                    "decoded bodies must share one source buffer"
+                );
+            } else {
+                shared_source = Some(identity);
+            }
+        }
+    }
+
+    #[test]
+    fn source_table_deduplicates_shared_buffers_before_content_hashing() {
+        let source = SourceText::new("shared document source".to_string());
+        let mut table = SourceTable::default();
+        for _ in 0..128 {
+            assert_eq!(table.intern(&source), 0);
+        }
+        assert_eq!(table.sources.len(), 1);
+        assert_eq!(table.content_hashes, 1);
+    }
+
+    #[test]
+    fn standalone_raw_body_rejects_document_source_references() {
+        let encoded = serde_json::json!({
+            "source_ref": 0,
+            "span": {"source_id": 7, "start": 0, "end": 1}
+        });
+        let error = serde_json::from_value::<IrRawBody>(encoded)
+            .expect_err("a document source_ref needs its source table");
+        assert!(error.to_string().contains("document-level sources table"));
+    }
+
+    #[test]
+    fn standalone_raw_body_preserves_a_real_marker_looking_source() {
+        let source = "\0scribium-source-ref:17";
+        let body = IrRawBody::new(
+            SourceText::new(source),
+            SourceSpan::new(SourceId(7), 0, source.len()),
+        );
+        let encoded = serde_json::to_value(&body).expect("standalone body serializes");
+        assert_eq!(encoded["source"], source);
+        assert_eq!(serde_json::from_value::<IrRawBody>(encoded).unwrap(), body);
+    }
+
+    #[test]
+    fn document_source_reference_without_a_table_is_rejected() {
+        let source_text = SourceText::new("body");
+        let document = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "call".to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: Some(IrRawBody::new(
+                    source_text,
+                    SourceSpan::new(SourceId(1), 0, 4),
+                )),
+                span: SourceSpan::new(SourceId(1), 0, 4),
+            }],
+            metadata: IrMetadata::default(),
         };
-        assert_eq!(raw_body.source.slice(raw_body.span.byte_span()), Some("x"));
+        let mut encoded = serde_json::to_value(&document).expect("document serializes");
+        encoded
+            .as_object_mut()
+            .expect("document is an object")
+            .remove("sources");
+        let error = serde_json::from_value::<IrDocument>(encoded)
+            .expect_err("source_ref without sources must be rejected");
+        assert!(error.to_string().contains("document-level sources table"));
+    }
+
+    #[test]
+    fn source_table_roundtrip_does_not_confuse_a_real_marker_looking_source() {
+        let source = "\0scribium-source-ref:17";
+        let document = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "call".to_string(),
+                positional_args: Vec::new(),
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: Some(IrRawBody::new(
+                    SourceText::new(source),
+                    SourceSpan::new(SourceId(1), 0, source.len()),
+                )),
+                span: SourceSpan::new(SourceId(1), 0, source.len()),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let encoded = serde_json::to_value(&document).expect("document serializes");
+        assert_eq!(encoded["sources"][0], source);
+        let decoded = serde_json::from_value::<IrDocument>(encoded).expect("document deserializes");
+        assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn legacy_raw_body_source_format_still_roundtrips() {
+        let metadata = serde_json::to_value(IrMetadata::default()).expect("metadata serializes");
+        let encoded = serde_json::json!({
+            "nodes": [{
+                "FunctionCall": {
+                    "name": "call",
+                    "positional_args": [],
+                    "named_args": [],
+                    "body": null,
+                    "raw_body": {
+                        "source": "legacy body",
+                        "span": {"source_id": 1, "start": 0, "end": 11}
+                    },
+                    "span": {"source_id": 1, "start": 0, "end": 11}
+                }
+            }],
+            "metadata": metadata
+        });
+        let decoded = serde_json::from_value::<IrDocument>(encoded).expect("legacy IR decodes");
+        let encoded_again = serde_json::to_value(&decoded).expect("legacy IR reserializes");
+        let decoded_again =
+            serde_json::from_value::<IrDocument>(encoded_again).expect("IR roundtrips");
+        assert_eq!(decoded_again, decoded);
+    }
+
+    #[test]
+    fn source_table_rejects_an_out_of_range_reference() {
+        let metadata = serde_json::to_value(IrMetadata::default()).expect("metadata serializes");
+        let encoded = serde_json::json!({
+            "nodes": [{
+                "FunctionCall": {
+                    "name": "call",
+                    "positional_args": [],
+                    "named_args": [],
+                    "body": null,
+                    "raw_body": {
+                        "source_ref": 1,
+                        "span": {"source_id": 1, "start": 0, "end": 1}
+                    },
+                    "span": {"source_id": 1, "start": 0, "end": 1}
+                }
+            }],
+            "metadata": metadata,
+            "sources": ["x"]
+        });
+        let error = serde_json::from_value::<IrDocument>(encoded)
+            .expect_err("out-of-range source_ref must be rejected");
+        assert!(error.to_string().contains("out of range"));
     }
 
     #[test]

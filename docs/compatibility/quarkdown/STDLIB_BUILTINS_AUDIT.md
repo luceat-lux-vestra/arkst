@@ -421,9 +421,10 @@ scribium-markdown/scribium-quarkdown frontend
 -> backend-neutral IrValue/IrComponent/content
 -> existing scribium-typst lowering where an owning component exists.
 
-- Frontend/parser: call grammar and parsed argument/body representation are
-  #148 evidence. This PR does not change parser grammar or recover raw body
-  text.
+- Frontend/parser: call lexing and parsed argument/body representation remain
+  #148 evidence. #166 adds the source-backed raw-body boundary beside that
+  representation; it does not redefine call lexing or claim malformed-input
+  recovery parity.
 - Binding/conversion: crates/scribium-engine/src/value_conversion.rs and the
   invocation-origin path provide bounded scalar/enum/iterable conversion.
   Generalized conversion, origin semantics, diagnostics, and atomicity remain

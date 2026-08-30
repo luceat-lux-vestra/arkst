@@ -10,7 +10,7 @@ use rushdown::parser::{
     ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
 };
 use rushdown::text::{BasicReader, BlockReader, Lines, Reader, Segment};
-use rushdown::util::{indent_position, indent_width, is_blank};
+use rushdown::util::{indent_position, is_blank};
 use rushdown::{
     as_extension_data, as_extension_data_mut, as_type_data_mut, matches_extension_kind,
 };
@@ -118,12 +118,23 @@ fn skip_argument_separator(source: &str, start: usize) -> usize {
     cursor
 }
 
-/// Returns whether a non-blank line satisfies Quarkdown's body token prefix.
+/// Returns the source-relative indentation of a non-blank line that satisfies
+/// Quarkdown's body token prefix.
 ///
 /// Rushdown may have already consumed an enclosing container's indentation
 /// before invoking a nested block parser. In that case `line` starts at the
 /// remaining text and the original prefix is recovered from the source line.
-fn body_line_prefix(line: &[u8], source: &str, segment: Segment, call_start: usize) -> Option<()> {
+///
+/// The ownership test is deliberately byte-based. Quarkdown's body grammar
+/// accepts a literal two-space prefix or a literal tab; visual indentation is
+/// only a Markdown parsing concern and must not decide whether a line belongs
+/// to the raw body token.
+fn body_line_prefix(
+    line: &[u8],
+    source: &str,
+    segment: Segment,
+    call_start: usize,
+) -> Option<usize> {
     let line_start = source[..segment.start()]
         .rfind('\n')
         .map_or(0, |index| index + 1);
@@ -134,24 +145,65 @@ fn body_line_prefix(line: &[u8], source: &str, segment: Segment, call_start: usi
     let body_line = source.get(line_start..segment.stop())?.as_bytes();
     let whitespace = |prefix: &[u8]| prefix.iter().all(|byte| matches!(byte, b' ' | b'\t'));
 
-    // When both source lines are ordinary indented lines, compare the body
-    // line with the call's own logical indentation. This prevents a sibling
-    // at the call's depth from becoming that call's body after an enclosing
-    // parser has already consumed its indentation.
+    // When both source lines are ordinary indented lines, remove the call's
+    // literal source prefix before applying the body grammar. Comparing
+    // visual widths here would incorrectly accept mixed prefixes such as
+    // ` <tab>value` and would make a first-line indentation threshold own the
+    // rest of the body.
     if whitespace(call_prefix) {
-        let call_indent = indent_width(call_prefix, 0).0;
-        let body_indent = indent_width(body_line, 0).0;
-        if body_indent < call_indent + 2 {
-            return None;
+        let relative = body_line.strip_prefix(call_prefix)?;
+        if relative.starts_with(b"  ") || relative.starts_with(b"\t") {
+            return Some(
+                relative
+                    .iter()
+                    .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                    .count(),
+            );
         }
-        return Some(());
+        return None;
     }
 
     if segment.padding() == 0 && (line.starts_with(b"  ") || line.starts_with(b"\t")) {
-        return Some(());
+        return Some(
+            line.iter()
+                .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                .count(),
+        );
     }
 
     None
+}
+
+/// Finds the common character indentation used by the complete body token.
+///
+/// This look-ahead is only for Rushdown's structured representation. The
+/// source-backed raw range is still recorded independently, and ownership is
+/// checked for every line by `body_line_prefix`. Looking ahead lets the
+/// structured tree agree with the upstream `trimIndent()` result when a later
+/// body line is shallower than the first one.
+fn body_indent_for_token(source: &str, segment: Segment, call_start: usize) -> Option<usize> {
+    let mut line_start = source[..segment.start()]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let mut minimum = None;
+
+    while line_start < source.len() {
+        let line_end = source[line_start..]
+            .find('\n')
+            .map_or(source.len(), |index| line_start + index + 1);
+        let line = source.get(line_start..line_end)?;
+        if !is_blank(line.as_bytes()) {
+            let line_segment = Segment::new(line_start, line_end);
+            let Some(indent) = body_line_prefix(line.as_bytes(), source, line_segment, call_start)
+            else {
+                break;
+            };
+            minimum = Some(minimum.map_or(indent, |current: usize| current.min(indent)));
+        }
+        line_start = line_end;
+    }
+
+    minimum
 }
 
 #[derive(Debug)]
@@ -277,18 +329,18 @@ impl BlockParser for QuarkdownBlockParser {
         let call_start = as_extension_data!(arena, node_ref, QuarkdownBlock)
             .call
             .start();
-        body_line_prefix(&line, reader.source(), segment, call_start)?;
-        let actual_indent = indent_width(&line, line_offset).0;
+        let actual_indent = body_line_prefix(&line, reader.source(), segment, call_start)?;
         let body_indent = {
             let block = as_extension_data!(arena, node_ref, QuarkdownBlock);
-            block.body_indent.unwrap_or(actual_indent)
+            block.body_indent.unwrap_or_else(|| {
+                body_indent_for_token(reader.source(), segment, call_start).unwrap_or(actual_indent)
+            })
         };
         if as_extension_data!(arena, node_ref, QuarkdownBlock)
             .body_indent
             .is_none()
         {
-            as_extension_data_mut!(arena, node_ref, QuarkdownBlock).body_indent =
-                Some(actual_indent);
+            as_extension_data_mut!(arena, node_ref, QuarkdownBlock).body_indent = Some(body_indent);
         }
 
         let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);

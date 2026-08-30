@@ -2414,7 +2414,11 @@ impl Evaluator {
                         };
                         Some(Candidate::Positional {
                             value: InvocationValue::dynamic_value(IrValue::String(body_text)),
-                            span: raw_body.span,
+                            // The raw body span is local to `raw_body.source`.
+                            // Binding diagnostics must use the call's source
+                            // provenance, especially when this call came from
+                            // a dynamically reparsed Markdown value.
+                            span: *span,
                         })
                     } else {
                         None
@@ -4053,9 +4057,12 @@ impl Evaluator {
 
         let body_location_candidate = match (body.as_ref(), raw_body) {
             (None, _) => None,
-            (Some(_), Some(raw_body)) => Some(Candidate::Positional {
+            (Some(_), Some(_raw_body)) => Some(Candidate::Positional {
                 value: CaptionPositionArgumentLocation::Body,
-                span: raw_body.span,
+                // The candidate's provenance is the containing call. The
+                // raw body's own span may belong to a separate dynamic
+                // SourceText and is only valid for slicing that source.
+                span: *span,
             }),
             (Some(body), None) => {
                 diagnostics.push(target_conversion_error_message(
@@ -4147,7 +4154,7 @@ impl Evaluator {
                     };
                     (
                         InvocationValue::dynamic_value(IrValue::String(body_text)),
-                        raw_body.span,
+                        *span,
                     )
                 }
             };
@@ -4670,11 +4677,7 @@ impl Evaluator {
             return match raw_native_body_string_value(raw_body) {
                 Ok(value) => CallOutcome::Value(IrValue::String(value)),
                 Err(error) => {
-                    diagnostics.push(target_conversion_error(
-                        "`.html` body",
-                        raw_body.span,
-                        error,
-                    ));
+                    diagnostics.push(target_conversion_error("`.html` body", *span, error));
                     CallOutcome::Failed
                 }
             };
@@ -10789,7 +10792,9 @@ fn source_backed_body_candidate(
             };
             Ok(Some(Candidate::Positional {
                 value: InvocationValue::dynamic_value(IrValue::String(body_text)),
-                span: raw_body.span,
+                // `raw_body.span` is source-local. The containing call span
+                // remains the evaluator-side diagnostic provenance.
+                span,
             }))
         }
         (Some(span), None) => {
@@ -11733,7 +11738,6 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
             ordered_args,
             lambda_parameters,
             body,
-            raw_body,
             span,
             ..
         } => {
@@ -11747,16 +11751,17 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
             if let Some(body) = body {
                 rebase_dynamic_nodes(body, source_span);
             }
-            if let Some(raw_body) = raw_body {
-                raw_body.span = source_span;
-            }
+            // `raw_body.span` is local to the temporary SourceText created
+            // for this dynamic parse. Keep that source-local range intact;
+            // the enclosing call span is the evaluator-only provenance used
+            // for diagnostics and binding errors.
         }
         IrNode::ChainedFunctionCall {
             head,
             chain,
             body,
-            raw_body,
             span,
+            ..
         } => {
             *span = source_span;
             rebase_dynamic_segment(head, source_span);
@@ -11766,9 +11771,8 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
             if let Some(body) = body {
                 rebase_dynamic_nodes(body, source_span);
             }
-            if let Some(raw_body) = raw_body {
-                raw_body.span = source_span;
-            }
+            // A dynamic raw body's span belongs to its own source buffer and
+            // must not be rebased into the caller's document coordinate space.
         }
         IrNode::FunctionDeclaration {
             name,
@@ -11979,6 +11983,98 @@ mod tests {
 
     fn span(start: usize, end: usize) -> SourceSpan {
         SourceSpan::new(SourceId(1), start, end)
+    }
+
+    #[test]
+    fn dynamic_markdown_reparse_keeps_raw_body_spans_source_local() {
+        let dynamic = ".theme\n  .docname\n    nested\n";
+        let parsed = scribium_markdown::parse_with_mode(dynamic, Mode::Quarkdown);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "unexpected: {:?}",
+            parsed.diagnostics
+        );
+        let (document, conversion_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            SourceId(9),
+            &crate::DocumentMetadataDefaults::default(),
+            Mode::Quarkdown,
+        );
+        assert!(
+            conversion_diagnostics.is_empty(),
+            "unexpected: {conversion_diagnostics:?}"
+        );
+
+        let caller_span = SourceSpan::new(SourceId(1), 500, 512);
+        let mut nodes = document.nodes;
+        rebase_dynamic_nodes(&mut nodes, caller_span);
+
+        let IrNode::FunctionCall {
+            raw_body: Some(outer_raw),
+            body: Some(body),
+            span: outer_span,
+            ..
+        } = &nodes[0]
+        else {
+            panic!("expected a reparsed block call: {nodes:?}");
+        };
+        assert_eq!(*outer_span, caller_span);
+        assert!(outer_raw.source.slice(outer_raw.span.byte_span()).is_some());
+
+        let IrNode::FunctionCall {
+            raw_body: Some(nested_raw),
+            span: nested_span,
+            ..
+        } = &body[0]
+        else {
+            panic!("expected a nested reparsed block call: {body:?}");
+        };
+        assert_eq!(*nested_span, caller_span);
+        assert!(nested_raw
+            .source
+            .slice(nested_raw.span.byte_span())
+            .is_some());
+
+        let mut diagnostics = Vec::new();
+        let candidate = source_backed_body_candidate(
+            Some(caller_span),
+            Some(nested_raw),
+            "dynamic nested target",
+            &mut diagnostics,
+        )
+        .expect("valid source-local span")
+        .expect("body candidate");
+        let Candidate::Positional { span, .. } = candidate else {
+            panic!("expected positional body candidate");
+        };
+        assert_eq!(span, caller_span);
+        assert!(diagnostics.is_empty());
+
+        let roundtripped = serde_json::from_value::<IrDocument>(
+            serde_json::to_value(IrDocument {
+                nodes,
+                metadata: scribium_ir::IrMetadata::default(),
+            })
+            .expect("dynamic IR serializes"),
+        )
+        .expect("dynamic IR deserializes");
+        let IrNode::FunctionCall {
+            body: Some(body), ..
+        } = &roundtripped.nodes[0]
+        else {
+            panic!("expected a roundtripped dynamic call");
+        };
+        let IrNode::FunctionCall {
+            raw_body: Some(nested_raw),
+            ..
+        } = &body[0]
+        else {
+            panic!("expected a roundtripped nested call");
+        };
+        assert!(nested_raw
+            .source
+            .slice(nested_raw.span.byte_span())
+            .is_some());
     }
 
     fn named_arg(name: &str, value: IrValue) -> IrNamedArg {
