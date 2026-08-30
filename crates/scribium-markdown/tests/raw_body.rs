@@ -16,20 +16,26 @@ fn root_raw_body(source: &str) -> scribium_markdown::ast::RawBody {
     raw_body.clone()
 }
 
+fn raw_source(raw_body: &scribium_markdown::ast::RawBody) -> &str {
+    raw_body
+        .source
+        .slice(raw_body.span)
+        .expect("raw body span must address its source buffer")
+}
+
 #[test]
-fn raw_body_value_matches_trim_indent_trim_end_for_tabs_mixed_indent_and_crlf() {
+fn raw_body_keeps_one_shared_lossless_source_for_utf8_tabs_and_crlf() {
     let source = ".theme\r\n\t\tα\r\n\t\t  β \r\n\t\t\r\n\t\tγ\t \r\n\r\n";
     let raw_body = root_raw_body(source);
 
     assert_eq!(
-        &source[raw_body.span.start..raw_body.span.end],
-        raw_body.source_text
+        raw_source(&raw_body),
+        &source[raw_body.span.start..raw_body.span.end]
     );
     assert_eq!(
-        raw_body.source_text,
+        raw_source(&raw_body),
         "\r\n\t\tα\r\n\t\t  β \r\n\t\t\r\n\t\tγ\t \r\n\r\n"
     );
-    assert_eq!(raw_body.text, "α\n  β \n\nγ");
 }
 
 #[test]
@@ -37,12 +43,44 @@ fn complete_body_range_preserves_leading_and_trailing_blank_lines() {
     let source = ".docdescription\n\n\n    hello\n\n\n";
     let raw_body = root_raw_body(source);
 
-    assert_eq!(raw_body.source_text, "\n\n\n    hello\n\n\n");
+    assert_eq!(raw_source(&raw_body), "\n\n\n    hello\n\n\n");
     assert_eq!(
-        &source[raw_body.span.start..raw_body.span.end],
-        raw_body.source_text
+        raw_source(&raw_body),
+        &source[raw_body.span.start..raw_body.span.end]
     );
-    assert_eq!(raw_body.text, "\n\nhello");
+}
+
+#[test]
+fn body_token_starts_after_header_spaces_and_tabs() {
+    for (source, expected) in [
+        (".docdescription   \n    hello\n", "\n    hello\n"),
+        (".docdescription\t\t\n    hello\n", "\n    hello\n"),
+        (".docdescription   \r\n    hello\r\n", "\r\n    hello\r\n"),
+    ] {
+        let raw_body = root_raw_body(source);
+        assert_eq!(raw_source(&raw_body), expected, "source: {source:?}");
+        assert_eq!(
+            raw_source(&raw_body),
+            &source[raw_body.span.start..raw_body.span.end],
+            "source: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn continued_header_uses_the_final_separator_before_the_body_token() {
+    let source = concat!(
+        ".docdescription {title} \\",
+        "\r\n    {subtitle}   \r\n",
+        "    hello\r\n",
+    );
+    let raw_body = root_raw_body(source);
+
+    assert_eq!(raw_source(&raw_body), "\r\n    hello\r\n");
+    assert_eq!(
+        raw_source(&raw_body),
+        &source[raw_body.span.start..raw_body.span.end]
+    );
 }
 
 #[test]
@@ -57,8 +95,7 @@ fn blank_only_body_has_no_body_value_but_is_not_a_parse_error() {
 }
 
 #[test]
-fn nested_body_uses_the_same_trimmed_value_independent_of_reader_base_offset() {
-    let top_level = root_raw_body(".theme\n\n    alpha\n        beta\n\n");
+fn nested_body_preserves_the_same_source_token_shape_independent_of_reader_base_offset() {
     let nested_source = ".function {wrap}\n    .theme\n\n        alpha\n            beta\n\n";
     let output = parse_with_mode(nested_source, Mode::Quarkdown);
     assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
@@ -76,9 +113,12 @@ fn nested_body_uses_the_same_trimmed_value_independent_of_reader_base_offset() {
         panic!("expected nested theme body, got {body:?}");
     };
 
-    assert_eq!(nested.text, top_level.text);
     assert_eq!(
-        &nested_source[nested.span.start..nested.span.end],
-        nested.source_text
+        raw_source(nested),
+        "\n\n        alpha\n            beta\n\n"
+    );
+    assert_eq!(
+        raw_source(nested),
+        &nested_source[nested.span.start..nested.span.end]
     );
 }

@@ -1116,9 +1116,7 @@ fn byte_to_source_span(byte_span: &scribium_source::ByteSpan, source_id: SourceI
 
 fn raw_body_to_ir(raw_body: &scribium_markdown::ast::RawBody, source_id: SourceId) -> IrRawBody {
     IrRawBody {
-        source_text: raw_body.source_text.clone(),
-        text: raw_body.text.clone(),
-        native_text: raw_body.native_text.clone(),
+        source: raw_body.source.clone(),
         span: byte_to_source_span(&raw_body.span, source_id),
     }
 }

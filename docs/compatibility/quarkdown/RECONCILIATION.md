@@ -330,10 +330,11 @@ freeze wording is no longer a complete status. After
 ## Issue #166 implementation reconciliation
 
 The bounded #166 engine slice closes the raw-body prerequisite for the
-reviewed conversion consumers. `scribium-markdown` retains source-backed raw
-body text and its original byte span beside the structured body; `scribium-ir`
-carries that durable source data as `IrRawBody`, never as `IrValue` state or
-`ValueOrigin`. The engine-owned `value_conversion` target boundary preserves
+reviewed conversion consumers. `scribium-markdown` retains one shared,
+immutable source buffer and the exact body-token span beside the structured
+body; `scribium-ir` carries that durable source data as `IrRawBody`, never as
+`IrValue` state or `ValueOrigin`. The engine-owned `value_conversion` target
+boundary preserves
 typed scalar/content/node/iterable/dictionary/callable distinctions, returns an
 explicit contextual Markdown request for dynamic text, and materializes only
 the targets consumed by this slice.

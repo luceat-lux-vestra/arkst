@@ -2067,6 +2067,20 @@ mod tests {
     }
 
     #[test]
+    fn theme_body_conversion_keeps_upstream_leading_blank_line_semantics() {
+        let source = ".theme\n\n\n    hello\n\n\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: None,
+                layout: Some("\n\nhello".to_string()),
+            })
+        );
+    }
+
+    #[test]
     fn theme_uses_whole_state_replacement_and_empty_invocation_is_a_setter() {
         let source = ".theme {Dark} layout:{Compact}\n.theme {Light}\n";
         let (replaced, _) = compile_source(source);

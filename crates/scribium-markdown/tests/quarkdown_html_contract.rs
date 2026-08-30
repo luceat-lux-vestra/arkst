@@ -114,10 +114,11 @@ fn html_indented_body_remains_parser_owned_raw_html() {
     };
     assert_eq!(raw, "<div>\n        Hello\n    </div>\n");
     assert_span(source, *span, raw);
-    assert_eq!(raw_body.text, "<div>\n    Hello\n</div>");
-    assert_eq!(raw_body.native_text, "<div>\n        Hello\n    </div>\n");
     assert_eq!(
-        raw_body.source_text,
+        raw_body
+            .source
+            .slice(raw_body.span)
+            .expect("raw body source span"),
         "\n    <div>\n        Hello\n    </div>\n"
     );
     assert_span(
@@ -128,7 +129,7 @@ fn html_indented_body_remains_parser_owned_raw_html() {
 }
 
 #[test]
-fn nested_raw_body_keeps_source_text_and_call_owned_indentation() {
+fn nested_raw_body_keeps_source_provenance_and_call_owned_indentation() {
     let source = ".function {setauthors}\n    .docauthors\n        - Callable\n            - email: callable@example.com\n\n";
     let output = parse_with_mode(source, Mode::Quarkdown);
     assert!(output.diagnostics.is_empty(), "unexpected: {output:?}");
@@ -146,15 +147,10 @@ fn nested_raw_body_keeps_source_text_and_call_owned_indentation() {
         panic!("expected nested docauthors body, got {body:?}");
     };
     assert_eq!(
-        raw_body.text,
-        "- Callable\n    - email: callable@example.com"
-    );
-    assert_eq!(
-        raw_body.source_text,
+        raw_body
+            .source
+            .slice(raw_body.span)
+            .expect("raw body source span"),
         "\n        - Callable\n            - email: callable@example.com\n\n"
-    );
-    assert_eq!(
-        raw_body.native_text,
-        "- Callable\n            - email: callable@example.com\n"
     );
 }

@@ -15,7 +15,7 @@ use rushdown::{
     as_extension_data, as_extension_data_mut, as_type_data_mut, matches_extension_kind,
 };
 use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue};
-use scribium_source::ByteSpan;
+use scribium_source::{ByteSpan, SourceText};
 
 use crate::ast::{
     Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg,
@@ -54,6 +54,8 @@ struct BodyRange {
     /// The complete source-backed body token, including blank lines that are
     /// not represented by Rushdown body nodes.
     raw: ByteSpan,
+    /// The one immutable source buffer shared by all body ranges.
+    source: SourceText,
 }
 
 type BodyLineRanges = Vec<(ByteSpan, BodyRange)>;
@@ -70,8 +72,8 @@ struct QuarkdownBlock {
     /// Original reader segments accepted as body lines. These preserve parser
     /// ownership for the frontend's lazy-paragraph normalization.
     body_lines: Vec<Segment>,
-    /// Start of the complete upstream body token, immediately after the
-    /// parsed call head and before its line terminator.
+    /// Start of the complete upstream body token, after the optional
+    /// horizontal argument separator and before its line terminator.
     raw_body_start: usize,
     /// End of the complete body token, extended across accepted body and
     /// blank lines. It is meaningful only when `body_lines` is non-empty.
@@ -98,6 +100,21 @@ impl From<QuarkdownBlock> for KindData {
     fn from(value: QuarkdownBlock) -> Self {
         KindData::Extension(Box::new(value))
     }
+}
+
+/// Consume the optional horizontal argument separator that precedes an
+/// upstream body token. Newline bytes deliberately remain part of the body
+/// token, including CRLF's `\r` and `\n` pair and any following blank lines.
+fn skip_argument_separator(source: &str, start: usize) -> usize {
+    let mut cursor = start.min(source.len());
+    while source
+        .as_bytes()
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    cursor
 }
 
 #[derive(Debug)]
@@ -151,7 +168,7 @@ impl BlockParser for QuarkdownBlockParser {
             continuation_pending: header_pending && continuation_pending,
             body_indent: None,
             body_lines: Vec::new(),
-            raw_body_start: call_segment.stop(),
+            raw_body_start: skip_argument_separator(source, call_segment.stop()),
             raw_body_end: call_segment.stop(),
         });
         reader.advance_to_eol();
@@ -180,12 +197,13 @@ impl BlockParser for QuarkdownBlockParser {
             match scribium_quarkdown::parse_call(candidate) {
                 Ok(Some((call, _))) => {
                     let call_end = call.span.end.checked_add(call_start)?;
+                    let body_start = skip_argument_separator(source, call_end);
                     let trailing = source.get(call_end..candidate_end)?;
                     let has_continuation = scribium_quarkdown::has_trailing_continuation(candidate);
                     if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
                         let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
                         block.call = Segment::new(call_start, call_end);
-                        block.raw_body_start = call_end;
+                        block.raw_body_start = body_start;
                         block.raw_body_end = call_end;
                         block.header_pending = false;
                         block.continuation_pending = false;
@@ -562,6 +580,7 @@ pub fn parse_with_markdown_profile(source: &str, profile: MarkdownProfile) -> Pa
 fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutput {
     let (front_matter, body_start) = parse_front_matter(source);
     let body = &source[body_start..];
+    let source_text = SourceText::new(source.to_owned());
     let parser = parser(mode, profile);
     let mut reader = BasicReader::new(body);
     let mut diagnostics = Vec::new();
@@ -589,6 +608,7 @@ fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutp
             child,
             body,
             body_start,
+            &source_text,
             &mut diagnostics,
             &mut body_line_ranges,
         ) {
@@ -884,6 +904,7 @@ fn convert_block(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     body_line_ranges: &mut BodyLineRanges,
 ) -> Option<Block> {
@@ -919,6 +940,7 @@ fn convert_block(
                 node,
                 source,
                 base,
+                source_text,
                 diagnostics,
                 body_line_ranges,
             ),
@@ -934,6 +956,7 @@ fn convert_block(
                             child,
                             source,
                             base,
+                            source_text,
                             diagnostics,
                             body_line_ranges,
                         ),
@@ -991,6 +1014,7 @@ fn convert_block(
                     BodyRange {
                         lines: ranges,
                         raw: ByteSpan::new(raw_start, raw_end),
+                        source: source_text.clone(),
                     },
                 ));
             }
@@ -1006,6 +1030,7 @@ fn convert_block(
                     ConversionState {
                         diagnostics,
                         body_line_ranges,
+                        source_text,
                     },
                 )),
                 Ok(None) => Some(Block::Unsupported {
@@ -1126,6 +1151,7 @@ fn convert_table_row(
 struct ConversionState<'a> {
     diagnostics: &'a mut Vec<ParserDiagnostic>,
     body_line_ranges: &'a mut BodyLineRanges,
+    source_text: &'a SourceText,
 }
 
 fn directive_block(
@@ -1140,6 +1166,7 @@ fn directive_block(
     let ConversionState {
         diagnostics,
         body_line_ranges,
+        source_text,
     } = state;
     let span = node_span(arena, node, source)
         .and_then(|value| offset_span(value, base))
@@ -1147,9 +1174,16 @@ fn directive_block(
         .unwrap_or(ByteSpan::new(0, 0));
     let span_base = base.checked_add(call_base).unwrap_or(base);
     let call_name = call.name.clone();
-    let raw_body = raw_body_for(span, source, base, body_line_ranges);
-    let body_nodes =
-        convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
+    let raw_body = raw_body_for(span, body_line_ranges);
+    let body_nodes = convert_children_blocks(
+        arena,
+        node,
+        source,
+        base,
+        source_text,
+        diagnostics,
+        body_line_ranges,
+    );
     Block::DirectiveCall {
         name: call.name,
         name_span: offset_span(call.name_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
@@ -1178,205 +1212,15 @@ fn directive_block(
 /// Captures the exact source-backed body input used by Quarkdown's
 /// `FunctionCallRefiner`. The parsed body remains a separate representation;
 /// this value is never reconstructed from it.
-fn raw_body_for(
-    owner: ByteSpan,
-    source: &str,
-    base: usize,
-    body_line_ranges: &BodyLineRanges,
-) -> Option<RawBody> {
+fn raw_body_for(owner: ByteSpan, body_line_ranges: &BodyLineRanges) -> Option<RawBody> {
     let range = body_line_ranges
         .iter()
         .find(|(span, _)| *span == owner)
         .map(|(_, range)| range)?;
-    let raw_start = range.raw.start.checked_sub(base)?;
-    let raw_end = range.raw.end.checked_sub(base)?;
-    let source_body = source.get(raw_start..raw_end)?;
-    let text = trim_indent_and_end(source_body);
-    let native_text = normalize_native_body(source_body);
     (range.raw.start < range.raw.end).then_some(RawBody {
-        source_text: source_body.to_owned(),
-        text,
-        native_text,
+        source: range.source.clone(),
         span: range.raw,
     })
-}
-
-/// Mirrors Kotlin's `String.trimIndent()` followed by `trimEnd()` for the
-/// body DynamicValue. Kotlin removes the first and last blank lines, finds the
-/// minimum leading-whitespace character count among non-blank lines, removes
-/// that many characters from every remaining line, joins with LF, and then
-/// trims trailing Unicode whitespace. CRLF and CR are therefore normalized to
-/// LF in the semantic body value.
-fn trim_indent_and_end(source: &str) -> String {
-    let lines = split_lines(source);
-    let mut start = 0;
-    let mut end = lines.len();
-    if lines.get(start).is_some_and(|line| line.is_blank()) {
-        start += 1;
-    }
-    if end > start && lines.get(end - 1).is_some_and(|line| line.is_blank()) {
-        end -= 1;
-    }
-
-    let minimum_indent = lines[start..end]
-        .iter()
-        .filter(|line| !line.is_blank())
-        .map(|line| line.leading_whitespace_chars())
-        .min()
-        .unwrap_or(0);
-
-    let mut result = String::new();
-    for (index, line) in lines[start..end].iter().enumerate() {
-        if index > 0 {
-            result.push('\n');
-        }
-        result.push_str(drop_chars(line, minimum_indent));
-    }
-    result.trim_end().to_owned()
-}
-
-/// Mirrors the existing source-backed native-content boundary used by
-/// `.html`: the reader's body indentation is removed from the first body
-/// line, while later line bytes and line endings remain untouched. This is an
-/// explicit native-content compatibility channel, not a second Markdown
-/// conversion rule, and it never reconstructs text from parsed nodes.
-fn normalize_native_body(source: &str) -> String {
-    // The complete body token starts at the header's line terminator for the
-    // upstream DynamicValue boundary. The existing native-content contract
-    // starts after that delimiter, so remove only this one separator before
-    // applying its first-line indentation rule. It also historically omitted
-    // blank lines before and after the native body; preserve that contract
-    // here while `source_text` and `text` retain the complete body token.
-    let source = if let Some(source) = source.strip_prefix("\r\n") {
-        source
-    } else {
-        source.strip_prefix('\n').unwrap_or(source)
-    };
-    let lines = source_line_ranges(source);
-    let Some(first) = lines.iter().find(|line| !line.is_blank(source)) else {
-        return String::new();
-    };
-    let Some(last) = lines.iter().rfind(|line| !line.is_blank(source)) else {
-        return String::new();
-    };
-    let source = &source[first.start..last.end];
-    let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
-    let first_line = &source[..first_line_end];
-    let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
-    let first_content = first_content.strip_suffix('\r').unwrap_or(first_content);
-    let indentation = first_content
-        .chars()
-        .take_while(|character| *character == ' ' || *character == '\t')
-        .map(char::len_utf8)
-        .sum::<usize>();
-    let mut normalized = String::with_capacity(source.len().saturating_sub(indentation));
-    normalized.push_str(&first_line[indentation..]);
-    normalized.push_str(&source[first_line_end..]);
-    normalized
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SourceLineRange {
-    start: usize,
-    content_end: usize,
-    end: usize,
-}
-
-impl SourceLineRange {
-    fn is_blank(self, source: &str) -> bool {
-        source[self.start..self.content_end]
-            .chars()
-            .all(char::is_whitespace)
-    }
-}
-
-fn source_line_ranges(source: &str) -> Vec<SourceLineRange> {
-    let mut ranges = Vec::new();
-    let bytes = source.as_bytes();
-    let mut start = 0;
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'\n' {
-            let content_end = if index > start && bytes[index - 1] == b'\r' {
-                index - 1
-            } else {
-                index
-            };
-            ranges.push(SourceLineRange {
-                start,
-                content_end,
-                end: index + 1,
-            });
-            start = index + 1;
-        } else if bytes[index] == b'\r' {
-            let (content_end, end) = if bytes.get(index + 1) == Some(&b'\n') {
-                (index, index + 2)
-            } else {
-                (index, index + 1)
-            };
-            ranges.push(SourceLineRange {
-                start,
-                content_end,
-                end,
-            });
-            start = end;
-            index = end;
-            continue;
-        }
-        index += 1;
-    }
-    if start < source.len() || source.is_empty() {
-        ranges.push(SourceLineRange {
-            start,
-            content_end: source.len(),
-            end: source.len(),
-        });
-    }
-    ranges
-}
-
-fn split_lines(source: &str) -> Vec<&str> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let bytes = source.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if matches!(bytes[index], b'\n' | b'\r') {
-            lines.push(&source[start..index]);
-            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
-                index += 1;
-            }
-            index += 1;
-            start = index;
-        } else {
-            index += 1;
-        }
-    }
-    lines.push(&source[start..]);
-    lines
-}
-
-trait BodyLine {
-    fn is_blank(&self) -> bool;
-    fn leading_whitespace_chars(&self) -> usize;
-}
-
-impl BodyLine for &str {
-    fn is_blank(&self) -> bool {
-        self.chars().all(char::is_whitespace)
-    }
-
-    fn leading_whitespace_chars(&self) -> usize {
-        self.chars()
-            .take_while(|character| character.is_whitespace())
-            .count()
-    }
-}
-
-fn drop_chars(line: &str, count: usize) -> &str {
-    line.char_indices()
-        .nth(count)
-        .map_or("", |(index, _)| &line[index..])
 }
 
 fn convert_children_blocks(
@@ -1384,13 +1228,22 @@ fn convert_children_blocks(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     body_line_ranges: &mut BodyLineRanges,
 ) -> Vec<Block> {
     arena[node]
         .children(arena)
         .filter_map(|child| {
-            convert_block(arena, child, source, base, diagnostics, body_line_ranges)
+            convert_block(
+                arena,
+                child,
+                source,
+                base,
+                source_text,
+                diagnostics,
+                body_line_ranges,
+            )
         })
         .collect()
 }

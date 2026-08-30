@@ -8,7 +8,7 @@
 //! receives normalized IR; its defensive handling of manually constructed or
 //! unresolved IR is a separate concern from semantic evaluation.
 
-use scribium_source::SourceSpan;
+use scribium_source::{SourceSpan, SourceText};
 use std::num::NonZeroU32;
 
 /// A compiled document in intermediate representation.
@@ -307,19 +307,14 @@ pub struct TargetSpecificContent {
     pub span: SourceSpan,
 }
 
-/// Source-backed body text retained alongside a structured call body.
-/// `source_text` is the exact source slice; `text` is its
-/// `trimIndent().trimEnd()` conversion input; `native_text` preserves the
-/// existing source-backed native-content contract for `.html`. Evaluator
-/// conversion uses these only at their explicit target boundaries; they are
-/// not evaluator state and are never stored in `IrValue`.
+/// Target-neutral source-backed body retained alongside a structured call
+/// body. The immutable source buffer is shared by nested bodies and `span` is
+/// the exact upstream body-token range. Evaluator target consumers derive
+/// their own value lazily from this source slice; no target-specific or
+/// evaluator-only state is stored here.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrRawBody {
-    #[serde(default)]
-    pub source_text: String,
-    pub text: String,
-    #[serde(default)]
-    pub native_text: String,
+    pub source: SourceText,
     pub span: SourceSpan,
 }
 

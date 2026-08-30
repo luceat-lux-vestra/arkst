@@ -229,11 +229,12 @@ canonical #151 audit for the full source link and ownership disposition.
 Quarkdown v2.5.1's `RegularArgumentsBinder` permits an indented body after
 regular arguments and, because `codeBlocks` is the final bindable
 `.captionposition` parameter, falls back to that parameter as raw
-`DynamicValue` text after `trimIndent().trimEnd()`. Scribium retains that
-semantic value separately from the lossless source slice and parsed
-`CallBody`; the bounded setter consumes the semantic value for the final
-`codeBlocks` conversion without evaluating nested body calls. The existing
-`.html` native-content path retains its source-preserving line behavior.
+`DynamicValue` text after `trimIndent().trimEnd()`. Scribium retains one shared
+lossless source buffer and the exact body-token span beside the parsed
+`CallBody`; the bounded setter derives the semantic value at the final
+`codeBlocks` conversion boundary without evaluating nested body calls. The
+existing `.html` native-content path derives its separate source-preserving
+line representation in the evaluator consumer.
 Invalid raw enum text still fails before state publication. Complete body
 fallback coverage for the remaining layout/document consumers and caption
 rendering remains open.

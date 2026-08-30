@@ -1,4 +1,4 @@
-use scribium_source::ByteSpan;
+use scribium_source::{ByteSpan, SourceText};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -13,20 +13,16 @@ pub struct FrontMatter {
     pub span: ByteSpan,
 }
 
-/// The source-backed body representation used by engine conversion.
+/// The target-neutral source-backed body representation used by engine
+/// conversion.
 ///
-/// `source_text` is the exact source slice for the body. `text` is the same
-/// `trimIndent().trimEnd()` body string that Quarkdown's body refiner supplies
-/// to a `DynamicValue`. `native_text` retains the existing source-backed
-/// native-content contract for `.html`; it is not a target-conversion value.
-/// `span` identifies the original source range. Parsed body nodes are
-/// deliberately kept separately so a target can choose lazy structured
-/// evaluation without reconstructing this text from an evaluated value.
+/// `source` is shared by all bodies from one parsed document and `span` is the
+/// exact upstream body-token range. Target-specific values are derived lazily
+/// by their owning engine consumer; parsed body nodes remain separate so a
+/// target never has to reconstruct source text from an evaluated value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawBody {
-    pub source_text: String,
-    pub text: String,
-    pub native_text: String,
+    pub source: SourceText,
     pub span: ByteSpan,
 }
 

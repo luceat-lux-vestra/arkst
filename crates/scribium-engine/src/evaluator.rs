@@ -2403,10 +2403,17 @@ impl Evaluator {
                             ));
                             return CallOutcome::Failed;
                         };
+                        let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body)
+                        else {
+                            diagnostics.push(chain_evaluation_error(
+                                "This body conversion requires a valid source-backed body span"
+                                    .to_string(),
+                                call_body_source_span(call_body, *span),
+                            ));
+                            return CallOutcome::Failed;
+                        };
                         Some(Candidate::Positional {
-                            value: InvocationValue::dynamic_value(IrValue::String(
-                                raw_body.text.clone(),
-                            )),
+                            value: InvocationValue::dynamic_value(IrValue::String(body_text)),
                             span: raw_body.span,
                         })
                     } else {
@@ -2557,8 +2564,8 @@ impl Evaluator {
     ) -> Result<Vec<IrNode>, CallOutcome> {
         // Dynamic text is reparsed only because the selected upstream target
         // is a Markdown/content factory. Source-backed call bodies never use
-        // this path: their lossless text is retained in `IrRawBody` and is
-        // passed directly to the target instead.
+        // this path: their lossless source span is retained in `IrRawBody` and
+        // its target value is derived directly at the target boundary.
         let parsed = match target {
             value_conversion::RawMarkdownTarget::Inline => {
                 scribium_markdown::parse_inline_with_mode(text, Mode::Quarkdown)
@@ -4134,8 +4141,12 @@ impl Evaluator {
                         restore_on_failure(context);
                         return CallOutcome::Failed;
                     };
+                    let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                        restore_on_failure(context);
+                        return CallOutcome::Failed;
+                    };
                     (
-                        InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
+                        InvocationValue::dynamic_value(IrValue::String(body_text)),
                         raw_body.span,
                     )
                 }
@@ -4743,7 +4754,10 @@ impl Evaluator {
                     return CallOutcome::Failed;
                 };
                 if let Some(raw_body) = raw_body {
-                    IrValue::String(raw_body.text.clone())
+                    let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                        return CallOutcome::Failed;
+                    };
+                    IrValue::String(body_text)
                 } else {
                     match self.evaluate_call_body(body, span, diagnostics, context) {
                         CallOutcome::Value(value) => value,
@@ -10764,10 +10778,20 @@ fn source_backed_body_candidate(
 ) -> Result<Option<Candidate<InvocationValue>>, CallOutcome> {
     match (body_span, raw_body) {
         (None, _) => Ok(None),
-        (Some(_), Some(raw_body)) => Ok(Some(Candidate::Positional {
-            value: InvocationValue::dynamic_value(IrValue::String(raw_body.text.clone())),
-            span: raw_body.span,
-        })),
+        (Some(span), Some(raw_body)) => {
+            let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                diagnostics.push(target_conversion_error_message(
+                    target,
+                    span,
+                    "requires a valid source-backed body span".to_string(),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            Ok(Some(Candidate::Positional {
+                value: InvocationValue::dynamic_value(IrValue::String(body_text)),
+                span: raw_body.span,
+            }))
+        }
         (Some(span), None) => {
             diagnostics.push(target_conversion_error_message(
                 target,
@@ -10844,21 +10868,40 @@ fn target_conversion_error_message(target: &str, span: SourceSpan, message: Stri
 fn raw_native_body_string_value(
     raw_body: &IrRawBody,
 ) -> Result<String, value_conversion::ConversionError> {
-    if !raw_body.native_text.is_empty() {
-        return Ok(raw_body.native_text.clone());
+    let Some(source) = raw_body.source.slice(raw_body.span.byte_span()) else {
+        return Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::String,
+        });
+    };
+    let native = normalize_html_native_body(source);
+    if !native.is_empty() {
+        return Ok(native);
     }
-    if !raw_body.source_text.is_empty() {
-        return Ok(normalize_legacy_native_body(&raw_body.source_text));
-    }
-    if !raw_body.text.is_empty() {
-        return Ok(raw_body.text.clone());
-    }
-    Err(value_conversion::ConversionError::UnsupportedValue {
-        target: value_conversion::ConversionTarget::String,
-    })
+    value_conversion::raw_body_dynamic_text(raw_body).ok_or(
+        value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::String,
+        },
+    )
 }
 
-fn normalize_legacy_native_body(source: &str) -> String {
+fn normalize_html_native_body(source: &str) -> String {
+    // `.html` retains its pre-existing native-content contract: the body
+    // token's first line terminator is the call/body delimiter, surrounding
+    // blank lines are omitted, and only the first native line's indentation
+    // is removed. This target-local normalization must not shape RawBody.
+    let source = if let Some(source) = source.strip_prefix("\r\n") {
+        source
+    } else {
+        source.strip_prefix('\n').unwrap_or(source)
+    };
+    let lines = native_source_line_ranges(source);
+    let Some(first) = lines.iter().find(|line| !line.is_blank(source)) else {
+        return String::new();
+    };
+    let Some(last) = lines.iter().rfind(|line| !line.is_blank(source)) else {
+        return String::new();
+    };
+    let source = &source[first.start..last.end];
     let first_line_end = source.find('\n').map_or(source.len(), |index| index + 1);
     let first_line = &source[..first_line_end];
     let first_content = first_line.strip_suffix('\n').unwrap_or(first_line);
@@ -10872,6 +10915,66 @@ fn normalize_legacy_native_body(source: &str) -> String {
     normalized.push_str(&first_line[indentation..]);
     normalized.push_str(&source[first_line_end..]);
     normalized
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeSourceLine {
+    start: usize,
+    content_end: usize,
+    end: usize,
+}
+
+impl NativeSourceLine {
+    fn is_blank(self, source: &str) -> bool {
+        source[self.start..self.content_end]
+            .chars()
+            .all(char::is_whitespace)
+    }
+}
+
+fn native_source_line_ranges(source: &str) -> Vec<NativeSourceLine> {
+    let mut ranges = Vec::new();
+    let bytes = source.as_bytes();
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\n' {
+            let content_end = if index > start && bytes[index - 1] == b'\r' {
+                index - 1
+            } else {
+                index
+            };
+            ranges.push(NativeSourceLine {
+                start,
+                content_end,
+                end: index + 1,
+            });
+            start = index + 1;
+        } else if bytes[index] == b'\r' {
+            let (content_end, end) = if bytes.get(index + 1) == Some(&b'\n') {
+                (index, index + 2)
+            } else {
+                (index, index + 1)
+            };
+            ranges.push(NativeSourceLine {
+                start,
+                content_end,
+                end,
+            });
+            start = end;
+            index = end;
+            continue;
+        }
+        index += 1;
+    }
+    if start < source.len() || source.is_empty() {
+        ranges.push(NativeSourceLine {
+            start,
+            content_end: source.len(),
+            end: source.len(),
+        });
+    }
+    ranges
 }
 
 fn html_argument_error(message: &str, span: SourceSpan) -> Diagnostic {

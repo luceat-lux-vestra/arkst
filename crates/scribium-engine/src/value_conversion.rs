@@ -9,10 +9,96 @@
 use scribium_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
     IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrRange,
-    IrSize, IrSizeUnit, IrValue,
+    IrRawBody, IrSize, IrSizeUnit, IrValue,
 };
 use scribium_source::SourceSpan;
 use std::ops::Deref;
+
+/// Materialize the Quarkdown body `DynamicValue` only at a conversion target
+/// that explicitly requests it. The source slice is lossless and shared;
+/// this is the sole engine-owned `trimIndent().trimEnd()` derivation used by
+/// raw body conversion.
+pub(crate) fn raw_body_dynamic_text(raw_body: &IrRawBody) -> Option<String> {
+    raw_body
+        .source
+        .slice(raw_body.span.byte_span())
+        .map(trim_indent_and_end)
+}
+
+/// Mirrors Kotlin's `String.trimIndent()` followed by `trimEnd()` for a body
+/// DynamicValue. Line endings are normalized to LF by the semantic value;
+/// the source-backed representation itself remains lossless.
+fn trim_indent_and_end(source: &str) -> String {
+    let lines = split_lines(source);
+    let mut start = 0;
+    let mut end = lines.len();
+    if lines.get(start).is_some_and(|line| line.is_blank()) {
+        start += 1;
+    }
+    if end > start && lines.get(end - 1).is_some_and(|line| line.is_blank()) {
+        end -= 1;
+    }
+
+    let minimum_indent = lines[start..end]
+        .iter()
+        .filter(|line| !line.is_blank())
+        .map(|line| line.leading_whitespace_chars())
+        .min()
+        .unwrap_or(0);
+
+    let mut result = String::new();
+    for (index, line) in lines[start..end].iter().enumerate() {
+        if index > 0 {
+            result.push('\n');
+        }
+        result.push_str(drop_chars(line, minimum_indent));
+    }
+    result.trim_end().to_owned()
+}
+
+fn split_lines(source: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\n' | b'\r') {
+            lines.push(&source[start..index]);
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            index += 1;
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    lines.push(&source[start..]);
+    lines
+}
+
+trait BodyLine {
+    fn is_blank(&self) -> bool;
+    fn leading_whitespace_chars(&self) -> usize;
+}
+
+impl BodyLine for &str {
+    fn is_blank(&self) -> bool {
+        self.chars().all(char::is_whitespace)
+    }
+
+    fn leading_whitespace_chars(&self) -> usize {
+        self.chars()
+            .take_while(|character| character.is_whitespace())
+            .count()
+    }
+}
+
+fn drop_chars(line: &str, count: usize) -> &str {
+    line.char_indices()
+        .nth(count)
+        .map_or("", |(index, _)| &line[index..])
+}
 
 /// Origin of a value at a Quarkdown invocation boundary.
 ///
@@ -2022,19 +2108,41 @@ mod tests {
     use super::{
         convert_domain_with_origin, convert_integer_with_origin, convert_range,
         convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
-        convert_target_with_origin, ClosedEnumSpec, ClosedEnumTarget, ClosedEnumVariant,
-        ConversionError, ConversionTarget, DomainTarget, DomainValue, InvocationValue,
-        RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
+        convert_target_with_origin, raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget,
+        ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget, DomainValue,
+        InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
     };
     use scribium_ir::{
         IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment,
         IrDocumentType, IrEnumValue, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair,
-        IrRange, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
+        IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
     };
-    use scribium_source::{SourceId, SourceSpan};
+    use scribium_source::{SourceId, SourceSpan, SourceText};
 
     fn span() -> SourceSpan {
         SourceSpan::new(SourceId(7), 10, 16)
+    }
+
+    fn raw_body(source: &str) -> IrRawBody {
+        IrRawBody {
+            source: SourceText::new(source.to_owned()),
+            span: SourceSpan::new(SourceId(7), 0, source.len()),
+        }
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_matches_trim_indent_trim_end_without_losing_leading_blank_lines() {
+        let body = raw_body("\n\n\t\tα\r\n\t\t  β \r\n\t\t\r\n");
+        assert_eq!(raw_body_dynamic_text(&body).as_deref(), Some("\nα\n  β"));
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_is_derived_only_from_a_valid_source_span() {
+        let body = IrRawBody {
+            source: SourceText::new("body".to_string()),
+            span: SourceSpan::new(SourceId(7), 1, 5),
+        };
+        assert!(raw_body_dynamic_text(&body).is_none());
     }
 
     #[test]
