@@ -1,18 +1,104 @@
-//! Bounded, context-free value conversion used by the current evaluator slice.
+//! Engine-owned target conversion for the evaluator value boundary.
 //!
-//! This module deliberately does not model Quarkdown's complete dynamic value
-//! hierarchy. It contains the scalar conversion boundaries and the bounded
-//! domain adapters that have a concrete Scribium consumer or an explicit live
-//! evaluator path today. Context-sensitive Markdown conversion, collection
-//! construction, callable conversion, and layout consumers remain outside this
-//! policy.
+//! Conversion is target-driven, not a general coercion graph. This module
+//! keeps the upstream distinction between already typed values, dynamic raw
+//! values, and structured Markdown content. Context-sensitive targets return a
+//! raw conversion request for the evaluator to execute with its context; they
+//! never stringify an evaluated value and feed it back through Markdown.
 
 use scribium_ir::{
-    IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment, IrDocumentType,
-    IrEnumValue, IrMainAxisAlignment, IrNamedArg, IrRange, IrSize, IrSizeUnit, IrValue,
+    IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
+    IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrValue,
 };
 use scribium_source::SourceSpan;
 use std::ops::Deref;
+
+/// Materialize the Quarkdown body `DynamicValue` only at a conversion target
+/// that explicitly requests it. The source slice is lossless and shared;
+/// this is the sole engine-owned `trimIndent().trimEnd()` derivation used by
+/// raw body conversion.
+pub(crate) fn raw_body_dynamic_text(raw_body: &IrRawBody) -> Option<String> {
+    raw_body
+        .source
+        .slice(raw_body.span)
+        .map(trim_indent_and_end)
+}
+
+/// Mirrors Kotlin's `String.trimIndent()` followed by `trimEnd()` for a body
+/// DynamicValue. Line endings are normalized to LF by the semantic value;
+/// the source-backed representation itself remains lossless.
+fn trim_indent_and_end(source: &str) -> String {
+    let lines = split_lines(source);
+    let mut start = 0;
+    let mut end = lines.len();
+    if lines.get(start).is_some_and(|line| line.is_blank()) {
+        start += 1;
+    }
+    if end > start && lines.get(end - 1).is_some_and(|line| line.is_blank()) {
+        end -= 1;
+    }
+
+    let minimum_indent = lines[start..end]
+        .iter()
+        .filter(|line| !line.is_blank())
+        .map(|line| line.leading_whitespace_chars())
+        .min()
+        .unwrap_or(0);
+
+    let mut result = String::new();
+    for (index, line) in lines[start..end].iter().enumerate() {
+        if index > 0 {
+            result.push('\n');
+        }
+        result.push_str(drop_chars(line, minimum_indent));
+    }
+    result.trim_end().to_owned()
+}
+
+fn split_lines(source: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\n' | b'\r') {
+            lines.push(&source[start..index]);
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            index += 1;
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    lines.push(&source[start..]);
+    lines
+}
+
+trait BodyLine {
+    fn is_blank(&self) -> bool;
+    fn leading_whitespace_chars(&self) -> usize;
+}
+
+impl BodyLine for &str {
+    fn is_blank(&self) -> bool {
+        self.chars().all(char::is_whitespace)
+    }
+
+    fn leading_whitespace_chars(&self) -> usize {
+        self.chars()
+            .take_while(|character| character.is_whitespace())
+            .count()
+    }
+}
+
+fn drop_chars(line: &str, count: usize) -> &str {
+    line.char_indices()
+        .nth(count)
+        .map_or("", |(index, _)| &line[index..])
+}
 
 /// Origin of a value at a Quarkdown invocation boundary.
 ///
@@ -90,8 +176,14 @@ pub(crate) enum ScalarTarget {
 
 /// Conversion targets used when classifying a failure, including the typed
 /// Range boundary that is parsed separately because it carries provenance.
+/// The content/node/iterable/callable targets are intentionally present even
+/// when the current bounded builtin inventory does not consume every one;
+/// they keep the shared target model explicit instead of letting consumers
+/// invent their own category tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum ConversionTarget {
+    Dynamic,
     Number,
     Integer,
     Boolean,
@@ -100,6 +192,12 @@ pub(crate) enum ConversionTarget {
     Size,
     Color,
     Enum,
+    InlineContent,
+    BlockContent,
+    Node,
+    Iterable,
+    Dictionary,
+    Callable,
 }
 
 impl From<ScalarTarget> for ConversionTarget {
@@ -284,6 +382,224 @@ static CONTAINER_ALIGNMENT_SPEC: ClosedEnumSpec<'static, IrContainerAlignment> =
 pub(crate) enum ConversionError {
     InvalidText { target: ConversionTarget },
     UnsupportedValue { target: ConversionTarget },
+}
+
+/// A context-sensitive conversion result. `Value` is already typed or
+/// structurally preserved. `RawMarkdown` is an explicit request for the
+/// evaluator to parse the original dynamic text in the selected target
+/// context; the conversion module does not perform that evaluation itself.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TargetValue {
+    Value(IrValue),
+    RawMarkdown {
+        target: RawMarkdownTarget,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RawMarkdownTarget {
+    Inline,
+    Block,
+    Iterable,
+    Dictionary,
+    Callable,
+}
+
+/// Applies the one engine-owned target conversion policy used by value
+/// consumers. The returned raw requests correspond to the pinned
+/// `DynamicValueConverter` branches and preserve the value's dynamic origin.
+pub(crate) fn convert_target_with_origin(
+    argument: &InvocationValue,
+    target: ConversionTarget,
+    span: SourceSpan,
+) -> Result<TargetValue, ConversionError> {
+    match target {
+        ConversionTarget::Dynamic => Ok(TargetValue::Value(argument.value.clone())),
+        ConversionTarget::Number => {
+            convert_scalar_with_origin(argument, ScalarTarget::Number).map(scalar_value_to_ir)
+        }
+        ConversionTarget::Integer => convert_integer_with_origin(argument)
+            .map(|value| TargetValue::Value(IrValue::Number(f64::from(value)))),
+        ConversionTarget::Boolean => {
+            convert_scalar_with_origin(argument, ScalarTarget::Boolean).map(scalar_value_to_ir)
+        }
+        ConversionTarget::String => {
+            convert_scalar_with_origin(argument, ScalarTarget::String).map(scalar_value_to_ir)
+        }
+        ConversionTarget::Range => convert_range_with_origin(argument, span)
+            .map(|value| TargetValue::Value(IrValue::Range(value))),
+        ConversionTarget::Size => {
+            convert_domain_with_origin(argument, DomainTarget::Size).map(domain_value_to_ir)
+        }
+        ConversionTarget::Color => {
+            convert_domain_with_origin(argument, DomainTarget::Color).map(domain_value_to_ir)
+        }
+        ConversionTarget::Enum => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Enum,
+        }),
+        ConversionTarget::InlineContent => {
+            convert_content_target(argument, RawMarkdownTarget::Inline, span, false)
+        }
+        ConversionTarget::BlockContent => {
+            convert_content_target(argument, RawMarkdownTarget::Block, span, true)
+        }
+        ConversionTarget::Node => match &argument.value {
+            IrValue::Component(component) => {
+                Ok(TargetValue::Value(IrValue::Component(component.clone())))
+            }
+            _ => Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Node,
+            }),
+        },
+        ConversionTarget::Iterable => convert_structured_target(
+            argument,
+            RawMarkdownTarget::Iterable,
+            &[
+                IrValueKind::Collection,
+                IrValueKind::Pair,
+                IrValueKind::Dictionary,
+                IrValueKind::Range,
+            ],
+        ),
+        ConversionTarget::Dictionary => convert_structured_target(
+            argument,
+            RawMarkdownTarget::Dictionary,
+            &[IrValueKind::Dictionary],
+        ),
+        ConversionTarget::Callable => match &argument.value {
+            IrValue::Callable(value) => Ok(TargetValue::Value(IrValue::Callable(value.clone()))),
+            IrValue::InlineBody(body) => Ok(TargetValue::Value(IrValue::Callable(IrCallable {
+                parameters: body.parameters.clone(),
+                body: body.body.clone(),
+                span: body.span,
+                capture: None,
+            }))),
+            IrValue::String(value) | IrValue::Identifier(value)
+                if argument.origin == ValueOrigin::Dynamic =>
+            {
+                Ok(TargetValue::RawMarkdown {
+                    target: RawMarkdownTarget::Callable,
+                    text: value.clone(),
+                })
+            }
+            _ => Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Callable,
+            }),
+        },
+    }
+}
+
+fn scalar_value_to_ir(value: ScalarValue) -> TargetValue {
+    match value {
+        ScalarValue::Number(value) => TargetValue::Value(IrValue::Number(value)),
+        ScalarValue::Boolean(value) => TargetValue::Value(IrValue::Boolean(value)),
+        ScalarValue::String(value) => TargetValue::Value(IrValue::String(value)),
+    }
+}
+
+fn domain_value_to_ir(value: DomainValue) -> TargetValue {
+    match value {
+        DomainValue::Size(value) => TargetValue::Value(IrValue::Size(value)),
+        DomainValue::Color(value) => TargetValue::Value(IrValue::Color(value)),
+        DomainValue::Enum(value) => TargetValue::Value(IrValue::Enum(value)),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IrValueKind {
+    Collection,
+    Pair,
+    Dictionary,
+    Range,
+}
+
+fn convert_content_target(
+    argument: &InvocationValue,
+    raw_target: RawMarkdownTarget,
+    span: SourceSpan,
+    block_target: bool,
+) -> Result<TargetValue, ConversionError> {
+    match &argument.value {
+        // MarkdownContentValue adapts to InlineMarkdownContentValue in the
+        // pinned value model. The IR keeps one structured content carrier, so
+        // both content targets preserve that carrier without flattening it.
+        IrValue::Content(nodes) => Ok(TargetValue::Value(IrValue::Content(nodes.clone()))),
+        // An inline contextual body is not a block body. It remains inline
+        // content until the selected target asks for it.
+        IrValue::InlineBody(body) if !block_target => {
+            Ok(TargetValue::Value(IrValue::Content(body.content.clone())))
+        }
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            Ok(TargetValue::RawMarkdown {
+                target: raw_target,
+                text: value.clone(),
+            })
+        }
+        IrValue::String(value) if !block_target => Ok(TargetValue::Value(IrValue::Content(vec![
+            IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: value.clone(),
+                    span,
+                }],
+                span,
+            },
+        ]))),
+        _ => Err(ConversionError::UnsupportedValue {
+            target: if block_target {
+                ConversionTarget::BlockContent
+            } else {
+                ConversionTarget::InlineContent
+            },
+        }),
+    }
+}
+
+fn convert_structured_target(
+    argument: &InvocationValue,
+    raw_target: RawMarkdownTarget,
+    accepted: &[IrValueKind],
+) -> Result<TargetValue, ConversionError> {
+    let kind = match &argument.value {
+        IrValue::Collection(_) => IrValueKind::Collection,
+        IrValue::Pair(_) => IrValueKind::Pair,
+        IrValue::Dictionary(_) => IrValueKind::Dictionary,
+        IrValue::Range(_) => IrValueKind::Range,
+        // A parsed Markdown list is the frontend representation of the
+        // upstream dynamic iterable adapter. Keep it structured here so the
+        // evaluator can materialize its elements without reparsing or
+        // stringifying the already parsed list.
+        IrValue::Content(_) if raw_target == RawMarkdownTarget::Iterable => {
+            return Ok(TargetValue::Value(argument.value.clone()));
+        }
+        _ => {
+            if let IrValue::String(value) | IrValue::Identifier(value) = &argument.value {
+                if argument.origin == ValueOrigin::Dynamic {
+                    return Ok(TargetValue::RawMarkdown {
+                        target: raw_target,
+                        text: value.clone(),
+                    });
+                }
+            }
+            return Err(ConversionError::UnsupportedValue {
+                target: match raw_target {
+                    RawMarkdownTarget::Dictionary => ConversionTarget::Dictionary,
+                    _ => ConversionTarget::Iterable,
+                },
+            });
+        }
+    };
+    if !accepted.contains(&kind) {
+        return Err(ConversionError::UnsupportedValue {
+            target: match raw_target {
+                RawMarkdownTarget::Dictionary => ConversionTarget::Dictionary,
+                _ => ConversionTarget::Iterable,
+            },
+        });
+    }
+    Ok(TargetValue::Value(argument.value.clone()))
 }
 
 /// Converts a typed evaluator value to one of the supported scalar targets.
@@ -1791,19 +2107,232 @@ fn range_to_text(range: &IrRange) -> String {
 mod tests {
     use super::{
         convert_domain_with_origin, convert_integer_with_origin, convert_range,
-        convert_range_with_origin, convert_scalar, convert_scalar_with_origin, ClosedEnumSpec,
-        ClosedEnumTarget, ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget,
-        DomainValue, InvocationValue, ScalarTarget, ScalarValue,
+        convert_range_with_origin, convert_scalar, convert_scalar_with_origin,
+        convert_target_with_origin, raw_body_dynamic_text, ClosedEnumSpec, ClosedEnumTarget,
+        ClosedEnumVariant, ConversionError, ConversionTarget, DomainTarget, DomainValue,
+        InvocationValue, RawMarkdownTarget, ScalarTarget, ScalarValue, TargetValue,
     };
     use scribium_ir::{
         IrCaptionPosition, IrColor, IrComponent, IrContainerAlignment, IrCrossAxisAlignment,
-        IrDocumentType, IrEnumValue, IrMainAxisAlignment, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue,
+        IrDocumentType, IrEnumValue, IrInline, IrInlineBody, IrMainAxisAlignment, IrNode, IrPair,
+        IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue,
     };
-    use scribium_source::{SourceId, SourceSpan};
+    use scribium_source::{ByteSpan, SourceId, SourceSpan, SourceText};
 
     fn span() -> SourceSpan {
         SourceSpan::new(SourceId(7), 10, 16)
+    }
+
+    fn raw_body(source: &str) -> IrRawBody {
+        IrRawBody::new(
+            SourceText::new(source.to_owned()),
+            ByteSpan::new(0, source.len()),
+        )
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_matches_trim_indent_trim_end_without_losing_leading_blank_lines() {
+        let body = raw_body("\n\n\t\tα\r\n\t\t  β \r\n\t\t\r\n");
+        assert_eq!(raw_body_dynamic_text(&body).as_deref(), Some("\nα\n  β"));
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_applies_trim_indent_and_trim_end_to_the_full_token() {
+        let body = raw_body("\n\n\n  hello  \n\n\n");
+        // The first blank line is the body delimiter consumed by Kotlin's
+        // trimIndent convention; additional leading blank lines remain.
+        // trimEnd removes all trailing blank-line whitespace after the
+        // common indentation has been removed.
+        assert_eq!(raw_body_dynamic_text(&body).as_deref(), Some("\n\nhello"));
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_uses_the_minimum_indent_of_all_body_lines() {
+        let source = ".theme\n    first\n  second\n";
+        let body_end = source.len();
+        let body = IrRawBody::new(
+            scribium_source::SourceText::new(source),
+            ByteSpan::new(7, body_end),
+        );
+
+        assert_eq!(
+            raw_body_dynamic_text(&body).as_deref(),
+            Some("  first\nsecond")
+        );
+    }
+
+    #[test]
+    fn raw_body_dynamic_text_is_derived_only_from_a_valid_source_span() {
+        let body = IrRawBody::new(SourceText::new("body".to_string()), ByteSpan::new(1, 5));
+        assert!(raw_body_dynamic_text(&body).is_none());
+    }
+
+    #[test]
+    fn target_conversion_keeps_scalar_content_and_origin_ordering_explicit() {
+        assert_eq!(
+            convert_target_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("2".into())),
+                ConversionTarget::Number,
+                span(),
+            ),
+            Ok(TargetValue::Value(IrValue::Number(2.0)))
+        );
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(IrValue::String("2".into())),
+                ConversionTarget::Number,
+                span(),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::Number
+            })
+        ));
+
+        let static_string = convert_target_with_origin(
+            &InvocationValue::static_value(IrValue::String("*text*".into())),
+            ConversionTarget::InlineContent,
+            span(),
+        )
+        .expect("static String adapts to plain inline content");
+        assert!(matches!(
+            static_string,
+            TargetValue::Value(IrValue::Content(nodes))
+                if matches!(nodes.as_slice(), [IrNode::Paragraph { content, .. }] if matches!(content.as_slice(), [IrInline::Text { content, .. }] if content == "*text*"))
+        ));
+
+        assert_eq!(
+            convert_target_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("*text*".into())),
+                ConversionTarget::InlineContent,
+                span(),
+            ),
+            Ok(TargetValue::RawMarkdown {
+                target: RawMarkdownTarget::Inline,
+                text: "*text*".into(),
+            })
+        );
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(IrValue::String("text".into())),
+                ConversionTarget::BlockContent,
+                span(),
+            ),
+            Err(ConversionError::UnsupportedValue {
+                target: ConversionTarget::BlockContent
+            })
+        ));
+        for value in [IrValue::Number(2.0), IrValue::Boolean(true)] {
+            assert!(matches!(
+                convert_target_with_origin(
+                    &InvocationValue::static_value(value),
+                    ConversionTarget::InlineContent,
+                    span(),
+                ),
+                Err(ConversionError::UnsupportedValue {
+                    target: ConversionTarget::InlineContent
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn target_conversion_preserves_node_callable_iterable_dictionary_and_none() {
+        let component = IrValue::Component(IrComponent::Stacked(IrStackedComponent {
+            layout: IrStackedLayout::Row,
+            main_axis_alignment: IrMainAxisAlignment::Start,
+            cross_axis_alignment: IrCrossAxisAlignment::Stretch,
+            row_gap: None,
+            column_gap: None,
+            children: Vec::new(),
+            span: span(),
+        }));
+        assert_eq!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(component.clone()),
+                ConversionTarget::Node,
+                span(),
+            ),
+            Ok(TargetValue::Value(component))
+        );
+
+        let inline_body = IrValue::InlineBody(IrInlineBody {
+            content: vec![IrNode::Paragraph {
+                content: vec![IrInline::Text {
+                    content: "body".into(),
+                    span: span(),
+                }],
+                span: span(),
+            }],
+            parameters: None,
+            body: Vec::new(),
+            span: span(),
+        });
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(inline_body),
+                ConversionTarget::Callable,
+                span(),
+            ),
+            Ok(TargetValue::Value(IrValue::Callable(_)))
+        ));
+
+        let pair = IrValue::Pair(IrPair {
+            first: Box::new(IrValue::String("key".into())),
+            second: Box::new(IrValue::Number(1.0)),
+            span: span(),
+        });
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(pair),
+                ConversionTarget::Iterable,
+                span(),
+            ),
+            Ok(TargetValue::Value(IrValue::Pair(_)))
+        ));
+
+        let dictionary = IrValue::Dictionary(scribium_ir::IrDictionary {
+            entries: Vec::new(),
+            span: span(),
+        });
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::static_value(dictionary.clone()),
+                ConversionTarget::Dictionary,
+                span(),
+            ),
+            Ok(TargetValue::Value(IrValue::Dictionary(_)))
+        ));
+        assert!(matches!(
+            convert_target_with_origin(
+                &InvocationValue::dynamic_value(IrValue::String("- key: value".into())),
+                ConversionTarget::Dictionary,
+                span(),
+            ),
+            Ok(TargetValue::RawMarkdown {
+                target: RawMarkdownTarget::Dictionary,
+                ..
+            })
+        ));
+
+        for target in [
+            ConversionTarget::Number,
+            ConversionTarget::InlineContent,
+            ConversionTarget::BlockContent,
+            ConversionTarget::Node,
+            ConversionTarget::Iterable,
+            ConversionTarget::Dictionary,
+            ConversionTarget::Callable,
+        ] {
+            assert!(
+                convert_target_with_origin(
+                    &InvocationValue::static_value(IrValue::None),
+                    target,
+                    span(),
+                )
+                .is_err(),
+                "None unexpectedly converted to {target:?}"
+            );
+        }
     }
 
     #[test]

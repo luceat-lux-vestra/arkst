@@ -142,7 +142,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
 | Mathematical/numeric operations | `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`, `.negate`, `.sqrt`, `.logn`, `.pi`, `.sin`, `.cos`, `.tan`, `.truncate`, `.round`, `.iseven`, plus `.range` | Typed numeric/boolean results with shared binding, upstream Float/Double/Float operation boundaries, binary64 `.pi`, deterministic software transcendental evaluation, DynamicValue Number conversion for textual `decimals` followed by Int-only normalization, and Kotlin ties-to-even rounding | Implemented (bounded v2.5.1 numeric family) |
-| String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; `.capitalize` differs on Unicode titlecase versus uppercase (`ǳ`), and `.startswith(ignorecase:true)` differs on Unicode character-wise case matching versus whole-string lowercasing; Dynamic String → InlineMarkdownContent conversion remains unsupported | Partial (bounded v2.5.1 slice) |
+| String/text operations         | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, `.startswith`, `.plaintext` | Typed scalar string results and boolean predicates plus bounded `.plaintext` projection from already-parsed inline IR; `.capitalize` differs on Unicode titlecase versus uppercase (`ǳ`), and `.startswith(ignorecase:true)` differs on Unicode character-wise case matching versus whole-string lowercasing; Dynamic String → InlineMarkdownContent conversion is implemented only at the explicit `.plaintext` target | Partial (bounded v2.5.1 slice) |
 | Inline hard line break          | `.br` | Argumentless inline `LineBreak` producer represented as the existing `IrInline::HardBreak`; surrounding order, call provenance, source-defined shadowing, atomic invalid forms, `.plaintext`, serde, and existing Typst lowering are covered | Implemented (bounded v2.5.1 slice) |
 | Target-specific HTML content  | `.html {<em>world</em>}` or isolated `.html` with an indented body | Closed `Html` target-specific semantic node, explicit `NativeContent` capability, verbatim payload retained for a future HTML output backend, silent Typst/PDF omission | Implemented (bounded semantic slice; no HTML backend) |
 | User-defined functions         | `.function {name}`, explicit/implicit parameter modes, optional `parameter?`, positional/named calls, block-last binding | Semantically supported for the evidenced slice | Implemented (evidenced slice) |
@@ -236,8 +236,11 @@ The pinned Quarkdown v2.5.1 contract gives `.dockeywords` an argumentless
 getter returning the current keywords as an iterable and a setter accepting an
 iterable. Scribium supports the documented Markdown list body, an already
 evaluated typed iterable through normal positional binding, and the named
-`keywords:` binding. Getter order is preserved, the default is an empty list,
-and every successful setter **replaces** the complete prior keyword list.
+`keywords:` binding. For a source-backed body, the shared iterable converter
+evaluates one dynamic expression in the current context and prefers its typed
+Iterable or Dictionary result before using the Markdown-list fallback. Getter
+order is preserved, the default is an empty list, and every successful setter
+**replaces** the complete prior keyword list.
 
 The evaluator materializes and validates the complete candidate before one
 state commit. Only the existing bounded String-like scalar families
@@ -282,9 +285,9 @@ complete JVM/CLDR locale database.
 getter and does not clear the existing locale. The setter validates argument
 shape, evaluates and converts the candidate, resolves it, and commits once;
 failed resolution restores the previous locale, including state mutated by a
-nested candidate evaluation. Block bodies are rejected before their parsed
-nodes can execute because the current frontend/IR does not expose upstream's
-lossless raw `DynamicValue` body text. Ordinary callable child scopes share the
+nested candidate evaluation. #166 retains a source-backed raw block body beside
+its parsed nodes and converts the bounded `.doclang` fallback without executing
+those nodes. Ordinary callable child scopes share the
 locale state. Source-defined `.doclang` shadows the native builtin, while the
 historical `.docname`, `.docdescription`, and `.doctype` native-first behavior
 is unchanged. Scribium introduces no localization tables, `.localize`
@@ -308,13 +311,11 @@ null, layout: String? = null)` as a setter returning no document value. Both
 regular parameters can bind positionally or by name; `@LikelyNamed` on
 `layout` is metadata and is not a runtime positional restriction. An indented
 body falls back to the final bindable parameter, so it binds `layout` for this
-signature. Scribium defers that fallback: the existing frontend/IR boundary
-provides parsed body nodes, not the lossless raw `DynamicValue` body text
-required by the String parameter contract. It therefore rejects a `.theme`
-block body before evaluation, preserving the upstream contract as a deferred
-compatibility gap rather than treating body syntax as a runtime signature
-restriction. Supplied string components are lowercased and theme existence is
-left to the rendering boundary. Scribium stores the result as an explicit
+signature. Scribium retains the lossless source-backed body beside the parsed
+body and derives the target-conversion `DynamicValue` as
+`trimIndent().trimEnd()`; nested body calls are not executed as a substitute
+for the raw value. Supplied string components are lowercased and theme
+existence is left to the rendering boundary. Scribium stores the result as an explicit
 backend-neutral `IrDocumentTheme` in the shared evaluator-owned document state.
 
 Each successful call replaces the complete theme. Therefore a later
@@ -331,8 +332,10 @@ The existing invocation-time scalar String boundary accepts String,
 Identifier, Number, and Boolean values for each component; `.none` maps to a
 null component. Collections, Dictionary/Pair, Range, Callable, Component,
 rich content, and unresolved values remain outside this bounded component
-conversion. A block body is rejected before its parsed nodes can be evaluated;
-this prevents nested calls or document-state mutations from running. Binding,
+ conversion. A block body is retained as source-backed raw text and selected
+target conversion happens before its parsed nodes can be evaluated; this
+prevents nested calls or document-state mutations from running accidentally.
+Binding,
 evaluation, conversion, normalization, and shape validation complete before
 one state commit; failures retain the old full theme and keep the original
 argument span in the structured diagnostic. Callable child scopes share the
@@ -360,11 +363,12 @@ remain binding failures.
 
 The upstream regular binder also accepts an indented block body. Because
 `codeBlocks` is the final bindable parameter, upstream falls back from that
-body to `codeBlocks` as a raw `DynamicValue`. Scribium does not claim this
-behavior: the current frontend/IR boundary exposes a parsed `CallBody`, not
-the lossless raw body text needed for that conversion. As with `.theme`, this
-is an explicit compatibility gap; `.captionposition` rejects a body before
-body evaluation rather than executing or silently reinterpreting it.
+body to `codeBlocks` as a raw `DynamicValue`. #166 retains the lossless
+source-backed body beside the parsed `CallBody` and derives its target value
+with `trimIndent().trimEnd()` before routing it through the shared conversion
+boundary. `.captionposition` therefore does not execute parsed body nodes as
+a substitute; caption rendering and broader target coverage remain explicit
+gaps.
 
 Each invocation contributes a partial `CaptionPositionInfo` and merges it into
 the current state. A supplied `default` replaces only the default; supplied
@@ -375,8 +379,8 @@ evaluates every candidate, uses the post-evaluation shared state as the merge
 base, converts through the existing closed-enum boundary, and commits one
 complete `IrCaptionPositionInfo` snapshot. This preserves successful nested
 caption-state mutations while failures still restore the pre-invocation
-state. Body rejection is the explicit raw-body compatibility gap described
-above.
+state. The source-backed body fallback is now covered by #166; caption
+rendering and broader target coverage remain explicit gaps.
 
 The evaluator-owned state is shared by callable child scopes, while a
 source-defined `.captionposition` shadows the native setter in direct and
@@ -561,7 +565,7 @@ The implemented boundary is deliberately consumer-driven:
 | `Boolean` | bounded scalar conversion implemented | conditions, predicates, and boolean argument flags | [`ValueFactory.boolean`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt) |
 | `Range` | bounded conversion implemented for iterable consumers | `.foreach`, collection access, and dynamic range materialization | [`ValueFactory.range`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt), [`Collection.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Collection.kt) |
 | `String` | bounded scalar conversion implemented | scalar string builtins and the typed Range-to-text boundary; static StringValue remains String | [`ValueFactory.string`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`StringValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/StringValue.kt), [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt), [`Range.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/data/Range.kt) |
-| `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | context-sensitive conversion deferred | parser/evaluation context is required | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
+| `EvaluableString`, `MarkdownContent`, `InlineMarkdownContent` | bounded context-sensitive conversion implemented; complete coverage deferred | parser/evaluation context is required; source-backed raw bodies remain outside `IrValue` | [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt) |
 | `Size` | bounded domain conversion implemented for reviewed consumers | `.container` width/height and Stacked gaps; typed Size identity and DynamicValue-origin text | v2.5.1 `Size` value family and existing evaluator conversion tests |
 | `Color`, `Enum`, and remaining layout/document values | component/layout conversion remains partial or deferred | closed enum alignment consumers are implemented; colors, styles, and remaining layout fields are deferred | v2.5.1 value families; bounded consumers only |
 | collections, callables, and generic document/content stringification | unsupported conversion; existing typed operations remain separate | typed collection/callable paths only | `DynamicValueConverter.kt`, `ValueFactory.kt`, and consumer signatures |
@@ -581,9 +585,10 @@ optional argument omission.
 Invalid conversions use the existing source-backed `E3001` path and do not
 publish partial IR, collection, or callback results. Conversion is a pure
 semantic transformation over the invocation value, its dynamic-origin bit,
-and explicit target; it does not access files, processes, the network, a
-backend, or a hidden parser. In particular, String → Markdown reparsing and
-String → InlineMarkdownContent reparsing are deferred. The independently authored
+and explicit target; it does not access files, processes, the network, or a
+backend. A dynamic String is reparsed only by the explicit `.plaintext`
+InlineMarkdownContent target path; source-backed bodies use retained raw text,
+and all other generic String → Markdown paths remain deferred. The independently authored
 `fixtures/quarkdown-conformance/cases/dynamic-value-scalar-family` fixture and
 the evaluator/unit tests cover the implemented consumer paths. This is
 **bounded scalar conversion implemented**, not broad DynamicValue
@@ -849,7 +854,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | M2 blockquotes / strikethrough / task lists / tables | `scribium-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `scribium-engine/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `scribium-engine/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `scribium-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `scribium-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
 | v2.5.1 call syntax slice | `scribium-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `scribium-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `scribium-engine/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`, `scribium-core/src/lib.rs::compile_evaluates_block_and_inline_chain_value_flow`, `compile_evaluates_chain_inside_a_content_argument`, `compile_chain_and_nested_call_are_semantically_equivalent`, `compile_variable_values_keep_types_across_chain_and_nested_forms`, `compile_numeric_variable_reassignment_preserves_numeric_value_context`, `compile_chain_and_ordinary_conditional_are_equally_lazy`, `compile_reports_unimplemented_chain_callees_with_specific_spans`, `compile_reports_chain_failures_in_inline_and_content_paths`; `scribium-engine/src/evaluator.rs::nested_call_and_chain_share_the_same_value_context`, `nested_and_chained_case_transforms_share_dynamic_scalar_adaptation`, `variable_values_remain_semantic_through_nested_and_chained_calls`, `chain_value_flow_is_left_to_right_and_injects_first`, `chain_preserves_explicit_positional_arguments_after_previous_value`, `chain_keeps_named_arguments_named_while_injecting_previous_value`, `false_final_conditional_chain_does_not_evaluate_its_body`, `false_final_inline_conditional_chain_does_not_evaluate_its_body`, `child_scope_inherits_parent_and_isolates_local_bindings`; `scribium-cli/src/commands.rs::unimplemented_chain_callee_fails_before_typst_or_pdf_output`; `scribium-typst/tests/backend_integration.rs::integration_chain_evaluation_reaches_typst_and_pdf`; `fixtures/markdown/quarkdown_v251_syntax.qd` syntax/provenance fixture |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
-| String/text operations | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `scribium-engine/src/builtins.rs::tests::string_surface_is_registered_and_returns_typed_values`, `string_operations_bind_named_arguments_and_defaults`, `string_case_and_empty_operations_cover_unicode_and_boundaries`, `string_operations_reject_unsupported_values_and_invalid_bindings`, `plaintext_projects_evaluated_inline_structure`, `plaintext_rejects_reparse_and_unsupported_values`, `plaintext_reuses_single_content_argument_binding`; `scribium-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_v251_plaintext_fixture_projects_evaluated_inline_content`, `compile_plaintext_rejects_unsupported_values_atomically`; `scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`, `fixtures/quarkdown-conformance/cases/plaintext-family/input.qd`, and their `expected/ir.json` goldens | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith` preserve typed evaluator results, share positional/named binding and scalar string adaptation, support ordinary/nested/chained forms, and fail closed for unsupported values. `.plaintext` projects already-parsed inline IR after nested evaluation: text, code, emphasis, strong, strikethrough, and link labels recurse; soft breaks emit a newline; hard breaks and images emit nothing; empty content emits an empty string. Unresolved calls and unsupported structured values fail closed with source-backed `E3001`. Dynamic String → InlineMarkdownContent conversion remains deferred by design. | Implemented (bounded v2.5.1 slice) |
+| String/text operations | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `scribium-engine/src/builtins.rs::tests::string_surface_is_registered_and_returns_typed_values`, `string_operations_bind_named_arguments_and_defaults`, `string_case_and_empty_operations_cover_unicode_and_boundaries`, `string_operations_reject_unsupported_values_and_invalid_bindings`, `plaintext_projects_evaluated_inline_structure`, `plaintext_rejects_reparse_and_unsupported_values`, `plaintext_reuses_single_content_argument_binding`; `scribium-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_v251_plaintext_fixture_projects_evaluated_inline_content`, `compile_plaintext_rejects_unsupported_values_atomically`; `scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`, `fixtures/quarkdown-conformance/cases/plaintext-family/input.qd`, and their `expected/ir.json` goldens | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith` preserve typed evaluator results, share positional/named binding and scalar string adaptation, support ordinary/nested/chained forms, and fail closed for unsupported values. `.plaintext` projects already-parsed inline IR after nested evaluation: text, code, emphasis, strong, strikethrough, and link labels recurse; soft breaks emit a newline; hard breaks and images emit nothing; empty content emits an empty string. Unresolved calls and unsupported structured values fail closed with source-backed `E3001`. Dynamic String → InlineMarkdownContent is parsed only at the explicit `.plaintext` target; generic String → Markdown conversion remains deferred. | Implemented (bounded v2.5.1 slice) |
 | Logical/comparison predicates | `scribium-engine/src/builtins.rs::tests::logical_surface_is_registered_and_evaluates_typed_results`, `equality_preserves_types_and_uses_upstream_plain_text_fallback`, `logical_builtins_reject_invalid_values_and_duplicate_bindings`; `scribium-core/src/lib.rs::compile_logical_comparisons_drive_conditionals_and_nested_calls`, `compile_logical_comparisons_work_in_user_functions_and_chains`, `compile_logical_comparison_failure_is_atomic_and_source_backed`, `compile_logical_comparison_execution_is_deterministic_for_utf8_crlf`; `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_logical_comparison_expression_remains_structural_and_source_backed`; `scribium-typst/tests/backend_integration.rs::integration_logical_comparison_evaluation_reaches_typst_and_pdf` | `.islower`, `.isgreater`, `.equals`, and `.not` return typed booleans, preserve the value boundary, support lazy conditional use, and fail closed on invalid input | Implemented (bounded v2.5.1 slice) |
 | User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_non_lambda_body_with_colon_is_not_stripped`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
 | Scoped `.let`                | `scribium-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `scribium-engine/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `scribium-engine/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `scribium-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |

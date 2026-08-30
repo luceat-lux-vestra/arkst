@@ -10,16 +10,16 @@ use rushdown::parser::{
     ParserExtension, State, PRIORITY_CODE_SPAN, PRIORITY_FENCED_CODE_BLOCK,
 };
 use rushdown::text::{BasicReader, BlockReader, Lines, Reader, Segment};
-use rushdown::util::{indent_position, indent_width, is_blank};
+use rushdown::util::{indent_position, is_blank};
 use rushdown::{
     as_extension_data, as_extension_data_mut, as_type_data_mut, matches_extension_kind,
 };
 use scribium_quarkdown::{Arg, ArgContent, QuarkdownCall, Value as QuarkdownValue};
-use scribium_source::ByteSpan;
+use scribium_source::{ByteSpan, SourceText};
 
 use crate::ast::{
     Block, CallArgument, CallSegment, Document, FrontMatter, Inline, ListItem, NamedArg,
-    RangeValue, TableCell, TableRow, TaskStatus, Value,
+    RangeValue, RawBody, TableCell, TableRow, TaskStatus, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +47,18 @@ pub struct ParseOutput {
     pub diagnostics: Vec<ParserDiagnostic>,
 }
 
-type BodyLineRanges = Vec<(ByteSpan, Vec<ByteSpan>)>;
+#[derive(Debug)]
+struct BodyRange {
+    /// The non-blank body lines used to normalize parsed Markdown structure.
+    lines: Vec<ByteSpan>,
+    /// The complete source-backed body token, including blank lines that are
+    /// not represented by Rushdown body nodes.
+    raw: ByteSpan,
+    /// The one immutable source buffer shared by all body ranges.
+    source: SourceText,
+}
+
+type BodyLineRanges = Vec<(ByteSpan, BodyRange)>;
 
 #[derive(Debug)]
 struct QuarkdownBlock {
@@ -55,12 +66,19 @@ struct QuarkdownBlock {
     call_start: usize,
     header_pending: bool,
     continuation_pending: bool,
-    /// The first qualifying body's visual indentation in the current reader
-    /// context. This is never an absolute source-column measurement.
+    /// Indentation used only to preserve relative Markdown structure while
+    /// feeding accepted lines to Rushdown. Body ownership is decided by
+    /// `body_line_prefix` for every line and never by this value.
     body_indent: Option<usize>,
     /// Original reader segments accepted as body lines. These preserve parser
     /// ownership for the frontend's lazy-paragraph normalization.
     body_lines: Vec<Segment>,
+    /// Start of the complete upstream body token, after the optional
+    /// horizontal argument separator and before its line terminator.
+    raw_body_start: usize,
+    /// End of the complete body token, extended across accepted body and
+    /// blank lines. It is meaningful only when `body_lines` is non-empty.
+    raw_body_end: usize,
 }
 
 impl NodeKind for QuarkdownBlock {
@@ -83,6 +101,109 @@ impl From<QuarkdownBlock> for KindData {
     fn from(value: QuarkdownBlock) -> Self {
         KindData::Extension(Box::new(value))
     }
+}
+
+/// Consume the optional horizontal argument separator that precedes an
+/// upstream body token. Newline bytes deliberately remain part of the body
+/// token, including CRLF's `\r` and `\n` pair and any following blank lines.
+fn skip_argument_separator(source: &str, start: usize) -> usize {
+    let mut cursor = start.min(source.len());
+    while source
+        .as_bytes()
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    cursor
+}
+
+/// Returns the source-relative indentation of a non-blank line that satisfies
+/// Quarkdown's body token prefix.
+///
+/// Rushdown may have already consumed an enclosing container's indentation
+/// before invoking a nested block parser. In that case `line` starts at the
+/// remaining text and the original prefix is recovered from the source line.
+///
+/// The ownership test is deliberately byte-based. Quarkdown's body grammar
+/// accepts a literal two-space prefix or a literal tab; visual indentation is
+/// only a Markdown parsing concern and must not decide whether a line belongs
+/// to the raw body token.
+fn body_line_prefix(
+    line: &[u8],
+    source: &str,
+    segment: Segment,
+    call_start: usize,
+) -> Option<usize> {
+    let line_start = source[..segment.start()]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let call_line_start = source[..call_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let call_prefix = source.get(call_line_start..call_start)?.as_bytes();
+    let body_line = source.get(line_start..segment.stop())?.as_bytes();
+    let whitespace = |prefix: &[u8]| prefix.iter().all(|byte| matches!(byte, b' ' | b'\t'));
+
+    // When both source lines are ordinary indented lines, remove the call's
+    // literal source prefix before applying the body grammar. Comparing
+    // visual widths here would incorrectly accept mixed prefixes such as
+    // ` <tab>value` and would make a first-line indentation threshold own the
+    // rest of the body.
+    if whitespace(call_prefix) {
+        let relative = body_line.strip_prefix(call_prefix)?;
+        if relative.starts_with(b"  ") || relative.starts_with(b"\t") {
+            return Some(
+                relative
+                    .iter()
+                    .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                    .count(),
+            );
+        }
+        return None;
+    }
+
+    if segment.padding() == 0 && (line.starts_with(b"  ") || line.starts_with(b"\t")) {
+        return Some(
+            line.iter()
+                .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                .count(),
+        );
+    }
+
+    None
+}
+
+/// Finds the common character indentation used by the complete body token.
+///
+/// This look-ahead is only for Rushdown's structured representation. The
+/// source-backed raw range is still recorded independently, and ownership is
+/// checked for every line by `body_line_prefix`. Looking ahead lets the
+/// structured tree agree with the upstream `trimIndent()` result when a later
+/// body line is shallower than the first one.
+fn body_indent_for_token(source: &str, segment: Segment, call_start: usize) -> Option<usize> {
+    let mut line_start = source[..segment.start()]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let mut minimum = None;
+
+    while line_start < source.len() {
+        let line_end = source[line_start..]
+            .find('\n')
+            .map_or(source.len(), |index| line_start + index + 1);
+        let line = source.get(line_start..line_end)?;
+        if !is_blank(line.as_bytes()) {
+            let line_segment = Segment::new(line_start, line_end);
+            let Some(indent) = body_line_prefix(line.as_bytes(), source, line_segment, call_start)
+            else {
+                break;
+            };
+            minimum = Some(minimum.map_or(indent, |current: usize| current.min(indent)));
+        }
+        line_start = line_end;
+    }
+
+    minimum
 }
 
 #[derive(Debug)]
@@ -136,6 +257,8 @@ impl BlockParser for QuarkdownBlockParser {
             continuation_pending: header_pending && continuation_pending,
             body_indent: None,
             body_lines: Vec::new(),
+            raw_body_start: skip_argument_separator(source, call_segment.stop()),
+            raw_body_end: call_segment.stop(),
         });
         reader.advance_to_eol();
         Some((node_ref, State::HAS_CHILDREN))
@@ -163,11 +286,14 @@ impl BlockParser for QuarkdownBlockParser {
             match scribium_quarkdown::parse_call(candidate) {
                 Ok(Some((call, _))) => {
                     let call_end = call.span.end.checked_add(call_start)?;
+                    let body_start = skip_argument_separator(source, call_end);
                     let trailing = source.get(call_end..candidate_end)?;
                     let has_continuation = scribium_quarkdown::has_trailing_continuation(candidate);
                     if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
                         let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
                         block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = body_start;
+                        block.raw_body_end = call_end;
                         block.header_pending = false;
                         block.continuation_pending = false;
                     } else if has_continuation {
@@ -188,40 +314,41 @@ impl BlockParser for QuarkdownBlockParser {
         }
 
         if is_blank(&line) {
+            let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+            block.raw_body_end = segment.stop();
             reader.advance_to_eol();
             return Some(State::HAS_CHILDREN);
         }
 
-        let (actual_indent, _) = indent_width(&line, reader.line_offset());
+        let line_offset = reader.line_offset();
+        // Quarkdown's bodyArgContent applies this predicate to every
+        // non-blank line independently. It does not carry the first body's
+        // indentation forward as a continuation threshold. `line` starts at
+        // the reader's current position; `line_offset` is the already
+        // consumed outer-container offset and must not be applied twice.
+        let call_start = as_extension_data!(arena, node_ref, QuarkdownBlock)
+            .call
+            .start();
+        let actual_indent = body_line_prefix(&line, reader.source(), segment, call_start)?;
         let body_indent = {
             let block = as_extension_data!(arena, node_ref, QuarkdownBlock);
-            if let Some(body_indent) = block.body_indent {
-                if actual_indent < body_indent {
-                    return None;
-                }
-                body_indent
-            } else {
-                let has_minimum_indent = actual_indent >= 2 || line.first() == Some(&b'\t');
-                if !has_minimum_indent {
-                    return None;
-                }
-                actual_indent
-            }
+            block.body_indent.unwrap_or_else(|| {
+                body_indent_for_token(reader.source(), segment, call_start).unwrap_or(actual_indent)
+            })
         };
-
         if as_extension_data!(arena, node_ref, QuarkdownBlock)
             .body_indent
             .is_none()
         {
-            as_extension_data_mut!(arena, node_ref, QuarkdownBlock).body_indent =
-                Some(actual_indent);
+            as_extension_data_mut!(arena, node_ref, QuarkdownBlock).body_indent = Some(body_indent);
         }
 
-        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
-            .body_lines
-            .push(segment);
+        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+        block.body_lines.push(segment);
+        block.raw_body_end = segment.stop();
 
-        let (position, padding) = indent_position(&line, reader.line_offset(), body_indent)?;
+        let strip_indent = actual_indent.min(body_indent);
+        let (position, padding) = indent_position(&line, line_offset, strip_indent)?;
         reader.advance_and_set_padding(position, padding);
         Some(State::HAS_CHILDREN)
     }
@@ -455,6 +582,85 @@ pub fn parse_with_mode(source: &str, mode: Mode) -> ParseOutput {
     parse_source(source, mode, MarkdownProfile::Gfm)
 }
 
+/// Parses a source-backed inline Markdown value with the same Rushdown and
+/// Quarkdown inline extensions used by document content.
+///
+/// This is intentionally a fragment boundary for target conversion, not a
+/// second Markdown implementation. The range parser keeps the original
+/// source buffer as the reader input, so nested Quarkdown calls and inline
+/// provenance are handled by the ordinary frontend machinery.
+pub fn parse_inline_with_mode(source: &str, mode: Mode) -> ParseOutput {
+    if source.is_empty() {
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: 0,
+            },
+            diagnostics: Vec::new(),
+        };
+    }
+
+    let span = ByteSpan::new(0, source.len());
+    let trigger = source.as_bytes()[0];
+    let parser = parser_with_content_range(mode, MarkdownProfile::Gfm, Some((span, trigger)));
+    let mut reader = BasicReader::new(source);
+    let mut diagnostics = Vec::new();
+    let parsed = catch_unwind(AssertUnwindSafe(|| parser.parse(&mut reader)));
+    let Ok((arena, root)) = parsed else {
+        diagnostics.push(ParserDiagnostic {
+            code: "E9003",
+            message: "Rushdown panicked while parsing inline target content".to_string(),
+            span,
+        });
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: source.lines().count(),
+            },
+            diagnostics,
+        };
+    };
+
+    let Some(paragraph) = arena[root].children(&arena).find(|node| {
+        matches!(arena[*node].kind_data(), KindData::Paragraph(_))
+            && node_span(&arena, *node, source) == Some(span)
+    }) else {
+        diagnostics.push(ParserDiagnostic {
+            code: "E9003",
+            message: "Inline target content did not produce one source-backed paragraph"
+                .to_string(),
+            span,
+        });
+        return ParseOutput {
+            document: Document {
+                nodes: Vec::new(),
+                front_matter: None,
+                line_count: source.lines().count(),
+            },
+            diagnostics,
+        };
+    };
+
+    let content = convert_inlines(
+        &arena,
+        paragraph,
+        source,
+        0,
+        &mut diagnostics,
+        InlineConversionContext::ContentArgument,
+    );
+    ParseOutput {
+        document: Document {
+            nodes: vec![Block::Paragraph { content, span }],
+            front_matter: None,
+            line_count: source.lines().count(),
+        },
+        diagnostics,
+    }
+}
+
 pub fn parse_with_markdown_profile(source: &str, profile: MarkdownProfile) -> ParseOutput {
     parse_source(source, Mode::Markdown, profile)
 }
@@ -462,6 +668,7 @@ pub fn parse_with_markdown_profile(source: &str, profile: MarkdownProfile) -> Pa
 fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutput {
     let (front_matter, body_start) = parse_front_matter(source);
     let body = &source[body_start..];
+    let source_text = SourceText::new(source.to_owned());
     let parser = parser(mode, profile);
     let mut reader = BasicReader::new(body);
     let mut diagnostics = Vec::new();
@@ -489,6 +696,7 @@ fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutp
             child,
             body,
             body_start,
+            &source_text,
             &mut diagnostics,
             &mut body_line_ranges,
         ) {
@@ -532,7 +740,7 @@ fn normalize_block(
             let accepted_lines = body_line_ranges
                 .iter()
                 .find(|(owner, _)| owner == span)
-                .map(|(_, lines)| lines.as_slice());
+                .map(|(_, range)| range.lines.as_slice());
             let children = std::mem::take(body);
             let mut normalized_children = Vec::new();
             for mut child in children {
@@ -784,6 +992,7 @@ fn convert_block(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     body_line_ranges: &mut BodyLineRanges,
 ) -> Option<Block> {
@@ -819,6 +1028,7 @@ fn convert_block(
                 node,
                 source,
                 base,
+                source_text,
                 diagnostics,
                 body_line_ranges,
             ),
@@ -834,6 +1044,7 @@ fn convert_block(
                             child,
                             source,
                             base,
+                            source_text,
                             diagnostics,
                             body_line_ranges,
                         ),
@@ -884,7 +1095,16 @@ fn convert_block(
                 .map(|segment| offset_span(ByteSpan::new(segment.start(), segment.stop()), base))
                 .collect::<Option<Vec<_>>>()?;
             if !ranges.is_empty() {
-                body_line_ranges.push((span, ranges));
+                let raw_start = extension.raw_body_start.checked_add(base)?;
+                let raw_end = extension.raw_body_end.checked_add(base)?;
+                body_line_ranges.push((
+                    span,
+                    BodyRange {
+                        lines: ranges,
+                        raw: ByteSpan::new(raw_start, raw_end),
+                        source: source_text.clone(),
+                    },
+                ));
             }
             let call_span = checked_segment(extension.call, source)?;
             match scribium_quarkdown::parse_call(source.get(call_span.start..call_span.end)?) {
@@ -898,6 +1118,7 @@ fn convert_block(
                     ConversionState {
                         diagnostics,
                         body_line_ranges,
+                        source_text,
                     },
                 )),
                 Ok(None) => Some(Block::Unsupported {
@@ -1018,6 +1239,7 @@ fn convert_table_row(
 struct ConversionState<'a> {
     diagnostics: &'a mut Vec<ParserDiagnostic>,
     body_line_ranges: &'a mut BodyLineRanges,
+    source_text: &'a SourceText,
 }
 
 fn directive_block(
@@ -1032,6 +1254,7 @@ fn directive_block(
     let ConversionState {
         diagnostics,
         body_line_ranges,
+        source_text,
     } = state;
     let span = node_span(arena, node, source)
         .and_then(|value| offset_span(value, base))
@@ -1039,8 +1262,16 @@ fn directive_block(
         .unwrap_or(ByteSpan::new(0, 0));
     let span_base = base.checked_add(call_base).unwrap_or(base);
     let call_name = call.name.clone();
-    let body_nodes =
-        convert_children_blocks(arena, node, source, base, diagnostics, body_line_ranges);
+    let raw_body = raw_body_for(span, body_line_ranges);
+    let body_nodes = convert_children_blocks(
+        arena,
+        node,
+        source,
+        base,
+        source_text,
+        diagnostics,
+        body_line_ranges,
+    );
     Block::DirectiveCall {
         name: call.name,
         name_span: offset_span(call.name_span, span_base).unwrap_or(ByteSpan::new(0, 0)),
@@ -1060,9 +1291,24 @@ fn directive_block(
             .map(|segment| convert_call_segment(segment, source, base, call_base, diagnostics))
             .collect(),
         body: (!body_nodes.is_empty()).then_some(body_nodes),
+        raw_body,
         lambda_header: None,
         span,
     }
+}
+
+/// Captures the exact source-backed body input used by Quarkdown's
+/// `FunctionCallRefiner`. The parsed body remains a separate representation;
+/// this value is never reconstructed from it.
+fn raw_body_for(owner: ByteSpan, body_line_ranges: &BodyLineRanges) -> Option<RawBody> {
+    let range = body_line_ranges
+        .iter()
+        .find(|(span, _)| *span == owner)
+        .map(|(_, range)| range)?;
+    (range.raw.start < range.raw.end).then_some(RawBody {
+        source: range.source.clone(),
+        span: range.raw,
+    })
 }
 
 fn convert_children_blocks(
@@ -1070,13 +1316,22 @@ fn convert_children_blocks(
     node: NodeRef,
     source: &str,
     base: usize,
+    source_text: &SourceText,
     diagnostics: &mut Vec<ParserDiagnostic>,
     body_line_ranges: &mut BodyLineRanges,
 ) -> Vec<Block> {
     arena[node]
         .children(arena)
         .filter_map(|child| {
-            convert_block(arena, child, source, base, diagnostics, body_line_ranges)
+            convert_block(
+                arena,
+                child,
+                source,
+                base,
+                source_text,
+                diagnostics,
+                body_line_ranges,
+            )
         })
         .collect()
 }
@@ -4038,7 +4293,7 @@ mod tests {
     }
 
     #[test]
-    fn quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed() {
+    fn quarkdown_body_accepts_a_shallower_qualifying_line() {
         let output = parse_with_diagnostics(".note\n    first\n  second\n\noutside\n");
         let Block::DirectiveCall {
             body: Some(body), ..
@@ -4047,9 +4302,8 @@ mod tests {
             panic!("expected directive body")
         };
         assert_eq!(body.len(), 1);
-        assert_eq!(paragraph_text(&body[0]), "first");
-        assert_eq!(paragraph_text(&output.document.nodes[1]), "second");
-        assert_eq!(paragraph_text(&output.document.nodes[2]), "outside");
+        assert_eq!(paragraph_text(&body[0]), "firstsecond");
+        assert_eq!(paragraph_text(&output.document.nodes[1]), "outside");
     }
 
     #[test]

@@ -89,8 +89,8 @@ implementation exists for those 19 names. A preserved `IrNode::FunctionCall`
 or inline directive is not a successful setter, typed node, state mutation,
 or renderer claim. `.captionposition` is `PARTIAL` because its evaluator and
 immutable IR semantics are implemented and independently evidenced, while
-the pinned raw-body fallback and all caption output remain outside the current
-boundary.
+caption output remains outside the current boundary. #166 now covers the
+source-backed raw-body fallback for the bounded `.captionposition` setter.
 
 ## 4. Pinned upstream semantic contracts
 
@@ -250,12 +250,12 @@ closed IR enum preserves the distinction between inherited/null overrides and
 explicit values. Typst/HTML do not consume the snapshot, so no caption
 placement or rendered-output equivalence is claimed.
 
-The one remaining upstream semantic gap is the permitted indented body:
-because `codeBlocks` is the final regular parameter, Quarkdown maps the body
-to raw `DynamicValue` text. Scribium's current frontend/IR boundary retains a
-parsed `CallBody`, not lossless raw body text, and therefore rejects the body
-before nested evaluation. This is a bounded #149/#148/#154 prerequisite gap,
-not a claim that upstream rejects the body. The existing #145 / PR #146 slice
+The permitted indented body is now retained as source-backed raw text beside
+the parsed `CallBody`. Because `codeBlocks` is the final regular parameter,
+Quarkdown maps the body to raw `DynamicValue` text, and #166 feeds that text to
+the bounded setter without evaluating parsed body nodes as a substitute. This
+remains a bounded #149/#148/#154 prerequisite slice, not a claim of complete
+caption rendering or target coverage. The existing #145 / PR #146 slice
 matches the pinned closed domain, bottom default, merge/preserve, nullable
 behavior, candidate-before-commit, rollback, callable sharing,
 source-defined precedence, immutable snapshot, serde defaults, and no-output
@@ -453,8 +453,8 @@ equivalence, and `.captionposition` intentionally has no renderer consumer.
 - Regular parameters are positionally and by name bindable according to the
   shared binder. `@LikelyNamed`/`@LikelyBody` do not establish named-only or
   body-only rules. Final-parameter body fallback is an upstream raw
-  `DynamicValue` contract; the current Scribium frontend does not expose that
-  lossless raw text for the affected state setters.
+  `DynamicValue` contract; #166 retains that lossless source text beside the
+  parsed body for the bounded affected state setters.
 - Closed domains identified in the sweep include page side, page orientation,
   page size format, page-margin position, caption position, numbering symbols,
   navigation role, slide transition style/speed, text alignment, and size/unit
@@ -532,9 +532,9 @@ New cohesive implementation follow-ups were created, but none was started:
 | [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
 
-The `.captionposition` raw-body gap is not duplicated into a new issue: it is
-the existing bounded slice with raw-body/content prerequisites in #166/#158/
-#160. No issue is one-function-per-row by default; #180 is split because raw
+The `.captionposition` raw-body work is implemented in the bounded slice by
+#166, while caption output remains separate. No issue is one-function-per-row
+by default; #180 is split because raw
 TeX body conversion, macro-map state, and math-renderer consumption form a
 distinct semantic contract from #175 layout state. All implementation ordering
 follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).

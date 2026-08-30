@@ -656,8 +656,9 @@ dictionaries, callables, and rich Markdown content are not implicitly
 stringified. `.plaintext` is a separate projection of already-parsed
 `IrValue::Content`: formatting delimiters are omitted, code and link labels
 recurse, soft breaks emit a newline, and hard breaks/images emit nothing.
-Markdown-bearing `String` values are not reparsed; that Dynamic String →
-InlineMarkdownContent conversion remains a documented compatibility gap.
+Markdown-bearing `String` values are reparsed only by the explicit
+`.plaintext` Dynamic String → InlineMarkdownContent target; generic
+String-to-Markdown conversion remains a documented compatibility gap.
 
 ### Iteration (Implemented first slice)
 

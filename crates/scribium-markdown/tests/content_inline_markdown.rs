@@ -1,5 +1,6 @@
 use scribium_markdown::{
-    parse_with_diagnostics, parse_with_mode, Block, CallArgument, Inline, Mode, Value,
+    parse_inline_with_mode, parse_with_diagnostics, parse_with_mode, Block, CallArgument, Inline,
+    Mode, Value,
 };
 use scribium_source::ByteSpan;
 
@@ -413,6 +414,30 @@ fn delimiter_completion_is_scoped_to_content_arguments() {
             .collect();
         assert_eq!(spans, ["**normal", " and ", "*emphasis"]);
     }
+}
+
+#[test]
+fn dynamic_inline_target_fragment_uses_the_existing_inline_parser() {
+    let output = parse_inline_with_mode("before .uppercase {world} after", Mode::Quarkdown);
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        output.diagnostics
+    );
+    let [Block::Paragraph { content, .. }] = output.document.nodes.as_slice() else {
+        panic!(
+            "expected one inline paragraph, got {:?}",
+            output.document.nodes
+        );
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [
+            Inline::Text { content: before, .. },
+            Inline::DirectiveCall { name, .. },
+            Inline::Text { content: after, .. },
+        ] if before == "before " && name == "uppercase" && after == " after"
+    ));
 }
 
 trait ArgumentSpan {

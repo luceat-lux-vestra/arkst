@@ -99,13 +99,13 @@ and conversion details are linked to the canonical [#149 value-model audit](VALU
 | Surface | Pinned signature and identity | Initial state | Mutation/return contract | Scribium boundary | Status |
 |---|---|---|---|---|---|
 | `.doctype` | `doctype(type: DocumentType? = null)`; no alias | `PLAIN`; getter returns lowercase enum name | Getter returns text. Setter replaces the type and returns `VoidValue`; upstream enum validation occurs before assignment | Typed evaluator state and IR snapshot; body fallback and renderer effects are not equivalent | `PARTIAL` |
-| `.docname` | `docname(name: String? = null)`; no alias | Absent name is observable as `""` | Getter returns name or empty text. Setter rejects blank text, replaces the name, and returns `VoidValue` | Current state uses `String` with empty absence; the upstream regular-body fallback is rejected at the current raw-body boundary | `PARTIAL` |
-| `.docdescription` | `docdescription(description: String? = null)`; no alias | Absent description is observable as `""` | Getter returns description or empty text. Setter replaces the description and returns `VoidValue` | Same bounded state/IR boundary and body limitation as `.docname` | `PARTIAL` |
+| `.docname` | `docname(name: String? = null)`; no alias | Absent name is observable as `""` | Getter returns name or empty text. Setter rejects blank text, replaces the name, and returns `VoidValue` | Current state uses `String` with empty absence; source-backed body fallback reaches the shared String target boundary without evaluating parsed body nodes | `PARTIAL` |
+| `.docdescription` | `docdescription(description: String? = null)`; no alias | Absent description is observable as `""` | Getter returns description or empty text. Setter replaces the description and returns `VoidValue` | Same bounded state/IR boundary; source-backed body fallback reaches the shared String target boundary without evaluating parsed body nodes | `PARTIAL` |
 | `.docauthor` | `docauthor(author: String? = null)`; no alias | Empty ordered author list; getter is `""` | Getter returns the first author name or empty text. Setter appends one `DocumentAuthor`; duplicates are preserved; setter returns `VoidValue` | Current append path is bounded to scalar conversion and shares state; full upstream body/conversion contract remains open | `PARTIAL` |
 | `.docauthors` | `docauthors(authors: Map<String, DictionaryValue<OutputValue<String>>>? = null)`; no alias | Empty ordered author list | Getter returns an ordered dictionary keyed by author name with nested info. Setter maps entries and appends them; dictionary key collisions cannot represent two entries with the same key | Current validation is pre-commit and ordered, but body/value conversion is bounded; mixed singular/plural append behavior is tested | `PARTIAL` |
-| `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; raw-body and generalized conversion remain gaps | `PARTIAL` |
-| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Current deterministic checked-in locale table is narrower than the upstream JVM locale universe; raw-body fallback is rejected | `PARTIAL` |
-| `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction and rollback are evidenced; raw-body fallback and theme resolution/rendering are not | `PARTIAL` |
+| `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; source-backed body conversion and generalized target coverage remain partial | `PARTIAL` |
+| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Current deterministic checked-in locale table is narrower than the upstream JVM locale universe; source-backed body text is converted before lookup without evaluating parsed body nodes | `PARTIAL` |
+| `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction, raw-body fallback, and rollback are evidenced; theme resolution/rendering are not | `PARTIAL` |
 | `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `UNSUPPORTED` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; this evidence is retained here without re-auditing #151 semantics | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
 
 ## 5. Family-level semantic analysis
@@ -124,9 +124,11 @@ Scribium's `DocumentState` has one evaluator-owned state object with `String`
 name/description, a typed document type, and a final immutable snapshot into
 `IrDocumentState`. The absence distinction for name/description is intentionally
 represented by the documented empty getter contract rather than an IR option.
-The current frontend rejects raw block bodies for these calls, while pinned
-regular argument binding can fall back from a body to the final regular
-parameter. That observable mismatch keeps all three rows `PARTIAL`.
+Pinned regular argument binding can fall back from a body to the final regular
+parameter. #166 now retains that source-backed body text through the AST/IR
+handoff and consumes it at the shared String target boundary without using
+already parsed body nodes; state/output and full upstream conversion parity
+remain partial.
 
 “Document title” is not a separate pinned `DocumentInfo` field. The upstream
 `.htmloptions(title=...)` value controls an HTML `<title>` and is cross-owned
@@ -160,9 +162,9 @@ remain observable.
 
 Scribium's bounded implementation preserves these replacement, ordering, and
 duplicate semantics in `IrDocumentState.keywords`. It validates the complete
-candidate list before one state commit. It does not claim the upstream
-general `DynamicValue`/raw-body conversion surface, so the status remains
-`PARTIAL`.
+candidate list before one state commit. #166 now routes a source-backed body
+through the shared iterable target conversion without reconstructing it from
+parsed nodes; the status remains `PARTIAL` for the broader DynamicValue surface.
 
 ### Locale and #151-owned localization cross-reference
 
@@ -198,8 +200,9 @@ classification.
 Scribium deliberately uses a deterministic checked-in locale table rather than
 an OS/JVM dependency. It stores canonical tag and localized-name data in the
 IR and has no localization-table state. Valid upstream identifiers outside the
-checked-in table, raw-body fallback, and locale-aware rendering remain #152
-locale gaps; `.localization` and `.localize` remain #151-owned unsupported
+checked-in table and locale-aware rendering remain #152 locale gaps; #166 now
+covers the bounded source-backed raw-body fallback without evaluating parsed
+body nodes. `.localization` and `.localize` remain #151-owned unsupported
 general stdlib gaps.
 
 ### Theme
@@ -213,7 +216,8 @@ upstream, outside this state contract.
 
 Scribium records `Option<IrDocumentTheme>` so “never set” and “set to empty”
 survive the IR boundary. Supplied strings are lowercased and each successful
-call replaces the whole theme. Raw-body fallback and theme registry/output
+call replaces the whole theme. #166 supplies the source-backed raw-body
+fallback to the bounded theme String target; theme registry/output
 consumption remain outside the bounded implementation.
 
 ## 6. Initial/default state
@@ -276,10 +280,11 @@ The generic callable, lazy-body, scope, and lookup rules remain canonical in
   duplicate or broaden #150's model.
 
 Nested argument evaluation is especially important: upstream regular-body
-fallback can evaluate or re-lex content according to the target type, while
-Scribium currently rejects the unavailable lossless raw-body form for the
-affected setters. The current nested rollback witness is therefore evidence
-of Scribium's bounded state guarantee, not evidence of upstream equivalence.
+fallback can evaluate or re-lex content according to the target type. #166
+retains the lossless source-backed body form for the bounded affected setters
+and selects conversion before parsed-body evaluation. The current nested
+rollback witness is therefore evidence of Scribium's bounded state guarantee,
+not evidence of complete upstream equivalence.
 
 ## 9. Current Scribium architecture mapping
 
@@ -378,8 +383,8 @@ one:
 - [#165](https://github.com/luceat-lux-vestra/scribium/issues/165) owns generic
   binder validation and follows the engine prerequisite band in #156;
 - [#166](https://github.com/luceat-lux-vestra/scribium/issues/166) owns the
-  lossless dynamic/raw-body representation prerequisite and follows the
-  engine prerequisite band in #156;
+  bounded lossless dynamic/raw-body representation and target-conversion slice
+  in this branch; broader target coverage remains with the owning audits;
 - [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) owns generic
   conversion diagnostics and commit atomicity and follows the engine
   prerequisite band in #156;

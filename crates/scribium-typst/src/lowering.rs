@@ -304,6 +304,7 @@ impl LoweringContext {
                 chain,
                 body,
                 span,
+                ..
             } => {
                 // Defensive rendering for manually constructed unresolved IR.
                 // The normal evaluator resolves successful chains before this
@@ -2715,6 +2716,7 @@ mod tests {
                     content: vec![text("content")],
                     span: empty_span(),
                 }]),
+                raw_body: None,
                 span: empty_span(),
             }],
             metadata: IrMetadata::default(),
@@ -2739,6 +2741,7 @@ mod tests {
                     ordered_args: None,
                     lambda_parameters: None,
                     body: None,
+                    raw_body: None,
                     span: empty_span(),
                 },
                 IrNode::FunctionCall {
@@ -2753,6 +2756,7 @@ mod tests {
                     ordered_args: None,
                     lambda_parameters: None,
                     body: None,
+                    raw_body: None,
                     span: empty_span(),
                 },
             ],
@@ -2779,6 +2783,7 @@ mod tests {
                 ordered_args: None,
                 lambda_parameters: None,
                 body: None,
+                raw_body: None,
                 span: empty_span(),
             }],
             metadata: IrMetadata::default(),
@@ -2811,6 +2816,7 @@ mod tests {
                     span: SourceSpan::new(source_id, 8, 13),
                 }],
                 body: None,
+                raw_body: None,
                 span: whole,
             }],
             metadata: IrMetadata::default(),

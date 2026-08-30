@@ -142,10 +142,12 @@ returns an ordered iterable while replacing the complete keyword list only
 after all candidate elements validate. `.theme` accepts nullable scalar
 `color` and `layout` parameters, binds both positionally or by name, accepts
 `.none` as a null component, and lowercases supplied strings. Its regular
-block body falls back to the final `layout` parameter upstream; Scribium
-defers this path because the current frontend/IR exposes parsed nodes rather
-than lossless raw body text. A `.theme` body is rejected before evaluation so
-nested calls cannot execute or mutate document state. It replaces the complete
+block body falls back to the final `layout` parameter upstream; #166 now
+retains the lossless source-backed raw body and derives its bounded String
+target value with `trimIndent().trimEnd()` without evaluating parsed body
+nodes. A `.theme` body therefore remains lazy
+until target conversion is selected, so nested calls cannot execute or mutate
+document state accidentally. It replaces the complete
 theme on every successful call, including an explicit empty setter. The
 snapshot is serializable plain data with explicit defaults for older
 serialized IR; the document type defaults to `plain`, missing authors and
@@ -170,9 +172,9 @@ public localization documentation (`zh`, `en`, `fr`, `de`, `it`, `ja`, `pl`,
 `pt`, `ru`, `uk`) plus the pinned `LocaleTest` lookup examples `ko`, `en-US`,
 and `fr-CA`. This is explicitly partial and bounded: valid BCP 47/name
 identifiers outside the table fail rather than being accepted as compatible,
-and remain a documented compatibility gap. Block-body fallback is also
-deferred and rejected before nested body evaluation because the current
-frontend/IR cannot provide upstream's lossless raw `DynamicValue` text.
+and remain a documented compatibility gap. Block-body fallback now uses the
+source-backed raw `DynamicValue` equivalent for the bounded `.doclang` target;
+remaining target consumers are deferred and are not inferred from this slice.
 Binding, candidate evaluation, String conversion, resolution, validation, and
 one state commit are atomic, including rollback of nested state mutation after
 a failed candidate. Ordinary callable child scopes share locale state, and
@@ -398,8 +400,8 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | Inline iteration body | Regular binding first resolves the callee parameter; an inline likely-body becomes a `Lambda` only for a callable target, while an ordinary dynamic parameter receives content | `Value::InlineBody`/`IrValue::InlineBody` preserves structured content and callable metadata until source-defined/native resolution; native iteration adapts it into the shared `IrCallable` path | Keep contextual inline bodies target-sensitive and source-backed | Bounded `.foreach`/`.repeat` support implemented, including direct/chain source-defined shadowing | Generalized inline component/callback bodies |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; upstream block-body fallback remains a documented deferred gap | Valid BCP 47/name locale records outside the checked-in table, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
-| `.captionposition` document-state | Nullable `default`, `figures`, `tables`, and `@Name("code") codeBlocks`; partial state merged into current document layout state; regular body fallback targets final `codeBlocks` upstream | Typed evaluator-owned caption state uses post-evaluation shared state as the successful merge base, commits one immutable `IrCaptionPositionInfo`, and rejects bodies before evaluation because raw `DynamicValue` text is unavailable | Preserve nested successful mutations and explicit-versus-inherited overrides; keep body fallback separate from parsed `CallBody` semantics | Implemented at bounded evaluator/IR boundary; upstream body-to-final-`codeBlocks` fallback is an explicit compatibility gap | Raw body representation and caption rendering/placement |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; #166 supplies source-backed body fallback for the bounded consumers without executing parsed body nodes | Valid BCP 47/name locale records outside the checked-in table, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
+| `.captionposition` document-state | Nullable `default`, `figures`, `tables`, and `@Name("code") codeBlocks`; partial state merged into current document layout state; regular body fallback targets final `codeBlocks` upstream | Typed evaluator-owned caption state uses post-evaluation shared state as the successful merge base, commits one immutable `IrCaptionPositionInfo`, and derives source-backed raw body text for the final `codeBlocks` target without evaluating parsed body nodes | Preserve nested successful mutations and explicit-versus-inherited overrides; keep body fallback separate from parsed `CallBody` semantics | Implemented at bounded evaluator/IR boundary; caption rendering/placement and complete target coverage remain open | Caption rendering/placement and broader raw-body consumers |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `grid` | Positive integer columns, alignments, general/vertical/horizontal gaps, Markdown body; non-positive columns fail | `.grid` validates a dedicated integral positive `columns` boundary and applies `vgap ?: gap` / `hgap ?: gap` before constructing a typed Grid component | Validate before component construction and keep the result typed | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -408,7 +410,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | `Size` conversion | `ValueFactory.size` parses typed/numeric/unit values with domain rules | Backend-neutral `IrSize` conversion is consumed by row/column/grid gaps and `.whitespace` for the exact seven-unit decimal grammar, with typed identity and origin-gated text | Domain-specific origin-aware conversion adapter | Implemented for Stacked gaps and bounded `.whitespace` | Other Size consumers |
 | `Color` conversion | `ValueFactory.color` accepts typed colors or domain text decoding | Backend-neutral `IrColor` conversion implements the ordered Hex/RGB/RGBA/HSV-HSL/Named decoder families and numeric channels | Domain-specific origin-aware conversion adapter | Implemented | Color consumers, style, and component semantics |
 | Enum conversion | Closed enum values are matched through the allowed value set and public names | Explicit closed enum adapter preserves `DocumentType`, Stacked main-axis, and Stacked cross-axis domains with case-insensitive public names and no static String coercion | Closed domain adapter; no reflective generic coercion | Implemented for `.doctype` and Stacked layout | Other closed enum consumers |
-| Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` is supported; String → Markdown reparsing is not | Content remains structured; raw String conversion requires a future explicit frontend/provenance contract | Partial | Content conversion boundary |
+| Markdown conversion | Markdown/content conversion parses a raw dynamic value in the frontend context; node output is semantic | Already-parsed `IrValue::Content` remains structured; dynamic String → Markdown is parsed only by the explicit `.plaintext` target path, while source-backed bodies use `IrRawBody` with one shared lossless source buffer and exact body-token span; each non-blank continuation line uses the pinned two-space-or-tab prefix, and `trimIndent().trimEnd()` is derived only at the engine conversion boundary. The raw-body range is a source-local `ByteSpan`, caller provenance stays on the containing node, and `IrDocument` JSON stores each distinct source buffer once in a private document-level source table. | Content remains structured; conversion is centralized in the engine and source provenance is retained outside `IrValue`; `.html` native normalization remains evaluator-consumer-owned | Partial | Remaining target consumers and complete content conversion coverage |
 | Component conversion | Dynamic result can become a node/layout value through typed output visitors | Closed typed `IrValue::Component`/`IrComponent` is constructed by the reviewed source calls and materialized as one typed block node | Backend-neutral component value, origin-gated construction, typed output materialization | Implemented for reviewed block-body Stacked slice and bounded `.center` | General String → Markdown body conversion and inline insertion |
 
 ## Normative evaluator rules
@@ -510,8 +512,9 @@ are separate and are not part of this closure audit.
 
 ## Intentionally deferred
 
-This slice does not implement String → Markdown or String → component
-conversion, inline Stacked/Container insertion, the deferred direct
+This slice does not implement generic String → Markdown or String → component
+conversion; the explicit `.plaintext` Dynamic String → InlineMarkdownContent
+boundary is covered. Inline Stacked/Container insertion, the deferred direct
 `.container` style parameters, `StyleOptions`, `.float`, `.fullspan`, a generic layout
 engine, a parallel evaluator, filesystem/network features, or an evaluator rewrite. No architecture
 prototype or feature snapshot was
@@ -541,10 +544,10 @@ while omitted or nullable `.none` overrides preserve their previous values.
 
 The regular binder also maps an indented body to the final bindable parameter.
 For `.captionposition`, that means upstream's block body falls back to
-`codeBlocks` as raw `DynamicValue` text. Scribium records this as an explicit
-compatibility gap: the current frontend/IR boundary exposes parsed `CallBody`
-nodes rather than lossless raw body text, so the setter rejects a body before
-body evaluation, matching the existing `.theme` boundary.
+`codeBlocks` as raw `DynamicValue` text. #166 retains this body beside the
+structured `CallBody` and feeds the source-backed text through the shared
+conversion boundary, so the setter does not evaluate parsed body nodes as a
+substitute. Caption rendering and broader target coverage remain open.
 
 Scribium maps that contract to the existing evaluator-owned `DocumentState` and
 immutable `IrDocument.metadata.document_state` snapshot. The representation is

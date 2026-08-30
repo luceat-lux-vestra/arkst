@@ -94,6 +94,7 @@ fn center_rejects_lambda_parameters() {
                 }],
                 span,
             }]),
+            raw_body: None,
             span,
         }],
         metadata: scribium_core::ir::IrMetadata::default(),

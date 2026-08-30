@@ -96,6 +96,7 @@ fn align_rejects_lambda_body() {
                 }],
                 span,
             }]),
+            raw_body: None,
             span,
         }],
         metadata: scribium_core::ir::IrMetadata::default(),

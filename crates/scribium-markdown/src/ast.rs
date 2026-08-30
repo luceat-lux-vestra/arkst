@@ -1,4 +1,4 @@
-use scribium_source::ByteSpan;
+use scribium_source::{ByteSpan, SourceText};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -10,6 +10,19 @@ pub struct Document {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontMatter {
     pub fields: Vec<(String, String)>,
+    pub span: ByteSpan,
+}
+
+/// The target-neutral source-backed body representation used by engine
+/// conversion.
+///
+/// `source` is shared by all bodies from one parsed document and `span` is the
+/// exact upstream body-token range. Target-specific values are derived lazily
+/// by their owning engine consumer; parsed body nodes remain separate so a
+/// target never has to reconstruct source text from an evaluated value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawBody {
+    pub source: SourceText,
     pub span: ByteSpan,
 }
 
@@ -61,6 +74,7 @@ pub enum Block {
         arguments: Vec<CallArgument>,
         chain: Vec<CallSegment>,
         body: Option<Vec<Block>>,
+        raw_body: Option<RawBody>,
         /// Contextual lambda metadata for calls with lambda body semantics
         /// (`.function`, `.let`, `.foreach`, and `.repeat`). Other call bodies deliberately
         /// remain ordinary Markdown structures.

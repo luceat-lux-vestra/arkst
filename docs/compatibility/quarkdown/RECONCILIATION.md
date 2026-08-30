@@ -90,11 +90,11 @@ status recorded by its owner.
 | Surface or boundary | Primary owner and status | Consumer/handoff | Evidence and residual gap |
 |---|---|---|---|
 | Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #165 binding, #149 conversion, #150 evaluation, #154 content | Parser tests retain spans; the remaining pinned grammar/provenance gaps are #159, #162, and #164. #158's nested tight-call and #160's Markdown-content preservation, plus #163's ordered argument handoff, are implemented bounded slices. Parser recognition is never a semantic claim. |
-| Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149 plus #165 for structural binding; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths are evidenced; raw-body/diagnostic/atomicity gaps remain #166–#167. |
+| Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149 plus #165 for structural binding and #166 for the bounded target/raw-body slice; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths and bounded source-backed conversion consumers are evidenced; broader target coverage, diagnostics, and atomicity gaps remain. |
 | Variables, callable scope, lazy evaluation, iteration, optionality, extension, failure, and evaluator provenance | #150; `PARTIAL` except `.node`/`.extend` boundaries | #151 builtin declarations; #154 content results | Current bounded callable paths are tested. `.extend`/`.super` is `UNSUPPORTED` and #169-owned; upstream partial-effects divergence is not fixed here. |
 | General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` remain `PARTIAL` and #172-owned; `.get` is #194-owned, library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
-| `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme` | #152; all eight `PARTIAL` | #149 conversion; #153 layout; #154 output; #173 locale closure | Evaluator/IR state and independent fixtures exist. Rendering, complete locale coverage, raw-body fallback, and broader metadata remain gaps. |
-| `.captionposition` | #153; `PARTIAL` | #152 state snapshot; #154 caption-producing content | Typed evaluator/IR merge and serde evidence exists; caption rendering and raw block-body fallback are not claimed. |
+| `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme` | #152; all eight `PARTIAL` | #149 conversion; #153 layout; #154 output; #173 locale closure | Evaluator/IR state and independent fixtures exist. #166 covers bounded source-backed body conversion without parsed-body evaluation; rendering, complete locale coverage, and broader metadata remain gaps. |
+| `.captionposition` | #153; `PARTIAL` | #152 state snapshot; #154 caption-producing content | Typed evaluator/IR merge, serde, and bounded raw block-body conversion evidence exists; caption rendering and broader target coverage remain open. |
 | Remaining document-wide layout/configuration (`.numbering`, `.pageformat`, `.font`, page counters, navigation, `.slides`, and related rows) | #153; 19 `PARSED_ONLY` rows | #154 component/content consumers; #175–#178 | Parser/retention evidence does not establish state, IR, or output support. Follow-up ownership remains grouped by contract. |
 | Bounded ordinary Markdown block/inline/table/fence/link behavior | #154; `SUPPORTED_END_TO_END` rows | Rushdown frontend and Typst output | Existing parser/IR/Typst/PDF evidence is for the bounded Markdown contract, not Quarkdown callable producers. |
 | Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185, with `.match` in #198, `.subdocumentgraph` in #199 after #188, and `.keybinding`/`.loremipsum` explicitly in #184. CSS rows remain an explicit HTML-backend/product defer. No backend escape hatch is introduced. |
@@ -169,10 +169,11 @@ numbers are not inferred from a numeric sequence.
 | Issues | Origin / canonical owner | Scope and dependency decision | Recommended band |
 |---|---|---|---|
 | [#159](https://github.com/luceat-lux-vestra/scribium/issues/159), [#162](https://github.com/luceat-lux-vestra/scribium/issues/162), [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) | #148 / Markdown and Quarkdown frontend | Malformed recovery, escaped delimiters, and separator placement. These are production grammar/provenance gaps; they must not absorb binder/evaluator behavior. | Frontend band; parallel after #187. |
-| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | #148 → #154 / Markdown content conversion | Implemented bounded frontend slice: supported Markdown inline nodes in static Quarkdown content arguments retain Rushdown structure and original-source spans, including the #158 nested tight-call shape. This establishes no evaluator, IR, or output compatibility; dynamic/content conversion remains separately owned. | Completed parser/frontend slice; broader content and output contracts remain with #154/#166. |
+| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | #148 → #154 / Markdown content conversion | Implemented bounded frontend slice: supported Markdown inline nodes in static Quarkdown content arguments retain Rushdown structure and original-source spans, including the #158 nested tight-call shape. This establishes no evaluator, IR, or output compatibility; dynamic/content conversion is separately owned by #166. | Completed parser/frontend slice; broader content and output contracts remain with #154. |
 | [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) | #148 → #165 / grammar representation for engine binding | Implemented in the grammar/frontend and IR: head and chain segments preserve one source-ordered argument sequence with provenance while retaining legacy projections for adapters. #165 consumes this representation for semantic binding. | Completed bounded representation prerequisite; grammar recognition remains separate from semantic compatibility. |
-| [#165](https://github.com/luceat-lux-vestra/scribium/issues/165) | #149 / shared engine binder | Implemented bounded engine contract: one binder validates ordered mixed arguments, exact names/aliases, named eligibility, duplicate/collision/excess rules, required/optional/default slots, and target-owned body policy for native, source-defined, and callback paths. Target conversion, raw body compatibility, and broader commit/diagnostic guarantees remain separate. | Completed bounded engine binding slice; #166 and #167 remain. |
-| [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | #149 / conversion, raw body, diagnostics, atomicity | #166 consumes structured content/call shapes for context-sensitive dynamic/content conversion; #167 hardens conversion diagnostics and the shared commit/rollback boundary used by state and content consumers. | Engine follow-up band. |
+| [#165](https://github.com/luceat-lux-vestra/scribium/issues/165) | #149 / shared engine binder | Implemented bounded engine contract: one binder validates ordered mixed arguments, exact names/aliases, named eligibility, duplicate/collision/excess rules, required/optional/default slots, and target-owned body policy for native, source-defined, and callback paths. Broader commit/diagnostic guarantees remain separate. | Completed bounded engine binding slice; #166 and #167 remain. |
+| [#166](https://github.com/luceat-lux-vestra/scribium/issues/166) | #149 / conversion, raw body | Implemented bounded engine-owned target conversion: source-backed raw bodies are retained beside structured calls and dynamic/static/content distinctions remain explicit for the demonstrated consumers; no evaluated nested call is stringified and reparsed. | Completed bounded conversion/raw-body slice; broader targets remain partial. |
+| [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | #149 / diagnostics, atomicity | #167 hardens conversion diagnostics and the shared commit/rollback boundary used by state and content consumers. | Engine follow-up band. |
 | [#169](https://github.com/luceat-lux-vestra/scribium/issues/169) | #150 / engine evaluator | `.extend`/`.super`, condition, chaining, scope, and failure semantics. Depends on the grammar and shared binder/evaluator contracts (#158–#167). | After engine prerequisite band. |
 | [#172](https://github.com/luceat-lux-vestra/scribium/issues/172), [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #151 / #152 | #172 owns Unicode titlecase and case-insensitive prefix semantics; #173 owns bounded `.doclang` locale closure. They consume shared conversion/state contracts and do not duplicate localization ownership. | Parallel after shared engine prerequisites. |
 | [#175](https://github.com/luceat-lux-vestra/scribium/issues/175), [#176](https://github.com/luceat-lux-vestra/scribium/issues/176), [#177](https://github.com/luceat-lux-vestra/scribium/issues/177), [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | #153 / document-wide configuration and layout policy | #175 owns document-wide state; #176 owns page margins/counters/heading/page policy; #177 owns navigation/markers/TOC; #178 owns slide configuration. Component-local content remains #154-owned. They consume #165–#167 and the backend strategy decision where output is involved. | Layout/configuration band after prerequisites. |
@@ -325,6 +326,43 @@ freeze wording is no longer a complete status. After
 - #191 is **deferred/milestone-blocked** to M6/WASM; and
 - no issue is authorized to bypass the architecture, evidence, or host
   boundaries recorded here.
+
+## Issue #166 implementation reconciliation
+
+The bounded #166 engine slice closes the raw-body prerequisite for the
+reviewed conversion consumers. `scribium-markdown` retains one shared,
+immutable source buffer and the exact body-token span beside the structured
+body; `scribium-ir` carries that durable source data as `IrRawBody`, with a
+source-local `ByteSpan` and caller provenance on the containing node, never as
+`IrValue` state or `ValueOrigin`. The engine-owned `value_conversion` target
+boundary preserves
+typed scalar/content/node/iterable/dictionary/callable distinctions, returns an
+explicit contextual Markdown request for dynamic text, and materializes only
+the targets consumed by this slice.
+
+The demonstrated consumers are dynamic String to inline Markdown through
+`.plaintext`, typed and Markdown-list iterable conversion, and regular
+document-state body fallback for `.theme`, `.doclang`, and `.captionposition`.
+The retained body source range is the complete upstream body token, including
+leading/trailing blank lines; each non-blank continuation line independently
+requires the pinned two-space-or-tab prefix, and its target value applies
+`trimIndent().trimEnd()`. JSON serialization of an `IrDocument` stores each
+distinct source buffer once in a document-scoped source table while retaining
+raw-body spans, so inspect output does not repeat the full document for every
+unresolved call. The source-table `source_ref` is private to the document wire
+model; standalone `IrRawBody` and `IrNode` values reject unresolved references.
+Source-backed body fallback does not evaluate or stringify the parsed nested
+body. Dynamic iterable conversion evaluates one raw expression in context and
+uses typed Iterable/Dictionary results before its Markdown-list fallback.
+Static String content remains literal text, raw HTML keeps its existing
+source-preserving path, and #158/#160 structure remains unchanged. The
+document-level source-table reference is a wire-only encoding: standalone
+`IrRawBody` values reject `source_ref`, missing/out-of-range table references
+are rejected, and successful deserialization restores the source-local span
+invariant. Callable,
+dictionary, remaining block-content consumers, complete upstream target
+coverage, and diagnostic/commit parity remain partial or deferred to their
+owners; #167 is not absorbed here.
 
 Individual issue bodies are cross-linked to this decision and retain their
 original scope/non-goals. No production implementation was started by #156.

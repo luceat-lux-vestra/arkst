@@ -1856,11 +1856,11 @@ mod tests {
     }
 
     #[test]
-    fn captionposition_body_is_rejected_before_nested_state_mutation() {
+    fn captionposition_body_uses_raw_target_conversion_before_nested_state_mutation() {
         let source = ".captionposition default:{top}\n.captionposition\n    .captionposition figures:{bottom}\n    .uppercase {nested}\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary.map(|span| span.source_id),
             Some(source_id)
@@ -2051,23 +2051,33 @@ mod tests {
     }
 
     #[test]
-    fn theme_block_body_is_rejected_before_nested_evaluation() {
+    fn theme_block_body_uses_raw_final_parameter_without_nested_evaluation() {
         let source = ".theme {Existing} layout:{Compact}\n.theme\n    .theme {Mutated}\n    .uppercase {Minimal}\n";
-        let (result, source_id) = compile_source(source);
-        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        assert_eq!(result.diagnostics[0].code, "E3003");
-        assert_eq!(
-            result.diagnostics[0].primary.map(|span| span.source_id),
-            Some(source_id)
-        );
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(
             result.ir.metadata.document_state.theme,
             Some(crate::ir::IrDocumentTheme {
-                color: Some("existing".to_string()),
-                layout: Some("compact".to_string()),
+                color: None,
+                layout: Some(".theme {mutated}\n.uppercase {minimal}".to_string()),
             })
         );
         assert_eq!(output_text(&result), "");
+        assert_eq!(result.ir.nodes.len(), 0);
+    }
+
+    #[test]
+    fn theme_body_conversion_keeps_upstream_leading_blank_line_semantics() {
+        let source = ".theme\n\n\n    hello\n\n\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.theme,
+            Some(crate::ir::IrDocumentTheme {
+                color: None,
+                layout: Some("\n\nhello".to_string()),
+            })
+        );
     }
 
     #[test]
@@ -2370,12 +2380,12 @@ mod tests {
     }
 
     #[test]
-    fn doclang_block_body_is_rejected_before_nested_mutations() {
+    fn doclang_block_body_uses_raw_target_conversion_before_nested_mutations() {
         let source =
             ".doclang {en}\n.doclang\n    .doclang {it}\n    .uppercase {nested}\n.doclang\n";
         let (result, source_id) = compile_source(source);
         assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        assert_eq!(result.diagnostics[0].code, "E3003");
+        assert_eq!(result.diagnostics[0].code, "E3001");
         assert_eq!(
             result.diagnostics[0].primary.map(|span| span.source_id),
             Some(source_id)
@@ -2748,15 +2758,30 @@ mod tests {
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             let start = source.find(invalid).expect("invalid docauthors input");
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
-            assert_eq!(
-                result.diagnostics[0].primary,
-                Some(scribium_source::SourceSpan::new(
-                    source_id,
-                    start,
-                    start + invalid.len()
-                )),
-                "{source:?}: {result:?}"
-            );
+            let primary = result.diagnostics[0].primary;
+            if source.contains(".docauthors\n") {
+                // The source-backed raw-body conversion owns the complete
+                // body span. It must still overlap the invalid source-backed
+                // body; #167 owns finer-grained conversion diagnostics.
+                assert!(
+                    primary.is_some_and(|span| {
+                        span.source_id == source_id
+                            && span.start < start + invalid.len()
+                            && span.end > start
+                    }),
+                    "{source:?}: {result:?}"
+                );
+            } else {
+                assert_eq!(
+                    primary,
+                    Some(scribium_source::SourceSpan::new(
+                        source_id,
+                        start,
+                        start + invalid.len()
+                    )),
+                    "{source:?}: {result:?}"
+                );
+            }
             assert_eq!(output_text(&result), "Existing", "{source:?}: {result:?}");
             assert_eq!(result.ir.metadata.document_state.authors.len(), 1);
         }
@@ -2820,6 +2845,93 @@ mod tests {
             result.ir.metadata.document_state.keywords,
             vec!["4".to_string(), "5".to_string()]
         );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_evaluates_typed_iterable_before_markdown_fallback() {
+        let source = ".function {someFunction}\n    .range {1} {3}\n.dockeywords\n    .someFunction\n.dockeywords::size\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "3\n1");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_accepts_a_typed_collection_result() {
+        let source = ".function {someCollection}\n    .foreach {1..2}\n        .1\n.dockeywords\n    .someCollection\n.dockeywords::size\n.dockeywords::last\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n2");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_resolves_a_variable_iterable_once() {
+        let source = ".var {items} {.range {3} {4}}\n.dockeywords\n    .items\n.dockeywords::size\n.dockeywords::first\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "2\n3");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["3".to_string(), "4".to_string()]
+        );
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_accepts_a_typed_dictionary_result() {
+        let source = ".function {emptyDictionary}\n    .dictionary\n.dockeywords\n    .emptyDictionary\n.dockeywords::size\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn dockeywords_dynamic_body_does_not_evaluate_an_expression_twice() {
+        let source = ".var {count} {0}\n.function {counted}\n    .var {count} {.count::sum {1}}\n    .range {1} {2}\n.dockeywords\n    .counted\n.count\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "1");
+        assert_eq!(
+            result.ir.metadata.document_state.keywords,
+            vec!["1".to_string(), "2".to_string()]
+        );
+    }
+
+    #[test]
+    fn unused_dynamic_iterable_body_is_not_evaluated() {
+        let source =
+            ".if {false}\n    .dockeywords\n        .unknownFunction\n.dockeywords::size\n";
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "0");
+    }
+
+    #[test]
+    fn failed_dynamic_iterable_expression_is_not_reparsed_as_markdown() {
+        let source = ".dockeywords\n    .multiply {true} {true}\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0]
+            .message
+            .contains("requires numeric arguments"));
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
+    }
+
+    #[test]
+    fn void_dynamic_iterable_expression_is_not_silently_accepted() {
+        let source =
+            ".function {noValue}\n    .var {temporary} {value}\n.dockeywords\n    .noValue\n";
+        let (result, _) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert!(result.diagnostics[0].message.contains("no value"));
+        assert!(result.ir.metadata.document_state.keywords.is_empty());
     }
 
     #[test]
@@ -3089,12 +3201,8 @@ mod tests {
     }
 
     #[test]
-    fn compile_plaintext_rejects_unsupported_values_atomically() {
-        for source in [
-            ".plaintext {.pair {a} {b}}\n",
-            ".plaintext {1..2}\n",
-            ".plaintext {\"**hello**\"}\n",
-        ] {
+    fn compile_plaintext_preserves_targeted_dynamic_content_and_rejects_unsupported_values() {
+        for source in [".plaintext {.pair {a} {b}}\n", ".plaintext {1..2}\n"] {
             let (result, source_id) = compile_source(source);
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
@@ -3109,6 +3217,10 @@ mod tests {
             );
             assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
         }
+
+        let (result, _) = compile_source(".plaintext {\"**hello**\"}\n");
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "hello");
     }
 
     #[test]
@@ -3164,6 +3276,26 @@ mod tests {
             assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
             assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
             assert!(result.diagnostics[0].primary.is_some(), "{source:?}");
+            assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
+        }
+
+        let dynamic_content = ".var {markup} {.string {\"**hello**\"}}\n.plaintext {.markup}\n";
+        let (result, _) = compile_source(dynamic_content);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "hello");
+
+        let static_content = ".plaintext {.string {\"**hello**\"}}\n";
+        let (result, _) = compile_source(static_content);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "**hello**");
+
+        for source in [
+            ".var {number} {2}\n.plaintext {.number}\n",
+            ".var {boolean} {true}\n.plaintext {.boolean}\n",
+        ] {
+            let (result, _) = compile_source(source);
+            assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+            assert_eq!(result.diagnostics[0].code, "E3001", "{source:?}");
             assert!(result.ir.nodes.is_empty(), "{source:?}: {result:?}");
         }
     }
