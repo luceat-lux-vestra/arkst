@@ -6,7 +6,9 @@ use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
 #[cfg(test)]
 use crate::value_conversion::InvocationNamedArg;
-use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue, ValueOrigin};
+#[cfg(test)]
+use crate::value_conversion::ValueOrigin;
+use crate::value_conversion::{self, InvocationValue, ScalarTarget, ScalarValue};
 use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::{SourceId, SourceSpan};
@@ -20,6 +22,20 @@ type BoundArguments = Vec<Option<InvocationValue>>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BuiltinError {
     pub message: String,
+    pub(crate) conversion: Option<BuiltinConversionFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BuiltinConversionFailure {
+    pub(crate) parameter: String,
+    pub(crate) error: value_conversion::ConversionError,
+}
+
+impl BuiltinError {
+    fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -510,7 +526,7 @@ pub(crate) fn evaluate_with_origins(
     let bound = plan
         .bind(&candidates, body.as_ref(), fallback_span)
         .map_err(|failure| error(format!("`.{}` {}", builtin.name, failure.message)))?;
-    evaluate_bound(builtin, bound)
+    evaluate_bound(builtin, &bound)
 }
 
 /// Evaluates a builtin after the engine-owned binder has selected every slot.
@@ -518,13 +534,13 @@ pub(crate) fn evaluate_with_origins(
 /// positional/named assignment or argument-count validation.
 pub(crate) fn evaluate_bound(
     builtin: &BuiltinSpec,
-    bound: BoundInvocation<InvocationValue>,
+    bound: &BoundInvocation<InvocationValue>,
 ) -> Result<IrValue, BuiltinError> {
     let arguments = bound
         .slots
-        .into_iter()
+        .iter()
         .map(|slot| match slot {
-            BoundSlot::Explicit { value, .. } => Some(value),
+            BoundSlot::Explicit { value, .. } => Some(value.clone()),
             BoundSlot::Omitted | BoundSlot::Defaulted => None,
         })
         .collect::<BoundArguments>();
@@ -624,8 +640,8 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
-    let text = scalar_string_argument(&value).ok_or_else(|| {
-        error("`.string` requires a scalar value that can adapt to text".to_string())
+    let text = scalar_string_argument_result(&value, "value").map_err(|error| {
+        error.with_message("`.string` requires a scalar value that can adapt to text".to_string())
     })?;
     Ok(IrValue::String(text))
 }
@@ -645,10 +661,12 @@ fn evaluate_concatenate(
         .map(|value| boolean_argument(&value, "if"))
         .transpose()?
         .unwrap_or(true);
-    let a = scalar_string_argument(&a)
-        .ok_or_else(|| error("`.concatenate` argument `a` cannot adapt to text".to_string()))?;
-    let with = scalar_string_argument(&with)
-        .ok_or_else(|| error("`.concatenate` argument `with` cannot adapt to text".to_string()))?;
+    let a = scalar_string_argument_result(&a, "a").map_err(|error| {
+        error.with_message("`.concatenate` argument `a` cannot adapt to text".to_string())
+    })?;
+    let with = scalar_string_argument_result(&with, "with").map_err(|error| {
+        error.with_message("`.concatenate` argument `with` cannot adapt to text".to_string())
+    })?;
     if condition {
         Ok(IrValue::String(format!("{a}{with}")))
     } else {
@@ -664,8 +682,8 @@ fn evaluate_empty_check(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
-    let text = scalar_string_argument(&value).ok_or_else(|| {
-        error(format!(
+    let text = scalar_string_argument_result(&value, "string").map_err(|error| {
+        error.with_message(format!(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
     })?;
@@ -692,10 +710,12 @@ fn evaluate_startswith(
         .map(|value| boolean_argument(&value, "ignorecase"))
         .transpose()?
         .unwrap_or(false);
-    let string = scalar_string_argument(&string)
-        .ok_or_else(|| error("`.startswith` argument `string` cannot adapt to text".to_string()))?;
-    let prefix = scalar_string_argument(&prefix)
-        .ok_or_else(|| error("`.startswith` argument `prefix` cannot adapt to text".to_string()))?;
+    let string = scalar_string_argument_result(&string, "string").map_err(|error| {
+        error.with_message("`.startswith` argument `string` cannot adapt to text".to_string())
+    })?;
+    let prefix = scalar_string_argument_result(&prefix, "prefix").map_err(|error| {
+        error.with_message("`.startswith` argument `prefix` cannot adapt to text".to_string())
+    })?;
     let result = if ignorecase {
         string.to_lowercase().starts_with(&prefix.to_lowercase())
     } else {
@@ -727,14 +747,36 @@ fn numeric_argument(value: &InvocationValue, parameter: &str) -> Result<f32, Bui
 fn numeric_argument_value(value: &InvocationValue, parameter: &str) -> Result<f64, BuiltinError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Number) {
         Ok(ScalarValue::Number(number)) => Ok(number),
-        Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be numeric"))),
+        Ok(_) => Err(conversion_error(
+            format!("`{parameter}` must be numeric"),
+            parameter,
+            value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Number,
+            },
+        )),
+        Err(error) => Err(conversion_error(
+            format!("`{parameter}` must be numeric"),
+            parameter,
+            error,
+        )),
     }
 }
 
 fn boolean_argument(value: &InvocationValue, parameter: &str) -> Result<bool, BuiltinError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {
         Ok(ScalarValue::Boolean(value)) => Ok(value),
-        Ok(_) | Err(_) => Err(error(format!("`{parameter}` must be boolean"))),
+        Ok(_) => Err(conversion_error(
+            format!("`{parameter}` must be boolean"),
+            parameter,
+            value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Boolean,
+            },
+        )),
+        Err(error) => Err(conversion_error(
+            format!("`{parameter}` must be boolean"),
+            parameter,
+            error,
+        )),
     }
 }
 
@@ -941,9 +983,9 @@ fn evaluate_numeric(
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires numeric arguments")))?;
     let first = numeric_argument(&first, builtin.signature.parameter_names[0])
-        .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
+        .map_err(|error| error.with_message(format!("`.{name}` requires numeric arguments")))?;
     let second = numeric_argument(&second, builtin.signature.parameter_names[1])
-        .map_err(|_| error(format!("`.{name}` requires numeric arguments")))?;
+        .map_err(|error| error.with_message(format!("`.{name}` requires numeric arguments")))?;
 
     let result = match builtin.kind {
         BuiltinKind::Sum => first + second,
@@ -966,7 +1008,7 @@ fn evaluate_unary_numeric(
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
     let value = numeric_argument(&value, "x")
-        .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
+        .map_err(|error| error.with_message(format!("`.{name}` requires a numeric argument")))?;
 
     match builtin.kind {
         BuiltinKind::Abs => Ok(numeric_result(value.abs())),
@@ -988,7 +1030,7 @@ fn evaluate_transcendental(
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one numeric argument")))?;
     let value = numeric_argument(&value, "x")
-        .map_err(|_| error(format!("`.{name}` requires a numeric argument")))?;
+        .map_err(|error| error.with_message(format!("`.{name}` requires a numeric argument")))?;
     Ok(numeric_result(deterministic_transcendental(
         builtin.kind,
         value,
@@ -1032,8 +1074,9 @@ fn evaluate_truncate(
     let decimals = arguments
         .remove(0)
         .ok_or_else(|| error("`.truncate` requires an integer `decimals` argument".to_string()))?;
-    let value = numeric_argument(&value, "x")
-        .map_err(|_| error("`.truncate` requires a numeric `x` argument".to_string()))?;
+    let value = numeric_argument(&value, "x").map_err(|error| {
+        error.with_message("`.truncate` requires a numeric `x` argument".to_string())
+    })?;
     let decimals = integer_argument(&decimals, "decimals")?;
     if decimals < 0 {
         return Err(error(
@@ -1066,7 +1109,7 @@ fn evaluate_round(
         .remove(0)
         .ok_or_else(|| error("`.round` requires one numeric argument".to_string()))?;
     let value = numeric_argument(&value, "x")
-        .map_err(|_| error("`.round` requires a numeric argument".to_string()))?;
+        .map_err(|error| error.with_message("`.round` requires a numeric argument".to_string()))?;
     Ok(IrValue::Number(f64::from(kotlin_round_to_int(value))))
 }
 
@@ -1124,20 +1167,34 @@ fn number_value_is_integral(value: f32) -> bool {
 /// converted to an Int.
 fn integer_argument(value: &InvocationValue, parameter: &str) -> Result<i32, BuiltinError> {
     let number = match &value.value {
-        IrValue::Number(value) => *value as f32,
+        IrValue::Number(value) => Some(*value as f32),
         IrValue::String(text) | IrValue::Identifier(text)
-            if value.origin == ValueOrigin::Dynamic =>
+            if value.origin == crate::value_conversion::ValueOrigin::Dynamic =>
         {
             text.parse::<i32>()
                 .map(|value| value as f32)
                 .ok()
                 .or_else(|| text.parse::<f32>().ok())
-                .ok_or_else(|| error(format!("`{parameter}` must be an integer")))?
         }
-        _ => return Err(error(format!("`{parameter}` must be an integer"))),
+        _ => None,
+    };
+    let Some(number) = number else {
+        return Err(conversion_error(
+            format!("`{parameter}` must be an integer"),
+            parameter,
+            value_conversion::ConversionError::UnsupportedValue {
+                target: value_conversion::ConversionTarget::Integer,
+            },
+        ));
     };
     if !number_value_is_integral(number) {
-        return Err(error(format!("`{parameter}` must be an integer")));
+        return Err(conversion_error(
+            format!("`{parameter}` must be an integer"),
+            parameter,
+            value_conversion::ConversionError::InvalidText {
+                target: value_conversion::ConversionTarget::Integer,
+            },
+        ));
     }
     Ok(kotlin_float_to_int(number))
 }
@@ -1169,8 +1226,8 @@ fn evaluate_case(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error(format!("`.{name}` requires one string argument")))?;
-    let text = scalar_string_argument(&value).ok_or_else(|| {
-        error(format!(
+    let text = scalar_string_argument_result(&value, "string").map_err(|error| {
+        error.with_message(format!(
             "`.{name}` requires a scalar value that can adapt to text"
         ))
     })?;
@@ -1192,21 +1249,55 @@ fn evaluate_case(
 }
 
 fn error(message: String) -> BuiltinError {
-    BuiltinError { message }
+    BuiltinError {
+        message,
+        conversion: None,
+    }
+}
+
+fn conversion_error(
+    message: String,
+    parameter: &str,
+    error: value_conversion::ConversionError,
+) -> BuiltinError {
+    BuiltinError {
+        message,
+        conversion: Some(BuiltinConversionFailure {
+            parameter: parameter.to_string(),
+            error,
+        }),
+    }
 }
 
 /// Applies the context-free String conversion boundary used by scalar string
 /// builtins. Rich content remains the separate `.plaintext`/native-content
 /// path; it is not silently serialized or reparsed here.
-pub(crate) fn scalar_string_argument(value: &InvocationValue) -> Option<String> {
+pub(crate) fn scalar_string_conversion(
+    value: &InvocationValue,
+) -> Result<String, value_conversion::ConversionError> {
     match value_conversion::convert_scalar_with_origin(value, ScalarTarget::String) {
-        Ok(ScalarValue::String(value)) => Some(value),
-        Ok(_) => None,
-        Err(_) => match &value.value {
-            IrValue::Content(nodes) => plain_scalar_content_argument(nodes),
-            _ => None,
+        Ok(ScalarValue::String(value)) => Ok(value),
+        Ok(_) => Err(value_conversion::ConversionError::UnsupportedValue {
+            target: value_conversion::ConversionTarget::String,
+        }),
+        Err(error) => match &value.value {
+            IrValue::Content(nodes) => plain_scalar_content_argument(nodes).ok_or(error),
+            _ => Err(error),
         },
     }
+}
+
+fn scalar_string_argument_result(
+    value: &InvocationValue,
+    parameter: &str,
+) -> Result<String, BuiltinError> {
+    scalar_string_conversion(value).map_err(|error| {
+        conversion_error(
+            format!("`{parameter}` cannot adapt to text"),
+            parameter,
+            error,
+        )
+    })
 }
 
 fn plain_scalar_content_argument(nodes: &[IrNode]) -> Option<String> {
@@ -1228,7 +1319,7 @@ fn plain_scalar_content_argument(nodes: &[IrNode]) -> Option<String> {
 /// Applies the existing structural text boundary used by resource and native
 /// content consumers. Plain paragraph content is adapted structurally; rich
 /// content is not rendered or round-tripped through a backend. Scalar builtin
-/// conversion uses [`scalar_string_argument`] instead.
+/// conversion uses [`scalar_string_conversion`] instead.
 pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
     match value {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
