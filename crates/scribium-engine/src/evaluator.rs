@@ -8187,6 +8187,19 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        let structural_candidates =
+            structural_candidates(ordered_args, positional_args, named_args, *span);
+        let body_shape = body.map(|body| body_candidate_shape(body, *span));
+        let structural_plan = match self.preflight_extension_binding(
+            binding,
+            &structural_candidates,
+            body_shape.as_ref(),
+            *span,
+            diagnostics,
+        ) {
+            Ok(plan) => plan,
+            Err(()) => return CallOutcome::Failed,
+        };
         let candidates = match self.evaluate_invocation_candidates(
             ordered_args,
             positional_args,
@@ -8209,7 +8222,66 @@ impl Evaluator {
             *span,
             diagnostics,
             context,
+            structural_plan.as_ref(),
         )
+    }
+
+    fn preflight_extension_binding(
+        &self,
+        binding: &FunctionBinding,
+        candidates: &[Candidate<()>],
+        body: Option<&Candidate<()>>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Option<BindingPlan>, ()> {
+        let Some(extension) = binding.extension.as_ref() else {
+            return Err(());
+        };
+        let metadata = lambda_binding_metadata(&binding.parameters);
+        match &binding.parameters {
+            LambdaParameters::Explicit(_) => {
+                let structural_plan = match invocation_binder::plan(
+                    &metadata,
+                    candidates,
+                    None,
+                    BodyPolicy::AllowSeparate,
+                    span,
+                ) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return Err(());
+                    }
+                };
+                if let Err(error) = invocation_binder::plan(
+                    &metadata,
+                    candidates,
+                    body,
+                    extension.body_policy.binder_policy(),
+                    span,
+                ) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return Err(());
+                }
+                Ok(Some(structural_plan))
+            }
+            LambdaParameters::Implicit => {
+                if let Err(error) = invocation_binder::validate_implicit(candidates) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return Err(());
+                }
+                Ok(None)
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -8222,57 +8294,29 @@ impl Evaluator {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        structural_plan: Option<&BindingPlan>,
     ) -> CallOutcome {
         let Some(extension) = binding.extension.as_ref() else {
             return CallOutcome::Failed;
         };
-        let metadata = lambda_binding_metadata(&binding.parameters);
-        let structural_plan = match binding.parameters {
-            LambdaParameters::Explicit(_) => match invocation_binder::plan(
-                &metadata,
-                &candidate_shapes(&candidates),
-                None,
-                BodyPolicy::AllowSeparate,
-                span,
-            ) {
-                Ok(plan) => Some(plan),
-                Err(error) => {
-                    diagnostics.push(binding_diagnostic_with_message(
-                        error,
-                        callable_binding_message,
-                    ));
-                    return CallOutcome::Failed;
-                }
-            },
-            LambdaParameters::Implicit => {
-                if let Err(error) =
-                    invocation_binder::validate_implicit(&candidate_shapes(&candidates))
-                {
-                    diagnostics.push(binding_diagnostic_with_message(
-                        error,
-                        callable_binding_message,
-                    ));
-                    return CallOutcome::Failed;
-                }
-                None
+        let owned_structural_plan;
+        let structural_plan = match structural_plan {
+            Some(plan) => Some(plan),
+            None => {
+                let body_shape = body.map(|body| owned_body_candidate_shape(body, span));
+                owned_structural_plan = match self.preflight_extension_binding(
+                    binding,
+                    &candidate_shapes(&candidates),
+                    body_shape.as_ref(),
+                    span,
+                    diagnostics,
+                ) {
+                    Ok(plan) => plan,
+                    Err(()) => return CallOutcome::Failed,
+                };
+                owned_structural_plan.as_ref()
             }
         };
-        let body_shape = body.map(|body| owned_body_candidate_shape(body, span));
-        if matches!(binding.parameters, LambdaParameters::Explicit(_)) {
-            if let Err(error) = invocation_binder::plan(
-                &metadata,
-                &candidate_shapes(&candidates),
-                body_shape.as_ref(),
-                extension.body_policy.binder_policy(),
-                span,
-            ) {
-                diagnostics.push(binding_diagnostic_with_message(
-                    error,
-                    callable_binding_message,
-                ));
-                return CallOutcome::Failed;
-            }
-        }
 
         let body_value = match extension_body_value(
             self,
@@ -8318,9 +8362,8 @@ impl Evaluator {
                     };
                     *last = body_value.value.clone();
                     if let Some(parameter) = binding.parameters.last_name() {
-                        let body_span = body
-                            .map(|body| call_body_source_span(owned_body_as_call_body(body), span))
-                            .unwrap_or(span);
+                        let body_span =
+                            extension_body_candidate_span(extension.body_policy, body, span);
                         forwarded.push(Candidate::Named {
                             name: parameter.name.clone(),
                             name_span: parameter.name_span,
@@ -8344,9 +8387,7 @@ impl Evaluator {
                     values.push(body_value.value.clone());
                     forwarded.push(Candidate::Positional {
                         value: body_value.clone(),
-                        span: body
-                            .map(|body| call_body_source_span(owned_body_as_call_body(body), span))
-                            .unwrap_or(span),
+                        span: extension_body_candidate_span(extension.body_policy, body, span),
                     });
                 }
                 (values, forwarded)
@@ -8453,6 +8494,36 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
+        let structural_candidates =
+            structural_candidates(ordered_args, positional_args, named_args, *span);
+        let structural_plan = match &state.parameters {
+            LambdaParameters::Explicit(_) => match invocation_binder::plan(
+                &lambda_binding_metadata(&state.parameters),
+                &structural_candidates,
+                None,
+                BodyPolicy::Reject,
+                *span,
+            ) {
+                Ok(plan) => Some(plan),
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            LambdaParameters::Implicit => {
+                if let Err(error) = invocation_binder::validate_implicit(&structural_candidates) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                None
+            }
+        };
         let candidates = match self.evaluate_invocation_candidates(
             ordered_args,
             positional_args,
@@ -8468,22 +8539,8 @@ impl Evaluator {
         };
         let overrides = match &state.parameters {
             LambdaParameters::Explicit(_) => {
-                let metadata = lambda_binding_metadata(&state.parameters);
-                let plan = match invocation_binder::plan(
-                    &metadata,
-                    &candidate_shapes(&candidates),
-                    None,
-                    BodyPolicy::Reject,
-                    *span,
-                ) {
-                    Ok(plan) => plan,
-                    Err(error) => {
-                        diagnostics.push(binding_diagnostic_with_message(
-                            error,
-                            callable_binding_message,
-                        ));
-                        return CallOutcome::Failed;
-                    }
+                let Some(plan) = structural_plan.as_ref() else {
+                    return CallOutcome::Failed;
                 };
                 let bound = match plan.bind(&candidates, None, *span) {
                     Ok(bound) => bound,
@@ -8497,18 +8554,7 @@ impl Evaluator {
                 };
                 forwarded_extension_candidates(&bound)
             }
-            LambdaParameters::Implicit => {
-                if let Err(error) =
-                    invocation_binder::validate_implicit(&candidate_shapes(&candidates))
-                {
-                    diagnostics.push(binding_diagnostic_with_message(
-                        error,
-                        callable_binding_message,
-                    ));
-                    return CallOutcome::Failed;
-                }
-                candidates
-            }
+            LambdaParameters::Implicit => candidates,
         };
         let merged = merge_extension_candidates(&state.forwarded, &overrides, &state.parameters);
         self.invoke_function_target(
@@ -8550,6 +8596,7 @@ impl Evaluator {
                         span,
                         diagnostics,
                         context,
+                        None,
                     )
                 } else {
                     let body = body.map(owned_body_as_call_body);
@@ -12999,6 +13046,22 @@ fn merge_extension_candidates(
         merged.insert(name, candidate.clone());
     }
     merged.into_values().collect()
+}
+
+fn extension_body_candidate_span(
+    policy: ExtensionBodyPolicy,
+    body: Option<&OwnedCallBody>,
+    call_span: SourceSpan,
+) -> SourceSpan {
+    if matches!(policy, ExtensionBodyPolicy::BindRaw) {
+        // `IrRawBody::span` is local to its source. The regular native
+        // BindRaw path uses the containing call span for the generated
+        // candidate, so an extension forwarding the same raw body must keep
+        // that diagnostic provenance.
+        return call_span;
+    }
+    body.map(|body| call_body_source_span(owned_body_as_call_body(body), call_span))
+        .unwrap_or(call_span)
 }
 
 #[allow(clippy::too_many_arguments)]

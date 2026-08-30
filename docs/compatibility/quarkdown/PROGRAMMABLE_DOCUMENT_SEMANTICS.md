@@ -415,11 +415,12 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 
 ## Normative evaluator rules
 
-The observable order is: callee resolution; inline argument evaluation in
-source order; named/positional binding; origin-aware conversion; definition
-capture restoration; caller-visible lookup overlay; invocation child-scope
-creation; parameter installation; lazy body decision; call execution; typed
-result construction; document-state commit; result materialization.
+The observable order is: callee resolution; ordered candidate-shape
+validation and structural binding; inline argument evaluation in source
+order; origin-aware conversion; definition capture restoration; caller-visible
+lookup overlay; invocation child-scope creation; parameter installation; lazy
+body decision; call execution; typed result construction; document-state
+commit; result materialization.
 
 The bounded scope implementation keeps these layers explicit:
 
@@ -454,6 +455,13 @@ declaration-time parent link plus a scope-local evaluator overlay. `where` recei
 parameters as the wrapper; a false condition delegates to the current parent
 target, while a true condition invokes the wrapper body with `.super` available
 only in that active extension context.
+
+The wrapper and `.super` override paths perform structural preflight against
+the target parameter contract before evaluating argument expressions. They then
+reuse the evaluated binding plan for conversion and invocation, so an invalid
+named argument takes precedence over a failing nested argument in both ordinary
+and extended calls. Raw `BindRaw` body forwarding retains the regular native
+call-span provenance while keeping the raw-body span source-local.
 
 Repeated extensions insert a new wrapper immediately before the existing parent
 link, so declaration order is preserved and each `.super` call reaches the

@@ -179,6 +179,51 @@ fn extension_condition_failure_is_not_double_wrapped() {
 }
 
 #[test]
+fn regular_and_extended_calls_preflight_shape_before_failing_argument_evaluation() {
+    let sources = [
+        ".function {plain}\n    value:\n    .value\n\n.plain unknown:{.sum {true} {2}}\n",
+        ".function {extended}\n    value:\n    .value\n\n.extend {extended}\n    value:\n    .super\n\n.extended unknown:{.sum {true} {2}}\n",
+    ];
+
+    for source in sources {
+        let result = compile_source(source);
+        assert_eq!(result.ir.nodes.len(), 0, "{source:?}: {result:?}");
+        assert_eq!(result.diagnostics.len(), 1, "{source:?}: {result:?}");
+        assert!(
+            result.diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("unknown named parameter `unknown`"),
+            "{source:?}: {result:?}"
+        );
+        assert!(
+            !result.diagnostics[0]
+                .message
+                .contains("requires numeric arguments"),
+            "{source:?}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn super_preflights_shape_before_failing_override_evaluation() {
+    let source = ".function {base}\n    value:\n    .value\n\n.extend {base}\n    value:\n    .super unknown:{.sum {true} {2}}\n\n.base {ok}\n";
+    let result = compile_source(source);
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert!(
+        result.diagnostics[0]
+            .message
+            .to_ascii_lowercase()
+            .contains("unknown named parameter `unknown`"),
+        "{result:?}"
+    );
+    assert!(!result.diagnostics[0]
+        .message
+        .contains("requires numeric arguments"));
+}
+
+#[test]
 fn native_target_extension_keeps_native_precedence_and_body_policy() {
     let result =
         compile_source(".extend {lowercase}\n    .super::uppercase\n\n.lowercase {hello}\n");
@@ -200,6 +245,41 @@ fn native_extension_raw_body_stays_lazy_and_is_not_reparsed_as_nested_state() {
     let result = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     assert_eq!(paragraph_texts(&result), [".state {changed}", "before"]);
+}
+
+#[test]
+fn direct_and_extended_native_raw_body_calls_keep_call_span_provenance() {
+    let direct_source = ".sum {1}\n    invalid\n";
+    let (direct, direct_id) = compile_source_with_id(direct_source);
+    assert_eq!(direct.diagnostics.len(), 1, "{direct:?}");
+    assert!(direct.diagnostics[0]
+        .message
+        .contains("requires numeric arguments"));
+    let direct_start = direct_source.find(".sum").expect("direct call span");
+    assert_eq!(
+        direct.diagnostics[0].primary,
+        Some(SourceSpan::new(
+            direct_id,
+            direct_start,
+            direct_source.find("invalid").expect("direct body") + "invalid".len(),
+        ))
+    );
+
+    let extended_source = ".extend {sum}\n    .super\n\n.sum {1}\n    invalid\n";
+    let (extended, extended_id) = compile_source_with_id(extended_source);
+    assert_eq!(extended.diagnostics.len(), 1, "{extended:?}");
+    assert!(extended.diagnostics[0]
+        .message
+        .contains("requires numeric arguments"));
+    let extended_start = extended_source.rfind(".sum").expect("extended call span");
+    assert_eq!(
+        extended.diagnostics[0].primary,
+        Some(SourceSpan::new(
+            extended_id,
+            extended_start,
+            extended_source.find("invalid").expect("extended body") + "invalid".len(),
+        ))
+    );
 }
 
 #[test]
