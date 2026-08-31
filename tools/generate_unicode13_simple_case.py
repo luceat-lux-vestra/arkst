@@ -1,16 +1,50 @@
 #!/usr/bin/env python3
 """Generate the engine's Unicode 13 simple case mapping ranges.
 
-The input is the official Unicode 13.0.0 UnicodeData.txt.  The generated
+The input is the official Unicode 13.0.0 UnicodeData.txt. The generator
+verifies the exact pinned input before reading any case mappings. The generated
 range tables preserve only mappings present in the file's simple uppercase,
-simple lowercase, and simple titlecase columns; full mappings are
-intentionally not inferred.
+simple lowercase, and simple titlecase columns; full mappings are intentionally
+not inferred.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
+
+
+UNICODE_DATA_SIZE = 1_851_767
+# Published Unicode 13.0.0 UnicodeData.txt SHA-256 fingerprint prefix.
+UNICODE_DATA_SHA256_PREFIX = "bdbffbbfc8ad"
+# Exact Git blob identity of ICU 67.1's vendored Unicode 13.0.0 UnicodeData.txt.
+# Git blob hashes cover both the byte length and complete file contents.
+UNICODE_DATA_GIT_BLOB_SHA1 = "e22f967bbab8f2477a43533a334e21ebc0728eda"
+
+
+def validate_source(source: Path) -> None:
+    data = source.read_bytes()
+    if len(data) != UNICODE_DATA_SIZE:
+        raise ValueError(
+            f"{source}: expected UnicodeData.txt byte length {UNICODE_DATA_SIZE}, "
+            f"got {len(data)}"
+        )
+
+    sha256 = hashlib.sha256(data).hexdigest()
+    if not sha256.startswith(UNICODE_DATA_SHA256_PREFIX):
+        raise ValueError(
+            f"{source}: expected UnicodeData.txt SHA-256 prefix "
+            f"{UNICODE_DATA_SHA256_PREFIX}, got {sha256}"
+        )
+
+    git_blob = f"blob {len(data)}\0".encode("ascii") + data
+    git_blob_sha1 = hashlib.sha1(git_blob).hexdigest()
+    if git_blob_sha1 != UNICODE_DATA_GIT_BLOB_SHA1:
+        raise ValueError(
+            f"{source}: expected pinned UnicodeData.txt Git blob SHA-1 "
+            f"{UNICODE_DATA_GIT_BLOB_SHA1}, got {git_blob_sha1}"
+        )
 
 
 def read_mapping(source: Path, field: int) -> list[tuple[int, int]]:
@@ -68,6 +102,7 @@ def rust_ranges(name: str, mapping: list[tuple[int, int]]) -> str:
 
 
 def generate(source: Path) -> str:
+    validate_source(source)
     uppercase = read_mapping(source, 12)
     lowercase = read_mapping(source, 13)
     titlecase = read_mapping(source, 14)
