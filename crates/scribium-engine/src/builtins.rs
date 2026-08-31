@@ -4,6 +4,12 @@ use crate::invocation_binder::BodyPolicy;
 #[cfg(test)]
 use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
+use crate::unicode_case::{
+    simple_lowercase as unicode_simple_lowercase,
+    simple_titlecase_mapping as unicode_simple_titlecase_mapping,
+    simple_uppercase as unicode_simple_uppercase,
+    UNICODE_VERSION as SIMPLE_MAPPING_UNICODE_VERSION,
+};
 #[cfg(test)]
 use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
@@ -13,7 +19,7 @@ use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::SourceId;
 use scribium_source::SourceSpan;
-use unicode_case_mapping::{to_lowercase, to_titlecase, to_uppercase, UNICODE_VERSION};
+use unicode_case_mapping::{to_lowercase, to_uppercase, UNICODE_VERSION};
 
 // Quarkdown v2.5.1 is pinned to a JVM 17 runtime, whose Character mappings
 // use Unicode 13.0. Keep the generated mapping table aligned with that
@@ -24,6 +30,9 @@ const _: () = {
     assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
     assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
     assert!(UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
 };
 
 #[cfg(test)]
@@ -796,47 +805,49 @@ fn kotlin_char_equals(left: char, right: char) -> bool {
     left_upper == right_upper || simple_lowercase(left_upper) == simple_lowercase(right_upper)
 }
 
-/// The Unicode mapping crate exposes full mappings, while Kotlin's
-/// `uppercaseChar` is explicitly one-to-one. A multi-code-point uppercase
-/// mapping therefore has no simple uppercase equivalent and retains the
-/// original character for this comparison.
+/// Kotlin/JVM's `uppercaseChar` and `lowercaseChar` use Unicode's simple
+/// mappings. These are kept separate from the full mappings used by the
+/// string case operations: U+1F80, for example, has a two-scalar full
+/// uppercase mapping but a one-scalar simple uppercase mapping.
 fn simple_uppercase(character: char) -> char {
-    let mapping = to_uppercase(character);
-    if mapping[0] != 0 && mapping[1] == 0 {
-        if let Some(mapped) = char::from_u32(mapping[0]) {
-            return mapped;
-        }
-    }
-    character
+    unicode_simple_uppercase(character)
 }
 
-/// Return the one-to-one lowercase mapping used by Kotlin's
-/// `lowercaseChar`. The pinned Unicode data has one invariant multi-code-point
-/// lowercase mapping (`İ`), whose first scalar is its JVM simple mapping.
 fn simple_lowercase(character: char) -> char {
-    let mapping = to_lowercase(character);
-    if mapping[0] != 0 {
-        if let Some(mapped) = char::from_u32(mapping[0]) {
-            return mapped;
-        }
-    }
-    character
+    unicode_simple_lowercase(character)
 }
 
 /// Apply Kotlin's `Char.titlecase()` mapping, preserving the distinction from
 /// uppercase and retaining all original trailing scalars at the caller.
 fn unicode_titlecase(character: char) -> String {
-    if let Some(mapped) = unicode_mapping_to_string(&to_titlecase(character)) {
-        if !mapped.is_empty() {
-            return mapped;
+    let uppercase = unicode_mapping_to_string(&to_uppercase(character))
+        .filter(|mapping| !mapping.is_empty())
+        .unwrap_or_else(|| character.to_string());
+    if uppercase.chars().count() > 1 {
+        // This is Kotlin's exact Char.titlecaseImpl exception for U+0149.
+        // Its full uppercase mapping is "ʼN" and Kotlin preserves that
+        // mapping instead of lowercasing the trailing N.
+        if character == '\u{0149}' {
+            return uppercase;
         }
-    }
-    if let Some(mapped) = unicode_mapping_to_string(&to_uppercase(character)) {
-        if !mapped.is_empty() {
-            return mapped;
+
+        let mut result = String::new();
+        if let Some(first) = uppercase.chars().next() {
+            result.push(first);
+            for character in uppercase.chars().skip(1) {
+                result.push_str(
+                    &unicode_mapping_to_string(&to_lowercase(character))
+                        .filter(|mapping| !mapping.is_empty())
+                        .unwrap_or_else(|| character.to_string()),
+                );
+            }
         }
+        return result;
     }
-    character.to_string()
+
+    unicode_simple_titlecase_mapping(character)
+        .unwrap_or_else(|| unicode_simple_uppercase(character))
+        .to_string()
 }
 
 fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
@@ -1479,7 +1490,9 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
-        BuiltinBodyPolicy, PINNED_JVM_UNICODE_VERSION, UNICODE_VERSION,
+        simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
+        to_uppercase, BuiltinBodyPolicy, PINNED_JVM_UNICODE_VERSION,
+        SIMPLE_MAPPING_UNICODE_VERSION, UNICODE_VERSION,
     };
     use crate::value_conversion::InvocationValue;
     use scribium_ir::{
@@ -2544,6 +2557,10 @@ mod tests {
             ("ǳabc", "ǲabc"),
             ("ßabc", "Ssabc"),
             ("ﬀabc", "Ffabc"),
+            ("ᾀabc", "Ἀιabc"),
+            // Kotlin preserves this historical Char.titlecaseImpl exception
+            // instead of lowercasing the trailing N of the full uppercase.
+            ("ŉabc", "ʼNabc"),
             ("é—ßabc", "É—ßabc"),
             // `replaceFirstChar` receives a UTF-16 Char, so a supplementary
             // first character is unchanged by the pinned Kotlin contract.
@@ -2598,6 +2615,21 @@ mod tests {
             UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
             "case mappings must stay on the pinned JDK 17 Unicode version"
         );
+        assert_eq!(
+            SIMPLE_MAPPING_UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
+            "simple case mappings must stay on the pinned JDK 17 Unicode version"
+        );
+    }
+
+    #[test]
+    fn simple_case_mappings_are_not_inferred_from_full_mappings() {
+        assert_eq!(unicode_simple_uppercase('\u{1F80}'), '\u{1F88}');
+        assert_eq!(unicode_simple_lowercase('\u{1F88}'), '\u{1F80}');
+        assert_eq!(
+            to_uppercase('\u{1F80}'),
+            [0x1F08, 0x0399, 0],
+            "U+1F80 must retain its distinct full uppercase mapping"
+        );
     }
 
     #[test]
@@ -2613,6 +2645,9 @@ mod tests {
             ("Hi", "HELLO", true, false),
             ("Σigma", "ς", true, true),
             ("Σιγμα", "ςΙ", true, true),
+            // U+1F80 has distinct full and simple uppercase mappings. JVM
+            // Character comparison uses the simple U+1F88 mapping.
+            ("ᾀabc", "ᾈ", true, true),
             ("ſound", "S", true, true),
             ("İstanbul", "i", true, true),
             // The JVM's regionMatches path compares supplementary code points

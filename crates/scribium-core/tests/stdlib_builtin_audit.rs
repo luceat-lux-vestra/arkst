@@ -295,10 +295,10 @@ fn representative_scalar_and_optionality_contracts_are_observable() {
 
 #[test]
 fn unicode_string_semantics_are_observable_through_the_public_facade() {
-    let source = ".capitalize {ǳabc}\n.startswith {Σigma} {ς} ignorecase:{true}\n.capitalize {ꟑabc}\n.startswith {ꟑabc} {Ꟑ} ignorecase:{true}\n";
+    let source = ".capitalize {ǳabc}\n.capitalize {ᾀabc}\n.startswith {Σigma} {ς} ignorecase:{true}\n.startswith {ᾀabc} {ᾈ} ignorecase:{true}\n.capitalize {ꟑabc}\n.startswith {ꟑabc} {Ꟑ} ignorecase:{true}\n";
     let (result, source_id) = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
-    assert_eq!(output_text(&result), "ǲabc\ntrue\nꟑabc\nfalse");
+    assert_eq!(output_text(&result), "ǲabc\nἈιabc\ntrue\ntrue\nꟑabc\nfalse");
 
     for node in &result.ir.nodes {
         let IrNode::Paragraph { content, span } = node else {

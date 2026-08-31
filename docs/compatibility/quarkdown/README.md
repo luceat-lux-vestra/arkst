@@ -910,9 +910,9 @@ copied or translated.
 The String/text evidence row includes the currently observable bounded
 implementation. The canonical #151 classification is now
 `SUPPORTED_SEMANTICS` for `.capitalize` and `.startswith`: pinned JDK
-17-compatible Unicode 13.0 titlecase and Kotlin/JVM-compatible character-wise
-case-insensitive matching are reproduced by the engine without normalization
-or locale/global state.
+17-compatible Kotlin `Char.titlecase()` over Unicode 13.0 full/simple mapping
+data and Kotlin/JVM-compatible character-wise case-insensitive matching are
+reproduced by the engine without normalization or locale/global state.
 Independent evidence is in `crates/scribium-core/tests/stdlib_builtin_audit.rs`;
 #172 closes this bounded string-semantics slice. The row remains partially
 compatible overall because `.plaintext` and broader DynamicValue/output
@@ -1028,8 +1028,9 @@ left-to-right value flow; an unimplemented chain callee reports a source-backed
 conversion contracts are evidenced, not complete DynamicValue compatibility.
 `.capitalize` and `.startswith(ignorecase:true)` are **Semantically supported**
 at the bounded scalar boundary after #172: the engine uses pinned JDK
-17-compatible Unicode 13.0 titlecase data and Kotlin/JVM-compatible
-character-wise case matching. The
+17-compatible Kotlin `Char.titlecase()` semantics over Unicode 13.0
+full/simple mapping data and Kotlin/JVM-compatible character-wise case
+matching. The
 broader string family remains bounded because `.plaintext` and other
 DynamicValue/output contracts are not promoted by this slice.
 **User-defined functions are also semantically supported for the evidenced
