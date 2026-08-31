@@ -320,6 +320,37 @@ fn extensions_invoked_from_another_callable_keep_nested_super_scope() {
 }
 
 #[test]
+fn extension_body_helper_inherits_the_active_super_callable() {
+    let source = ".function {greet}\n    name:\n    base .name\n\n.function {delegate}\n    name:\n    .super name:{.name}\n\n.extend {greet}\n    name:\n    wrapped .delegate {.name}\n\n.greet {world}\n";
+    let result = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(paragraph_text(&result), "wrapped base world");
+}
+
+#[test]
+fn nested_extension_replaces_super_and_restores_the_outer_extension() {
+    let source = ".function {greet}\n    name:\n    base .name\n\n.function {callinner}\n    name:\n    .greet {.name}\n\n.function {outer}\n    name:\n    .callinner {.name}\n\n.extend {greet}\n    name:\n    inner .super\n\n.extend {outer}\n    name:\n    outer .callinner {.name}\n    .super\n\n.outer {world}\n";
+    let result = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(
+        paragraph_texts(&result),
+        ["outer inner base world", "inner base world"]
+    );
+}
+
+#[test]
+fn extension_condition_does_not_receive_the_active_super_callable() {
+    let source = ".function {greet}\n    name:\n    base .name\n\n.extend {greet} where:{name: .super}\n    name:\n    extended\n\n.greet {world}\n";
+    let result = compile_source(source);
+    assert!(result.ir.nodes.is_empty(), "{result:?}");
+    assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0]
+        .message
+        .contains("inside an extension"));
+}
+
+#[test]
 fn extension_preserves_recursion_through_the_current_callable_chain() {
     let source = ".function {count}\n    n:\n    .if {.n::equals {0}}\n        done\n    .ifnot {.n::equals {0}}\n        .count {.n::subtract {1}}\n\n.extend {count}\n    n:\n    .super\n\n.count {2}\n";
     let result = compile_source(source);

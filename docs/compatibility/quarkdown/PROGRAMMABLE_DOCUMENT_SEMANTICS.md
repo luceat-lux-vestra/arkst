@@ -459,7 +459,10 @@ old chain without retaining dead overlays or relying on allocation addresses.
 `where` receives the same named
 parameters as the wrapper; a false condition delegates to the current parent
 target, while a true condition invokes the wrapper body with `.super` available
-only in that active extension context.
+only in that active extension context. Ordinary helpers and nested callable
+invocations inherit that dynamic context, nested extensions replace it for
+their body and restore the enclosing context on return, and `where` condition
+lambdas deliberately suppress it.
 
 The wrapper and `.super` override paths perform structural preflight against
 the target parameter contract before evaluating argument expressions. They then

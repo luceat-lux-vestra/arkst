@@ -166,7 +166,9 @@ extension/super row only to `PARTIAL`: it resolves visible source-defined
 callables and regular scalar builtins through the existing evaluator and shared
 binder, preserves target parameter names, supports conditional delegation and
 ordered extension chains, and exposes `.super` only in the active extension
-invocation. It does not claim specialized layout/resource/document-state/native
+invocation. Ordinary helper calls inherit the active dynamic extension context,
+nested extensions replace and then restore it, and condition lambdas do not
+receive the injected `.super`. It does not claim specialized layout/resource/document-state/native
 owners, renderer compatibility, or upstream partial-effects parity.
 
 The implementation keeps extension links and invocation bodies evaluator-owned;

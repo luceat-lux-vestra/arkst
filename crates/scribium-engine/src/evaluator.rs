@@ -195,6 +195,16 @@ struct ExtensionInvocation {
     raw_body: Option<IrRawBody>,
 }
 
+/// Controls whether an ordinary callable invocation receives the active
+/// extension's dynamic `.super` binding. An extension invocation supplies a
+/// replacement binding explicitly; only condition lambdas suppress the
+/// inherited binding, matching their separate upstream invocation context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionContextMode {
+    Inherit,
+    Suppress,
+}
+
 /// The parameter mode of a callable body.
 ///
 /// Explicit parameters retain their source-backed names and optionality.
@@ -7359,6 +7369,43 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        self.invoke_callable_with_extension_mode(
+            callable,
+            arguments,
+            options,
+            diagnostics,
+            caller_context,
+            ExtensionContextMode::Inherit,
+        )
+    }
+
+    fn invoke_callable_without_extension_context(
+        &self,
+        callable: &IrCallable,
+        arguments: Vec<IrValue>,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        self.invoke_callable_with_extension_mode(
+            callable,
+            arguments,
+            options,
+            diagnostics,
+            caller_context,
+            ExtensionContextMode::Suppress,
+        )
+    }
+
+    fn invoke_callable_with_extension_mode(
+        &self,
+        callable: &IrCallable,
+        arguments: Vec<IrValue>,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_context_mode: ExtensionContextMode,
+    ) -> CallOutcome {
         let _depth = match caller_context.enter_evaluation_depth(options.span, diagnostics) {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
@@ -7373,7 +7420,14 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
-        self.invoke_bound_callable(callable, bound, options, diagnostics, caller_context)
+        self.invoke_bound_callable_with_extension_mode(
+            callable,
+            bound,
+            diagnostics,
+            caller_context,
+            None,
+            extension_context_mode,
+        )
     }
 
     fn invoke_bound_callable(
@@ -7384,12 +7438,13 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        self.invoke_bound_callable_with_extension(
+        self.invoke_bound_callable_with_extension_mode(
             callable,
             bound,
             diagnostics,
             caller_context,
             None,
+            ExtensionContextMode::Inherit,
         )
     }
 
@@ -7400,6 +7455,25 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
         extension_invocation: Option<Rc<ExtensionInvocation>>,
+    ) -> CallOutcome {
+        self.invoke_bound_callable_with_extension_mode(
+            callable,
+            bound,
+            diagnostics,
+            caller_context,
+            extension_invocation,
+            ExtensionContextMode::Suppress,
+        )
+    }
+
+    fn invoke_bound_callable_with_extension_mode(
+        &self,
+        callable: &IrCallable,
+        bound: BoundLambdaArguments,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_invocation: Option<Rc<ExtensionInvocation>>,
+        extension_context_mode: ExtensionContextMode,
     ) -> CallOutcome {
         caller_context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
@@ -7417,7 +7491,11 @@ impl Evaluator {
             let invocation_base =
                 EvaluationContext::with_caller_overlay(definition_context, caller_context);
             let mut child = invocation_base.child();
-            child.extension_invocation = extension_invocation;
+            child.extension_invocation =
+                extension_invocation.or_else(|| match extension_context_mode {
+                    ExtensionContextMode::Inherit => caller_context.extension_invocation.clone(),
+                    ExtensionContextMode::Suppress => None,
+                });
             match bound {
                 BoundLambdaArguments::Explicit(values) => {
                     child.set_lambda_scope(LambdaScope::Explicit);
@@ -8500,7 +8578,7 @@ impl Evaluator {
         });
 
         if let Some(condition) = &extension.condition {
-            let condition_result = match self.invoke_callable(
+            let condition_result = match self.invoke_callable_without_extension_context(
                 condition,
                 values.clone(),
                 IterationOptions {
