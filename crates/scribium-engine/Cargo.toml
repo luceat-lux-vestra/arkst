@@ -18,6 +18,7 @@ scribium-source.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 libm.workspace = true
+unicode-case-mapping.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

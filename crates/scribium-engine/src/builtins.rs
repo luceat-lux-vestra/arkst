@@ -13,6 +13,7 @@ use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::SourceId;
 use scribium_source::SourceSpan;
+use unicode_case_mapping::{to_lowercase, to_titlecase, to_uppercase};
 
 #[cfg(test)]
 type Arguments<'a> = &'a [InvocationValue];
@@ -747,11 +748,95 @@ fn evaluate_startswith(
         error.with_message("`.startswith` argument `prefix` cannot adapt to text".to_string())
     })?;
     let result = if ignorecase {
-        string.to_lowercase().starts_with(&prefix.to_lowercase())
+        starts_with_ignore_case(&string, &prefix)
     } else {
         string.starts_with(&prefix)
     };
     Ok(IrValue::Boolean(result))
+}
+
+/// Reproduces the pinned JVM `String.startsWith(prefix, ignoreCase)` contract:
+/// a prefix is compared one Unicode character at a time using the pinned
+/// JVM's simple case relation. For valid UTF-8, this is equivalent to the
+/// JVM's code-point-aware `regionMatches` path. In particular, this does not
+/// apply full-string case conversion or Unicode normalization.
+fn starts_with_ignore_case(string: &str, prefix: &str) -> bool {
+    let mut string_characters = string.chars();
+    for prefix_character in prefix.chars() {
+        let Some(string_character) = string_characters.next() else {
+            return false;
+        };
+        if !kotlin_char_equals(string_character, prefix_character) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Kotlin/JVM's case-insensitive character comparison compares the simple
+/// uppercase forms first, then the simple lowercase forms of those results.
+fn kotlin_char_equals(left: char, right: char) -> bool {
+    if left == right {
+        return true;
+    }
+
+    let left_upper = simple_uppercase(left);
+    let right_upper = simple_uppercase(right);
+    left_upper == right_upper || simple_lowercase(left_upper) == simple_lowercase(right_upper)
+}
+
+/// The Unicode mapping crate exposes full mappings, while Kotlin's
+/// `uppercaseChar` is explicitly one-to-one. A multi-code-point uppercase
+/// mapping therefore has no simple uppercase equivalent and retains the
+/// original character for this comparison.
+fn simple_uppercase(character: char) -> char {
+    let mapping = to_uppercase(character);
+    if mapping[0] != 0 && mapping[1] == 0 {
+        if let Some(mapped) = char::from_u32(mapping[0]) {
+            return mapped;
+        }
+    }
+    character
+}
+
+/// Return the one-to-one lowercase mapping used by Kotlin's
+/// `lowercaseChar`. The pinned Unicode data has one invariant multi-code-point
+/// lowercase mapping (`İ`), whose first scalar is its JVM simple mapping.
+fn simple_lowercase(character: char) -> char {
+    let mapping = to_lowercase(character);
+    if mapping[0] != 0 {
+        if let Some(mapped) = char::from_u32(mapping[0]) {
+            return mapped;
+        }
+    }
+    character
+}
+
+/// Apply Kotlin's `Char.titlecase()` mapping, preserving the distinction from
+/// uppercase and retaining all original trailing scalars at the caller.
+fn unicode_titlecase(character: char) -> String {
+    if let Some(mapped) = unicode_mapping_to_string(&to_titlecase(character)) {
+        if !mapped.is_empty() {
+            return mapped;
+        }
+    }
+    if let Some(mapped) = unicode_mapping_to_string(&to_uppercase(character)) {
+        if !mapped.is_empty() {
+            return mapped;
+        }
+    }
+    character.to_string()
+}
+
+fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
+    let mut result = String::new();
+    for &codepoint in mapping {
+        if codepoint == 0 {
+            break;
+        }
+        result.push(char::from_u32(codepoint)?);
+    }
+    Some(result)
 }
 
 fn evaluate_plaintext(
@@ -1269,7 +1354,14 @@ fn evaluate_case(
             let Some(first) = characters.next() else {
                 return Ok(IrValue::String(text));
             };
-            let mut result = first.to_uppercase().collect::<String>();
+            let mut result = if first.len_utf16() == 1 {
+                unicode_titlecase(first)
+            } else {
+                // Kotlin's `replaceFirstChar` passes the leading UTF-16
+                // surrogate to `Char.titlecase`, which leaves supplementary
+                // input unchanged.
+                first.to_string()
+            };
             result.push_str(characters.as_str());
             result
         }
@@ -2435,6 +2527,24 @@ mod tests {
             .expect("Unicode capitalization should succeed"),
             IrValue::String("Éclair".into())
         );
+        for (input, expected) in [
+            ("hello", "Hello"),
+            ("Hello", "Hello"),
+            ("ǳabc", "ǲabc"),
+            ("ßabc", "Ssabc"),
+            ("ﬀabc", "Ffabc"),
+            ("é—ßabc", "É—ßabc"),
+            // `replaceFirstChar` receives a UTF-16 Char, so a supplementary
+            // first character is unchanged by the pinned Kotlin contract.
+            ("𐐨abc", "𐐨abc"),
+        ] {
+            assert_eq!(
+                evaluate("capitalize", &[IrValue::String(input.into())], &[], false)
+                    .expect("titlecase capitalization should succeed"),
+                IrValue::String(expected.into()),
+                "capitalize({input:?})"
+            );
+        }
         assert_eq!(
             evaluate("isempty", &[IrValue::String(String::new())], &[], false)
                 .expect("empty string should be accepted"),
@@ -2464,6 +2574,47 @@ mod tests {
                 not_empty,
                 IrValue::Boolean(!matches!(empty, IrValue::Boolean(true))),
                 "predicate complement for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn startswith_matches_kotlin_character_case_contract_without_normalization() {
+        for (string, prefix, ignorecase, expected) in [
+            ("Hello", "He", false, true),
+            ("Hello", "he", false, false),
+            ("Hello", "", false, true),
+            ("Hello", "he", true, true),
+            ("Hello", "Ho", true, false),
+            ("Hello", "", true, true),
+            ("Hi", "Hello", false, false),
+            ("Hi", "HELLO", true, false),
+            ("Σigma", "ς", true, true),
+            ("Σιγμα", "ςΙ", true, true),
+            ("ſound", "S", true, true),
+            ("İstanbul", "i", true, true),
+            // The JVM's regionMatches path compares supplementary code points
+            // with simple mappings, without full case-fold expansion.
+            ("𐐀nicode", "𐐨", true, true),
+            // Full case folding would match this, but Kotlin's character-wise
+            // comparison does not expand ß to the two-character string "ss".
+            ("ßeta", "ss", true, false),
+            // Case comparison does not normalize a decomposed prefix to NFC.
+            ("Éclair", "e\u{301}", true, false),
+        ] {
+            assert_eq!(
+                evaluate(
+                    "startswith",
+                    &[
+                        IrValue::String(string.into()),
+                        IrValue::String(prefix.into()),
+                    ],
+                    &[named_arg("ignorecase", IrValue::Boolean(ignorecase))],
+                    false,
+                )
+                .expect("startswith should evaluate"),
+                IrValue::Boolean(expected),
+                "startswith({string:?}, {prefix:?}, ignorecase={ignorecase})"
             );
         }
     }
