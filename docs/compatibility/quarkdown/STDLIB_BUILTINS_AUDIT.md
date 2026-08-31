@@ -208,16 +208,26 @@ The case strategy is pinned in
   is not changed.
 - Evidence/status: existing scalar and content tests cover whitespace
   preservation, Unicode case behavior, conditional concatenation, prefix case
-  handling, conversion errors, and plain-text projection. The six unaffected
-  scalar transforms are SUPPORTED_SEMANTICS. capitalize is PARTIAL because
-  pinned StringCase.Capitalize uses Char::titlecase while Scribium uses
-  char::to_uppercase; for example, ǳ becomes upstream ǲ but current Scribium
-  produces Ǳ. startswith is PARTIAL when ignorecase is true because pinned
-  Kotlin String.startsWith performs character-wise case-insensitive matching,
-  while Scribium lowercases both complete strings first; Greek ς/Σ provides a
-  separating case. plaintext is PARTIAL because the full upstream
+  handling, conversion errors, and plain-text projection. The eight scalar
+  transforms are SUPPORTED_SEMANTICS. `.capitalize` uses the pinned Unicode
+  Kotlin `Char.titlecase()` contract: full uppercase mappings use the first
+  scalar followed by lowercase of the remaining scalars, while one-scalar
+  results use simple titlecase with the JVM uppercase fallback. `.startswith`
+  uses direct Unicode 13 simple upper/lower mappings for Kotlin/JVM-compatible
+  character-wise comparison without whole-string case conversion or
+  normalization. Independent `ǳ`/`ǲ`, `ᾀ`/`Ἀι`, `ŉ`, Greek `ς`/`Σ`, long-s,
+  sharp-s, dotted-I, and decomposed-prefix cases exercise those contracts.
+  plaintext is PARTIAL because the full upstream
   InlineMarkdownContent/body and output contract is broader than the current
   bounded carrier.
+- The engine uses the pinned `unicode-case-mapping = 0.2.0` UCD 13.0 full
+  mapping table plus a generated engine-local UCD 13.0 simple mapping table
+  from `UnicodeData.txt` fields 12–14. This matches the Unicode data used by
+  the pinned Quarkdown JVM 17 runtime and keeps full/simple mappings distinct.
+  Rust stdlib has no titlecase/full mapping API and the existing workspace
+  dependencies provide no suitable implementation. The narrow dependency and
+  generated table are used only by the engine, have no locale or host
+  capability, and compile-time guards reject mapping-version drift.
 
 ### Boolean, comparison, and optionality
 
@@ -481,9 +491,9 @@ materialization E3005 where applicable.
   independently asserts 162 rows, unique names, full-SHA evidence, 60 #151
   rows, 102 cross-owned rows, and canonical status counts. It performs no
   network access, and also compiles representative scalar, optionality,
-  collection/sort, failure, and Unicode string-gap cases through the public
-  Scribium facade. The Unicode cases deliberately record the current output
-  versus the pinned contract; they do not change production semantics.
+  collection/sort, failure, and Unicode string cases through the public
+  Scribium facade, including source provenance for successful and failing
+  calls.
 - Existing engine/evaluator tests are behavior evidence rather than copied
   upstream fixtures: scalar conversion/math/string cases, typed
   Pair/Dictionary/Range/Collection adaptation, access and aggregation,
@@ -503,20 +513,20 @@ separately.
 | #147 status | Count |
 |---|---:|
 | SUPPORTED_END_TO_END | 0 |
-| SUPPORTED_SEMANTICS | 41 |
+| SUPPORTED_SEMANTICS | 43 |
 | PARSED_ONLY | 0 |
-| PARTIAL | 8 |
+| PARTIAL | 6 |
 | UNSUPPORTED | 10 |
 | DEFERRED | 0 |
 | BLOCKED | 0 |
 | UNKNOWN | 0 |
 | NOT_APPLICABLE | 1 |
 
-The eight PARTIAL names are sorted, range, plaintext, capitalize, startswith,
-otherwise, ifpresent, and takeif. The ten UNSUPPORTED names are get, libexists, functionexists,
+The six PARTIAL names are sorted, range, plaintext, otherwise, ifpresent, and
+takeif. The ten UNSUPPORTED names are get, libexists, functionexists,
 libraries, libfunctions, localization, localize, log, debug, and error.
 The one NOT_APPLICABLE inventory row is none because its value taxonomy
-belongs to #149. The 41 SUPPORTED_SEMANTICS rows are bounded engine semantic
+belongs to #149. The 43 SUPPORTED_SEMANTICS rows are bounded engine semantic
 claims; none is promoted to SUPPORTED_END_TO_END.
 
 ## Corrections and reconciliation
@@ -538,10 +548,11 @@ Important corrections:
   remains a #149 value-model boundary, and callback optionality remains #150.
 - sorted is selector/key-based with stable ordering evidence; it is not an
   arbitrary comparator API.
-- capitalize and startswith are PARTIAL rather than SUPPORTED_SEMANTICS:
-  pinned Char::titlecase differs from Scribium char::to_uppercase for ǳ, and
-  pinned Kotlin ignoreCase matching differs from whole-string lowercasing for
-  Greek ς/Σ. These are one bounded Unicode string-semantics follow-up.
+- #172 closes the bounded Unicode string-semantics gap: `.capitalize` now
+  reproduces Kotlin `Char.titlecase()` over pinned Unicode 13.0 full/simple
+  mappings, and `.startswith(ignorecase:true)` now uses the corresponding
+  Kotlin/JVM character-wise simple case comparison. Both rows are promoted to
+  SUPPORTED_SEMANTICS; no end-to-end output claim is added.
 - map and filter are current Scribium extensions, not pinned v2.5.1 stdlib
   declarations.
 - float is a pinned Layout declaration and is #154-owned; it is not a
@@ -565,7 +576,7 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 records the cohesive Unicode string-semantics gap. The four
+Issue #172 closes the cohesive Unicode string-semantics gap. The four
 remaining #151 unsupported families are real pinned gaps with bounded owners:
 [#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for dictionary
 lookup, [#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for
@@ -579,7 +590,8 @@ Existing issues are reused:
   atomicity dependencies;
 - #150 and #169 for callback/control-flow and extend/super;
 - #152, #153, #154, and #155 for the cross-owned public surface.
-- #172 for Unicode titlecase and case-insensitive prefix semantics.
+- #172 for the completed Unicode titlecase and case-insensitive prefix
+  semantics slice.
 
 Remaining implementation questions are the full DynamicValue conversion
 matrix, exact diagnostics/atomicity deltas for currently bounded semantics,
@@ -594,7 +606,7 @@ For #156, the usable reconciliation input is:
 - pinned public surface: 162;
 - #151-owned inventory: 60;
 - cross-owned/excluded: 102;
-- #151 status counts: 41 SUPPORTED_SEMANTICS, 8 PARTIAL,
+- #151 status counts: 43 SUPPORTED_SEMANTICS, 6 PARTIAL,
   10 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
   categories;
 - newly recovered omission: isnone as an explicit general predicate;
@@ -602,5 +614,7 @@ For #156, the usable reconciliation input is:
   #151 implementation;
 - corrected prior ownership/status: get is public but currently unsupported;
   float is #154-owned; map/filter are extensions;
-- new follow-up issue: #172, bounded Unicode string case/prefix semantics;
-- production behavior: unchanged by this audit.
+- completed implementation: #172, bounded Unicode string case/prefix semantics;
+- production behavior: the two audited string semantics are corrected and
+  promoted at the bounded semantic boundary; broader output claims remain
+  unchanged.

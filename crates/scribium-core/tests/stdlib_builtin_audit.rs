@@ -244,14 +244,14 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .iter()
             .filter(|row| row[4] == "SUPPORTED_SEMANTICS")
             .count(),
-        41
+        43
     );
-    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 8);
+    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 6);
     for name in ["capitalize", "startswith"] {
         assert_eq!(
             owned.iter().find(|row| row[0] == name).map(|row| row[4]),
-            Some("PARTIAL"),
-            "Unicode contract gap must remain explicit for {name}"
+            Some("SUPPORTED_SEMANTICS"),
+            "Unicode contract should be complete at the audited semantic boundary for {name}"
         );
     }
     assert_eq!(
@@ -294,22 +294,32 @@ fn representative_scalar_and_optionality_contracts_are_observable() {
 }
 
 #[test]
-fn unicode_string_gaps_are_observable_without_production_changes() {
-    // Pinned StringCase.Capitalize uses replaceFirstChar(Char::titlecase),
-    // while the current Scribium path uses Rust char::to_uppercase().
-    let (capitalize, _) = compile_source(".capitalize {ǳabc}\n");
-    assert!(capitalize.diagnostics.is_empty(), "{capitalize:?}");
-    let current_capitalize = output_text(&capitalize);
-    assert_eq!(current_capitalize, "Ǳabc");
-    assert_ne!(current_capitalize, "ǲabc");
+fn unicode_string_semantics_are_observable_through_the_public_facade() {
+    let source = ".capitalize {ǳabc}\n.capitalize {ᾀabc}\n.startswith {Σigma} {ς} ignorecase:{true}\n.startswith {ᾀabc} {ᾈ} ignorecase:{true}\n.capitalize {ꟑabc}\n.startswith {ꟑabc} {Ꟑ} ignorecase:{true}\n";
+    let (result, source_id) = compile_source(source);
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(output_text(&result), "ǲabc\nἈιabc\ntrue\ntrue\nꟑabc\nfalse");
 
-    // Pinned Strings.startsWith delegates to Kotlin's ignoreCase comparison;
-    // the current Scribium path lowercases both complete strings first.
-    let (startswith, _) = compile_source(".startswith {Σigma} {ς} ignorecase:{true}\n");
-    assert!(startswith.diagnostics.is_empty(), "{startswith:?}");
-    let current_startswith = output_text(&startswith);
-    assert_eq!(current_startswith, "false");
-    assert_ne!(current_startswith, "true");
+    for node in &result.ir.nodes {
+        let IrNode::Paragraph { content, span } = node else {
+            panic!("expected scalar builtin paragraph, got {node:?}");
+        };
+        assert_eq!(span.source_id, source_id);
+        assert!(content.iter().all(|inline| match inline {
+            IrInline::Text { span, .. } => span.source_id == source_id,
+            _ => true,
+        }));
+    }
+
+    let invalid_source = ".startswith {Hello} {he} ignorecase:{maybe}\n";
+    let (failed, source_id) = compile_source(invalid_source);
+    assert_eq!(failed.diagnostics.len(), 1, "{failed:?}");
+    assert_eq!(failed.diagnostics[0].code, "E3001");
+    assert_eq!(
+        failed.diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
+    );
+    assert!(failed.ir.nodes.is_empty(), "{failed:?}");
 }
 
 #[test]

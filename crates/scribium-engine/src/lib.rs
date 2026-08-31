@@ -10,6 +10,7 @@ pub mod builtins;
 pub mod evaluator;
 pub(crate) mod invocation_binder;
 pub(crate) mod locale;
+pub(crate) mod unicode_case;
 pub(crate) mod value_conversion;
 
 /// Deterministic semantic resource limits for one evaluator compilation.

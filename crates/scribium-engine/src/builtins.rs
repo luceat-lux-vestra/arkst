@@ -4,6 +4,12 @@ use crate::invocation_binder::BodyPolicy;
 #[cfg(test)]
 use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
+use crate::unicode_case::{
+    simple_lowercase as unicode_simple_lowercase,
+    simple_titlecase_mapping as unicode_simple_titlecase_mapping,
+    simple_uppercase as unicode_simple_uppercase,
+    UNICODE_VERSION as SIMPLE_MAPPING_UNICODE_VERSION,
+};
 #[cfg(test)]
 use crate::value_conversion::InvocationNamedArg;
 #[cfg(test)]
@@ -13,6 +19,21 @@ use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::SourceId;
 use scribium_source::SourceSpan;
+use unicode_case_mapping::{to_lowercase, to_uppercase, UNICODE_VERSION};
+
+// Quarkdown v2.5.1 is pinned to a JVM 17 runtime, whose Character mappings
+// use Unicode 13.0. Keep the generated mapping table aligned with that
+// contract at compile time rather than allowing a dependency upgrade to
+// silently widen the supported character set.
+const PINNED_JVM_UNICODE_VERSION: (u64, u64, u64) = (13, 0, 0);
+const _: () = {
+    assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
+    assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
+    assert!(UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
+    assert!(SIMPLE_MAPPING_UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
+};
 
 #[cfg(test)]
 type Arguments<'a> = &'a [InvocationValue];
@@ -747,11 +768,97 @@ fn evaluate_startswith(
         error.with_message("`.startswith` argument `prefix` cannot adapt to text".to_string())
     })?;
     let result = if ignorecase {
-        string.to_lowercase().starts_with(&prefix.to_lowercase())
+        starts_with_ignore_case(&string, &prefix)
     } else {
         string.starts_with(&prefix)
     };
     Ok(IrValue::Boolean(result))
+}
+
+/// Reproduces the pinned JVM `String.startsWith(prefix, ignoreCase)` contract:
+/// a prefix is compared one Unicode character at a time using the pinned
+/// JVM's simple case relation. For valid UTF-8, this is equivalent to the
+/// JVM's code-point-aware `regionMatches` path. In particular, this does not
+/// apply full-string case conversion or Unicode normalization.
+fn starts_with_ignore_case(string: &str, prefix: &str) -> bool {
+    let mut string_characters = string.chars();
+    for prefix_character in prefix.chars() {
+        let Some(string_character) = string_characters.next() else {
+            return false;
+        };
+        if !kotlin_char_equals(string_character, prefix_character) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Kotlin/JVM's case-insensitive character comparison compares the simple
+/// uppercase forms first, then the simple lowercase forms of those results.
+fn kotlin_char_equals(left: char, right: char) -> bool {
+    if left == right {
+        return true;
+    }
+
+    let left_upper = simple_uppercase(left);
+    let right_upper = simple_uppercase(right);
+    left_upper == right_upper || simple_lowercase(left_upper) == simple_lowercase(right_upper)
+}
+
+/// Kotlin/JVM's `uppercaseChar` and `lowercaseChar` use Unicode's simple
+/// mappings. These are kept separate from the full mappings used by the
+/// string case operations: U+1F80, for example, has a two-scalar full
+/// uppercase mapping but a one-scalar simple uppercase mapping.
+fn simple_uppercase(character: char) -> char {
+    unicode_simple_uppercase(character)
+}
+
+fn simple_lowercase(character: char) -> char {
+    unicode_simple_lowercase(character)
+}
+
+/// Apply Kotlin's `Char.titlecase()` mapping, preserving the distinction from
+/// uppercase and retaining all original trailing scalars at the caller.
+fn unicode_titlecase(character: char) -> String {
+    let uppercase = unicode_mapping_to_string(&to_uppercase(character))
+        .filter(|mapping| !mapping.is_empty())
+        .unwrap_or_else(|| character.to_string());
+    if uppercase.chars().count() > 1 {
+        // This is Kotlin's exact Char.titlecaseImpl exception for U+0149.
+        // Its full uppercase mapping is "ʼN" and Kotlin preserves that
+        // mapping instead of lowercasing the trailing N.
+        if character == '\u{0149}' {
+            return uppercase;
+        }
+
+        let mut result = String::new();
+        if let Some(first) = uppercase.chars().next() {
+            result.push(first);
+            for character in uppercase.chars().skip(1) {
+                result.push_str(
+                    &unicode_mapping_to_string(&to_lowercase(character))
+                        .filter(|mapping| !mapping.is_empty())
+                        .unwrap_or_else(|| character.to_string()),
+                );
+            }
+        }
+        return result;
+    }
+
+    unicode_simple_titlecase_mapping(character)
+        .unwrap_or_else(|| unicode_simple_uppercase(character))
+        .to_string()
+}
+
+fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
+    let mut result = String::new();
+    for &codepoint in mapping {
+        if codepoint == 0 {
+            break;
+        }
+        result.push(char::from_u32(codepoint)?);
+    }
+    Some(result)
 }
 
 fn evaluate_plaintext(
@@ -1269,7 +1376,14 @@ fn evaluate_case(
             let Some(first) = characters.next() else {
                 return Ok(IrValue::String(text));
             };
-            let mut result = first.to_uppercase().collect::<String>();
+            let mut result = if first.len_utf16() == 1 {
+                unicode_titlecase(first)
+            } else {
+                // Kotlin's `replaceFirstChar` passes the leading UTF-16
+                // surrogate to `Char.titlecase`, which leaves supplementary
+                // input unchanged.
+                first.to_string()
+            };
             result.push_str(characters.as_str());
             result
         }
@@ -1376,7 +1490,9 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
-        BuiltinBodyPolicy,
+        simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
+        to_uppercase, BuiltinBodyPolicy, PINNED_JVM_UNICODE_VERSION,
+        SIMPLE_MAPPING_UNICODE_VERSION, UNICODE_VERSION,
     };
     use crate::value_conversion::InvocationValue;
     use scribium_ir::{
@@ -2435,6 +2551,31 @@ mod tests {
             .expect("Unicode capitalization should succeed"),
             IrValue::String("Éclair".into())
         );
+        for (input, expected) in [
+            ("hello", "Hello"),
+            ("Hello", "Hello"),
+            ("ǳabc", "ǲabc"),
+            ("ßabc", "Ssabc"),
+            ("ﬀabc", "Ffabc"),
+            ("ᾀabc", "Ἀιabc"),
+            // Kotlin preserves this historical Char.titlecaseImpl exception
+            // instead of lowercasing the trailing N of the full uppercase.
+            ("ŉabc", "ʼNabc"),
+            ("é—ßabc", "É—ßabc"),
+            // `replaceFirstChar` receives a UTF-16 Char, so a supplementary
+            // first character is unchanged by the pinned Kotlin contract.
+            ("𐐨abc", "𐐨abc"),
+            // U+A7D0/U+A7D1 were added after Unicode 13. The pinned JDK 17
+            // contract therefore leaves this unmapped character unchanged.
+            ("ꟑabc", "ꟑabc"),
+        ] {
+            assert_eq!(
+                evaluate("capitalize", &[IrValue::String(input.into())], &[], false)
+                    .expect("titlecase capitalization should succeed"),
+                IrValue::String(expected.into()),
+                "capitalize({input:?})"
+            );
+        }
         assert_eq!(
             evaluate("isempty", &[IrValue::String(String::new())], &[], false)
                 .expect("empty string should be accepted"),
@@ -2464,6 +2605,76 @@ mod tests {
                 not_empty,
                 IrValue::Boolean(!matches!(empty, IrValue::Boolean(true))),
                 "predicate complement for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_case_mapping_version_is_pinned_to_jdk_17_data() {
+        assert_eq!(
+            UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
+            "case mappings must stay on the pinned JDK 17 Unicode version"
+        );
+        assert_eq!(
+            SIMPLE_MAPPING_UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
+            "simple case mappings must stay on the pinned JDK 17 Unicode version"
+        );
+    }
+
+    #[test]
+    fn simple_case_mappings_are_not_inferred_from_full_mappings() {
+        assert_eq!(unicode_simple_uppercase('\u{1F80}'), '\u{1F88}');
+        assert_eq!(unicode_simple_lowercase('\u{1F88}'), '\u{1F80}');
+        assert_eq!(
+            to_uppercase('\u{1F80}'),
+            [0x1F08, 0x0399, 0],
+            "U+1F80 must retain its distinct full uppercase mapping"
+        );
+    }
+
+    #[test]
+    fn startswith_matches_kotlin_character_case_contract_without_normalization() {
+        for (string, prefix, ignorecase, expected) in [
+            ("Hello", "He", false, true),
+            ("Hello", "he", false, false),
+            ("Hello", "", false, true),
+            ("Hello", "he", true, true),
+            ("Hello", "Ho", true, false),
+            ("Hello", "", true, true),
+            ("Hi", "Hello", false, false),
+            ("Hi", "HELLO", true, false),
+            ("Σigma", "ς", true, true),
+            ("Σιγμα", "ςΙ", true, true),
+            // U+1F80 has distinct full and simple uppercase mappings. JVM
+            // Character comparison uses the simple U+1F88 mapping.
+            ("ᾀabc", "ᾈ", true, true),
+            ("ſound", "S", true, true),
+            ("İstanbul", "i", true, true),
+            // The JVM's regionMatches path compares supplementary code points
+            // with simple mappings, without full case-fold expansion.
+            ("𐐀nicode", "𐐨", true, true),
+            // Full case folding would match this, but Kotlin's character-wise
+            // comparison does not expand ß to the two-character string "ss".
+            ("ßeta", "ss", true, false),
+            // Case comparison does not normalize a decomposed prefix to NFC.
+            ("Éclair", "e\u{301}", true, false),
+            // U+A7D0/U+A7D1 were added after Unicode 13 and must not acquire
+            // a case pair from a newer mapping table.
+            ("ꟑabc", "Ꟑ", true, false),
+        ] {
+            assert_eq!(
+                evaluate(
+                    "startswith",
+                    &[
+                        IrValue::String(string.into()),
+                        IrValue::String(prefix.into()),
+                    ],
+                    &[named_arg("ignorecase", IrValue::Boolean(ignorecase))],
+                    false,
+                )
+                .expect("startswith should evaluate"),
+                IrValue::Boolean(expected),
+                "startswith({string:?}, {prefix:?}, ignorecase={ignorecase})"
             );
         }
     }
