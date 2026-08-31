@@ -13,7 +13,18 @@ use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::SourceId;
 use scribium_source::SourceSpan;
-use unicode_case_mapping::{to_lowercase, to_titlecase, to_uppercase};
+use unicode_case_mapping::{to_lowercase, to_titlecase, to_uppercase, UNICODE_VERSION};
+
+// Quarkdown v2.5.1 is pinned to a JVM 17 runtime, whose Character mappings
+// use Unicode 13.0. Keep the generated mapping table aligned with that
+// contract at compile time rather than allowing a dependency upgrade to
+// silently widen the supported character set.
+const PINNED_JVM_UNICODE_VERSION: (u64, u64, u64) = (13, 0, 0);
+const _: () = {
+    assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
+    assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
+    assert!(UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
+};
 
 #[cfg(test)]
 type Arguments<'a> = &'a [InvocationValue];
@@ -1468,7 +1479,7 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
-        BuiltinBodyPolicy,
+        BuiltinBodyPolicy, PINNED_JVM_UNICODE_VERSION, UNICODE_VERSION,
     };
     use crate::value_conversion::InvocationValue;
     use scribium_ir::{
@@ -2537,6 +2548,9 @@ mod tests {
             // `replaceFirstChar` receives a UTF-16 Char, so a supplementary
             // first character is unchanged by the pinned Kotlin contract.
             ("𐐨abc", "𐐨abc"),
+            // U+A7D0/U+A7D1 were added after Unicode 13. The pinned JDK 17
+            // contract therefore leaves this unmapped character unchanged.
+            ("ꟑabc", "ꟑabc"),
         ] {
             assert_eq!(
                 evaluate("capitalize", &[IrValue::String(input.into())], &[], false)
@@ -2579,6 +2593,14 @@ mod tests {
     }
 
     #[test]
+    fn unicode_case_mapping_version_is_pinned_to_jdk_17_data() {
+        assert_eq!(
+            UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
+            "case mappings must stay on the pinned JDK 17 Unicode version"
+        );
+    }
+
+    #[test]
     fn startswith_matches_kotlin_character_case_contract_without_normalization() {
         for (string, prefix, ignorecase, expected) in [
             ("Hello", "He", false, true),
@@ -2601,6 +2623,9 @@ mod tests {
             ("ßeta", "ss", true, false),
             // Case comparison does not normalize a decomposed prefix to NFC.
             ("Éclair", "e\u{301}", true, false),
+            // U+A7D0/U+A7D1 were added after Unicode 13 and must not acquire
+            // a case pair from a newer mapping table.
+            ("ꟑabc", "Ꟑ", true, false),
         ] {
             assert_eq!(
                 evaluate(

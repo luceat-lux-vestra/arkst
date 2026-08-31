@@ -63,9 +63,9 @@ insta = "1"
 tempfile = "3"
 rushdown = { git = "https://github.com/yuin/rushdown.git", rev = "e5eb4e4446541ea0ed53111c1b37e779283ff57c", default-features = false, features = ["std", "html-entities"] }
 libm = { version = "0.2.16", default-features = false }
-# Rust stdlib has no Unicode titlecase/full mapping API; this generated UCD
-# table supplies the deterministic scalar mappings required by the engine.
-unicode-case-mapping = "=1.0.0"
+# Rust stdlib has no Unicode titlecase/full mapping API; this generated UCD 13
+# table matches the JDK 17 Unicode data used by the pinned Quarkdown runtime.
+unicode-case-mapping = "=0.2.0"
 typst = "0.15.1"
 typst-syntax = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }

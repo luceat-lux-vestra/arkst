@@ -217,11 +217,12 @@ The case strategy is pinned in
   those contracts. plaintext is PARTIAL because the full upstream
   InlineMarkdownContent/body and output contract is broader than the current
   bounded carrier.
-- The engine uses the pinned, dependency-free `unicode-case-mapping = 1.0.0`
-  UCD table because Rust stdlib has no titlecase/full mapping API and the
-  existing workspace dependencies provide no suitable implementation. The
-  narrow dependency is used only by the engine and has no locale or host
-  capability.
+- The engine uses the pinned, dependency-free `unicode-case-mapping = 0.2.0`
+  UCD 13.0 table, matching the Unicode data used by the pinned Quarkdown JVM
+  17 runtime. Rust stdlib has no titlecase/full mapping API and the existing
+  workspace dependencies provide no suitable implementation. The narrow
+  dependency is used only by the engine, has no locale or host capability, and
+  the engine has a compile-time guard against mapping-version drift.
 
 ### Boolean, comparison, and optionality
 
