@@ -177,8 +177,8 @@ precedence, failure effects, and source-backed deterministic diagnostics.
 
 The primary #147 statuses are conservative: the bounded callable, scope,
 parameter, `.let`, evaluation, chain, conditional, iteration,
-optionality/callback, collection, precedence, failure, and diagnostic rows are
-`PARTIAL`; `.node` and `.extend`/`.super` are `UNSUPPORTED`; document-state
+optionality/callback, collection, precedence, failure, diagnostic, and
+extension/super rows are `PARTIAL`; `.node` remains `UNSUPPORTED`; document-state
 separation is `NOT_APPLICABLE` to #150. No row is promoted to
 `SUPPORTED_END_TO_END` by this audit. The existing #61/#131 evidence remains
 valid for its bounded foundation but does not establish full v2.5.1
@@ -186,10 +186,10 @@ compatibility.
 
 The audit reuses #148/#158–#164 for grammar/frontend boundaries and
 #149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
-does not create duplicate builtin or test issues. The only new cohesive
-semantic follow-up is [#169](https://github.com/luceat-lux-vestra/scribium/issues/169)
-for engine-owned `.extend`/`.super` semantics; implementation ordering follows
-the dependency bands in [#156 reconciliation](RECONCILIATION.md).
+does not create duplicate builtin or test issues. The bounded engine-owned
+`.extend`/`.super` implementation is tracked by
+[#169](https://github.com/luceat-lux-vestra/scribium/issues/169); broader target
+and output coverage follows the dependency bands in [#156 reconciliation](RECONCILIATION.md).
 
 ## v2.5.1 stdlib surface classification
 
@@ -214,7 +214,8 @@ to complete compatibility.
 | Partially implemented (Unicode string semantics) | `.capitalize`, `.startswith` | The pinned `StringCase.Capitalize` uses `Char::titlecase`, while the current engine uses `char::to_uppercase`; pinned Kotlin `String.startsWith(prefix, ignoreCase)` uses character-wise case-insensitive matching, while current Scribium lowercases complete strings. These gaps are independently evidenced with `ǳ`/`ǲ`/`Ǳ` and Greek `ς`/`Σ`; follow-up #172 is bounded to this string-semantics slice. |
 | Partially implemented (bounded) | `.container` | Empty/body-only containers plus `width`, `height`, and `fullwidth` sizing use the typed Container component and Typst block lowering; deferred style/layout parameters remain explicitly unsupported. |
 | Partially implemented | `.autopagebreak`, `.currentpage`, `.font`, `.footer`, `.formatpagenumber`, `.lastheading`, `.marker`, `.navigation`, `.noautopagebreak`, `.nonumbering`, `.numbering`, `.pageformat`, `.pagemargin`, `.paragraphstyle`, `.resetpagenumber`, `.tableofcontents`, `.texmacro`, `.totalpages` | Project/front-matter or IR metadata provides only a different, partial boundary; remaining function-driven document context and observable layout state are not implemented. |
-| Unsupported | `.allemojis`, `.bibliography`, `.box`, `.cite`, `.clip`, `.code`, `.codespan`, `.collapse`, `.debug`, `.emoji`, `.error`, `.extend`, `.figure`, `.filetree`, `.float`, `.fragment`, `.fullspan`, `.functionexists`, `.get`, `.heading`, `.icon`, `.image`, `.keybinding`, `.libraries`, `.libexists`, `.libfunctions`, `.link`, `.localization`, `.localize`, `.log`, `.loremipsum`, `.math`, `.match`, `.mermaid`, `.numbered`, `.pagebreak`, `.paragraph`, `.ref`, `.slides`, `.speakernote`, `.subdocumentgraph`, `.table`, `.tablebyrows`, `.tablecolumn`, `.tablecolumns`, `.tablecompute`, `.tablefilter`, `.tablesort`, `.text`, `.textcollapse`, `.todo`, `.xychart` | The call may be preserved or parsed, but no approved evaluator/backend-neutral semantic implementation exists. `.text`, `.codespan`, `.clip`, `.float`, `.fullspan`, and the remaining component/layout families remain separate compatibility work; the bounded `.row`/`.column`/`.grid`, `.center`, `.align`, `.landscape`, and `.container` slices are classified above. |
+| Partially implemented (bounded evaluator) | `.extend`, `.super` | Source-defined callables and regular scalar builtins resolve through the existing evaluator and shared binder/conversion path. Target parameter names, conditional delegation, chained parent links, nested dynamic `.super` inheritance/replacement, scope-local link lifetime, source-backed failures, and #167 savepoint rollback are independently tested in `crates/scribium-core/tests/quarkdown_function_extension.rs`. Specialized native owners, complete failure-effect parity, and rendered output remain outside this evaluator-only slice. |
+| Unsupported | `.allemojis`, `.bibliography`, `.box`, `.cite`, `.clip`, `.code`, `.codespan`, `.collapse`, `.debug`, `.emoji`, `.error`, `.figure`, `.filetree`, `.float`, `.fragment`, `.fullspan`, `.functionexists`, `.get`, `.heading`, `.icon`, `.image`, `.keybinding`, `.libraries`, `.libexists`, `.libfunctions`, `.link`, `.localization`, `.localize`, `.log`, `.loremipsum`, `.math`, `.match`, `.mermaid`, `.numbered`, `.pagebreak`, `.paragraph`, `.ref`, `.slides`, `.speakernote`, `.subdocumentgraph`, `.table`, `.tablebyrows`, `.tablecolumn`, `.tablecolumns`, `.tablecompute`, `.tablefilter`, `.tablesort`, `.text`, `.textcollapse`, `.todo`, `.xychart` | The call may be preserved or parsed, but no approved evaluator/backend-neutral semantic implementation exists. `.text`, `.codespan`, `.clip`, `.float`, `.fullspan`, and the remaining component/layout families remain separate compatibility work; the bounded `.row`/`.column`/`.grid`, `.center`, `.align`, `.landscape`, and `.container` slices are classified above. |
 | Unsupported (explicit ownership) | `.node` | Public `Flow.kt` `@QFunction`; #150 records only its programmable value-to-content and lazy-body boundary, while Node/Markdown representation, materialization, and backend/output fidelity belong to #154. No Scribium `.node` evaluator path or conformance claim exists. |
 | Intentionally deferred | `.csv`, `.css`, `.cssproperties`, `.env`, `.filename`, `.htmloptions`, `.includeall`, `.listfiles`, `.llmstxt`, `.pathtoroot`, `.subdocument` | Resource families, target-specific options, and process/environment access are explicitly outside this slice or require a separate host/security decision. `.llmstxt` remains deferred per task scope. |
 | Scribium extension | `.map`, `.filter` | Existing typed collection transforms have no corresponding public v2.5.1 `Collection.kt` declarations and are excluded from upstream compatibility counts. |

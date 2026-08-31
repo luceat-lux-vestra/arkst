@@ -70,7 +70,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 /// A resolved variable value stored in the evaluation environment.
 ///
@@ -109,6 +109,7 @@ struct FunctionBinding {
     body: Vec<IrNode>,
     declaration_span: SourceSpan,
     capture: Option<Box<IrCallableCapture>>,
+    extension: Option<Rc<FunctionExtension>>,
 }
 
 impl FunctionBinding {
@@ -120,6 +121,88 @@ impl FunctionBinding {
             capture: self.capture.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ExtensionId(u64);
+
+/// The evaluator-owned link used by a function extension. The wrapper body
+/// remains an ordinary `FunctionBinding`; only its immutable declaration-time
+/// parent target is extra runtime state. Scope-local chain overlays live on
+/// `EvaluationContext`, so chained calls share callable identity without
+/// mutating a link that another invocation may still own.
+#[derive(Debug, Clone, PartialEq)]
+struct FunctionExtension {
+    id: ExtensionId,
+    condition: Option<IrCallable>,
+    super_target: FunctionTarget,
+    body_policy: ExtensionBodyPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionBodyPolicy {
+    Reject,
+    BindRaw,
+    BindEvaluatedContent,
+    AllowSeparate,
+}
+
+impl ExtensionBodyPolicy {
+    fn binder_policy(self) -> BodyPolicy {
+        match self {
+            Self::Reject => BodyPolicy::Reject,
+            Self::BindRaw | Self::BindEvaluatedContent => BodyPolicy::BindFinal,
+            Self::AllowSeparate => BodyPolicy::AllowSeparate,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum FunctionTarget {
+    Binding(Rc<FunctionBinding>),
+    Native(String),
+}
+
+/// A scope-local successor for an extension link. The stable ID is the map
+/// identity; the weak owner prevents an unrelated link from being accepted if
+/// a corrupted or mixed context presents the same ID. The target stays strong
+/// while the link is live so chained wrappers remain callable. Replaced root
+/// bindings explicitly retire their reachable overlays, which breaks that
+/// otherwise unbounded retention chain.
+#[derive(Debug, Clone)]
+struct ExtensionOverlay {
+    owner: Weak<FunctionExtension>,
+    target: FunctionTarget,
+}
+
+/// Source-backed call data retained while an extension body evaluates. The
+/// body is cloned once into an invocation-local `Rc`; it is never reparsed or
+/// used as a transaction snapshot. This lets `.super` preserve the original
+/// caller body without evaluating it before a conditional extension selects
+/// a branch.
+#[derive(Clone)]
+enum OwnedCallBody {
+    Block(Rc<[IrNode]>),
+    Inline(Rc<[IrInline]>),
+}
+
+#[derive(Clone)]
+struct ExtensionInvocation {
+    target: FunctionTarget,
+    parameters: LambdaParameters,
+    forwarded: Vec<Candidate<InvocationValue>>,
+    body: Option<OwnedCallBody>,
+    raw_body: Option<IrRawBody>,
+}
+
+/// Controls whether an ordinary callable invocation receives the active
+/// extension's dynamic `.super` binding. An extension invocation supplies a
+/// replacement binding explicitly; only condition lambdas suppress the
+/// inherited binding, matching their separate upstream invocation context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionContextMode {
+    Inherit,
+    Suppress,
 }
 
 /// The parameter mode of a callable body.
@@ -160,6 +243,13 @@ impl LambdaParameters {
 
     fn from_ir(parameters: Option<Vec<IrParameter>>) -> Self {
         parameters.map_or(Self::Implicit, Self::Explicit)
+    }
+
+    fn last_name(&self) -> Option<&IrParameter> {
+        match self {
+            Self::Explicit(parameters) => parameters.last(),
+            Self::Implicit => None,
+        }
     }
 }
 
@@ -641,8 +731,10 @@ impl Drop for EvaluationDepthGuard {
 struct EvaluationContext<'a> {
     parent: Option<Box<EvaluationContext<'a>>>,
     variables: BTreeMap<String, VariableValue>,
-    functions: BTreeMap<String, FunctionBinding>,
+    functions: BTreeMap<String, Rc<FunctionBinding>>,
+    extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
     lambda_scope: Option<LambdaScope>,
+    extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
@@ -672,6 +764,7 @@ struct ScopeIdentity {
 struct InvocationTransaction {
     savepoints: Vec<InvocationSavepoint>,
     next_scope_key: usize,
+    next_extension_id: u64,
     #[cfg(test)]
     document_state_copy_work: usize,
 }
@@ -684,11 +777,29 @@ struct InvocationSavepoint {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum UndoKey {
-    DocumentState { field: DocumentStateField },
-    Variable { scope: usize, name: String },
-    AssignedVariable { scope: usize, name: String },
-    VariableOwner { scope: usize, name: String },
-    Function { scope: usize, name: String },
+    DocumentState {
+        field: DocumentStateField,
+    },
+    Variable {
+        scope: usize,
+        name: String,
+    },
+    AssignedVariable {
+        scope: usize,
+        name: String,
+    },
+    VariableOwner {
+        scope: usize,
+        name: String,
+    },
+    Function {
+        scope: usize,
+        name: String,
+    },
+    ExtensionTarget {
+        scope: usize,
+        extension: ExtensionId,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -741,7 +852,13 @@ enum InvocationUndo {
         scope: usize,
         name: String,
         journal_floor: Option<usize>,
-        previous: Option<FunctionBinding>,
+        previous: Option<Rc<FunctionBinding>>,
+    },
+    ExtensionTarget {
+        scope: usize,
+        extension: ExtensionId,
+        journal_floor: Option<usize>,
+        previous: Option<ExtensionOverlay>,
     },
 }
 
@@ -765,6 +882,12 @@ impl InvocationUndo {
                 scope: *scope,
                 name: name.clone(),
             },
+            Self::ExtensionTarget {
+                scope, extension, ..
+            } => UndoKey::ExtensionTarget {
+                scope: *scope,
+                extension: *extension,
+            },
         }
     }
 
@@ -775,6 +898,7 @@ impl InvocationUndo {
             | Self::AssignedVariable { scope, .. }
             | Self::VariableOwner { scope, .. }
             | Self::Function { scope, .. } => Some(*scope),
+            Self::ExtensionTarget { scope, .. } => Some(*scope),
         }
     }
 
@@ -785,6 +909,7 @@ impl InvocationUndo {
             | Self::AssignedVariable { journal_floor, .. }
             | Self::VariableOwner { journal_floor, .. }
             | Self::Function { journal_floor, .. } => *journal_floor,
+            Self::ExtensionTarget { journal_floor, .. } => *journal_floor,
         }
     }
 
@@ -798,6 +923,12 @@ impl InvocationTransaction {
         let key = self.next_scope_key;
         self.next_scope_key += 1;
         key
+    }
+
+    fn allocate_extension_id(&mut self) -> Option<ExtensionId> {
+        let id = self.next_extension_id;
+        self.next_extension_id = self.next_extension_id.checked_add(1)?;
+        Some(ExtensionId(id))
     }
 
     fn begin(&mut self, outermost: bool) {
@@ -903,7 +1034,9 @@ impl<'a> EvaluationContext<'a> {
             parent: None,
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
+            extension_targets: BTreeMap::new(),
             lambda_scope: None,
+            extension_invocation: None,
             resources: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
@@ -941,7 +1074,9 @@ impl<'a> EvaluationContext<'a> {
             parent: Some(Box::new(self.clone_scope_tree())),
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
+            extension_targets: BTreeMap::new(),
             lambda_scope: None,
+            extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
@@ -1024,7 +1159,9 @@ impl<'a> EvaluationContext<'a> {
                 .map(|parent| Box::new(parent.clone_scope_tree())),
             variables: self.variables.clone(),
             functions: self.functions.clone(),
+            extension_targets: self.extension_targets.clone(),
             lambda_scope: self.lambda_scope.clone(),
+            extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
@@ -1047,9 +1184,18 @@ impl<'a> EvaluationContext<'a> {
         self.scope_identity.key
     }
 
+    #[cfg(test)]
+    fn extension_target_count(&self) -> usize {
+        self.extension_targets.len()
+    }
+
     fn new_scope_identity(transaction: &Rc<RefCell<InvocationTransaction>>) -> Rc<ScopeIdentity> {
         let key = transaction.borrow_mut().allocate_scope_key();
         Rc::new(ScopeIdentity { key })
+    }
+
+    fn allocate_extension_id(&self) -> Option<ExtensionId> {
+        self.transaction.borrow_mut().allocate_extension_id()
     }
 
     fn should_journal_scope_write(&self) -> bool {
@@ -1154,6 +1300,88 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
+    fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
+        let key = extension.id;
+        self.extension_targets
+            .get(&key)
+            .and_then(|overlay| {
+                overlay
+                    .owner
+                    .upgrade()
+                    .filter(|owner| Rc::ptr_eq(owner, extension))
+                    .map(|_| overlay.target.clone())
+            })
+            .or_else(|| {
+                self.parent
+                    .as_deref()
+                    .map(|parent| parent.get_extension_target(extension))
+            })
+            .unwrap_or_else(|| extension.super_target.clone())
+    }
+
+    fn record_extension_target_before_id(&self, extension: ExtensionId) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::ExtensionTarget { scope, extension };
+        if self.transaction.borrow_mut().first_write(key) {
+            let previous = self.extension_targets.get(&extension).cloned();
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::ExtensionTarget {
+                    scope,
+                    extension,
+                    journal_floor,
+                    previous,
+                });
+        }
+    }
+
+    fn record_extension_target_before(&self, extension: &Rc<FunctionExtension>) {
+        self.record_extension_target_before_id(extension.id);
+    }
+
+    fn set_extension_target(&mut self, extension: &Rc<FunctionExtension>, target: FunctionTarget) {
+        self.record_extension_target_before(extension);
+        self.extension_targets.insert(
+            extension.id,
+            ExtensionOverlay {
+                owner: Rc::downgrade(extension),
+                target,
+            },
+        );
+    }
+
+    fn remove_extension_target(&mut self, extension: ExtensionId) {
+        if self.extension_targets.contains_key(&extension) {
+            self.record_extension_target_before_id(extension);
+            self.extension_targets.remove(&extension);
+        }
+    }
+
+    /// Retires the overlays that make an old root binding reach its chained
+    /// wrappers. Function replacement is the lifecycle boundary: after it,
+    /// the old root is no longer visible from this scope, so retaining those
+    /// overlays would keep the old chain alive indefinitely.
+    fn retire_extension_chain(&mut self, root: &Rc<FunctionBinding>) {
+        let mut current = FunctionTarget::Binding(Rc::clone(root));
+        let mut extension_ids = BTreeSet::new();
+        while let FunctionTarget::Binding(binding) = current {
+            let Some(extension) = binding.extension.as_ref() else {
+                break;
+            };
+            if !extension_ids.insert(extension.id) {
+                break;
+            }
+            current = self.get_extension_target(extension);
+        }
+        for extension in extension_ids {
+            self.remove_extension_target(extension);
+        }
+    }
+
     fn restore_undo(&mut self, undo: InvocationUndo) -> bool {
         if let Some(scope) = undo.scope() {
             if self.scope_key() != scope {
@@ -1202,6 +1430,18 @@ impl<'a> EvaluationContext<'a> {
                 }
                 None => {
                     self.functions.remove(&name);
+                }
+            },
+            InvocationUndo::ExtensionTarget {
+                extension,
+                previous,
+                ..
+            } => match previous {
+                Some(previous) => {
+                    self.extension_targets.insert(extension, previous);
+                }
+                None => {
+                    self.extension_targets.remove(&extension);
                 }
             },
         }
@@ -1334,16 +1574,23 @@ impl<'a> EvaluationContext<'a> {
         declaration_span: SourceSpan,
         capture: Option<Box<IrCallableCapture>>,
     ) {
+        let binding = Rc::new(FunctionBinding {
+            parameters,
+            body,
+            declaration_span,
+            capture,
+            extension: None,
+        });
+        self.replace_function_binding(name, binding);
+    }
+
+    fn replace_function_binding(&mut self, name: String, binding: Rc<FunctionBinding>) {
+        let previous = self.functions.get(&name).cloned();
         self.record_function_before(&name);
-        self.functions.insert(
-            name,
-            FunctionBinding {
-                parameters,
-                body,
-                declaration_span,
-                capture,
-            },
-        );
+        if let Some(previous) = previous.as_ref() {
+            self.retire_extension_chain(previous);
+        }
+        self.functions.insert(name, binding);
     }
 
     fn capture_snapshot(&self) -> IrCallableCapture {
@@ -1368,7 +1615,7 @@ impl<'a> EvaluationContext<'a> {
     fn collect_bindings(
         &self,
         variables: &mut BTreeMap<String, IrValue>,
-        functions: &mut BTreeMap<String, FunctionBinding>,
+        functions: &mut BTreeMap<String, Rc<FunctionBinding>>,
     ) {
         if let Some(parent) = self.parent.as_deref() {
             parent.collect_bindings(variables, functions);
@@ -1381,6 +1628,13 @@ impl<'a> EvaluationContext<'a> {
         functions.extend(self.functions.clone());
     }
 
+    fn collect_extension_targets(&self, targets: &mut BTreeMap<ExtensionId, ExtensionOverlay>) {
+        if let Some(parent) = self.parent.as_deref() {
+            parent.collect_extension_targets(targets);
+        }
+        targets.extend(self.extension_targets.clone());
+    }
+
     fn from_capture(capture: &IrCallableCapture) -> Self {
         let mut context = Self::new();
         for variable in &capture.variables {
@@ -1389,12 +1643,13 @@ impl<'a> EvaluationContext<'a> {
         for function in &capture.functions {
             context.functions.insert(
                 function.name.clone(),
-                FunctionBinding {
+                Rc::new(FunctionBinding {
                     parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
                     body: function.callable.body.clone(),
                     declaration_span: function.callable.span,
                     capture: function.callable.capture.clone(),
-                },
+                    extension: None,
+                }),
             );
         }
         context
@@ -1407,7 +1662,9 @@ impl<'a> EvaluationContext<'a> {
     fn with_caller_overlay(definition_context: Self, caller_context: &Self) -> Self {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
+        let mut extension_targets = BTreeMap::new();
         caller_context.collect_bindings(&mut variables, &mut functions);
+        caller_context.collect_extension_targets(&mut extension_targets);
         let mut forwarded_variable_owners = BTreeSet::new();
         caller_context.collect_variable_owners(&mut forwarded_variable_owners);
         let journal_floor = caller_context
@@ -1422,7 +1679,9 @@ impl<'a> EvaluationContext<'a> {
                 .map(|(name, value)| (name, VariableValue::from_evaluated_value(value)))
                 .collect(),
             functions,
+            extension_targets,
             lambda_scope: caller_context.visible_lambda_scope(),
+            extension_invocation: caller_context.extension_invocation.clone(),
             // Runtime/compiler state is intentionally not copied into this
             // lookup-only layer. Document state is the one explicit shared
             // exception required by the document-state contract.
@@ -1663,7 +1922,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     /// Looks up a function binding through the visible scope chain.
-    fn get_function(&self, name: &str) -> Option<&FunctionBinding> {
+    fn get_function(&self, name: &str) -> Option<&Rc<FunctionBinding>> {
         self.functions.get(name).or_else(|| {
             self.parent
                 .as_deref()
@@ -2551,6 +2810,22 @@ impl Evaluator {
         ) {
             return outcome;
         }
+        // Quarkdown injects `.super` only into the active extension body. A
+        // source-defined callable with this name remains ordinary and must
+        // be resolved through the normal function ownership path outside an
+        // extension invocation.
+        if name == "super" && context.extension_invocation.is_some() {
+            return self.evaluate_super_call(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+            );
+        }
         if let Some(result) = context.get_implicit_parameter(name) {
             return match result {
                 Ok(value) => CallOutcome::Value(value),
@@ -2559,6 +2834,14 @@ impl Evaluator {
                     CallOutcome::Failed
                 }
             };
+        }
+        if name == "super" && context.get_function(name).is_none() {
+            diagnostics.push(extension_error(
+                "`.super` is only available inside an extension body".to_string(),
+                *span,
+                None,
+            ));
+            return CallOutcome::Failed;
         }
 
         let native_binding_plan = match self.preflight_native_binding(
@@ -2605,6 +2888,20 @@ impl Evaluator {
             } else {
                 CallOutcome::Value(IrValue::Content(Vec::new()))
             };
+        }
+
+        if name == "extend" && context.get_function(name).is_none() {
+            return self.evaluate_extend(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+            );
         }
 
         let source_defined_shadowable_document_state = matches!(
@@ -2694,12 +2991,13 @@ impl Evaluator {
         // keeps its existing precedence.
         if matches!(name, "foreach" | "repeat") {
             if let Some(binding) = context.get_function(name).cloned() {
-                return self.evaluate_user_function(
+                return self.evaluate_function_binding(
                     &binding,
                     ordered_args,
                     positional_args,
                     named_args,
                     body,
+                    raw_body,
                     span,
                     diagnostics,
                     context,
@@ -2797,12 +3095,13 @@ impl Evaluator {
         // not handled by an earlier native branch. Iteration shadowing is
         // resolved explicitly above because its inline body is contextual.
         if let Some(binding) = context.get_function(name).cloned() {
-            return self.evaluate_user_function(
+            return self.evaluate_function_binding(
                 &binding,
                 ordered_args,
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -2989,93 +3288,112 @@ impl Evaluator {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
-            let evaluated_body = match builtin.body_policy {
-                builtins::BuiltinBodyPolicy::Reject => None,
-                builtins::BuiltinBodyPolicy::BindRaw => {
-                    if let Some(call_body) = body {
-                        let Some(raw_body) = raw_body else {
-                            diagnostics.push(chain_evaluation_error(
-                                "This body conversion requires source-backed raw body text"
-                                    .to_string(),
-                                call_body_source_span(call_body, *span),
-                            ));
-                            return CallOutcome::Failed;
-                        };
-                        let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body)
-                        else {
-                            diagnostics.push(chain_evaluation_error(
-                                "This body conversion requires a valid source-backed body span"
-                                    .to_string(),
-                                call_body_source_span(call_body, *span),
-                            ));
-                            return CallOutcome::Failed;
-                        };
-                        Some(Candidate::Positional {
-                            value: InvocationValue::dynamic_value(IrValue::String(body_text)),
-                            // The raw body span is local to `raw_body.source`.
-                            // Binding diagnostics must use the call's source
-                            // provenance, especially when this call came from
-                            // a dynamically reparsed Markdown value.
-                            span: *span,
-                        })
-                    } else {
-                        None
-                    }
-                }
-                builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
-                    if let Some(call_body) = body {
-                        let body =
-                            match self.evaluate_call_body(call_body, span, diagnostics, context) {
-                                CallOutcome::Value(value) => value,
-                                outcome => return outcome,
-                            };
-                        Some(Candidate::Positional {
-                            value: InvocationValue::static_value(body),
-                            span: call_body_source_span(call_body, *span),
-                        })
-                    } else {
-                        None
-                    }
-                }
-            };
-            let bound =
-                match binding_plan.bind(&evaluated_candidates, evaluated_body.as_ref(), *span) {
-                    Ok(bound) => bound,
-                    Err(error) => {
-                        diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
-                        return CallOutcome::Failed;
-                    }
-                };
-            let bound =
-                match self.convert_builtin_targets(builtin, bound, *span, diagnostics, context) {
-                    Ok(bound) => bound,
-                    Err(outcome) => return outcome,
-                };
-            return match builtins::evaluate_bound(builtin, bound) {
-                Ok(value) => CallOutcome::Value(value),
-                Err(error) => {
-                    if let Some(conversion) = error.conversion {
-                        diagnostics.push(conversion_failure_diagnostic(
-                            value_conversion::ConversionFailure::new(
-                                conversion.error,
-                                conversion.candidate_span,
-                                Some(conversion.parameter),
-                                conversion.parameter_span,
-                                *span,
-                            ),
-                            Some(error.message.as_str()),
-                        ));
-                    } else {
-                        diagnostics.push(chain_evaluation_error(error.message, *span));
-                    }
-                    CallOutcome::Failed
-                }
-            };
+            return self.evaluate_builtin_with_candidates(
+                builtin,
+                binding_plan,
+                evaluated_candidates,
+                body,
+                raw_body,
+                *span,
+                diagnostics,
+                context,
+            );
         }
 
         // Ordinary output context preserves unresolved calls. A chain wrapper
         // converts this outcome into an explicit source-backed E3001 instead.
         CallOutcome::Unresolved
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_builtin_with_candidates(
+        &self,
+        builtin: &builtins::BuiltinSpec,
+        binding_plan: &BindingPlan,
+        candidates: Vec<Candidate<InvocationValue>>,
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let body_value = match builtin.body_policy {
+            builtins::BuiltinBodyPolicy::Reject => None,
+            builtins::BuiltinBodyPolicy::BindRaw => {
+                if let Some(call_body) = body {
+                    let Some(raw_body) = raw_body else {
+                        diagnostics.push(chain_evaluation_error(
+                            "This body conversion requires source-backed raw body text".to_string(),
+                            call_body_source_span(call_body, span),
+                        ));
+                        return CallOutcome::Failed;
+                    };
+                    let Some(body_text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                        diagnostics.push(chain_evaluation_error(
+                            "This body conversion requires a valid source-backed body span"
+                                .to_string(),
+                            call_body_source_span(call_body, span),
+                        ));
+                        return CallOutcome::Failed;
+                    };
+                    Some(Candidate::Positional {
+                        value: InvocationValue::dynamic_value(IrValue::String(body_text)),
+                        // `IrRawBody::span` is local to its source. Binding
+                        // diagnostics use the containing call span, matching
+                        // the ordinary builtin invocation path.
+                        span,
+                    })
+                } else {
+                    None
+                }
+            }
+            builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+                if let Some(call_body) = body {
+                    let body = match self.evaluate_call_body(call_body, &span, diagnostics, context)
+                    {
+                        CallOutcome::Value(value) => value,
+                        outcome => return outcome,
+                    };
+                    Some(Candidate::Positional {
+                        value: InvocationValue::static_value(body),
+                        span: call_body_source_span(call_body, span),
+                    })
+                } else {
+                    None
+                }
+            }
+        };
+        let bound = match binding_plan.bind(&candidates, body_value.as_ref(), span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let bound = match self.convert_builtin_targets(builtin, bound, span, diagnostics, context) {
+            Ok(bound) => bound,
+            Err(outcome) => return outcome,
+        };
+        match builtins::evaluate_bound(builtin, bound) {
+            Ok(value) => CallOutcome::Value(value),
+            Err(error) => {
+                if let Some(conversion) = error.conversion {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            conversion.error,
+                            conversion.candidate_span,
+                            Some(conversion.parameter),
+                            conversion.parameter_span,
+                            span,
+                        ),
+                        Some(error.message.as_str()),
+                    ));
+                } else {
+                    diagnostics.push(chain_evaluation_error(error.message, span));
+                }
+                CallOutcome::Failed
+            }
+        }
     }
 
     /// Applies target-driven conversion after structural binding and after
@@ -7051,6 +7369,43 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        self.invoke_callable_with_extension_mode(
+            callable,
+            arguments,
+            options,
+            diagnostics,
+            caller_context,
+            ExtensionContextMode::Inherit,
+        )
+    }
+
+    fn invoke_callable_without_extension_context(
+        &self,
+        callable: &IrCallable,
+        arguments: Vec<IrValue>,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        self.invoke_callable_with_extension_mode(
+            callable,
+            arguments,
+            options,
+            diagnostics,
+            caller_context,
+            ExtensionContextMode::Suppress,
+        )
+    }
+
+    fn invoke_callable_with_extension_mode(
+        &self,
+        callable: &IrCallable,
+        arguments: Vec<IrValue>,
+        options: IterationOptions,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_context_mode: ExtensionContextMode,
+    ) -> CallOutcome {
         let _depth = match caller_context.enter_evaluation_depth(options.span, diagnostics) {
             Ok(depth) => depth,
             Err(outcome) => return outcome,
@@ -7065,7 +7420,14 @@ impl Evaluator {
             Ok(bound) => bound,
             Err(outcome) => return outcome,
         };
-        self.invoke_bound_callable(callable, bound, options, diagnostics, caller_context)
+        self.invoke_bound_callable_with_extension_mode(
+            callable,
+            bound,
+            diagnostics,
+            caller_context,
+            None,
+            extension_context_mode,
+        )
     }
 
     fn invoke_bound_callable(
@@ -7075,6 +7437,43 @@ impl Evaluator {
         _options: IterationOptions,
         diagnostics: &mut Vec<Diagnostic>,
         caller_context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        self.invoke_bound_callable_with_extension_mode(
+            callable,
+            bound,
+            diagnostics,
+            caller_context,
+            None,
+            ExtensionContextMode::Inherit,
+        )
+    }
+
+    fn invoke_bound_callable_with_extension(
+        &self,
+        callable: &IrCallable,
+        bound: BoundLambdaArguments,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_invocation: Option<Rc<ExtensionInvocation>>,
+    ) -> CallOutcome {
+        self.invoke_bound_callable_with_extension_mode(
+            callable,
+            bound,
+            diagnostics,
+            caller_context,
+            extension_invocation,
+            ExtensionContextMode::Suppress,
+        )
+    }
+
+    fn invoke_bound_callable_with_extension_mode(
+        &self,
+        callable: &IrCallable,
+        bound: BoundLambdaArguments,
+        diagnostics: &mut Vec<Diagnostic>,
+        caller_context: &mut EvaluationContext<'_>,
+        extension_invocation: Option<Rc<ExtensionInvocation>>,
+        extension_context_mode: ExtensionContextMode,
     ) -> CallOutcome {
         caller_context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
@@ -7092,6 +7491,11 @@ impl Evaluator {
             let invocation_base =
                 EvaluationContext::with_caller_overlay(definition_context, caller_context);
             let mut child = invocation_base.child();
+            child.extension_invocation =
+                extension_invocation.or_else(|| match extension_context_mode {
+                    ExtensionContextMode::Inherit => caller_context.extension_invocation.clone(),
+                    ExtensionContextMode::Suppress => None,
+                });
             match bound {
                 BoundLambdaArguments::Explicit(values) => {
                     child.set_lambda_scope(LambdaScope::Explicit);
@@ -7695,6 +8099,890 @@ impl Evaluator {
                 span: *span,
                 allow_destructuring: false,
             },
+            diagnostics,
+            context,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_function_binding(
+        &self,
+        binding: &FunctionBinding,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        implicit_argument: Option<InvocationValue>,
+    ) -> CallOutcome {
+        if binding.extension.is_some() {
+            self.evaluate_extension_call(
+                binding,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                raw_body,
+                span,
+                diagnostics,
+                context,
+            )
+        } else {
+            self.evaluate_user_function(
+                binding,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                implicit_argument,
+            )
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_extend(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let Some(body) = body else {
+            diagnostics.push(extension_error(
+                "`.extend` requires a non-empty wrapper body".to_string(),
+                *span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        let CallBody::Block(body_nodes) = body else {
+            diagnostics.push(extension_error(
+                "`.extend` is block-only and requires a wrapper body".to_string(),
+                call_body_source_span(body, *span),
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        if body_nodes.is_empty() {
+            diagnostics.push(extension_error(
+                "`.extend` requires a non-empty wrapper body".to_string(),
+                *span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            None,
+            None,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit {
+            value: target_value,
+            span: target_span,
+        }) = bound.slots.first()
+        else {
+            diagnostics.push(extension_error(
+                "`.extend` requires a callable target name".to_string(),
+                *span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        let target_name = match &target_value.value {
+            IrValue::Identifier(name) | IrValue::String(name)
+                if is_valid_normal_call_name(name) =>
+            {
+                name.clone()
+            }
+            _ => {
+                diagnostics.push(extension_error(
+                    "`.extend` target must be a normal callable name".to_string(),
+                    *target_span,
+                    None,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(existing_target) = resolve_function_target(&target_name, context) else {
+            diagnostics.push(extension_error(
+                format!("Cannot extend `{target_name}` because no callable target is visible"),
+                *target_span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        let Some((original_parameters, body_policy)) =
+            function_target_contract(&existing_target, *target_span)
+        else {
+            diagnostics.push(extension_error(
+                format!("Cannot extend `{target_name}` because its callable contract is invalid"),
+                *target_span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        let wrapper_parameters = extension_wrapper_parameters(&original_parameters, *span);
+        let target_names = lambda_parameter_names(&original_parameters);
+
+        if let Some(parameters) = lambda_parameters {
+            if let Some(parameter) = parameters
+                .iter()
+                .find(|parameter| !target_names.contains(&parameter.name))
+            {
+                diagnostics.push(extension_parameter_error(
+                    format!(
+                        "Extension parameter `{}` is not part of `{target_name}`",
+                        parameter.name
+                    ),
+                    parameter.span,
+                    *target_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            let mut seen = BTreeSet::new();
+            if let Some(parameter) = parameters
+                .iter()
+                .find(|parameter| !seen.insert(parameter.name.as_str()))
+            {
+                diagnostics.push(extension_parameter_error(
+                    format!("Duplicate extension parameter `{}`", parameter.name),
+                    parameter.span,
+                    *target_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+
+        let condition = match bound.slots.get(1) {
+            Some(BoundSlot::Explicit { value, span }) => match &value.value {
+                IrValue::Callable(callable) => {
+                    if let Some(parameters) = callable.parameters.as_deref() {
+                        if let Some(parameter) = parameters
+                            .iter()
+                            .find(|parameter| !target_names.contains(&parameter.name))
+                        {
+                            diagnostics.push(extension_parameter_error(
+                                format!(
+                                    "Extension condition parameter `{}` is not part of `{target_name}`",
+                                    parameter.name
+                                ),
+                                parameter.span,
+                                *span,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    }
+                    let mut condition = callable.clone();
+                    condition.parameters = wrapper_parameters.to_ir();
+                    Some(condition)
+                }
+                _ => {
+                    diagnostics.push(extension_error(
+                        "`.extend` `where` must be a callable condition".to_string(),
+                        *span,
+                        Some(*target_span),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            _ => None,
+        };
+
+        let (super_target, innermost) = split_extension_target(existing_target, context);
+        let Some(id) = context.allocate_extension_id() else {
+            diagnostics.push(extension_error(
+                "`.extend` exceeded the evaluator's extension identity limit".to_string(),
+                *span,
+                Some(*target_span),
+            ));
+            return CallOutcome::Failed;
+        };
+        let extension = Rc::new(FunctionExtension {
+            id,
+            condition,
+            super_target,
+            body_policy,
+        });
+        let wrapper = Rc::new(FunctionBinding {
+            parameters: wrapper_parameters,
+            body: body_nodes.to_vec(),
+            declaration_span: *span,
+            capture: Some(Box::new(context.capture_snapshot())),
+            extension: Some(Rc::clone(&extension)),
+        });
+
+        if let Some(innermost) = innermost {
+            context.set_extension_target(&innermost, FunctionTarget::Binding(wrapper));
+        } else {
+            context.replace_function_binding(target_name, wrapper);
+        }
+        CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_extension_call(
+        &self,
+        binding: &FunctionBinding,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let structural_candidates =
+            structural_candidates(ordered_args, positional_args, named_args, *span);
+        let body_shape = body.map(|body| body_candidate_shape(body, *span));
+        let structural_plan = match self.preflight_extension_binding(
+            binding,
+            &structural_candidates,
+            body_shape.as_ref(),
+            *span,
+            diagnostics,
+        ) {
+            Ok(plan) => plan,
+            Err(()) => return CallOutcome::Failed,
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            None,
+            None,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let body = body.map(|body| owned_call_body(body));
+        self.evaluate_extension_call_with_candidates(
+            binding,
+            candidates,
+            body.as_ref(),
+            raw_body,
+            *span,
+            diagnostics,
+            context,
+            structural_plan.as_ref(),
+        )
+    }
+
+    fn preflight_extension_binding(
+        &self,
+        binding: &FunctionBinding,
+        candidates: &[Candidate<()>],
+        body: Option<&Candidate<()>>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Option<BindingPlan>, ()> {
+        let Some(extension) = binding.extension.as_ref() else {
+            return Err(());
+        };
+        let metadata = lambda_binding_metadata(&binding.parameters);
+        match &binding.parameters {
+            LambdaParameters::Explicit(_) => {
+                let structural_plan = match invocation_binder::plan(
+                    &metadata,
+                    candidates,
+                    None,
+                    BodyPolicy::AllowSeparate,
+                    span,
+                ) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return Err(());
+                    }
+                };
+                if let Err(error) = invocation_binder::plan(
+                    &metadata,
+                    candidates,
+                    body,
+                    extension.body_policy.binder_policy(),
+                    span,
+                ) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return Err(());
+                }
+                Ok(Some(structural_plan))
+            }
+            LambdaParameters::Implicit => {
+                if let Err(error) = invocation_binder::validate_implicit(candidates) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return Err(());
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_extension_call_with_candidates(
+        &self,
+        binding: &FunctionBinding,
+        candidates: Vec<Candidate<InvocationValue>>,
+        body: Option<&OwnedCallBody>,
+        raw_body: Option<&IrRawBody>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        structural_plan: Option<&BindingPlan>,
+    ) -> CallOutcome {
+        let Some(extension) = binding.extension.as_ref() else {
+            return CallOutcome::Failed;
+        };
+        let owned_structural_plan;
+        let structural_plan = match structural_plan {
+            Some(plan) => Some(plan),
+            None => {
+                let body_shape = body.map(|body| owned_body_candidate_shape(body, span));
+                owned_structural_plan = match self.preflight_extension_binding(
+                    binding,
+                    &candidate_shapes(&candidates),
+                    body_shape.as_ref(),
+                    span,
+                    diagnostics,
+                ) {
+                    Ok(plan) => plan,
+                    Err(()) => return CallOutcome::Failed,
+                };
+                owned_structural_plan.as_ref()
+            }
+        };
+
+        let body_value = match extension_body_value(
+            self,
+            body,
+            raw_body,
+            extension.body_policy,
+            span,
+            diagnostics,
+            context,
+        ) {
+            Ok(value) => value,
+            Err(outcome) => return outcome,
+        };
+        let (values, forwarded) = match (&binding.parameters, structural_plan) {
+            (LambdaParameters::Explicit(_), Some(structural_plan)) => {
+                let bound = match structural_plan.bind(&candidates, None, span) {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let mut values = bound
+                    .slots
+                    .iter()
+                    .map(|slot| match slot {
+                        BoundSlot::Explicit { value, .. } => value.value.clone(),
+                        BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
+                    })
+                    .collect::<Vec<_>>();
+                let mut forwarded = forwarded_extension_candidates(&bound);
+                if let Some(body_value) = &body_value {
+                    let Some(last) = values.last_mut() else {
+                        diagnostics.push(extension_error(
+                            "`.extend` target body has no parameter slot".to_string(),
+                            span,
+                            None,
+                        ));
+                        return CallOutcome::Failed;
+                    };
+                    *last = body_value.value.clone();
+                    if let Some(parameter) = binding.parameters.last_name() {
+                        let body_span =
+                            extension_body_candidate_span(extension.body_policy, body, span);
+                        forwarded.push(Candidate::Named {
+                            name: parameter.name.clone(),
+                            name_span: parameter.name_span,
+                            value: body_value.clone(),
+                            span: body_span,
+                        });
+                    }
+                }
+                (values, forwarded)
+            }
+            (LambdaParameters::Implicit, None) => {
+                let mut values = candidates
+                    .iter()
+                    .filter_map(|candidate| match candidate {
+                        Candidate::Positional { value, .. } => Some(value.value.clone()),
+                        Candidate::Named { .. } => None,
+                    })
+                    .collect::<Vec<_>>();
+                let mut forwarded = candidates;
+                if let Some(body_value) = &body_value {
+                    values.push(body_value.value.clone());
+                    forwarded.push(Candidate::Positional {
+                        value: body_value.clone(),
+                        span: extension_body_candidate_span(extension.body_policy, body, span),
+                    });
+                }
+                (values, forwarded)
+            }
+            _ => return CallOutcome::Failed,
+        };
+        let state = Rc::new(ExtensionInvocation {
+            target: context.get_extension_target(extension),
+            parameters: binding.parameters.clone(),
+            forwarded,
+            body: body_value.is_none().then(|| body.cloned()).flatten(),
+            raw_body: body_value.is_none().then(|| raw_body.cloned()).flatten(),
+        });
+
+        if let Some(condition) = &extension.condition {
+            let condition_result = match self.invoke_callable_without_extension_context(
+                condition,
+                values.clone(),
+                IterationOptions {
+                    span,
+                    allow_destructuring: false,
+                },
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) => value,
+                CallOutcome::NoValue => {
+                    diagnostics.push(no_value_required(condition.span));
+                    return CallOutcome::Failed;
+                }
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::Unresolved => return CallOutcome::Unresolved,
+            };
+            let condition = match resolve_boolean_value(&InvocationValue::static_value(
+                condition_result.clone(),
+            )) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(value_source_span(&condition_result, &condition.span)),
+                            None::<String>,
+                            None,
+                            span,
+                        ),
+                        Some("`.extend` condition"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            if !condition {
+                return self.invoke_function_target(
+                    &state.target,
+                    state.forwarded.clone(),
+                    state.body.as_ref(),
+                    state.raw_body.as_ref(),
+                    span,
+                    diagnostics,
+                    context,
+                );
+            }
+        }
+
+        let callable = binding.as_callable();
+        let bound = match binding.parameters {
+            LambdaParameters::Explicit(_) => BoundLambdaArguments::Explicit(values),
+            LambdaParameters::Implicit => BoundLambdaArguments::Implicit(values),
+        };
+        self.invoke_bound_callable_with_extension(
+            &callable,
+            bound,
+            diagnostics,
+            context,
+            Some(state),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_super_call(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let Some(state) = context.extension_invocation.as_ref().cloned() else {
+            diagnostics.push(extension_error(
+                "`.super` is only available inside an extension body".to_string(),
+                *span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        if body.is_some() || lambda_parameters.is_some() {
+            diagnostics.push(extension_error(
+                "`.super` does not accept a body or lambda parameters".to_string(),
+                body.map_or(*span, |body| call_body_source_span(body, *span)),
+                None,
+            ));
+            return CallOutcome::Failed;
+        }
+        let structural_candidates =
+            structural_candidates(ordered_args, positional_args, named_args, *span);
+        let structural_plan = match &state.parameters {
+            LambdaParameters::Explicit(_) => match invocation_binder::plan(
+                &lambda_binding_metadata(&state.parameters),
+                &structural_candidates,
+                None,
+                BodyPolicy::Reject,
+                *span,
+            ) {
+                Ok(plan) => Some(plan),
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            },
+            LambdaParameters::Implicit => {
+                if let Err(error) = invocation_binder::validate_implicit(&structural_candidates) {
+                    diagnostics.push(binding_diagnostic_with_message(
+                        error,
+                        callable_binding_message,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                None
+            }
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            None,
+            None,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let overrides = match &state.parameters {
+            LambdaParameters::Explicit(_) => {
+                let Some(plan) = structural_plan.as_ref() else {
+                    return CallOutcome::Failed;
+                };
+                let bound = match plan.bind(&candidates, None, *span) {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                forwarded_extension_candidates(&bound)
+            }
+            LambdaParameters::Implicit => candidates,
+        };
+        let merged = merge_extension_candidates(&state.forwarded, &overrides, &state.parameters);
+        self.invoke_function_target(
+            &state.target,
+            merged,
+            state.body.as_ref(),
+            state.raw_body.as_ref(),
+            *span,
+            diagnostics,
+            context,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn invoke_function_target(
+        &self,
+        target: &FunctionTarget,
+        candidates: Vec<Candidate<InvocationValue>>,
+        body: Option<&OwnedCallBody>,
+        raw_body: Option<&IrRawBody>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let _depth = match context.enter_evaluation_depth(span, diagnostics) {
+            Ok(depth) => depth,
+            Err(outcome) => return outcome,
+        };
+        context.begin_invocation();
+        let checkpoint = InvocationCheckpoint::capture();
+        let outcome = match target {
+            FunctionTarget::Binding(binding) => {
+                if binding.extension.is_some() {
+                    self.evaluate_extension_call_with_candidates(
+                        binding,
+                        candidates,
+                        body,
+                        raw_body,
+                        span,
+                        diagnostics,
+                        context,
+                        None,
+                    )
+                } else {
+                    let body = body.map(owned_body_as_call_body);
+                    self.evaluate_user_function_with_candidates(
+                        binding,
+                        candidates,
+                        body.as_ref(),
+                        span,
+                        diagnostics,
+                        context,
+                    )
+                }
+            }
+            FunctionTarget::Native(name) => {
+                let body = body.map(owned_body_as_call_body);
+                self.evaluate_native_target_with_candidates(
+                    name,
+                    candidates,
+                    body.as_ref(),
+                    raw_body,
+                    span,
+                    diagnostics,
+                    context,
+                )
+            }
+        };
+        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+            checkpoint.restore(context);
+        } else {
+            checkpoint.commit(context);
+        }
+        context.end_invocation();
+        outcome
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_user_function_with_candidates(
+        &self,
+        binding: &FunctionBinding,
+        candidates: Vec<Candidate<InvocationValue>>,
+        body: Option<&CallBody<'_>>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        match &binding.parameters {
+            LambdaParameters::Implicit => {
+                if candidates
+                    .iter()
+                    .any(|candidate| matches!(candidate, Candidate::Named { .. }))
+                {
+                    diagnostics.push(extension_error(
+                        "Implicit callable parameters are positional only".to_string(),
+                        span,
+                        None,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                let mut values = candidates
+                    .into_iter()
+                    .filter_map(|candidate| match candidate {
+                        Candidate::Positional { value, .. } => Some(value.value),
+                        Candidate::Named { .. } => None,
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(body) = body {
+                    match self.evaluate_call_body(*body, &span, diagnostics, context) {
+                        CallOutcome::Value(value) => values.push(value),
+                        CallOutcome::NoValue => return CallOutcome::NoValue,
+                        CallOutcome::Failed => return CallOutcome::Failed,
+                        CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                    }
+                }
+                let callable = binding.as_callable();
+                self.invoke_bound_callable(
+                    &callable,
+                    BoundLambdaArguments::Implicit(values),
+                    IterationOptions {
+                        span,
+                        allow_destructuring: false,
+                    },
+                    diagnostics,
+                    context,
+                )
+            }
+            LambdaParameters::Explicit(parameters) => {
+                let metadata = parameters
+                    .iter()
+                    .map(|parameter| {
+                        let omission = if parameter.optional {
+                            invocation_binder::OmissionPolicy::Optional
+                        } else {
+                            invocation_binder::OmissionPolicy::Required
+                        };
+                        ParameterMetadata {
+                            name: &parameter.name,
+                            aliases: &[],
+                            allows_named: true,
+                            omission,
+                            name_span: Some(parameter.name_span),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let body_value = body.map(|body| {
+                    match self.evaluate_call_body(*body, &span, diagnostics, context) {
+                        CallOutcome::Value(value) => Ok(Candidate::Positional {
+                            value: InvocationValue::static_value(value),
+                            span: call_body_source_span(*body, span),
+                        }),
+                        CallOutcome::NoValue => Err(CallOutcome::NoValue),
+                        CallOutcome::Failed => Err(CallOutcome::Failed),
+                        CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
+                    }
+                });
+                let body_value = match body_value {
+                    Some(Ok(value)) => Some(value),
+                    Some(Err(outcome)) => return outcome,
+                    None => None,
+                };
+                let body_shape = body_value.as_ref().map(candidate_shape);
+                let plan = match invocation_binder::plan(
+                    &metadata,
+                    &candidate_shapes(&candidates),
+                    body_shape.as_ref(),
+                    BodyPolicy::BindFinal,
+                    span,
+                ) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let bound = match plan.bind(&candidates, body_value.as_ref(), span) {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        diagnostics.push(binding_diagnostic_with_message(
+                            error,
+                            callable_binding_message,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };
+                let values = bound
+                    .slots
+                    .into_iter()
+                    .map(|slot| match slot {
+                        BoundSlot::Explicit { value, .. } => value.value,
+                        BoundSlot::Omitted | BoundSlot::Defaulted => IrValue::None,
+                    })
+                    .collect::<Vec<_>>();
+                let callable = binding.as_callable();
+                self.invoke_bound_callable(
+                    &callable,
+                    BoundLambdaArguments::Explicit(values),
+                    IterationOptions {
+                        span,
+                        allow_destructuring: false,
+                    },
+                    diagnostics,
+                    context,
+                )
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_native_target_with_candidates(
+        &self,
+        name: &str,
+        candidates: Vec<Candidate<InvocationValue>>,
+        body: Option<&CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let Some(builtin) = builtins::lookup(name) else {
+            diagnostics.push(extension_error(
+                format!("`.super` target `.{name}` has no supported evaluator path"),
+                span,
+                None,
+            ));
+            return CallOutcome::Failed;
+        };
+        let parameters = builtins::binding_parameters(builtin);
+        let shapes = candidate_shapes(&candidates);
+        let body_shape = body.map(|body| body_candidate_shape(*body, span));
+        let plan = match invocation_binder::plan(
+            &parameters,
+            &shapes,
+            body_shape.as_ref(),
+            builtin.body_policy.binder_policy(),
+            span,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        self.evaluate_builtin_with_candidates(
+            builtin,
+            &plan,
+            candidates,
+            body.copied(),
+            raw_body,
+            span,
             diagnostics,
             context,
         )
@@ -10195,6 +11483,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             ],
             BodyPolicy::AllowSeparate,
         ),
+        "extend" => (
+            vec![
+                ParameterMetadata::required("target").named(false),
+                ParameterMetadata::optional("where"),
+            ],
+            BodyPolicy::AllowSeparate,
+        ),
         "let" => (
             vec![ParameterMetadata::required("value").named(false)],
             BodyPolicy::AllowSeparate,
@@ -11335,6 +12630,32 @@ fn chain_evaluation_error(message: String, span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn extension_error(
+    message: String,
+    primary: SourceSpan,
+    secondary: Option<SourceSpan>,
+) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message,
+        primary: Some(primary),
+        secondary: secondary.into_iter().collect(),
+        hints: vec![
+            "Extension targets, parameters, and `.super` calls must resolve within the current callable scope."
+                .to_string(),
+        ],
+    }
+}
+
+fn extension_parameter_error(
+    message: String,
+    primary: SourceSpan,
+    target_span: SourceSpan,
+) -> Diagnostic {
+    extension_error(message, primary, Some(target_span))
+}
+
 fn binding_diagnostic(error: invocation_binder::BindingError) -> Diagnostic {
     binding_diagnostic_with_code(error, "E3003")
 }
@@ -11650,6 +12971,321 @@ fn raw_invocation_candidates(
         span: argument.span,
     }));
     candidates
+}
+
+fn candidate_shape<T>(candidate: &Candidate<T>) -> Candidate<()> {
+    match candidate {
+        Candidate::Positional { span, .. } => Candidate::Positional {
+            value: (),
+            span: *span,
+        },
+        Candidate::Named {
+            name,
+            name_span,
+            span,
+            ..
+        } => Candidate::Named {
+            name: name.clone(),
+            name_span: *name_span,
+            value: (),
+            span: *span,
+        },
+    }
+}
+
+fn candidate_shapes<T>(candidates: &[Candidate<T>]) -> Vec<Candidate<()>> {
+    candidates.iter().map(candidate_shape).collect()
+}
+
+fn owned_call_body(body: CallBody<'_>) -> OwnedCallBody {
+    match body {
+        CallBody::Block(nodes) => OwnedCallBody::Block(Rc::from(nodes)),
+        CallBody::Inline(inlines) => OwnedCallBody::Inline(Rc::from(inlines)),
+    }
+}
+
+fn owned_body_as_call_body(body: &OwnedCallBody) -> CallBody<'_> {
+    match body {
+        OwnedCallBody::Block(nodes) => CallBody::Block(nodes),
+        OwnedCallBody::Inline(inlines) => CallBody::Inline(inlines),
+    }
+}
+
+fn owned_body_candidate_shape(body: &OwnedCallBody, span: SourceSpan) -> Candidate<()> {
+    body_candidate_shape(owned_body_as_call_body(body), span)
+}
+
+fn lambda_parameter_names(parameters: &LambdaParameters) -> BTreeSet<String> {
+    match parameters {
+        LambdaParameters::Explicit(parameters) => parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect(),
+        LambdaParameters::Implicit => BTreeSet::new(),
+    }
+}
+
+fn extension_wrapper_parameters(
+    parameters: &LambdaParameters,
+    fallback_span: SourceSpan,
+) -> LambdaParameters {
+    match parameters {
+        LambdaParameters::Explicit(parameters) => LambdaParameters::Explicit(
+            parameters
+                .iter()
+                .map(|parameter| IrParameter {
+                    name: parameter.name.clone(),
+                    name_span: parameter.name_span,
+                    span: parameter.span,
+                    optional: true,
+                })
+                .map(|mut parameter| {
+                    if parameter.span.start == 0 && parameter.span.end == 0 {
+                        parameter.span = fallback_span;
+                        parameter.name_span = fallback_span;
+                    }
+                    parameter
+                })
+                .collect(),
+        ),
+        LambdaParameters::Implicit => LambdaParameters::Implicit,
+    }
+}
+
+fn lambda_binding_metadata(parameters: &LambdaParameters) -> Vec<ParameterMetadata<'_>> {
+    match parameters {
+        LambdaParameters::Explicit(parameters) => parameters
+            .iter()
+            .map(|parameter| ParameterMetadata {
+                name: &parameter.name,
+                aliases: &[],
+                allows_named: true,
+                omission: if parameter.optional {
+                    invocation_binder::OmissionPolicy::Optional
+                } else {
+                    invocation_binder::OmissionPolicy::Required
+                },
+                name_span: Some(parameter.name_span),
+            })
+            .collect(),
+        LambdaParameters::Implicit => Vec::new(),
+    }
+}
+
+fn target_parameters_from_metadata(
+    parameters: Vec<ParameterMetadata<'static>>,
+    fallback_span: SourceSpan,
+) -> LambdaParameters {
+    LambdaParameters::Explicit(
+        parameters
+            .into_iter()
+            .map(|parameter| IrParameter {
+                name: parameter.name.to_string(),
+                name_span: parameter.name_span.unwrap_or(fallback_span),
+                span: parameter.name_span.unwrap_or(fallback_span),
+                optional: matches!(
+                    parameter.omission,
+                    invocation_binder::OmissionPolicy::Optional
+                        | invocation_binder::OmissionPolicy::Default
+                ),
+            })
+            .collect(),
+    )
+}
+
+fn builtin_extension_body_policy(policy: builtins::BuiltinBodyPolicy) -> ExtensionBodyPolicy {
+    match policy {
+        builtins::BuiltinBodyPolicy::Reject => ExtensionBodyPolicy::Reject,
+        builtins::BuiltinBodyPolicy::BindRaw => ExtensionBodyPolicy::BindRaw,
+        builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
+            ExtensionBodyPolicy::BindEvaluatedContent
+        }
+    }
+}
+
+fn native_extension_body_policy(policy: BodyPolicy) -> ExtensionBodyPolicy {
+    match policy {
+        BodyPolicy::Reject => ExtensionBodyPolicy::Reject,
+        BodyPolicy::BindFinal => ExtensionBodyPolicy::BindEvaluatedContent,
+        BodyPolicy::AllowSeparate => ExtensionBodyPolicy::AllowSeparate,
+    }
+}
+
+fn function_target_contract(
+    target: &FunctionTarget,
+    fallback_span: SourceSpan,
+) -> Option<(LambdaParameters, ExtensionBodyPolicy)> {
+    match target {
+        FunctionTarget::Binding(binding) => match binding.extension.as_ref() {
+            Some(extension) => function_target_contract(&extension.super_target, fallback_span),
+            None => Some((
+                binding.parameters.clone(),
+                ExtensionBodyPolicy::BindEvaluatedContent,
+            )),
+        },
+        FunctionTarget::Native(name) => {
+            if let Some(builtin) = builtins::lookup(name) {
+                Some((
+                    target_parameters_from_metadata(
+                        builtins::binding_parameters(builtin),
+                        fallback_span,
+                    ),
+                    builtin_extension_body_policy(builtin.body_policy),
+                ))
+            } else {
+                native_binding_parameters(name).map(|(parameters, policy)| {
+                    (
+                        target_parameters_from_metadata(parameters, fallback_span),
+                        native_extension_body_policy(policy),
+                    )
+                })
+            }
+        }
+    }
+}
+
+fn resolve_function_target(name: &str, context: &EvaluationContext<'_>) -> Option<FunctionTarget> {
+    if let Some(binding) = context.get_function(name) {
+        return Some(FunctionTarget::Binding(Rc::clone(binding)));
+    }
+    // This bounded slice can re-dispatch regular scalar builtins through the
+    // same binder/conversion boundary as ordinary calls. Bespoke native
+    // owners (layout, resource, document-state, and callbacks) remain outside
+    // #169 rather than being claimed as extension targets without a matching
+    // forced-call path.
+    if builtins::lookup(name).is_some() {
+        return Some(FunctionTarget::Native(name.to_string()));
+    }
+    None
+}
+
+fn split_extension_target(
+    target: FunctionTarget,
+    context: &EvaluationContext<'_>,
+) -> (FunctionTarget, Option<Rc<FunctionExtension>>) {
+    let mut current = target;
+    loop {
+        let FunctionTarget::Binding(binding) = &current else {
+            return (current, None);
+        };
+        let Some(extension) = binding.extension.as_ref() else {
+            return (current, None);
+        };
+        let next = context.get_extension_target(extension);
+        match &next {
+            FunctionTarget::Binding(next_binding) if next_binding.extension.is_some() => {
+                current = next;
+            }
+            _ => return (next, Some(Rc::clone(extension))),
+        }
+    }
+}
+
+fn forwarded_extension_candidates(
+    bound: &invocation_binder::BoundInvocation<InvocationValue>,
+) -> Vec<Candidate<InvocationValue>> {
+    bound
+        .slots
+        .iter()
+        .zip(bound.parameters.iter())
+        .filter_map(|(slot, parameter)| match slot {
+            BoundSlot::Explicit { value, span } => Some(Candidate::Named {
+                name: parameter.name.clone(),
+                name_span: parameter.name_span.unwrap_or(*span),
+                value: value.clone(),
+                span: *span,
+            }),
+            BoundSlot::Omitted | BoundSlot::Defaulted => None,
+        })
+        .collect()
+}
+
+fn merge_extension_candidates(
+    outer: &[Candidate<InvocationValue>],
+    overrides: &[Candidate<InvocationValue>],
+    parameters: &LambdaParameters,
+) -> Vec<Candidate<InvocationValue>> {
+    if matches!(parameters, LambdaParameters::Implicit) {
+        return outer
+            .iter()
+            .cloned()
+            .chain(overrides.iter().cloned())
+            .collect();
+    }
+    let mut merged = BTreeMap::<String, Candidate<InvocationValue>>::new();
+    for candidate in outer.iter().chain(overrides) {
+        let name = match candidate {
+            Candidate::Named { name, .. } => name.clone(),
+            Candidate::Positional { .. } => continue,
+        };
+        merged.insert(name, candidate.clone());
+    }
+    merged.into_values().collect()
+}
+
+fn extension_body_candidate_span(
+    policy: ExtensionBodyPolicy,
+    body: Option<&OwnedCallBody>,
+    call_span: SourceSpan,
+) -> SourceSpan {
+    if matches!(policy, ExtensionBodyPolicy::BindRaw) {
+        // `IrRawBody::span` is local to its source. The regular native
+        // BindRaw path uses the containing call span for the generated
+        // candidate, so an extension forwarding the same raw body must keep
+        // that diagnostic provenance.
+        return call_span;
+    }
+    body.map(|body| call_body_source_span(owned_body_as_call_body(body), call_span))
+        .unwrap_or(call_span)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extension_body_value(
+    evaluator: &Evaluator,
+    body: Option<&OwnedCallBody>,
+    raw_body: Option<&IrRawBody>,
+    policy: ExtensionBodyPolicy,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+    context: &mut EvaluationContext<'_>,
+) -> Result<Option<InvocationValue>, CallOutcome> {
+    let Some(body) = body else {
+        return Ok(None);
+    };
+    match policy {
+        ExtensionBodyPolicy::Reject => Ok(None),
+        ExtensionBodyPolicy::AllowSeparate => Ok(None),
+        ExtensionBodyPolicy::BindEvaluatedContent => {
+            match evaluator.evaluate_call_body(
+                owned_body_as_call_body(body),
+                &span,
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) => Ok(Some(InvocationValue::static_value(value))),
+                CallOutcome::NoValue => Err(CallOutcome::NoValue),
+                CallOutcome::Failed => Err(CallOutcome::Failed),
+                CallOutcome::Unresolved => Err(CallOutcome::Unresolved),
+            }
+        }
+        ExtensionBodyPolicy::BindRaw => {
+            let Some(raw_body) = raw_body else {
+                diagnostics.push(chain_evaluation_error(
+                    "This body conversion requires source-backed raw body text".to_string(),
+                    call_body_source_span(owned_body_as_call_body(body), span),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            let Some(text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                diagnostics.push(chain_evaluation_error(
+                    "This body conversion requires a valid source-backed body span".to_string(),
+                    call_body_source_span(owned_body_as_call_body(body), span),
+                ));
+                return Err(CallOutcome::Failed);
+            };
+            Ok(Some(InvocationValue::dynamic_value(IrValue::String(text))))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18384,6 +20020,112 @@ mod tests {
         assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
         checkpoint.commit(&context);
         context.end_invocation();
+    }
+
+    #[test]
+    fn issue_169_repeated_chained_extensions_do_not_retain_dead_undo_metadata() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let declaration = IrNode::FunctionDeclaration {
+            name: IrValue::Identifier("repeatable".to_string()),
+            parameters: vec![lambda_parameter("value", 4)],
+            body: vec![var_ref("value")],
+            span: span(0, 20),
+        };
+        evaluator.evaluate_node(&declaration, &mut diagnostics, &mut context);
+
+        let extension_parameters = vec![lambda_parameter("value", 24)];
+        let extension_body = vec![IrNode::FunctionCall {
+            name: "super".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(30, 36),
+        }];
+        for _ in 0..3 {
+            let outcome = evaluator.evaluate_call_value(
+                "extend",
+                &[IrValue::Identifier("repeatable".to_string())],
+                &[],
+                Some(CallBody::Block(&extension_body)),
+                Some(&extension_parameters),
+                &span(20, 40),
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::NoValue));
+        }
+        assert_eq!(context.extension_target_count(), 2);
+
+        for _ in 0..4096 {
+            let outcome = evaluator.evaluate_call_value(
+                "repeatable",
+                &[IrValue::String("value".to_string())],
+                &[],
+                None,
+                None,
+                &span(40, 55),
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(
+                outcome,
+                CallOutcome::Value(IrValue::String(value)) if value == "value"
+            ));
+        }
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(context.extension_target_count(), 2);
+        assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+    }
+
+    #[test]
+    fn issue_169_replaced_function_prunes_old_extension_overlays() {
+        let evaluator = Evaluator::new();
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let extension_parameters = vec![lambda_parameter("value", 24)];
+        let extension_body = vec![IrNode::FunctionCall {
+            name: "super".to_string(),
+            positional_args: Vec::new(),
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(30, 36),
+        }];
+
+        for _ in 0..1024 {
+            context.set_function_binding(
+                "repeatable".to_string(),
+                LambdaParameters::Explicit(vec![lambda_parameter("value", 4)]),
+                vec![var_ref("value")],
+                span(0, 20),
+                None,
+            );
+            assert_eq!(context.extension_target_count(), 0);
+            for _ in 0..3 {
+                let outcome = evaluator.evaluate_call_value(
+                    "extend",
+                    &[IrValue::Identifier("repeatable".to_string())],
+                    &[],
+                    Some(CallBody::Block(&extension_body)),
+                    Some(&extension_parameters),
+                    &span(20, 40),
+                    &mut diagnostics,
+                    &mut context,
+                );
+                assert!(matches!(outcome, CallOutcome::NoValue));
+            }
+            assert_eq!(context.extension_target_count(), 2);
+            assert_eq!(context.transaction.borrow().pending_entry_count(), 0);
+        }
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
