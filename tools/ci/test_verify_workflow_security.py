@@ -53,6 +53,14 @@ class WorkflowSecurityTests(unittest.TestCase):
     def test_clean_fixture_passes(self) -> None:
         self.verify(BASE)
 
+    def test_named_checkout_step_with_disabled_credentials_passes(self) -> None:
+        named = BASE.replace(
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n",
+            "      - name: Checkout repository\n"
+            "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n",
+        )
+        self.verify(named)
+
     def test_mutable_action_ref_is_rejected(self) -> None:
         self.reject(
             BASE.replace(
