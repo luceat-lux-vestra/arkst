@@ -419,13 +419,10 @@ fn validate_string_pool(
 
 /// Resolves an English display name before a canonical language tag.
 ///
-/// Name records retain the deterministic order of the exact
-/// `getAvailableLocales()` result set used by the pinned oracle. Java does not
-/// specify that provider-union order, so generation freezes a canonical
-/// order before applying upstream's first case-insensitive display-name match.
-/// Canonical tag records are a separate deduplicated index because upstream
-/// available locales contains one observable `nn-NO` collision while
-/// `fromTag` constructs a canonical `Locale` (`nn_NO`) directly.
+/// Name records retain the exact iteration order returned by the pinned JVM's
+/// `Locale.getAvailableLocales()`. That order is part of the name-first
+/// contract whenever the English display-name audit finds a collision;
+/// canonical tag records are a separate deduplicated index.
 pub(crate) fn resolve(identifier: &str) -> Option<IrDocumentLocale> {
     if let Some(record) = LOCALE_NAME_RECORDS
         .iter()
@@ -1494,15 +1491,16 @@ mod tests {
         string_equals_ignore_case,
     };
     use super::{
-        read_u32, DisplaySnapshot, LOCALE_AVAILABLE_RECORD_COUNT, LOCALE_DATASET_SOURCE_SHA256,
-        LOCALE_DATASET_VERSION, LOCALE_DISPLAY_COMPACT_FORMAT_VERSION,
-        LOCALE_DISPLAY_COMPACT_RECORD_COUNT, LOCALE_DISPLAY_COMPACT_SHA256,
-        LOCALE_DISPLAY_COMPACT_SNAPSHOT_BYTES, LOCALE_DISPLAY_DATA,
+        read_u32, DisplaySnapshot, LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256,
+        LOCALE_AVAILABLE_RECORD_COUNT, LOCALE_DATASET_SOURCE_SHA256, LOCALE_DATASET_VERSION,
+        LOCALE_DISPLAY_COMPACT_FORMAT_VERSION, LOCALE_DISPLAY_COMPACT_RECORD_COUNT,
+        LOCALE_DISPLAY_COMPACT_SHA256, LOCALE_DISPLAY_COMPACT_SNAPSHOT_BYTES, LOCALE_DISPLAY_DATA,
         LOCALE_DISPLAY_GENERATED_SOURCE_BYTES, LOCALE_DISPLAY_KEY_COUNT, LOCALE_DISPLAY_MAGIC,
         LOCALE_DISPLAY_MAX_COMPACT_SNAPSHOT_BYTES, LOCALE_DISPLAY_MAX_GENERATED_SOURCE_BYTES,
         LOCALE_DISPLAY_NUMERIC_INDEX_BYTES, LOCALE_DISPLAY_ORACLE_RECORD_COUNT,
         LOCALE_DISPLAY_PROFILE_COUNT, LOCALE_DISPLAY_RAW_STRING_POOL_BYTES,
         LOCALE_DISPLAY_RECORD_COUNT, LOCALE_DISPLAY_SOURCE_SHA256, LOCALE_DISPLAY_VALUE_COUNT,
+        LOCALE_NAME_COLLISIONS, LOCALE_NAME_COLLISION_COUNT, LOCALE_NAME_COLLISION_MEMBER_TAGS,
         LOCALE_NAME_RECORDS, LOCALE_TAG_RECORDS, LOCALE_TAG_RECORD_COUNT,
     };
 
@@ -1512,13 +1510,16 @@ mod tests {
         assert_eq!(LOCALE_TAG_RECORD_COUNT, LOCALE_TAG_RECORDS.len());
         assert_eq!(LOCALE_TAG_RECORDS.len(), 1156);
         assert_eq!(LOCALE_NAME_RECORDS.len(), 1157);
-        assert_eq!(LOCALE_NAME_RECORDS[0].tag, "af");
         assert_eq!(LOCALE_TAG_RECORDS[0].tag, "af");
         assert_eq!(LOCALE_TAG_RECORDS.last().unwrap().tag, "zu-ZA");
         assert_eq!(LOCALE_DATASET_VERSION, "25.0.4.1+1");
         assert_eq!(
             LOCALE_DATASET_SOURCE_SHA256,
-            "286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6"
+            "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e"
+        );
+        assert_eq!(
+            LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256,
+            "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28"
         );
         assert_eq!(LOCALE_DISPLAY_RECORD_COUNT, 453459);
         assert_eq!(
@@ -1552,14 +1553,54 @@ mod tests {
         assert!(LOCALE_TAG_RECORDS
             .windows(2)
             .all(|records| records[0].tag < records[1].tag));
-        assert_eq!(
-            LOCALE_NAME_RECORDS
+        assert_eq!(LOCALE_NAME_COLLISION_COUNT, LOCALE_NAME_COLLISIONS.len());
+        assert_name_collision_audit();
+    }
+
+    #[test]
+    fn available_name_collision_audit_preserves_raw_first_winner() {
+        assert_eq!(LOCALE_NAME_COLLISION_COUNT, 0);
+        assert!(LOCALE_NAME_COLLISION_MEMBER_TAGS.is_empty());
+        assert!(LOCALE_NAME_COLLISIONS.is_empty());
+        assert_name_collision_audit();
+    }
+
+    fn assert_name_collision_audit() {
+        let mut discovered = Vec::new();
+        for (index, record) in LOCALE_NAME_RECORDS.iter().enumerate() {
+            let first_index = LOCALE_NAME_RECORDS
                 .iter()
-                .filter(|record| record.tag == "nn-NO")
-                .count(),
-            2,
-            "the only available-order tag collision is explicitly modeled"
-        );
+                .position(|candidate| {
+                    string_equals_ignore_case(candidate.display_name, record.display_name)
+                })
+                .expect("record must be present in its own name class");
+            if first_index != index {
+                continue;
+            }
+            let members: Vec<_> = LOCALE_NAME_RECORDS
+                .iter()
+                .filter(|candidate| {
+                    string_equals_ignore_case(candidate.display_name, record.display_name)
+                })
+                .map(|candidate| candidate.tag)
+                .collect();
+            if members.len() > 1 {
+                discovered.push((record.display_name, members));
+            }
+        }
+        assert_eq!(discovered.len(), LOCALE_NAME_COLLISIONS.len());
+        for (display_name, members) in discovered {
+            let collision = LOCALE_NAME_COLLISIONS
+                .iter()
+                .find(|collision| string_equals_ignore_case(collision.display_name, display_name))
+                .expect("every runtime collision must be in the generated audit");
+            assert_eq!(collision.member_count, members.len());
+            let audited_members = &LOCALE_NAME_COLLISION_MEMBER_TAGS
+                [collision.member_start..collision.member_start + collision.member_count];
+            assert_eq!(audited_members, members.as_slice());
+            assert_eq!(collision.winner_tag, members[0]);
+            assert_eq!(resolve(display_name).unwrap().tag, members[0]);
+        }
     }
 
     #[test]

@@ -72,7 +72,11 @@ the active snapshot. The locale, display, and public differential helpers are
 `tools/dump_jdk25_locale_data.java`,
 `tools/dump_jdk25_locale_display_data.java`, and
 `tools/dump_jdk25_locale_oracle.java`, whose SHA-256 fingerprints are recorded
-in the generated metadata and generator constants.
+in the generated metadata and generator constants. The name-first available
+locale order is captured directly from the raw JDK array in
+`tools/jdk25_available_locale_order.tsv`, SHA-256
+`db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28`; the
+JDK25 English-name collision audit found zero classes.
 
 The locale snapshot covers available names/tags, display-language/script/
 region/variant values, Unicode-extension names, currencies, and accepted

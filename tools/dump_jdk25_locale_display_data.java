@@ -1,5 +1,4 @@
 import java.util.Currency;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -36,13 +35,13 @@ final class DumpJdk25LocaleDisplayData {
             }
         }
 
-        addBundle(Locale.ROOT, cldr, rows, profiles, false, null);
+        addBundle(Locale.ROOT, cldr, rows, profiles, false);
         for (Locale locale : Locale.getAvailableLocales()) {
-            addBundle(locale, cldr, rows, profiles, false, null);
+            addBundle(locale, cldr, rows, profiles, false);
         }
         // FALLBACK supports the root locale only. Add only keys absent from
         // CLDR so the effective provider precedence remains CLDR first.
-        addBundle(Locale.ROOT, fallback, rows, profiles, true, null);
+        addBundle(Locale.ROOT, fallback, rows, profiles, true);
         addCurrencyData(profiles, rows);
         addTimezoneData(profiles, timezoneIds, rows);
 
@@ -57,8 +56,7 @@ final class DumpJdk25LocaleDisplayData {
             LocaleData data,
             TreeMap<String, String> rows,
             TreeMap<String, Locale> profiles,
-            boolean preserveExisting,
-            TreeMap<String, String> preferredRows
+            boolean preserveExisting
     ) {
         OpenListResourceBundle bundle = data.getLocaleNames(requestedLocale);
         // ResourceBundle may label the FALLBACK root bundle as "und", but
@@ -85,57 +83,10 @@ final class DumpJdk25LocaleDisplayData {
             rejectControlCharacters(key, "key");
             rejectControlCharacters(stringValue, "value");
             String rowKey = profile + "\t" + key;
-            if (preferredRows != null && resolve(preferredRows, profile, key) != null) {
-                continue;
-            }
             String previous = rows.putIfAbsent(rowKey, stringValue);
             if (!preserveExisting && previous != null && !previous.equals(stringValue)) {
                 throw new IllegalStateException("conflicting locale display data: " + rowKey);
             }
-        }
-    }
-
-    private static String resolve(TreeMap<String, String> rows, String profile, String key) {
-        for (String candidate : fallbackProfiles(profile)) {
-            String value = rows.get(candidate + "\t" + key);
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
-    }
-
-    private static List<String> fallbackProfiles(String profile) {
-        if (profile.isEmpty()) {
-            return List.of();
-        }
-        String[] parts = profile.split("-");
-        String language = parts[0];
-        String script = null;
-        String region = null;
-        for (int index = 1; index < parts.length; index++) {
-            String part = parts[index];
-            if (part.length() == 4 && part.chars().allMatch(Character::isLetter)) {
-                script = part;
-            } else if ((part.length() == 2 && part.chars().allMatch(Character::isLetter))
-                    || (part.length() == 3 && part.chars().allMatch(Character::isDigit))) {
-                region = part;
-            }
-        }
-        java.util.ArrayList<String> candidates = new java.util.ArrayList<>();
-        addFallback(candidates, profile, script != null && region != null
-                ? language + "-" + script + "-" + region : null);
-        addFallback(candidates, profile, script != null ? language + "-" + script : null);
-        addFallback(candidates, profile, region != null ? language + "-" + region : null);
-        addFallback(candidates, profile, language);
-        addFallback(candidates, profile, "en");
-        addFallback(candidates, profile, "");
-        return candidates;
-    }
-
-    private static void addFallback(List<String> candidates, String profile, String candidate) {
-        if (candidate != null && !candidate.equals(profile) && !candidates.contains(candidate)) {
-            candidates.add(candidate);
         }
     }
 

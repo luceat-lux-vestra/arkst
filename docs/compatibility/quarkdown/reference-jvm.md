@@ -100,11 +100,18 @@ The checked-in locale snapshot contains 1,157 available-locale records and
 records; semantic fallback-delta compaction retains 267,017 records in the
 6,549,860-byte little-endian binary snapshot, with 320 profiles, 2,525 keys,
 and 178,930 interned values. The logical locale source SHA-256 is
-`286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6`, the
+`87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e`, the
 logical display source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and the
 compact artifact SHA-256 is
 `d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
+The name-first table preserves a pinned raw-array capture of
+`Locale.getAvailableLocales()` in
+`tools/jdk25_available_locale_order.tsv` (SHA-256
+`db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28`); the
+JDK25 character-wise English-name collision audit found zero collision
+classes. The generated Rust metadata is 502,124 bytes and remains below the
+1 MiB source budget.
 The generator exhaustively reconstructs every logical display row, validates
 the binary index, and checks both generated artifacts byte-for-byte. JDK25's
 CLDR parent-locale, likely-script, and language-alias routing metadata is

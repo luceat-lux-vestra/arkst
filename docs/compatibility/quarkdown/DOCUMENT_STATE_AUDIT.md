@@ -201,11 +201,12 @@ Scribium deliberately uses a deterministic checked-in locale snapshot rather
 than an OS/JVM dependency. Issue #173 generates the snapshot from
 `java.util.Locale.getAvailableLocales()` and the pinned `JVMLocale` getters
 under Eclipse Temurin `25.0.4.1+1` with `java.locale.providers=CLDR`.
-The 1,157 available records (including the root record) and 1,156
-deduplicated canonical-tag records preserve the observed `nn-NO` collision;
-the helper freezes the JDK's otherwise unspecified available-locale set order
-before emitting the name-first table. Name lookup remains first-match and
-character-wise JVM/Kotlin ignore-case, while tag lookup uses
+The 1,157 available records and 1,156 deduplicated canonical-tag records keep
+the raw returned-array order in the pinned
+`tools/jdk25_available_locale_order.tsv` manifest; the JDK25 exhaustive
+character-wise English-name collision audit found zero collision classes.
+Name lookup remains first-match and character-wise JVM/Kotlin ignore-case,
+while tag lookup uses
 `Locale.forLanguageTag`-compatible canonicalization. This includes language,
 script, region, variant, observed deprecated aliases, and valid unavailable
 tags such as `xx-YY`; malformed/root-only values remain failures.
@@ -223,7 +224,7 @@ bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
 Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
 the generator exhaustively reconstructs every full-oracle `(profile,key)` and
 requires the compact value to match exactly. The locale logical source
-SHA-256 is `286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6`,
+SHA-256 is `87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e`,
 the display logical source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and
 the compact artifact SHA-256 is

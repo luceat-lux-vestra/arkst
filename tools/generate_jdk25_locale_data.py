@@ -42,11 +42,14 @@ REFERENCE_JDK_SHA256 = "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9
 REFERENCE_JDK_SIZE = 141329719
 EXPECTED_AVAILABLE_RECORD_COUNT = 1157
 EXPECTED_TAG_RECORD_COUNT = 1156
-EXPECTED_SOURCE_SHA256 = "286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6"
-EXPECTED_DUMP_SOURCE_SHA256 = "e32b98afb810ebce10930946078c05e33a830df81abbb8f0469057145aeb83f9"
+EXPECTED_NAME_COLLISION_COUNT = 0
+AVAILABLE_ORDER_MANIFEST = "jdk25_available_locale_order.tsv"
+EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28"
+EXPECTED_SOURCE_SHA256 = "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e"
+EXPECTED_DUMP_SOURCE_SHA256 = "1fe197bc9b6651853726c90543e638241d3957a4444251bb0a76d96e5d82d0a2"
 EXPECTED_DISPLAY_RECORD_COUNT = 453459
 EXPECTED_DISPLAY_SOURCE_SHA256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
-EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "655184788175752bed232b561b70cdcdc1bf99d5d655c41380c70685a4722588"
+EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "d90169543b8fd21df5a8baaeceba42e1d0f8bfd1c9b46b2d9b46fcb322bfe453"
 EXPECTED_COMPACT_RECORD_COUNT = 267017
 EXPECTED_COMPACT_PROFILE_COUNT = 320
 EXPECTED_COMPACT_KEY_COUNT = 2525
@@ -62,7 +65,7 @@ REFERENCE_CLDR_SOURCE_MEMBER = REFERENCE_JDK_TZ_SOURCE_MEMBER
 REFERENCE_CLDR_SOURCE_SHA256 = REFERENCE_JDK_TZ_SOURCE_SHA256
 DISPLAY_DUMP_HELPER = "dump_jdk25_locale_display_data.java"
 PUBLIC_ORACLE_HELPER = "dump_jdk25_locale_oracle.java"
-EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "735ce3e1c89fe842dc913cd28125f7a94915e1075af5b037c942cebae5687445"
+EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "c6994f655ecf96557f0a6c5f3e99df788003af2ae66211bfe54f3759402b4548"
 JDK_EXPORTS = (
     "--add-exports=java.base/sun.util.resources=ALL-UNNAMED",
     "--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED",
@@ -305,11 +308,17 @@ def run_reference_display_java(
 
 def parse_dump(
     raw: bytes,
-) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]], str]:
+) -> tuple[
+    list[tuple[str, str, str]],
+    list[tuple[str, str, str]],
+    list[tuple[str, list[str]]],
+    str,
+]:
     lines = raw.decode("utf-8").splitlines()
     metadata: dict[str, str] = {}
     available: list[tuple[str, str, str]] = []
     tags: list[tuple[str, str, str]] = []
+    collisions: list[tuple[str, list[str]]] = []
     for line_number, line in enumerate(lines, 1):
         fields = line.split("\t")
         if fields[0] in {"available", "tag"}:
@@ -318,6 +327,10 @@ def parse_dump(
             (available if fields[0] == "available" else tags).append(
                 (fields[1], fields[2], fields[3])
             )
+        elif fields[0] == "collision":
+            if len(fields) < 4 or any(not field for field in fields[1:]):
+                raise ValueError(f"dump line {line_number}: malformed name collision")
+            collisions.append((fields[1], fields[2:]))
         else:
             if len(fields) != 2 or fields[0] in metadata:
                 raise ValueError(f"dump line {line_number}: malformed metadata")
@@ -328,6 +341,7 @@ def parse_dump(
         "java.vendor": REFERENCE_VENDOR,
         "java.vendor.version": REFERENCE_VENDOR_VERSION,
         "java.locale.providers": REFERENCE_LOCALE_PROVIDERS,
+        "name-collision-count": str(EXPECTED_NAME_COLLISION_COUNT),
     }
     if metadata != expected_metadata:
         raise ValueError(
@@ -344,6 +358,12 @@ def parse_dump(
             "reference canonical-tag record count mismatch: "
             f"expected {EXPECTED_TAG_RECORD_COUNT}, got {len(tags)}"
         )
+    if len(collisions) != EXPECTED_NAME_COLLISION_COUNT:
+        raise ValueError(
+            "reference name collision count mismatch: "
+            f"expected {EXPECTED_NAME_COLLISION_COUNT}, got {len(collisions)}"
+        )
+    available = apply_pinned_available_order(available)
     duplicate_available_tags = {
         tag: count
         for tag, count in Counter(tag for tag, _display, _localized in available).items()
@@ -362,7 +382,43 @@ def parse_dump(
             "reference locale source fingerprint mismatch: "
             f"expected {EXPECTED_SOURCE_SHA256}, got {source_sha256}"
         )
-    return available, tags, source_sha256
+    return available, tags, collisions, source_sha256
+
+
+def apply_pinned_available_order(
+    available: list[tuple[str, str, str]],
+) -> list[tuple[str, str, str]]:
+    # The Java helper emits Locale.getAvailableLocales() without sorting. The
+    # exact JDK provider union uses hash-based assembly whose unspecified raw
+    # order is not stable across JVM starts, so this manifest is a captured
+    # raw-array result from the pinned archive. We validate the current JVM's
+    # complete row set before reusing that captured order; no name records are
+    # sorted or otherwise approximated here.
+    manifest_path = Path(__file__).with_name(AVAILABLE_ORDER_MANIFEST)
+    manifest_bytes = manifest_path.read_bytes()
+    manifest_sha256 = sha256(manifest_bytes)
+    if manifest_sha256 != EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256:
+        raise ValueError(
+            "pinned available-locale order manifest fingerprint mismatch: "
+            f"expected {EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256}, got {manifest_sha256}"
+        )
+    manifest = [
+        tuple(line.split("\t"))
+        for line in manifest_bytes.decode("utf-8").splitlines()
+        if line
+    ]
+    if any(len(row) != 3 for row in manifest):
+        raise ValueError("pinned available-locale order manifest contains a malformed row")
+    if Counter(manifest) != Counter(available):
+        raise ValueError(
+            "pinned available-locale order manifest does not contain the exact "
+            "reference locale rows"
+        )
+    return manifest
+
+
+def available_order_manifest_bytes(available: list[tuple[str, str, str]]) -> bytes:
+    return "".join("\t".join(row) + "\n" for row in available).encode("utf-8")
 
 
 def rust_string(value: str) -> str:
@@ -909,6 +965,7 @@ def enforce_budgets(source: str, binary: bytes, stats: dict[str, int]) -> None:
 def render_rust_source(
     available: list[tuple[str, str, str]],
     tags: list[tuple[str, str, str]],
+    collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     display_source_sha256: str,
     display_stats: dict[str, int],
@@ -929,6 +986,8 @@ def render_rust_source(
         "// Reference archive:",
         f"// {REFERENCE_JDK_URL}",
         f"// Reference archive SHA-256: {REFERENCE_JDK_SHA256}",
+        f"// Available-locale raw-order manifest: {AVAILABLE_ORDER_MANIFEST}",
+        f"// Available-locale raw-order manifest SHA-256: {EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256}",
         f"// Dump helper SHA-256: {EXPECTED_DUMP_SOURCE_SHA256}",
         f"// Display-data dump helper SHA-256: {EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}",
         f"// Public differential oracle helper SHA-256: {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}",
@@ -948,6 +1007,11 @@ def render_rust_source(
         f"pub const LOCALE_AVAILABLE_RECORD_COUNT: usize = {len(available)};",
         "#[allow(dead_code)]",
         f"pub const LOCALE_TAG_RECORD_COUNT: usize = {len(tags)};",
+        "#[allow(dead_code)]",
+        f"pub const LOCALE_NAME_COLLISION_COUNT: usize = {len(collisions)};",
+        "#[allow(dead_code)]",
+        "pub const LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256: &str = "
+        f"{rust_string(EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256)};",
         "#[allow(dead_code)]",
         f"pub const LOCALE_DISPLAY_ORACLE_RECORD_COUNT: usize = {display_stats['oracle_records']};",
         "#[allow(dead_code)]",
@@ -1012,7 +1076,43 @@ def render_rust_source(
     lines.extend(
         [
             "];",
-        "static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[",
+            "#[allow(dead_code)]",
+            "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+            "struct LocaleNameCollision {",
+            "    display_name: &'static str,",
+            "    winner_tag: &'static str,",
+            "    member_start: usize,",
+            "    member_count: usize,",
+            "}",
+            "#[allow(dead_code)]",
+            "static LOCALE_NAME_COLLISION_MEMBER_TAGS: &[&str] = &[",
+        ]
+    )
+    lines.extend(
+        f"    {rust_string(tag)},"
+        for _display_name, member_tags in collisions
+        for tag in member_tags
+    )
+    lines.extend(
+        [
+            "];",
+            "#[allow(dead_code)]",
+            "static LOCALE_NAME_COLLISIONS: &[LocaleNameCollision] = &[",
+        ]
+    )
+    member_start = 0
+    for display_name, member_tags in collisions:
+        lines.append("    LocaleNameCollision {")
+        lines.append(f"        display_name: {rust_string(display_name)},")
+        lines.append(f"        winner_tag: {rust_string(member_tags[0])},")
+        lines.append(f"        member_start: {member_start},")
+        lines.append(f"        member_count: {len(member_tags)},")
+        lines.append("    },")
+        member_start += len(member_tags)
+    lines.extend(
+        [
+            "];",
+            "static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[",
         ]
     )
     for tag, display_name, localized_name in available:
@@ -1068,6 +1168,7 @@ def render_with_source_size(**kwargs: object) -> str:
 def print_stats(
     available: list[tuple[str, str, str]],
     tags: list[tuple[str, str, str]],
+    collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     stats: dict[str, int],
     display_source_sha256: str,
@@ -1075,6 +1176,8 @@ def print_stats(
 ) -> None:
     print(f"available_records={len(available)}")
     print(f"canonical_tag_records={len(tags)}")
+    print(f"name_collision_classes={len(collisions)}")
+    print(f"available_order_manifest_sha256={EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256}")
     print(f"logical_source_sha256={source_sha256}")
     print(f"locale_dump_helper_sha256={EXPECTED_DUMP_SOURCE_SHA256}")
     print(f"display_dump_helper_sha256={EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}")
@@ -1103,6 +1206,7 @@ def print_stats(
 def generate(
     available: list[tuple[str, str, str]],
     tags: list[tuple[str, str, str]],
+    collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     display: list[tuple[str, str, str]],
     display_source_sha256: str,
@@ -1136,6 +1240,7 @@ def generate(
     source = render_with_source_size(
         available=available,
         tags=tags,
+        collisions=collisions,
         source_sha256=source_sha256,
         display_source_sha256=display_source_sha256,
         display_stats=stats,
@@ -1165,6 +1270,11 @@ def main() -> None:
         default=Path("crates/scribium-engine/data/jdk25_locale_display.bin"),
     )
     parser.add_argument(
+        "--available-order-output",
+        type=Path,
+        default=Path("tools/jdk25_available_locale_order.tsv"),
+    )
+    parser.add_argument(
         "--check", action="store_true", help="fail if regeneration differs from checked-in outputs"
     )
     args = parser.parse_args()
@@ -1182,13 +1292,14 @@ def main() -> None:
             "reference public locale oracle helper fingerprint mismatch: "
             f"expected {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}, got {public_oracle_sha256}"
         )
-    available, tags, source_sha256 = parse_dump(run_reference_java(args.java, helper))
+    available, tags, collisions, source_sha256 = parse_dump(run_reference_java(args.java, helper))
     display, display_source_sha256 = parse_display_dump(
         run_reference_display_java(args.java, display_helper, timezone_ids)
     )
     generated, binary, stats = generate(
         available,
         tags,
+        collisions,
         source_sha256,
         display,
         display_source_sha256,
@@ -1199,6 +1310,7 @@ def main() -> None:
     print_stats(
         available,
         tags,
+        collisions,
         source_sha256,
         stats,
         display_source_sha256,
@@ -1209,9 +1321,12 @@ def main() -> None:
             raise SystemExit(f"generated output differs: {args.output}")
         if args.binary_output.read_bytes() != binary:
             raise SystemExit(f"generated output differs: {args.binary_output}")
+        if args.available_order_output.read_bytes() != available_order_manifest_bytes(available):
+            raise SystemExit(f"generated output differs: {args.available_order_output}")
     else:
         args.output.write_bytes(generated.encode("utf-8"))
         args.binary_output.write_bytes(binary)
+        args.available_order_output.write_bytes(available_order_manifest_bytes(available))
 
 
 if __name__ == "__main__":

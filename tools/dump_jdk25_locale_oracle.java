@@ -1,5 +1,4 @@
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.ResourceBundle;
@@ -10,7 +9,10 @@ final class DumpJdk25LocaleOracle {
     private DumpJdk25LocaleOracle() {}
 
     public static void main(String[] args) {
-        List<Locale> availableLocales = orderedAvailableLocales();
+        // Quarkdown's name-first path must see the exact array returned by the
+        // pinned JVM. Keep this order; only the request set below is sorted for
+        // deterministic oracle output.
+        List<Locale> availableLocales = List.of(Locale.getAvailableLocales());
         TreeSet<String> requests = new TreeSet<>();
         for (Locale locale : availableLocales) {
             if (!locale.getLanguage().isBlank()) {
@@ -98,21 +100,6 @@ final class DumpJdk25LocaleOracle {
             }
         }
         return null;
-    }
-
-    private static List<Locale> orderedAvailableLocales() {
-        // The JDK API does not promise an order for this provider union. Pin
-        // the exact returned set to a stable order before modeling Quarkdown's
-        // first English-name match.
-        ArrayList<Locale> locales = new ArrayList<>(List.of(Locale.getAvailableLocales()));
-        locales.sort(Comparator
-                .comparing(Locale::toLanguageTag)
-                .thenComparing(Locale::getLanguage)
-                .thenComparing(Locale::getScript)
-                .thenComparing(Locale::getCountry)
-                .thenComparing(Locale::getVariant)
-                .thenComparing(Locale::toString));
-        return locales;
     }
 
     private static String mixedCase(String value) {

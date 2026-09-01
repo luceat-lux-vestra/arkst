@@ -167,11 +167,13 @@ Because upstream delegates lookup to `java.util.Locale`, Scribium does not
 use a JVM, OS, environment, or native locale database at runtime. Issue #173
 checks in the complete evidenced available-locale snapshot from the exact
 reference contract: Eclipse Temurin `25.0.4.1+1` with
-`java.locale.providers=CLDR`. It retains 1,157 records, including the root
-record, and a deduplicated 1,156-record canonical tag binary-search index for
-`Locale.forLanguageTag` lookup. The helper freezes the JDK's otherwise
-unspecified available-locale set order before preserving the first-match
-English-name table. Generation verifies the pinned archive checksum and that
+`java.locale.providers=CLDR`. It retains 1,157 available records and a
+deduplicated 1,156-record canonical tag binary-search index for
+`Locale.forLanguageTag` lookup. The name-first table preserves the raw
+`Locale.getAvailableLocales()` array captured in the pinned
+`tools/jdk25_available_locale_order.tsv` manifest; the JDK25 exhaustive
+English-name collision audit found zero collision classes. Generation verifies
+the pinned archive checksum and that
 `--java` is the archive's exact `Contents/Home/bin/java` and `javac` members,
 then guards the dump-helper checksums, runtime/provider metadata, locale-source
 fingerprints, and the exact JDK25 timezone-source fingerprint; regeneration
@@ -208,8 +210,8 @@ IETF BCP 47 tag lookup, not an API restricted to built-in localization
 locales. Scribium preserves the JVM/Kotlin character-wise ignore-case
 comparison, name-first precedence, canonical language/script/region/variant
 tags, observed deprecated aliases, and valid unavailable tags such as
-`xx-YY`; malformed/root-only values fail. The snapshot explicitly models the
-real `nn-NO` available-order name collision. Block-body fallback still uses
+`xx-YY`; malformed/root-only values fail. The snapshot preserves the pinned
+available-locale order contract. Block-body fallback still uses
 the source-backed raw `DynamicValue` equivalent for the bounded `.doclang`
 target; remaining target consumers are deferred and are not inferred from
 this slice.

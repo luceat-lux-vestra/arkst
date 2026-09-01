@@ -1,5 +1,4 @@
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
 import java.util.TreeSet;
@@ -14,8 +13,12 @@ final class DumpJdk25LocaleData {
         System.out.println("java.vendor.version\t" + System.getProperty("java.vendor.version"));
         System.out.println("java.locale.providers\t" + System.getProperty("java.locale.providers"));
 
+        Locale[] availableLocales = Locale.getAvailableLocales();
+        List<CollisionGroup> collisions = findNameCollisions(availableLocales);
+        System.out.println("name-collision-count\t" + collisions.size());
+
         TreeSet<String> canonicalTags = new TreeSet<>();
-        for (Locale locale : orderedAvailableLocales()) {
+        for (Locale locale : availableLocales) {
             if (locale.getLanguage().isBlank()) {
                 continue;
             }
@@ -30,6 +33,14 @@ final class DumpJdk25LocaleData {
             System.out.println("available\t" + tag + "\t" + displayName + "\t" + localizedName);
         }
 
+        for (CollisionGroup collision : collisions) {
+            StringBuilder line = new StringBuilder("collision\t").append(collision.displayName);
+            for (Locale locale : collision.locales) {
+                line.append('\t').append(locale.toLanguageTag());
+            }
+            System.out.println(line);
+        }
+
         for (String tag : canonicalTags) {
             Locale locale = Locale.forLanguageTag(tag);
             System.out.println(
@@ -40,21 +51,37 @@ final class DumpJdk25LocaleData {
         }
     }
 
-    private static List<Locale> orderedAvailableLocales() {
-        // Locale.getAvailableLocales() does not specify an iteration order and
-        // the provider union is assembled through hash-based collections. The
-        // reference contract fixes the order of that exact returned set so
-        // Quarkdown's name-first collision policy is deterministic across
-        // regeneration runs and platforms.
-        ArrayList<Locale> locales = new ArrayList<>(List.of(Locale.getAvailableLocales()));
-        locales.sort(Comparator
-                .comparing(Locale::toLanguageTag)
-                .thenComparing(Locale::getLanguage)
-                .thenComparing(Locale::getScript)
-                .thenComparing(Locale::getCountry)
-                .thenComparing(Locale::getVariant)
-                .thenComparing(Locale::toString));
-        return locales;
+    private static List<CollisionGroup> findNameCollisions(Locale[] availableLocales) {
+        List<CollisionGroup> groups = new ArrayList<>();
+        for (Locale locale : availableLocales) {
+            if (locale.getLanguage().isBlank()) {
+                continue;
+            }
+            String displayName = locale.getDisplayName(Locale.ENGLISH);
+            CollisionGroup group = null;
+            for (CollisionGroup candidate : groups) {
+                if (candidate.displayName.equalsIgnoreCase(displayName)) {
+                    group = candidate;
+                    break;
+                }
+            }
+            if (group == null) {
+                group = new CollisionGroup(displayName);
+                groups.add(group);
+            }
+            group.locales.add(locale);
+        }
+        groups.removeIf(group -> group.locales.size() < 2);
+        return groups;
+    }
+
+    private static final class CollisionGroup {
+        private final String displayName;
+        private final List<Locale> locales = new ArrayList<>();
+
+        private CollisionGroup(String displayName) {
+            this.displayName = displayName;
+        }
     }
 
     private static void rejectControlCharacters(String value, String label) {
