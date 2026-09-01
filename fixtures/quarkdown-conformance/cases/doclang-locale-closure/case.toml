@@ -1,0 +1,5 @@
+id = "doclang-locale-closure"
+feature = "document-state-doclang-locale-closure"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-doclang-locale-closure"
+description = "JDK locale snapshot coverage for base, region, script, variant, alias, and unavailable-tag resolution"

@@ -164,17 +164,60 @@ nullable `String? = null` path and therefore uses the getter rather than
 clearing state. The IR carries only plain `{ tag, localized_name }` data.
 
 Because upstream delegates lookup to `java.util.Locale`, Scribium does not
-use a JVM, OS, environment, or native locale database. The upstream `.doclang`
-input is general case-insensitive English full-name or IETF BCP 47 tag lookup,
-not an API restricted to built-in localization locales. The evaluator uses a
-small checked-in deterministic table containing the ten locales named by the
-public localization documentation (`zh`, `en`, `fr`, `de`, `it`, `ja`, `pl`,
-`pt`, `ru`, `uk`) plus the pinned `LocaleTest` lookup examples `ko`, `en-US`,
-and `fr-CA`. This is explicitly partial and bounded: valid BCP 47/name
-identifiers outside the table fail rather than being accepted as compatible,
-and remain a documented compatibility gap. Block-body fallback now uses the
-source-backed raw `DynamicValue` equivalent for the bounded `.doclang` target;
-remaining target consumers are deferred and are not inferred from this slice.
+use a JVM, OS, environment, or native locale database at runtime. Issue #173
+checks in the complete evidenced available-locale snapshot from the exact
+reference contract: Eclipse Temurin `25.0.4.1+1` with
+`java.locale.providers=CLDR`. It retains 1,158 available records and a
+deduplicated 1,157-record canonical tag binary-search index for
+`Locale.forLanguageTag` lookup. The name-first table preserves the raw
+`Locale.getAvailableLocales()` array captured in the pinned
+`tools/jdk25_available_locale_order.tsv` manifest; the JDK25 exhaustive
+English-name collision audit found zero collision classes. Generation verifies
+the pinned archive checksum and that
+`--java` is the archive's exact `Contents/Home/bin/java` and `javac` members,
+then guards the dump-helper checksums, runtime/provider metadata, locale-source
+fingerprints, and the exact JDK25 timezone-source fingerprint; regeneration
+fails on a wrong runtime or altered input and `--check` verifies idempotence.
+
+The complete logical display oracle has 453,459 effective JDK25
+CLDR/FALLBACK-root records. The checked-in representation retains 267,017
+semantic fallback-delta records in the 6,549,860-byte compact binary snapshot,
+with 320 profiles, 2,525 keys, 178,930 interned values, 3,682,380 raw
+string-pool bytes, and 2,140,296 numeric-index bytes. The generated Rust
+metadata is below the executable 1 MiB source budget and performs static
+binary-search lookup. Display-name construction is generic over those
+records, so Unicode extensions such as `ca-buddhist`, `ca-japanese`, `nu-arab`,
+`co-phonebk`, `cu-usd`, `rg-uszzzz`, and `tz-usnyc` use the pinned JDK25
+provider data rather than handwritten value cases. Java's legacy
+`no-NO-x-lvariant-NY` → `nn-NO` canonicalization is preserved while its
+localized name uses the derived `no`/`NO`/`NY` base identity. The provider
+routing metadata captures JDK25 CLDR parent-locale, likely-script, and alias
+maps; the active FALLBACK root values are included as the only secondary
+provider layer.
+
+Regeneration must provide the exact archive and its extracted `java` member
+with its sibling `javac` member, for example:
+
+```text
+python3 tools/generate_jdk25_locale_data.py \
+  --java /path/to/Temurin-25.0.4.1+1/Contents/Home/bin/java \
+  --archive /path/to/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz \
+  --check
+```
+
+The upstream `.doclang` input is general case-insensitive English full-name or
+IETF BCP 47 tag lookup, not an API restricted to built-in localization
+locales. Scribium preserves the JVM/Kotlin character-wise ignore-case
+comparison, name-first precedence, canonical language/script/region/variant
+tags, observed deprecated aliases, and valid unavailable tags such as
+`xx-YY`. Valid blank-language root and private-use-only results are retained:
+their language/code/shortTag-equivalent fields remain empty while `tag` uses
+JDK `toLanguageTag()` serialization (`und` or `x-private`). Malformed inputs
+are compared with the exact JDK valid-prefix/root result. The snapshot
+preserves the pinned available-locale order contract. Block-body fallback still uses
+the source-backed raw `DynamicValue` equivalent for the bounded `.doclang`
+target; remaining target consumers are deferred and are not inferred from
+this slice.
 Binding, candidate evaluation, String conversion, resolution, validation, and
 one state commit are atomic, including rollback of nested state mutation after
 a failed candidate. Ordinary callable child scopes share locale state, and
@@ -400,7 +443,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 | Inline iteration body | Regular binding first resolves the callee parameter; an inline likely-body becomes a `Lambda` only for a callable target, while an ordinary dynamic parameter receives content | `Value::InlineBody`/`IrValue::InlineBody` preserves structured content and callable metadata until source-defined/native resolution; native iteration adapts it into the shared `IrCallable` path | Keep contextual inline bodies target-sensitive and source-backed | Bounded `.foreach`/`.repeat` support implemented, including direct/chain source-defined shadowing | Generalized inline component/callback bodies |
 | DynamicValue result | Dynamic results may be scalar, node, iterable, collection, or Markdown/content and are converted at output boundary | Typed `IrValue`, `IrValue::Content`, and closed `IrValue::Component` preserve semantic values; completed Stacked values materialize only at the typed block boundary | Keep component values backend-neutral until lossless output materialization | Bounded Stacked consumer implemented | General DynamicValue conversion and broader component families |
 | Component/node result | `NodeValue` carries a semantic AST node; output visitors place it block/inline | `.row`/`.column`/`.grid` and bounded `.center` produce typed `IrValue::Component` values and materialize as `IrNode::Component`; nested children and spans remain structured | Distinguish evaluated component values from unresolved calls and materialize only at a lossless typed boundary | Reviewed Stacked slice and bounded `.center` implemented | Inline component insertion and other component families |
-| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses deterministic checked-in locale records and preserves nullable `.none` getter behavior; #166 supplies source-backed body fallback for the bounded consumers without executing parsed body nodes | Valid BCP 47/name locale records outside the checked-in table, `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
+| Document-state mutation | Document APIs read with no argument, mutate shared mutable document info with an argument, and return void; `.theme` is a setter-only exception | Evaluator-owned state shared by ordinary callable child scopes and caller-overlay invocations; final `IrMetadata.document_state` snapshot; `.docname`, `.docdescription`, `.doctype`, bounded `.docauthor`/`.docauthors`, bounded `.dockeywords`, bounded `.doclang`, and bounded `.theme` are implemented with bounded conversion | Evaluator-owned shared working state plus final `IrDocument` snapshot | Document State Foundation and caller sharing implemented; `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and `.theme` implemented at bounded evidenced boundaries. `.doclang` uses the guarded deterministic Temurin 25.0.4.1+1 CLDR locale snapshot and preserves nullable `.none` getter behavior; #166 supplies source-backed body fallback for the bounded consumers without executing parsed body nodes | `.localize`, localization tables, theme resolution/validation/defaults, hyphenation, rendering/layout metadata, front-matter merge policy, and remaining document fields |
 | `.captionposition` document-state | Nullable `default`, `figures`, `tables`, and `@Name("code") codeBlocks`; partial state merged into current document layout state; regular body fallback targets final `codeBlocks` upstream | Typed evaluator-owned caption state uses post-evaluation shared state as the successful merge base, commits one immutable `IrCaptionPositionInfo`, and derives source-backed raw body text for the final `codeBlocks` target without evaluating parsed body nodes | Preserve nested successful mutations and explicit-versus-inherited overrides; keep body fallback separate from parsed `CallBody` semantics | Implemented at bounded evaluator/IR boundary; caption rendering/placement and complete target coverage remain open | Caption rendering/placement and broader raw-body consumers |
 | `row` | Stacked row with alignments, optional gap, and Markdown body | `.row` binds `alignment`, `cross`, and `gap`, evaluates a required block body lazily, and creates a typed Row component | Backend-neutral component value, then semantic node; Typst names remain in lowering | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
 | `column` | Stacked column with alignments, optional gap, and Markdown body | `.column` binds the same typed arguments with column gap semantics and creates a typed Column component | Same backend-neutral component boundary | Implemented for reviewed block-body Stacked slice | General String → Markdown body conversion and broader layout families |
@@ -572,8 +615,7 @@ necessary: the existing Rust types and exhaustive backend consumer are enough
 to select the representation at the document level.
 
 The remaining direct `.container` style parameters and related layout families
-remain deferred. Valid BCP 47/name `.doclang` records outside Scribium's
-checked-in bounded table, `.localize`,
+remain deferred. `.localize`,
 localization tables, theme resolution/validation/defaults, rendering policy,
 hyphenation, front-matter/document-state merging, generalized DynamicValue
 conversion, and other document metadata remain deferred. `.docauthor`,

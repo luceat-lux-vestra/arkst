@@ -40,3 +40,35 @@ java_version_output = [
 helper_source_sha256 = "e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47"
 oracle_output_sha256 = "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862"
 generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb520dbfb9211ad"
+
+# Phase B JDK25 locale snapshot fingerprints. These fields describe the
+# generated locale artifacts, while the fields above remain the Phase A
+# Unicode case-data record.
+locale_dump_helper_source_sha256 = "15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e"
+locale_display_dump_helper_source_sha256 = "25ecb0d2dbc767ef1006a112ead0e2271686cf2dfd7d8f870e812dcfefab9131"
+locale_generator_source_sha256 = "65cc75da3de62d1a9eeda9d5e043c805112c4dbc7de81f72c4fba76937298fce"
+locale_public_oracle_helper_source_sha256 = "80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02"
+locale_public_oracle_record_count = 7440
+locale_public_oracle_name_path_count = 2318
+locale_public_oracle_tag_path_count = 5122
+locale_public_oracle_output_sha256 = "05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed"
+locale_available_order_manifest_sha256 = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
+locale_logical_source_sha256 = "2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105"
+locale_logical_display_source_sha256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
+locale_compact_format_version = 1
+locale_available_record_count = 1158
+locale_canonical_tag_record_count = 1157
+locale_name_collision_count = 0
+locale_logical_display_record_count = 453459
+locale_compact_record_count = 267017
+locale_compact_profile_count = 320
+locale_compact_key_count = 2525
+locale_compact_value_count = 178930
+locale_compact_snapshot_bytes = 6549860
+locale_compact_snapshot_sha256 = "d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1"
+locale_generated_rust_bytes = 814205
+locale_generated_rust_sha256 = "2d649ef01791bae54fe7be2904689123b57dfc817185a026aaabfe005d78e578"
+locale_timezone_source_sha256 = "dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2"
+locale_timezone_source_rows = 681
+locale_timezone_unique_source_rows = 622
+locale_accepted_timezone_ids = 468

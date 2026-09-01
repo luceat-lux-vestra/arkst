@@ -78,7 +78,7 @@ audit row, or vice versa.
 | Audit guards and layer evidence | `crates/scribium-markdown/tests/call_grammar_audit.rs`; `crates/scribium-core/tests/quarkdown_value_model_audit.rs`, `stdlib_builtin_audit.rs`, `document_state_audit.rs`, `layout_document_configuration_audit.rs`, `content_media_markdown_extensions_audit.rs`, `filesystem_project_data_resources_audit.rs`, and `quarkdown_v251_reconciliation.rs` |
 | Parser, evaluator/IR, backend, and resource evidence | `crates/scribium-markdown/tests/quarkdown_v2_5_1.rs`; `crates/scribium-core/tests/quarkdown_br.rs`, `quarkdown_html_contract.rs`, `quarkdown_resource_builtins.rs`, `quarkdown_stacked_layout.rs`, `quarkdown_center.rs`, `quarkdown_align.rs`, `quarkdown_container.rs`, `quarkdown_landscape.rs`, and `quarkdown_whitespace.rs`; `crates/scribium-typst-subprocess/tests/backend_integration.rs`; the corresponding `scribium-core`, `scribium-ir`, and `scribium-typst` unit tests referenced by the audit records |
 | Serde and WASM boundary evidence | Document-state, value, collection, and component serde tests referenced by the audit records; [`FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md`](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md) records that no WASM resource binding or native/WASM resource fixture exists, so the boundary remains `DEFERRED` under #191 |
-| Independent conformance corpus | [`fixtures/quarkdown-conformance/README.md`](../../../fixtures/quarkdown-conformance/README.md) and exactly these 17 case directories: `br-line-break-family`, `call-dot-prefixed-basic`, `call-indented-body-basic`, `call-positional-basic`, `captionposition-document-state`, `docauthor-family`, `docauthors-family`, `dockeywords-family`, `doclang-family`, `dynamic-value-scalar-family`, `numeric-arithmetic-family`, `numeric-decimal-family`, `numeric-transcendental-family`, `optionality-callback-family`, `plaintext-family`, `string-scalar-family`, and `theme-document-state` |
+| Independent conformance corpus | [`fixtures/quarkdown-conformance/README.md`](../../../fixtures/quarkdown-conformance/README.md) and exactly these 18 case directories: `br-line-break-family`, `call-dot-prefixed-basic`, `call-indented-body-basic`, `call-positional-basic`, `captionposition-document-state`, `docauthor-family`, `docauthors-family`, `dockeywords-family`, `doclang-family`, `doclang-locale-closure`, `dynamic-value-scalar-family`, `numeric-arithmetic-family`, `numeric-decimal-family`, `numeric-transcendental-family`, `optionality-callback-family`, `plaintext-family`, `string-scalar-family`, and `theme-document-state` |
 
 The compatibility README and gap inventory are views over the audit records,
 not additional row owners. The referenced unit and integration tests are
@@ -117,12 +117,12 @@ All upstream evidence used for a current claim is pinned to
 records the permitted public documentation, declarations, and black-box
 evidence. No Quarkdown source, test, or fixture was copied or translated.
 
-The independent corpus currently contains 17 cases:
+The independent corpus currently contains 18 cases:
 
 - parser/provenance: `call-dot-prefixed-basic`, `call-positional-basic`, and
   `call-indented-body-basic`;
 - document state: `docauthor-family`, `docauthors-family`,
-  `dockeywords-family`, `doclang-family`, `theme-document-state`, and
+  `dockeywords-family`, `doclang-family`, `doclang-locale-closure`, `theme-document-state`, and
   `captionposition-document-state`;
 - evaluator/value semantics: `dynamic-value-scalar-family`,
   `numeric-arithmetic-family`, `numeric-decimal-family`,

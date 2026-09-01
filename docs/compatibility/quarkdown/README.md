@@ -270,16 +270,14 @@ localized getter name.
 
 The upstream `.doclang` input contract is broader than the built-in
 localization table: it accepts a case-insensitive English full name or an IETF
-BCP 47 language tag. Scribium uses a checked-in, immutable pure-Rust table of
-the ten locales listed by the public localization documentation (`zh`, `en`,
-`fr`, `de`, `it`, `ja`, `pl`, `pt`, `ru`, `uk`) plus the pinned v2.5.1
-`LocaleTest` lookup evidence (`ko`, `en-US`, and `fr-CA`). This avoids OS/JVM
-locale databases, hidden environment state, and host-dependent results while
-keeping the evaluator WASM-compatible. Identifiers outside that table,
-including otherwise valid BCP 47 tags or English names, fail with a
-source-backed diagnostic as an explicit bounded compatibility gap; blank or
-malformed identifiers fail as well. This is not a replacement for the
-complete JVM/CLDR locale database.
+BCP 47 language tag. Scribium uses a checked-in, immutable pure-Rust snapshot
+of the observable locale data returned by the pinned Temurin `25.0.4.1+1`
+oracle, with CLDR provider routing and active FALLBACK-root values captured at
+generation time. This avoids OS/JVM locale databases, hidden environment
+state, and host-dependent results while keeping the evaluator WASM-compatible.
+The snapshot is a compatibility representation of the pinned JDK behavior,
+not a generic JVM, CLDR, or ResourceBundle implementation; localization-table
+and rendering semantics remain separately owned.
 
 `.none` follows the pinned nullable `String? = null` path: it invokes the
 getter and does not clear the existing locale. The setter validates argument

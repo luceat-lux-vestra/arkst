@@ -1,0 +1,97 @@
+{
+  "nodes": [
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The document language starts unset: ", "span": {"source_id": 1, "start": 0, "end": 36}}},
+          {"Text": {"content": "", "span": {"source_id": 1, "start": 36, "end": 44}}}
+        ],
+        "span": {"source_id": 1, "start": 0, "end": 44}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The base locale is now ", "span": {"source_id": 1, "start": 65, "end": 88}}},
+          {"Text": {"content": "español", "span": {"source_id": 1, "start": 88, "end": 96}}}
+        ],
+        "span": {"source_id": 1, "start": 65, "end": 96}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The regional locale is now ", "span": {"source_id": 1, "start": 115, "end": 142}}},
+          {"Text": {"content": "español (México)", "span": {"source_id": 1, "start": 142, "end": 150}}}
+        ],
+        "span": {"source_id": 1, "start": 115, "end": 150}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The script and region locale is now ", "span": {"source_id": 1, "start": 174, "end": 210}}},
+          {"Text": {"content": "中文 (繁體，台灣)", "span": {"source_id": 1, "start": 210, "end": 218}}}
+        ],
+        "span": {"source_id": 1, "start": 174, "end": 218}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The language, script, and region locale is now ", "span": {"source_id": 1, "start": 242, "end": 289}}},
+          {"Text": {"content": "српски (ћирилица, Србија)", "span": {"source_id": 1, "start": 289, "end": 297}}}
+        ],
+        "span": {"source_id": 1, "start": 242, "end": 297}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The variant locale is now ", "span": {"source_id": 1, "start": 344, "end": 370}}},
+          {"Text": {"content": "English (United States, Computer)", "span": {"source_id": 1, "start": 370, "end": 378}}}
+        ],
+        "span": {"source_id": 1, "start": 344, "end": 378}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The deprecated language alias resolves to ", "span": {"source_id": 1, "start": 394, "end": 436}}},
+          {"Text": {"content": "עברית", "span": {"source_id": 1, "start": 436, "end": 444}}}
+        ],
+        "span": {"source_id": 1, "start": 394, "end": 444}
+      }
+    },
+    {
+      "Paragraph": {
+        "content": [
+          {"Text": {"content": "The valid unavailable tag is now ", "span": {"source_id": 1, "start": 463, "end": 496}}},
+          {"Text": {"content": "xx (YY)", "span": {"source_id": 1, "start": 496, "end": 504}}}
+        ],
+        "span": {"source_id": 1, "start": 463, "end": 504}
+      }
+    }
+  ],
+  "metadata": {
+    "title": null,
+    "author": null,
+    "date": null,
+    "raw": [],
+    "document_state": {
+      "name": "",
+      "description": "",
+      "document_type": "Plain",
+      "authors": [],
+      "keywords": [],
+      "theme": null,
+      "locale": {"tag": "xx-YY", "localized_name": "xx (YY)"},
+      "caption_position": {
+        "default": "Bottom",
+        "figures": null,
+        "tables": null,
+        "code_blocks": null
+      }
+    }
+  }
+}

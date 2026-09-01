@@ -95,7 +95,7 @@ fn audit_named_and_optional_binding_preserves_missing_none_and_named_slots() {
 
 #[test]
 fn audit_nested_candidate_conversion_is_before_state_commit_and_rolls_back() {
-    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid}}\n.doclang\n";
+    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid1}}\n.doclang\n";
     let (result, source_id) = compile_source(source);
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     assert_eq!(result.diagnostics[0].code, "E3001");

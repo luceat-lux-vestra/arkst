@@ -104,7 +104,7 @@ and conversion details are linked to the canonical [#149 value-model audit](VALU
 | `.docauthor` | `docauthor(author: String? = null)`; no alias | Empty ordered author list; getter is `""` | Getter returns the first author name or empty text. Setter appends one `DocumentAuthor`; duplicates are preserved; setter returns `VoidValue` | Current append path is bounded to scalar conversion and shares state; full upstream body/conversion contract remains open | `PARTIAL` |
 | `.docauthors` | `docauthors(authors: Map<String, DictionaryValue<OutputValue<String>>>? = null)`; no alias | Empty ordered author list | Getter returns an ordered dictionary keyed by author name with nested info. Setter maps entries and appends them; dictionary key collisions cannot represent two entries with the same key | Current validation is pre-commit and ordered, but body/value conversion is bounded; mixed singular/plural append behavior is tested | `PARTIAL` |
 | `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; source-backed body conversion and generalized target coverage remain partial | `PARTIAL` |
-| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Current deterministic checked-in locale table is narrower than the upstream JVM locale universe; source-backed body text is converted before lookup without evaluating parsed body nodes | `PARTIAL` |
+| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; malformed tags follow the JDK valid-prefix/root result, while type/arity/binding errors fail before assignment | Issue #173 closes the available-locale gap with a deterministic checked-in snapshot of the pinned reference JDK universe; source-backed body text is converted before lookup without evaluating parsed body nodes. Locale-aware rendering and broader body/output behavior remain outside this slice | `PARTIAL` |
 | `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction, raw-body fallback, and rollback are evidenced; theme resolution/rendering are not | `PARTIAL` |
 | `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `UNSUPPORTED` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; this evidence is retained here without re-auditing #151 semantics | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
 
@@ -197,13 +197,53 @@ missing table/locale/key entries fail as well. This cross-reference proves the
 resource-seeded initial state without reopening #151's canonical semantic
 classification.
 
-Scribium deliberately uses a deterministic checked-in locale table rather than
-an OS/JVM dependency. It stores canonical tag and localized-name data in the
-IR and has no localization-table state. Valid upstream identifiers outside the
-checked-in table and locale-aware rendering remain #152 locale gaps; #166 now
-covers the bounded source-backed raw-body fallback without evaluating parsed
-body nodes. `.localization` and `.localize` remain #151-owned unsupported
-general stdlib gaps.
+Scribium deliberately uses a deterministic checked-in locale snapshot rather
+than an OS/JVM dependency. Issue #173 generates the snapshot from
+`java.util.Locale.getAvailableLocales()` and the pinned `JVMLocale` getters
+under Eclipse Temurin `25.0.4.1+1` with `java.locale.providers=CLDR`.
+The 1,158 available records and 1,157 deduplicated canonical-tag records keep
+the raw returned-array order in the pinned
+`tools/jdk25_available_locale_order.tsv` manifest; the JDK25 exhaustive
+character-wise English-name collision audit found zero collision classes.
+Name lookup remains first-match and character-wise JVM/Kotlin ignore-case,
+while tag lookup uses
+`Locale.forLanguageTag`-compatible canonicalization. This includes language,
+script, region, variant, observed deprecated aliases, and valid unavailable
+tags such as `xx-YY`. Valid blank-language results are retained: root/`und`
+keeps empty language/code/shortTag-equivalent fields, while `tag` preserves
+JDK serialization (`und` or a private-use-only tag such as `x-private`);
+malformed prefixes are compared against the exact JDK result rather than
+rejected by a language-nonempty predicate.
+The parser preserves Java's legacy `no_NO_NY` mapping after private-use
+`lvariant` extraction, so `no-NO-x-lvariant-NY` canonicalizes to `nn-NO` while
+localized display retains the derived `no`/`NO`/`NY` base identity; residual
+private-use subtags remain part of the result.
+
+The complete logical display oracle has 453,459 JDK25 CLDR/FALLBACK-root
+records. Semantic fallback-delta compaction retains 267,017 genuine
+overrides in the checked-in
+`crates/scribium-engine/data/jdk25_locale_display.bin` snapshot (format 1):
+320 profiles, 2,525 keys, 178,930 interned values, 3,682,380 raw string-pool
+bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
+Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
+the generator exhaustively reconstructs every full-oracle `(profile,key)` and
+requires the compact value to match exactly. The locale logical source
+SHA-256 is `2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105`,
+the display logical source SHA-256 is
+`96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and
+the compact artifact SHA-256 is
+`d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
+Generic assembly uses the snapshot for `Locale.getDisplayName`, including
+JDK25 CLDR parent-locale/likely-script provider routing, Unicode extension
+fallbacks, and the active FALLBACK root values; only the JDK FALLBACK root data
+is used. Generation is guarded by the exact archive, helper, timezone-source,
+logical-source, compact-artifact, and size fingerprints. Runtime behavior has
+no JVM, OS locale database, filesystem, network, or global locale state.
+
+The IR still stores only canonical tag and localized-name data and has no
+localization-table state. #166 covers the bounded source-backed raw-body
+fallback without evaluating parsed body nodes. Locale-aware rendering,
+hyphenation, `.localization`, and `.localize` remain separately owned gaps.
 
 ### Theme
 
@@ -363,13 +403,15 @@ semantics. The 2 localization rows are canonical #151 handoffs and are also
 | `.docauthors` | [#137](https://github.com/luceat-lux-vestra/scribium/issues/137), [PR #138](https://github.com/luceat-lux-vestra/scribium/pull/138), merge `2b685f0` | Revalidated as ordered nested dictionary append with mixed-family state sharing; `PARTIAL` |
 | `.dockeywords` | [#139](https://github.com/luceat-lux-vestra/scribium/issues/139), [PR #140](https://github.com/luceat-lux-vestra/scribium/pull/140), merge `8771bd7` | Revalidated as replacement with ordering and duplicate preservation; `PARTIAL` for body/conversion/output boundary |
 | `.theme` | [#141](https://github.com/luceat-lux-vestra/scribium/issues/141), [PR #142](https://github.com/luceat-lux-vestra/scribium/pull/142), merge `bf32038` | Pinned implementation resolves the KDoc ambiguity in favor of whole-state replacement; explicit-empty option survives serde; `PARTIAL` |
-| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e` | Revalidated against upstream name/tag lookup and localized-name getter; deterministic locale table is narrower than upstream; `PARTIAL` |
+| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,158-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,157-tag canonical index, including blank-language root/private-use serialization. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
 | `.captionposition` | [#145](https://github.com/luceat-lux-vestra/scribium/issues/145), [PR #146](https://github.com/luceat-lux-vestra/scribium/pull/146), merge `247d945` | Seen and retained as #153 layout ownership; no #152 canonical status assigned |
 | Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/scribium/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
 
 Relevant current evidence includes
 [`evaluator.rs`](../../../crates/scribium-engine/src/evaluator.rs),
 [`locale.rs`](../../../crates/scribium-engine/src/locale.rs),
+[`locale_data.rs`](../../../crates/scribium-engine/src/locale_data.rs),
+[`generate_jdk25_locale_data.py`](../../../tools/generate_jdk25_locale_data.py),
 [`scribium-ir`](../../../crates/scribium-ir/src/lib.rs), the core document-state
 tests, and the independent author/keyword/locale/theme fixtures. The focused
 Issue #152 witnesses are in

@@ -63,7 +63,40 @@ jobs:
         env:
           REFERENCE_JAVA: ${{ steps.runtime.outputs.java }}
           ARCHIVE_PATH: ${{ steps.jdk.outputs.archive_path }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
         run: |
+          python3 tools/generate_jdk25_locale_data.py \
+            --java "$REFERENCE_JAVA" \
+            --archive "$ARCHIVE_PATH" \
+            --check
+          "$REFERENCE_JAVA" -Dfile.encoding=UTF-8 -Djava.locale.providers=CLDR --source 25 \
+            tools/dump_jdk25_locale_oracle.java > "$RUNNER_TEMP/locale-oracle.tsv"
+          python3 - "$RUNNER_TEMP/locale-oracle.tsv" <<'PY'
+          import hashlib
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          oracle_path = Path(sys.argv[1])
+          manifest = tomllib.loads(
+              Path("docs/compatibility/quarkdown/reference-jvm.toml").read_text()
+          )
+          expected_count = manifest["reference"]["locale_public_oracle_record_count"]
+          expected_sha256 = manifest["reference"]["locale_public_oracle_output_sha256"]
+          output = oracle_path.read_bytes()
+          actual_count = len(output.splitlines())
+          actual_sha256 = hashlib.sha256(output).hexdigest()
+          if actual_count != expected_count or actual_sha256 != expected_sha256:
+              raise SystemExit(
+                  f"public oracle mismatch: expected {expected_count}/{expected_sha256}, "
+                  f"got {actual_count}/{actual_sha256}"
+              )
+          PY
+          SCRIBIUM_JDK25_LOCALE_ORACLE="$RUNNER_TEMP/locale-oracle.tsv" \
+            cargo test -p scribium-engine --locked \
+            'locale::tests::jdk25_locale_oracle_matches_candidate_graph_and_public_resolution' \
+            -- --exact
           python3 tools/generate_jdk25_unicode_case.py \
             --java "$REFERENCE_JAVA" \
             --archive "$ARCHIVE_PATH" \

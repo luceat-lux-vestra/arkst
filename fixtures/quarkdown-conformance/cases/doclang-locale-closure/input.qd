@@ -1,0 +1,22 @@
+The document language starts unset: .doclang
+
+.doclang {Spanish}
+The base locale is now .doclang
+
+.doclang {es-MX}
+The regional locale is now .doclang
+
+.doclang {zh-Hant-TW}
+The script and region locale is now .doclang
+
+.doclang {sr-Cyrl-RS}
+The language, script, and region locale is now .doclang
+
+.doclang {English (United States, Computer)}
+The variant locale is now .doclang
+
+.doclang {iw}
+The deprecated language alias resolves to .doclang
+
+.doclang {xx-YY}
+The valid unavailable tag is now .doclang
