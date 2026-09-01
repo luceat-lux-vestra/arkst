@@ -30,6 +30,26 @@ jobs:
           toolchain: 1.98.0
           components: rustfmt
       - run: cargo fmt --all --check
+      - name: Verify supported workflow YAML shape
+        run: |
+          python3 tools/ci/test_verify_workflow_shape.py
+          python3 tools/ci/verify_workflow_shape.py
+      - name: Test merge-gate policy verifier
+        run: python3 tools/ci/test_verify_gate_policy.py
+      - name: Verify merge-gate policy and live ruleset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ruleset_id="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets" \
+            --jq '.[] | select(.name == "Protect main") | .id')"
+          if [ -z "$ruleset_id" ]; then
+            echo "Protect main ruleset not found" >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/rulesets/${ruleset_id}" \
+            > "$RUNNER_TEMP/protect-main-ruleset.json"
+          python3 tools/ci/verify_gate_policy.py verify \
+            --ruleset-json "$RUNNER_TEMP/protect-main-ruleset.json"
 
   clippy:
     name: clippy
