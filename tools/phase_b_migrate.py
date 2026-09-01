@@ -46,6 +46,7 @@ p = Path('tools/generate_jdk17_locale_data.py')
 s = p.read_text()
 s = s.replace('17.0.20.1+1', '25.0.4.1+1-LTS')
 s = s.replace('Temurin-17.0.20.1+1', 'Temurin-25.0.4.1+1')
+s = re.sub(r'REFERENCE_VENDOR_VERSION = ".*?"', 'REFERENCE_VENDOR_VERSION = "Temurin-25.0.4.1+1"', s, count=1)
 s = s.replace('CLDR,COMPAT', 'CLDR')
 s = re.sub(
     r'REFERENCE_JDK_URL = \(.*?\n\)',
