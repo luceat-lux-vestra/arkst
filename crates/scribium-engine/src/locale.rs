@@ -18,7 +18,7 @@ struct LocaleRecord {
 
 include!("locale_data.rs");
 
-const LOCALE_DISPLAY_DATA: &[u8] = include_bytes!("../data/jdk17_locale_display.bin");
+const LOCALE_DISPLAY_DATA: &[u8] = include_bytes!("../data/jdk25_locale_display.bin");
 const LOCALE_DISPLAY_MAGIC: &[u8; 4] = b"SCLD";
 const LOCALE_DISPLAY_HEADER_SIZE: usize = 72;
 const LOCALE_DISPLAY_HEADER_FIELDS: usize = 17;
@@ -1072,7 +1072,7 @@ fn display_unicode_keyword(parsed: &ParsedLanguageTag, key: &str, value: &str) -
     }
     // Locale.getDisplayName has three provider fallbacks for Unicode keyword
     // types that are not LocaleNames `type.*` records. The checked-in display
-    // dataset contains their JDK-17 provider values; the branches select the
+    // dataset contains their JDK-25 provider values; the branches select the
     // data family generically rather than enumerating keyword values.
     let display_type = if key == "cu" {
         let currency_key = format!("currency.{value}");

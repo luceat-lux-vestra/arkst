@@ -1,9 +1,9 @@
 import java.util.Locale;
 import java.util.TreeSet;
 
-/** Emits the locale facts consumed by generate_jdk17_locale_data.py. */
-final class DumpJdk17LocaleData {
-    private DumpJdk17LocaleData() {}
+/** Emits the locale facts consumed by generate_jdk25_locale_data.py. */
+final class DumpJdk25LocaleData {
+    private DumpJdk25LocaleData() {}
 
     public static void main(String[] args) {
         System.out.println("runtime.version\t" + Runtime.version());

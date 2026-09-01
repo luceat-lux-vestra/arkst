@@ -11,16 +11,13 @@ import sun.util.locale.provider.LocaleProviderAdapter;
 import sun.util.locale.provider.TimeZoneNameUtility;
 
 /** Emits deterministic effective locale-name display data for the .doclang generator. */
-final class DumpJdk17LocaleDisplayData {
-    private DumpJdk17LocaleDisplayData() {}
+final class DumpJdk25LocaleDisplayData {
+    private DumpJdk25LocaleDisplayData() {}
 
     public static void main(String[] args) {
-        // The pinned runtime uses CLDR first and COMPAT (the JRE adapter) as
-        // its provider fallback. Capture that same effective order so legacy
-        // provider values such as no_NO_NY's %%NY are not lost.
+        // JDK 25 uses CLDR only. The legacy JRE/COMPAT locale-data
+        // provider is not part of the pinned reference runtime.
         LocaleData cldr = new LocaleData(LocaleProviderAdapter.Type.CLDR);
-        LocaleData compat = new LocaleData(LocaleProviderAdapter.Type.JRE);
-        TreeMap<String, String> cldrRows = new TreeMap<>();
         TreeMap<String, String> rows = new TreeMap<>();
         TreeMap<String, Locale> profiles = new TreeMap<>();
         TreeMap<String, String> timezoneIds = new TreeMap<>();
@@ -35,14 +32,9 @@ final class DumpJdk17LocaleDisplayData {
             }
         }
 
-        addBundle(Locale.ROOT, cldr, cldrRows, profiles, false, null);
+        addBundle(Locale.ROOT, cldr, rows, profiles, false, null);
         for (Locale locale : Locale.getAvailableLocales()) {
-            addBundle(locale, cldr, cldrRows, profiles, false, null);
-        }
-        rows.putAll(cldrRows);
-        addBundle(Locale.ROOT, compat, rows, profiles, true, cldrRows);
-        for (Locale locale : Locale.getAvailableLocales()) {
-            addBundle(locale, compat, rows, profiles, true, cldrRows);
+            addBundle(locale, cldr, rows, profiles, false, null);
         }
         addCurrencyData(profiles, rows);
         addTimezoneData(profiles, timezoneIds, rows);
