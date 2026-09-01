@@ -80,12 +80,12 @@ def _run_blocks(lines: list[str]) -> list[str]:
     index = 0
     while index < len(lines):
         code = _code(lines[index])
-        scalar = re.match(r"^(\s*)run:\s*(.+)$", code)
+        scalar = re.match(r"^(\s*)(?:-\s+)?run:\s*(.+)$", code)
         if scalar and scalar.group(2).strip() not in {"|", ">", "|-", ">-"}:
             blocks.append(scalar.group(2))
             index += 1
             continue
-        block = re.match(r"^(\s*)run:\s*[|>]-?\s*$", code)
+        block = re.match(r"^(\s*)(?:-\s+)?run:\s*[|>]-?\s*$", code)
         if not block:
             index += 1
             continue
@@ -124,7 +124,10 @@ def verify_workflow(path: Path, root: Path) -> None:
         raise WorkflowSecurityError(f"{rel}: explicit concurrency policy is required")
 
     for job_id, block in _job_blocks(lines, rel):
-        if not any(re.fullmatch(r"    timeout-minutes:\s*[0-9]+\s*", _code(line)) for line in block):
+        if not any(
+            re.fullmatch(r"    timeout-minutes:\s*[0-9]+\s*", _code(line))
+            for line in block
+        ):
             raise WorkflowSecurityError(f"{rel}:{job_id}: timeout-minutes is required")
 
     for index, raw in enumerate(lines):
@@ -158,11 +161,10 @@ def verify_workflow(path: Path, root: Path) -> None:
                     f"{rel}: actions/checkout must set persist-credentials: false"
                 )
 
-    if "pull_request_target:" in text:
-        if "actions/checkout@" in text:
-            raise WorkflowSecurityError(
-                f"{rel}: pull_request_target workflow must not checkout repository content"
-            )
+    if "pull_request_target:" in text and "actions/checkout@" in text:
+        raise WorkflowSecurityError(
+            f"{rel}: pull_request_target workflow must not checkout repository content"
+        )
 
     for body in _run_blocks(lines):
         for expression in UNTRUSTED_EXPRESSIONS:
@@ -183,7 +185,9 @@ def verify_workflow(path: Path, root: Path) -> None:
         if match:
             image = match.group(1).strip("'\"")
             if "@sha256:" not in image:
-                raise WorkflowSecurityError(f"{rel}: container/service image is not digest pinned: {image}")
+                raise WorkflowSecurityError(
+                    f"{rel}: container/service image is not digest pinned: {image}"
+                )
 
 
 def verify_repository(root: Path) -> None:
