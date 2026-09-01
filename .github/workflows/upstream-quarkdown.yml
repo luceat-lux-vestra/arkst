@@ -39,61 +39,41 @@ jobs:
       - name: Build upstream watcher
         run: cargo build -p scribium-upstream-watch --locked
 
-      - name: Get latest stable release from GitHub
-        if: github.event.inputs.observed_tag == ''
-        id: get_release
-        run: |
-          RELEASE=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.tag_name')
-          URL=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.html_url')
-          python3 - "$RELEASE" <<'PY'
-          import re
-          import sys
-
-          tag = sys.argv[1]
-          if not 1 <= len(tag.encode("utf-8")) <= 128:
-              raise SystemExit("observed tag must be 1..128 UTF-8 bytes")
-          if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/+'-]*", tag) is None:
-              raise SystemExit("observed tag contains unsupported characters")
-          PY
-          printf 'tag=%s\n' "$RELEASE" >> "$GITHUB_OUTPUT"
-          printf 'url=%s\n' "$URL" >> "$GITHUB_OUTPUT"
+      - name: Determine and validate observed release
+        id: observed
         env:
           GH_TOKEN: ${{ github.token }}
-
-      - name: Use manual override for dry-run
-        if: github.event.inputs.observed_tag != ''
-        id: manual_override
-        env:
-          OBSERVED_TAG: ${{ github.event.inputs.observed_tag }}
+          MANUAL_TAG: ${{ github.event.inputs.observed_tag }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
+          if [ -n "$MANUAL_TAG" ]; then
+            if [ "$DRY_RUN" != "true" ]; then
+              echo "Error: observed_tag override may only be used with dry_run=true" >&2
+              exit 1
+            fi
+            OBSERVED_TAG="$MANUAL_TAG"
+            OBSERVED_URL="https://github.com/iamgio/quarkdown/releases/tag/$MANUAL_TAG"
+          else
+            OBSERVED_TAG=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.tag_name')
+            OBSERVED_URL=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.html_url')
+          fi
+
           python3 - "$OBSERVED_TAG" <<'PY'
           import re
           import sys
 
           tag = sys.argv[1]
-          if not 1 <= len(tag.encode("utf-8")) <= 128:
+          encoded = tag.encode("utf-8")
+          if not 1 <= len(encoded) <= 128:
               raise SystemExit("observed tag must be 1..128 UTF-8 bytes")
           if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/+'-]*", tag) is None:
               raise SystemExit("observed tag contains unsupported characters")
+          if ".." in tag or "//" in tag or tag.endswith(("/", ".", ".lock")):
+              raise SystemExit("observed tag is not an accepted ref-like release tag")
           PY
-          printf 'tag=%s\n' "$OBSERVED_TAG" >> "$GITHUB_OUTPUT"
-          printf 'url=https://github.com/iamgio/quarkdown/releases/tag/%s\n' "$OBSERVED_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Determine observed release
-        id: observed
-        env:
-          GET_RELEASE_TAG: ${{ steps.get_release.outputs.tag }}
-          GET_RELEASE_URL: ${{ steps.get_release.outputs.url }}
-          MANUAL_TAG: ${{ steps.manual_override.outputs.tag }}
-          MANUAL_URL: ${{ steps.manual_override.outputs.url }}
-        run: |
-          if [ -n "$GET_RELEASE_TAG" ]; then
-            printf 'tag=%s\n' "$GET_RELEASE_TAG" >> "$GITHUB_OUTPUT"
-            printf 'url=%s\n' "$GET_RELEASE_URL" >> "$GITHUB_OUTPUT"
-          else
-            printf 'tag=%s\n' "$MANUAL_TAG" >> "$GITHUB_OUTPUT"
-            printf 'url=%s\n' "$MANUAL_URL" >> "$GITHUB_OUTPUT"
-          fi
+          printf 'tag=%s\n' "$OBSERVED_TAG" >> "$GITHUB_OUTPUT"
+          printf 'url=%s\n' "$OBSERVED_URL" >> "$GITHUB_OUTPUT"
 
       - name: Run drift detection
         id: drift
@@ -169,13 +149,6 @@ jobs:
           echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
           echo ""
           echo "<!-- scribium-upstream-drift:quarkdown:$(echo "$DRIFT_RESULT" | jq -r '.observed_tag') -->"
-
-      - name: Manual override guard
-        if: github.event.inputs.observed_tag != '' && github.event.inputs.dry_run != 'true'
-        run: |
-          echo "Error: observed_tag override may only be used with dry_run=true"
-          echo "To create a real issue, do not use observed_tag override, or set dry_run=true for testing."
-          exit 1
 
       - name: Check for existing issue
         if: steps.check_drift.outputs.drift == 'true' && github.event.inputs.dry_run != 'true'
