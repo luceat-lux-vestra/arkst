@@ -101,24 +101,46 @@ def _run_blocks(lines: list[str]) -> list[str]:
     return blocks
 
 
+def _check_write_permissions(
+    lines: list[str], rel: str, allowed_writes: set[str], base_indent: int, scope: str
+) -> None:
+    prefix = " " * base_indent
+    for index, raw in enumerate(lines):
+        code = _code(raw)
+        if not re.fullmatch(rf"{re.escape(prefix)}permissions:(?:\s*.*)?", code):
+            continue
+        stripped = code.strip()
+        if stripped == "permissions: write-all":
+            raise WorkflowSecurityError(f"{rel}: {scope} permissions: write-all is forbidden")
+        if stripped in {"permissions: {}", "permissions: read-all"}:
+            continue
+        if stripped != "permissions:":
+            raise WorkflowSecurityError(f"{rel}: unsupported {scope} permissions syntax: {stripped}")
+        for candidate in lines[index + 1 :]:
+            candidate_code = _code(candidate)
+            if candidate_code.strip() and _indent(candidate) <= base_indent:
+                break
+            match = re.fullmatch(
+                rf"{' ' * (base_indent + 2)}([A-Za-z-]+):\s*write\s*", candidate_code
+            )
+            if match and match.group(1) not in allowed_writes:
+                raise WorkflowSecurityError(
+                    f"{rel}: unapproved {scope} write permission: {match.group(1)}"
+                )
+
+
 def verify_workflow(path: Path, root: Path) -> None:
     rel = path.relative_to(root).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
     text = "\n".join(lines)
+    allowed_writes = ALLOWED_WRITE_PERMISSIONS.get(rel, set())
 
     permissions = _top_level_block(lines, "permissions")
     if permissions is None:
         raise WorkflowSecurityError(f"{rel}: explicit top-level permissions are required")
-    permission_line = _code(lines[permissions[0]]).strip()
-    if permission_line == "permissions: write-all":
-        raise WorkflowSecurityError(f"{rel}: permissions: write-all is forbidden")
-    allowed_writes = ALLOWED_WRITE_PERMISSIONS.get(rel, set())
-    for raw in lines[permissions[0] + 1 : permissions[1]]:
-        match = re.fullmatch(r"  ([A-Za-z-]+):\s*write\s*", _code(raw))
-        if match and match.group(1) not in allowed_writes:
-            raise WorkflowSecurityError(
-                f"{rel}: unapproved workflow-level write permission: {match.group(1)}"
-            )
+    _check_write_permissions(
+        lines[permissions[0] : permissions[1]], rel, allowed_writes, 0, "workflow-level"
+    )
 
     if _top_level_block(lines, "concurrency") is None:
         raise WorkflowSecurityError(f"{rel}: explicit concurrency policy is required")
@@ -129,6 +151,7 @@ def verify_workflow(path: Path, root: Path) -> None:
             for line in block
         ):
             raise WorkflowSecurityError(f"{rel}:{job_id}: timeout-minutes is required")
+        _check_write_permissions(block, rel, allowed_writes, 4, f"job {job_id}")
 
     for index, raw in enumerate(lines):
         match = re.search(r"\buses:\s*([^\s#]+)", _code(raw))
