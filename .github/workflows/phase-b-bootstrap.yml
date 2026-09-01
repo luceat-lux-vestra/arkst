@@ -8,90 +8,111 @@ permissions:
   contents: write
 
 jobs:
-  rebuild:
-    if: ${{ !contains(github.event.head_commit.message, '[phase-b-bootstrap]') }}
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[phase-b-jdk25]') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - name: Reconstruct Phase B on JDK25 main
+      - name: Download exact Temurin 25 reference
+        id: jdk
         shell: bash
         run: |
           set -euo pipefail
-          old=83e12745acc4d3a1a3497b638f670e29030a8f22
-          git fetch origin "$old"
-          files=(
-            crates/scribium-core/src/lib.rs
-            crates/scribium-core/tests/document_state_audit.rs
-            crates/scribium-core/tests/quarkdown_v251_reconciliation.rs
-            crates/scribium-core/tests/quarkdown_value_model_audit.rs
-            crates/scribium-engine/src/locale.rs
-            crates/scribium-engine/src/locale_data.rs
-            crates/scribium-engine/data/jdk17_locale_display.bin
-            crates/scribium-test-support/src/lib.rs
-            docs/ROADMAP.md
-            docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT.md
-            docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT_MANIFEST.tsv
-            docs/compatibility/quarkdown/PROGRAMMABLE_DOCUMENT_SEMANTICS.md
-            fixtures/quarkdown-conformance/README.md
-            fixtures/quarkdown-conformance/cases/doclang-locale-closure/case.toml
-            fixtures/quarkdown-conformance/cases/doclang-locale-closure/expected/ir.json
-            fixtures/quarkdown-conformance/cases/doclang-locale-closure/input.qd
-            tools/dump_jdk17_locale_data.java
-            tools/dump_jdk17_locale_display_data.java
-            tools/generate_jdk17_locale_data.py
-            typos.toml
+          readarray -t v < <(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          with Path('docs/compatibility/quarkdown/reference-jvm.toml').open('rb') as f:
+              r=tomllib.load(f)['reference']
+          print(r['archive_filename']); print(r['archive_url']); print(r['archive_sha256'])
+          PY
           )
-          git checkout "$old" -- "${files[@]}"
+          p="$RUNNER_TEMP/${v[0]}"
+          curl --fail --location --retry 3 --output "$p" "${v[1]}"
+          printf '%s  %s\n' "${v[2]}" "$p" | sha256sum --check --strict
+          d="$RUNNER_TEMP/jdk25"; mkdir -p "$d"
+          tar -xzf "$p" -C "$d"
+          j="$(find "$d" -path '*/bin/java' -print -quit)"
+          test -x "$j"
+          echo "archive=$p" >> "$GITHUB_OUTPUT"
+          echo "java=$j" >> "$GITHUB_OUTPUT"
+      - name: Convert locale oracle tooling to JDK25 CLDR-only
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('crates/scribium-engine/src/locale.rs')
-          text = path.read_text()
-          text = text.replace(
-              'use crate::unicode_case::equals_ignore_case;',
-              'use crate::unicode_case::{simple_lowercase, simple_uppercase};'
-          )
-          old = '''fn string_equals_ignore_case(left: &str, right: &str) -> bool {
-              let mut left_chars = left.chars();
-              let mut right_chars = right.chars();
-              loop {
-                  match (left_chars.next(), right_chars.next()) {
-                      (Some(left), Some(right)) if equals_ignore_case(left, right) => {}
-                      (None, None) => return true,
-                      _ => return false,
-                  }
-              }
-          }
-          '''
-          new = '''fn string_equals_ignore_case(left: &str, right: &str) -> bool {
-              let mut left_chars = left.chars();
-              let mut right_chars = right.chars();
-              loop {
-                  match (left_chars.next(), right_chars.next()) {
-                      (Some(left), Some(right)) if char_equals_ignore_case(left, right) => {}
-                      (None, None) => return true,
-                      _ => return false,
-                  }
-              }
-          }
+          import re
 
-          fn char_equals_ignore_case(left: char, right: char) -> bool {
-              if left == right {
-                  return true;
-              }
-              let left_upper = simple_uppercase(left);
-              let right_upper = simple_uppercase(right);
-              left_upper == right_upper
-                  || simple_lowercase(left_upper) == simple_lowercase(right_upper)
-          }
-          '''
-          if old not in text:
-              raise SystemExit('locale ignore-case block not found')
-          path.write_text(text.replace(old, new))
+          # Public locale dumper: only class/file naming changes.
+          p=Path('tools/dump_jdk17_locale_data.java'); s=p.read_text()
+          s=s.replace('generate_jdk17_locale_data.py','generate_jdk25_locale_data.py').replace('DumpJdk17LocaleData','DumpJdk25LocaleData')
+          q=Path('tools/dump_jdk25_locale_data.java'); q.write_text(s); p.unlink()
+
+          # Display dumper: JDK25 has CLDR only; remove every JRE/COMPAT merge path.
+          p=Path('tools/dump_jdk17_locale_display_data.java'); s=p.read_text()
+          s=s.replace('DumpJdk17LocaleDisplayData','DumpJdk25LocaleDisplayData')
+          s=s.replace('''        // The pinned runtime uses CLDR first and COMPAT (the JRE adapter) as\n        // its provider fallback. Capture that same effective order so legacy\n        // provider values such as no_NO_NY's %%NY are not lost.\n        LocaleData cldr = new LocaleData(LocaleProviderAdapter.Type.CLDR);\n        LocaleData compat = new LocaleData(LocaleProviderAdapter.Type.JRE);\n        TreeMap<String, String> cldrRows = new TreeMap<>();\n        TreeMap<String, String> rows = new TreeMap<>();''','''        // JDK 25 uses the CLDR locale provider; the legacy JRE/COMPAT\n        // locale data provider was removed before this reference baseline.\n        LocaleData cldr = new LocaleData(LocaleProviderAdapter.Type.CLDR);\n        TreeMap<String, String> rows = new TreeMap<>();''')
+          s=s.replace('''        addBundle(Locale.ROOT, cldr, cldrRows, profiles, false, null);\n        for (Locale locale : Locale.getAvailableLocales()) {\n            addBundle(locale, cldr, cldrRows, profiles, false, null);\n        }\n        rows.putAll(cldrRows);\n        addBundle(Locale.ROOT, compat, rows, profiles, true, cldrRows);\n        for (Locale locale : Locale.getAvailableLocales()) {\n            addBundle(locale, compat, rows, profiles, true, cldrRows);\n        }''','''        addBundle(Locale.ROOT, cldr, rows, profiles, false, null);\n        for (Locale locale : Locale.getAvailableLocales()) {\n            addBundle(locale, cldr, rows, profiles, false, null);\n        }''')
+          q=Path('tools/dump_jdk25_locale_display_data.java'); q.write_text(s); p.unlink()
+
+          # Generator: move to the global Temurin25 oracle and make this discovery
+          # pass measure JDK25 fingerprints before they are locked in the next pass.
+          p=Path('tools/generate_jdk17_locale_data.py'); s=p.read_text()
+          s=s.replace('17.0.20.1+1','25.0.4.1+1-LTS')
+          s=s.replace('Temurin-17.0.20.1+1','Temurin-25.0.4.1+1')
+          s=s.replace('CLDR,COMPAT','CLDR')
+          s=re.sub(r'REFERENCE_JDK_URL = \(.*?\n\)', 'REFERENCE_JDK_URL = (\n    "https://github.com/adoptium/temurin25-binaries/releases/download/"\n    "jdk-25.0.4.1%2B1/"\n    "OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz"\n)', s, count=1, flags=re.S)
+          s=re.sub(r'REFERENCE_JDK_SHA256 = "[0-9a-f]+"', 'REFERENCE_JDK_SHA256 = "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e"', s, count=1)
+          s=re.sub(r'REFERENCE_JDK_SIZE = \d+', 'REFERENCE_JDK_SIZE = 141329719', s, count=1)
+          for name in ['EXPECTED_AVAILABLE_RECORD_COUNT','EXPECTED_TAG_RECORD_COUNT','EXPECTED_DISPLAY_RECORD_COUNT','EXPECTED_COMPACT_RECORD_COUNT','EXPECTED_COMPACT_PROFILE_COUNT','EXPECTED_COMPACT_KEY_COUNT','EXPECTED_COMPACT_VALUE_COUNT','EXPECTED_TZ_SOURCE_ENTRY_COUNT','EXPECTED_TZ_ID_COUNT']:
+              s=re.sub(rf'{name} = \d+', f'{name} = 0', s, count=1)
+          for name in ['EXPECTED_SOURCE_SHA256','EXPECTED_DUMP_SOURCE_SHA256','EXPECTED_DISPLAY_SOURCE_SHA256','EXPECTED_DISPLAY_DUMP_SOURCE_SHA256','EXPECTED_COMPACT_SHA256','REFERENCE_JDK_TZ_SOURCE_SHA256']:
+              s=re.sub(rf'{name} = "[0-9a-f]*"', f'{name} = ""', s, count=1)
+          s=s.replace('dump_jdk17_locale_display_data.java','dump_jdk25_locale_display_data.java')
+          s=s.replace('DumpJdk17LocaleDisplayData','DumpJdk25LocaleDisplayData')
+          s=s.replace('dump_jdk17_locale_data.java','dump_jdk25_locale_data.java')
+          s=s.replace('generate_jdk17_locale_data.py','generate_jdk25_locale_data.py')
+          s=s.replace('jdk17_locale_display.bin','jdk25_locale_display.bin')
+          s=s.replace('scribium-jdk17-','scribium-jdk25-')
+          s=s.replace('"--source",\n            "17",','"--source",\n            "25",')
+          s=s.replace('/Contents/Home/bin/{executable}','/bin/{executable}').replace('Contents/Home/bin/{executable}','bin/{executable}')
+          s=s.replace('/Contents/Home/lib/src.zip','/lib/src.zip').replace('Contents/Home/lib/src.zip','lib/src.zip')
+          s=s.replace('CLDR→COMPAT display data','CLDR display data')
+          # Discovery-pass expected checks become conditional; exact measured
+          # values are written into the next commit before final review.
+          s=s.replace('if helper_sha256 != EXPECTED_DUMP_SOURCE_SHA256:', 'if EXPECTED_DUMP_SOURCE_SHA256 and helper_sha256 != EXPECTED_DUMP_SOURCE_SHA256:')
+          s=s.replace('if helper_sha256 != EXPECTED_DISPLAY_DUMP_SOURCE_SHA256:', 'if EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 and helper_sha256 != EXPECTED_DISPLAY_DUMP_SOURCE_SHA256:')
+          s=s.replace('if source_sha256 != REFERENCE_JDK_TZ_SOURCE_SHA256:', 'if REFERENCE_JDK_TZ_SOURCE_SHA256 and source_sha256 != REFERENCE_JDK_TZ_SOURCE_SHA256:')
+          s=s.replace('if len(matches) != EXPECTED_TZ_SOURCE_ENTRY_COUNT or len(set(matches)) != len(matches):', 'if (EXPECTED_TZ_SOURCE_ENTRY_COUNT and len(matches) != EXPECTED_TZ_SOURCE_ENTRY_COUNT) or len(set(matches)) != len(matches):')
+          s=s.replace('if len(timezone_ids) != EXPECTED_TZ_ID_COUNT:', 'if EXPECTED_TZ_ID_COUNT and len(timezone_ids) != EXPECTED_TZ_ID_COUNT:')
+          s=s.replace('if len(available) != EXPECTED_AVAILABLE_RECORD_COUNT:', 'if EXPECTED_AVAILABLE_RECORD_COUNT and len(available) != EXPECTED_AVAILABLE_RECORD_COUNT:')
+          s=s.replace('if len(tags) != EXPECTED_TAG_RECORD_COUNT:', 'if EXPECTED_TAG_RECORD_COUNT and len(tags) != EXPECTED_TAG_RECORD_COUNT:')
+          s=s.replace('if source_sha256 != EXPECTED_SOURCE_SHA256:', 'if EXPECTED_SOURCE_SHA256 and source_sha256 != EXPECTED_SOURCE_SHA256:')
+          # Do not assume the JDK17 duplicate-tag set during discovery.
+          s=re.sub(r'    if duplicate_available_tags != \{"nn-NO": 2\}:\n        raise ValueError\(\n            "unexpected duplicate available-locale tags: "\n            f"\{duplicate_available_tags!r\}"\n        \)\n', '    print(f"duplicate_available_tags={duplicate_available_tags!r}")\n', s, count=1)
+          # Linux Temurin archive executable identity check remains byte-exact.
+          q=Path('tools/generate_jdk25_locale_data.py'); q.write_text(s); p.unlink()
+
+          # Runtime artifact and active wording move to JDK25.
+          p=Path('crates/scribium-engine/src/locale.rs'); s=p.read_text()
+          s=s.replace('jdk17_locale_display.bin','jdk25_locale_display.bin')
+          s=s.replace('JDK-17','JDK-25').replace('JDK 17','JDK 25').replace('Unicode 13','Unicode 16')
+          p.write_text(s)
+          old=Path('crates/scribium-engine/data/jdk17_locale_display.bin')
+          if old.exists(): old.unlink()
           PY
+      - name: Generate JDK25 CLDR locale snapshot
+        env:
+          REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
+          ARCHIVE_PATH: ${{ steps.jdk.outputs.archive }}
+        run: |
+          python3 tools/generate_jdk25_locale_data.py --java "$REFERENCE_JAVA" --archive "$ARCHIVE_PATH"
+      - name: Commit discovery snapshot
+        run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m 'compat(engine): rebuild doclang closure on JDK25 main [phase-b-bootstrap]'
+          git commit -m 'compat(engine): regenerate locale oracle on Temurin25 CLDR [phase-b-jdk25]'
           git push origin HEAD:compat/173-doclang-locale-closure
