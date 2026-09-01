@@ -1,0 +1,10 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      # These workflows intentionally use pull_request_target so fork PRs can
+      # update trusted repository metadata. Both execute only the trusted base
+      # workflow, perform no checkout or PR-head execution, and hold narrowly
+      # scoped API write permissions. Repository policy independently rejects
+      # any future checkout in a pull_request_target workflow.
+      - ai-review.yml
+      - pr-labeler.yml

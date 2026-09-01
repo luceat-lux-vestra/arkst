@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine compatibility scope
         id: scope
@@ -64,33 +65,40 @@ jobs:
 
       - name: Build pinned cmark-gfm
         if: steps.scope.outputs.relevant == 'true'
+        env:
+          CMARK_GFM_ROOT: ${{ steps.references.outputs.cmark_gfm_root }}
         run: |
-          cmake -S "${{ steps.references.outputs.cmark_gfm_root }}" \
-            -B "${{ steps.references.outputs.cmark_gfm_root }}/build" \
+          cmake -S "$CMARK_GFM_ROOT" \
+            -B "$CMARK_GFM_ROOT/build" \
             -DCMARK_TESTS=OFF \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build "${{ steps.references.outputs.cmark_gfm_root }}/build" \
+          cmake --build "$CMARK_GFM_ROOT/build" \
             --target cmark-gfm --parallel
 
       - name: Build pinned CommonMark cmark
         if: steps.scope.outputs.relevant == 'true'
+        env:
+          CMARK_ROOT: ${{ steps.references.outputs.cmark_root }}
         run: |
-          cmake -S "${{ steps.references.outputs.cmark_root }}" \
-            -B "${{ steps.references.outputs.cmark_root }}/build" \
+          cmake -S "$CMARK_ROOT" \
+            -B "$CMARK_ROOT/build" \
             -DCMARK_TESTS=OFF \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build "${{ steps.references.outputs.cmark_root }}/build" \
+          cmake --build "$CMARK_ROOT/build" \
             --target cmark_exe --parallel
 
       - name: Verify checked-in specification corpora
         if: steps.scope.outputs.relevant == 'true'
+        env:
+          COMMONMARK_SPEC: ${{ steps.references.outputs.commonmark_spec }}
+          CMARK_GFM_SPEC: ${{ steps.references.outputs.cmark_gfm_spec }}
         run: |
           python3 tools/markdown-compat/extract_corpus.py \
-            --spec "${{ steps.references.outputs.commonmark_spec }}" \
+            --spec "$COMMONMARK_SPEC" \
             --prefix commonmark \
             --output "$RUNNER_TEMP/commonmark.json"
           python3 tools/markdown-compat/extract_corpus.py \
-            --spec "${{ steps.references.outputs.cmark_gfm_spec }}" \
+            --spec "$CMARK_GFM_SPEC" \
             --prefix gfm \
             --output "$RUNNER_TEMP/gfm.json"
           cmp tests/compat/corpus/commonmark.json "$RUNNER_TEMP/commonmark.json"
@@ -98,10 +106,13 @@ jobs:
 
       - name: Run differential corpus and PDF smoke harness
         if: steps.scope.outputs.relevant == 'true'
+        env:
+          CMARK_ROOT: ${{ steps.references.outputs.cmark_root }}
+          CMARK_GFM_ROOT: ${{ steps.references.outputs.cmark_gfm_root }}
         run: |
           cargo run --locked -q -p scribium-markdown-compat -- \
-            --commonmark-cmark "${{ steps.references.outputs.cmark_root }}/build/src/cmark" \
-            --gfm-cmark "${{ steps.references.outputs.cmark_gfm_root }}/build/src/cmark-gfm" \
+            --commonmark-cmark "$CMARK_ROOT/build/src/cmark" \
+            --gfm-cmark "$CMARK_GFM_ROOT/build/src/cmark-gfm" \
             --output-dir "$RUNNER_TEMP/markdown-compat-report" \
             --typst typst
 
