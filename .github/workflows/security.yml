@@ -52,7 +52,7 @@ jobs:
           (github.event_name == 'workflow_dispatch' && inputs.force_failure) ||
           (github.event_name == 'pull_request' && github.head_ref == 'security/229-scheduled-failure-visibility')
         run: |
-          echo "Forcing audit failure to validate scheduled-failure reporting."
+          echo "Forcing audit failure to validate scheduled-failure reporting (reopen pass)."
           exit 1
 
   report-failure:
