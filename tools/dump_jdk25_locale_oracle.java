@@ -51,6 +51,8 @@ final class DumpJdk25LocaleOracle {
                 "no-NO-u-ca-gregory-x-foo-lvariant-NY",
                 "no-NO-x-lvariant-ny",
                 "no-NO-NY",
+                "ja-JP-x-lvariant-JP",
+                "th-TH-x-lvariant-TH",
                 "en--US",
                 "en-u",
                 "en-u-ca",

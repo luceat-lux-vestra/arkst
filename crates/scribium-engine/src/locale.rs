@@ -1958,6 +1958,22 @@ mod tests {
                 .canonical,
             "en-u-ca-gregory"
         );
+        for (input, expected_tag, expected_name) in [
+            (
+                "ja-JP-x-lvariant-JP",
+                "ja-JP-u-ca-japanese-x-lvariant-JP",
+                "日本語 (日本、JP、和暦)",
+            ),
+            (
+                "th-TH-x-lvariant-TH",
+                "th-TH-u-nu-thai-x-lvariant-TH",
+                "ไทย (ไทย, TH, ตัวเลขไทย)",
+            ),
+        ] {
+            let locale = resolve(input).expect("legacy compatibility locale should resolve");
+            assert_eq!(locale.tag, expected_tag, "input: {input}");
+            assert_eq!(locale.localized_name, expected_name, "input: {input}");
+        }
     }
 
     #[test]
