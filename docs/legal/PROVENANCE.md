@@ -29,6 +29,33 @@ or translated. See `CLEAN_ROOM_POLICY.md` for detailed rules.
 See `deny.toml` for the dependency license policy and `THIRD_PARTY_LICENSES.md`
 for the complete dependency license list (generated during builds).
 
+## Reference JVM and generated Unicode compatibility data
+
+The active JVM compatibility contract is the exact Eclipse Temurin
+`25.0.4.1+1` release described in
+[`docs/compatibility/quarkdown/reference-jvm.toml`](../compatibility/quarkdown/reference-jvm.toml).
+Its Linux x64 archive is a pinned, generation-time input and is not bundled
+with Scribium or required by the runtime. The archive URL, byte size,
+SHA-256, source/build revisions, Java output, helper hash, and generated
+artifact hash are recorded in that manifest.
+
+`crates/scribium-engine/src/unicode_case.rs` contains independently generated
+case-mapping values observed through the public Temurin/OpenJDK `Character`
+and `String` APIs. `tools/dump_jdk25_unicode_data.java`, the corpus, and the
+Python generator are independently authored Scribium tooling; no OpenJDK or
+Quarkdown source or tests were copied. The generated values are compatibility
+data, not a redistribution of the JDK implementation. The helper's exact
+source hash and transient oracle hash are checked during regeneration.
+
+The JDK distribution licensing and Classpath Exception terms are maintained
+by OpenJDK; see the [OpenJDK legal information](https://openjdk.org/legal/)
+and [GPLv2 with Classpath Exception](https://openjdk.org/legal/gplv2+ce.html).
+The Unicode 16.0-derived case-data provenance and applicable Unicode notice
+are covered by the [Unicode copyright and terms](https://www.unicode.org/copyright.html).
+These upstream notices apply to the generation sources/data provenance; the
+Scribium generator and runtime integration remain Apache-2.0 independently
+authored code.
+
 ## Trademarks
 
 - **Scribium** is a working name. A naming due diligence search must be
