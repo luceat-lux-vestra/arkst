@@ -48,7 +48,9 @@ jobs:
           command: check
           arguments: --all-features
       - name: Force reporter validation failure
-        if: github.event_name == 'workflow_dispatch' && inputs.force_failure
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.force_failure) ||
+          (github.event_name == 'pull_request' && github.head_ref == 'security/229-scheduled-failure-visibility')
         run: |
           echo "Forcing audit failure to validate scheduled-failure reporting."
           exit 1
@@ -59,7 +61,8 @@ jobs:
       - audit
     if: >-
       ${{ always() &&
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'security/229-scheduled-failure-visibility')) &&
       needs.audit.result == 'failure' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
