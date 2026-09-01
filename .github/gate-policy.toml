@@ -130,7 +130,7 @@ job = "audit"
 classification = "path_scoped_optional"
 contexts = ["audit"]
 always_present = false
-rationale = "PR-time advisories-only audit is path-scoped; scheduled supply-chain authority is reconciled separately by #228/#229."
+rationale = "Full-graph cargo-deny audit on dependency/security-workflow changes plus a weekly schedule and manual dispatch; non-required because the PR-time license job is the authoritative blocking gate."
 
 [[producer]]
 workflow = ".github/workflows/pr-labeler.yml"
