@@ -61,8 +61,10 @@ jobs:
           fi
 
           python3 tools/ci/validate_upstream_tag.py "$OBSERVED_TAG"
-          printf 'tag=%s\n' "$OBSERVED_TAG" >> "$GITHUB_OUTPUT"
-          printf 'url=%s\n' "$OBSERVED_URL" >> "$GITHUB_OUTPUT"
+          {
+            printf 'tag=%s\n' "$OBSERVED_TAG"
+            printf 'url=%s\n' "$OBSERVED_URL"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run drift detection
         id: drift
@@ -76,9 +78,11 @@ jobs:
             --observed-tag "$OBSERVED_TAG" \
             --observed-url "$OBSERVED_URL" \
             --output json)
-          echo "result<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$RESULT" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "result<<EOF"
+            echo "$RESULT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check if drift detected
         id: check_drift
@@ -151,8 +155,10 @@ jobs:
           EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 -F state=all \
             | jq -sr --arg marker "$MARKER" -f tools/ci/upstream_issue_filter.jq)
           if [ -n "$EXISTING" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "issue_number=$EXISTING" >> "$GITHUB_OUTPUT"
+            {
+              echo "exists=true"
+              echo "issue_number=$EXISTING"
+            } >> "$GITHUB_OUTPUT"
             echo "Issue #$EXISTING already exists for $ISSUE_KEY"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
