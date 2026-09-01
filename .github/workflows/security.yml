@@ -3,15 +3,18 @@ name: Security Audit
 on:
   schedule:
     - cron: "0 0 * * 1"
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".github/workflows/security.yml"
   pull_request:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".github/workflows/security.yml"
 
 permissions:
   contents: read
@@ -36,4 +39,5 @@ jobs:
           toolchain: 1.98.0
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          command: check advisories
+          command: check
+          arguments: --all-features
