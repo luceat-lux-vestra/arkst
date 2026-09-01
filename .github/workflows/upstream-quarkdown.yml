@@ -58,20 +58,7 @@ jobs:
             OBSERVED_URL=$(gh api repos/iamgio/quarkdown/releases/latest --jq '.html_url')
           fi
 
-          python3 - "$OBSERVED_TAG" <<'PY'
-          import re
-          import sys
-
-          tag = sys.argv[1]
-          encoded = tag.encode("utf-8")
-          if not 1 <= len(encoded) <= 128:
-              raise SystemExit("observed tag must be 1..128 UTF-8 bytes")
-          if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/+'-]*", tag) is None:
-              raise SystemExit("observed tag contains unsupported characters")
-          if ".." in tag or "//" in tag or tag.endswith(("/", ".", ".lock")):
-              raise SystemExit("observed tag is not an accepted ref-like release tag")
-          PY
-
+          python3 tools/ci/validate_upstream_tag.py "$OBSERVED_TAG"
           printf 'tag=%s\n' "$OBSERVED_TAG" >> "$GITHUB_OUTPUT"
           printf 'url=%s\n' "$OBSERVED_URL" >> "$GITHUB_OUTPUT"
 
@@ -111,7 +98,7 @@ jobs:
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
           SAMPLE=$(jq -nc --arg marker "$MARKER" '[{number: 4242, body: ("prefix " + $marker + " suffix")}]')
-          MATCH=$(printf '%s\n' "$SAMPLE" | jq -r --arg marker "$MARKER" 'map(select((.body // "") | contains($marker))) | .[0].number // empty')
+          MATCH=$(printf '%s\n' "$SAMPLE" | jq -sr --arg marker "$MARKER" -f tools/ci/upstream_issue_filter.jq)
           test "$MATCH" = "4242"
 
       - name: Print dry-run result
@@ -160,7 +147,7 @@ jobs:
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
           MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
           EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 -F state=all \
-            | jq -sr --arg marker "$MARKER" 'add | map(select((.body // "") | contains($marker))) | .[0].number // empty')
+            | jq -sr --arg marker "$MARKER" -f tools/ci/upstream_issue_filter.jq)
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "issue_number=$EXISTING" >> "$GITHUB_OUTPUT"
