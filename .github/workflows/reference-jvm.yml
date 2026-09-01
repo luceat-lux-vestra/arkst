@@ -1,0 +1,73 @@
+name: Reference JVM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-jvm-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify pinned Temurin 25 oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download and verify exact canonical JDK archive
+        id: jdk
+        shell: bash
+        run: |
+          readarray -t reference_values < <(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("docs/compatibility/quarkdown/reference-jvm.toml").open("rb") as stream:
+              reference = tomllib.load(stream)["reference"]
+          print(reference["archive_filename"])
+          print(reference["archive_url"])
+          print(reference["archive_sha256"])
+          PY
+          )
+          archive_filename="${reference_values[0]}"
+          archive_url="${reference_values[1]}"
+          archive_sha256="${reference_values[2]}"
+          archive_path="$RUNNER_TEMP/$archive_filename"
+          curl --fail --location --retry 3 --output "$archive_path" "$archive_url"
+          printf '%s  %s\n' "$archive_sha256" "$archive_path" | sha256sum --check --strict
+          printf 'archive_path=%s\n' "$archive_path" >> "$GITHUB_OUTPUT"
+
+      - name: Extract and verify exact Java runtime
+        id: runtime
+        shell: bash
+        env:
+          ARCHIVE_PATH: ${{ steps.jdk.outputs.archive_path }}
+        run: |
+          extract_root="$RUNNER_TEMP/temurin25-extracted"
+          mkdir -p "$extract_root"
+          tar --extract --gzip --file "$ARCHIVE_PATH" --directory "$extract_root"
+          reference_java="$(find "$extract_root" -path '*/bin/java' -print -quit)"
+          test -x "$reference_java"
+          "$reference_java" -version 2>&1
+          printf 'java=%s\n' "$reference_java" >> "$GITHUB_OUTPUT"
+
+      - name: Regeneration and external differential verification
+        env:
+          REFERENCE_JAVA: ${{ steps.runtime.outputs.java }}
+          ARCHIVE_PATH: ${{ steps.jdk.outputs.archive_path }}
+        run: |
+          python3 tools/generate_jdk25_unicode_case.py \
+            --java "$REFERENCE_JAVA" \
+            --archive "$ARCHIVE_PATH" \
+            --check
+          python3 tools/verify_jdk25_unicode.py \
+            --java "$REFERENCE_JAVA" \
+            --archive "$ARCHIVE_PATH"

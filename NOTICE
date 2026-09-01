@@ -26,3 +26,20 @@ THIRD_PARTY_LICENSES.md or generated during builds.
 
 This project is not affiliated with, endorsed by, or sponsored by
 Typst GmbH or the Quarkdown project.
+
+== Reference JVM and generated compatibility data ==
+
+Scribium's development-time compatibility oracle uses the exact Eclipse
+Temurin 25.0.4.1+1 JDK archive recorded in
+docs/compatibility/quarkdown/reference-jvm.toml. The JDK archive is not
+distributed with Scribium and no JVM is required at runtime. The generated
+Unicode case-mapping values are independently captured from public
+Character/String API results for the pinned oracle and are not a copy of JDK
+implementation source. See the OpenJDK legal information and GPLv2 with
+Classpath Exception at https://openjdk.org/legal/ and
+https://openjdk.org/legal/gplv2+ce.html.
+
+The generated case-data baseline corresponds to Unicode 16.0. Unicode,
+Unicode Inc., and the Unicode logo are trademarks of Unicode, Inc.; Unicode
+data licensing and notice terms are available at
+https://www.unicode.org/copyright.html.

@@ -1,0 +1,26 @@
+# CAP input
+CAP	hello
+CAP	ǳabc
+CAP	ßabc
+CAP	ﬀabc
+CAP	ᾀabc
+CAP	ŉabc
+CAP	𐐨abc
+CAP	ꟑabc
+CAP	ƛabc
+CAP	ᲊabc
+CAP	𐖗abc
+CAP	𐵰abc
+
+# START string prefix
+START	Hello	he
+START	Σιγμα	ςΙ
+START	ᾀabc	ᾈ
+START	𐐀nicode	𐐨
+START	ßeta	ss
+START	Éclair	é
+START	Ꟑabc	ꟑ
+START	ƛabc	ɫ
+START	Ᲊabc	ᲊ
+START	𐕰abc	𐖗
+START	𐵐abc	𐵰

@@ -213,21 +213,20 @@ The case strategy is pinned in
   Kotlin `Char.titlecase()` contract: full uppercase mappings use the first
   scalar followed by lowercase of the remaining scalars, while one-scalar
   results use simple titlecase with the JVM uppercase fallback. `.startswith`
-  uses direct Unicode 13 simple upper/lower mappings for Kotlin/JVM-compatible
+  uses direct Temurin 25/Unicode 16 simple upper/lower mappings for Kotlin/JVM-compatible
   character-wise comparison without whole-string case conversion or
   normalization. Independent `ǳ`/`ǲ`, `ᾀ`/`Ἀι`, `ŉ`, Greek `ς`/`Σ`, long-s,
   sharp-s, dotted-I, and decomposed-prefix cases exercise those contracts.
   plaintext is PARTIAL because the full upstream
   InlineMarkdownContent/body and output contract is broader than the current
   bounded carrier.
-- The engine uses the pinned `unicode-case-mapping = 0.2.0` UCD 13.0 full
-  mapping table plus a generated engine-local UCD 13.0 simple mapping table
-  from `UnicodeData.txt` fields 12–14. This matches the Unicode data used by
-  the pinned Quarkdown JVM 17 runtime and keeps full/simple mappings distinct.
-  Rust stdlib has no titlecase/full mapping API and the existing workspace
-  dependencies provide no suitable implementation. The narrow dependency and
-  generated table are used only by the engine, have no locale or host
-  capability, and compile-time guards reject mapping-version drift.
+- The engine uses a generated engine-local table captured directly from the
+  public `Character` and `String` APIs of the pinned Eclipse Temurin
+  `25.0.4.1+1` runtime. The generation helper exhaustively captures simple
+  scalar mappings, UTF-16 `Char` mappings, full mappings, and Kotlin's
+  `Char.titlecase()` algorithm; the transient oracle is never a runtime
+  dependency. Full and simple mappings remain distinct, and compile-time plus
+  generation-time fingerprints reject mapping-version or provenance drift.
 
 ### Boolean, comparison, and optionality
 
@@ -549,9 +548,10 @@ Important corrections:
 - sorted is selector/key-based with stable ordering evidence; it is not an
   arbitrary comparator API.
 - #172 closes the bounded Unicode string-semantics gap: `.capitalize` now
-  reproduces Kotlin `Char.titlecase()` over pinned Unicode 13.0 full/simple
-  mappings, and `.startswith(ignorecase:true)` now uses the corresponding
-  Kotlin/JVM character-wise simple case comparison. Both rows are promoted to
+  reproduces Kotlin `Char.titlecase()` over full/simple mappings generated
+  from the pinned Eclipse Temurin `25.0.4.1+1` oracle (Unicode 16.0), and
+  `.startswith(ignorecase:true)` now uses the corresponding Kotlin/JVM
+  character-wise simple case comparison. Both rows are promoted to
   SUPPORTED_SEMANTICS; no end-to-end output claim is added.
 - map and filter are current Scribium extensions, not pinned v2.5.1 stdlib
   declarations.

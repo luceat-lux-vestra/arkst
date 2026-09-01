@@ -5,10 +5,10 @@ use crate::invocation_binder::BodyPolicy;
 use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
 use crate::unicode_case::{
+    full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
     simple_lowercase as unicode_simple_lowercase,
     simple_titlecase_mapping as unicode_simple_titlecase_mapping,
-    simple_uppercase as unicode_simple_uppercase,
-    UNICODE_VERSION as SIMPLE_MAPPING_UNICODE_VERSION,
+    simple_uppercase as unicode_simple_uppercase, UNICODE_VERSION,
 };
 #[cfg(test)]
 use crate::value_conversion::InvocationNamedArg;
@@ -19,20 +19,28 @@ use scribium_ir::{IrInline, IrNode, IrValue};
 #[cfg(test)]
 use scribium_source::SourceId;
 use scribium_source::SourceSpan;
-use unicode_case_mapping::{to_lowercase, to_uppercase, UNICODE_VERSION};
 
-// Quarkdown v2.5.1 is pinned to a JVM 17 runtime, whose Character mappings
-// use Unicode 13.0. Keep the generated mapping table aligned with that
-// contract at compile time rather than allowing a dependency upgrade to
-// silently widen the supported character set.
-const PINNED_JVM_UNICODE_VERSION: (u64, u64, u64) = (13, 0, 0);
+// Quarkdown v2.5.1 compatibility is pinned to the exact Temurin 25 oracle.
+// Keep the generated mapping table aligned with that contract at compile time
+// rather than allowing a future regeneration or dependency change to silently
+// widen the supported character set.
+const PINNED_JVM_UNICODE_VERSION: (u64, u64, u64) = (16, 0, 0);
+#[cfg(test)]
+const PINNED_JVM_VERSION: &str = "25.0.4.1";
+#[cfg(test)]
+const PINNED_JVM_RUNTIME_VERSION: &str = "25.0.4.1+1-LTS";
+#[cfg(test)]
+const PINNED_JVM_VENDOR_VERSION: &str = "Temurin-25.0.4.1+1";
+#[cfg(test)]
+const PINNED_JVM_ARCHIVE_SHA256: &str =
+    "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e";
+#[cfg(test)]
+const PINNED_ORACLE_OUTPUT_SHA256: &str =
+    "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862";
 const _: () = {
     assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
     assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
     assert!(UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
-    assert!(SIMPLE_MAPPING_UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
-    assert!(SIMPLE_MAPPING_UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
-    assert!(SIMPLE_MAPPING_UNICODE_VERSION.2 == PINNED_JVM_UNICODE_VERSION.2);
 };
 
 #[cfg(test)]
@@ -820,7 +828,7 @@ fn simple_lowercase(character: char) -> char {
 /// Apply Kotlin's `Char.titlecase()` mapping, preserving the distinction from
 /// uppercase and retaining all original trailing scalars at the caller.
 fn unicode_titlecase(character: char) -> String {
-    let uppercase = unicode_mapping_to_string(&to_uppercase(character))
+    let uppercase = unicode_mapping_to_string(&unicode_full_uppercase(character))
         .filter(|mapping| !mapping.is_empty())
         .unwrap_or_else(|| character.to_string());
     if uppercase.chars().count() > 1 {
@@ -836,7 +844,7 @@ fn unicode_titlecase(character: char) -> String {
             result.push(first);
             for character in uppercase.chars().skip(1) {
                 result.push_str(
-                    &unicode_mapping_to_string(&to_lowercase(character))
+                    &unicode_mapping_to_string(&unicode_full_lowercase(character))
                         .filter(|mapping| !mapping.is_empty())
                         .unwrap_or_else(|| character.to_string()),
                 );
@@ -1491,8 +1499,16 @@ mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
         simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
-        to_uppercase, BuiltinBodyPolicy, PINNED_JVM_UNICODE_VERSION,
-        SIMPLE_MAPPING_UNICODE_VERSION, UNICODE_VERSION,
+        BuiltinBodyPolicy, PINNED_JVM_ARCHIVE_SHA256, PINNED_JVM_RUNTIME_VERSION,
+        PINNED_JVM_UNICODE_VERSION, PINNED_JVM_VENDOR_VERSION, PINNED_JVM_VERSION,
+        PINNED_ORACLE_OUTPUT_SHA256,
+    };
+    use crate::unicode_case::{
+        full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
+        simple_titlecase_mapping as unicode_simple_titlecase_mapping, ORACLE_OUTPUT_SHA256,
+        REFERENCE_JVM_ARCHIVE_SHA256, REFERENCE_JVM_RUNTIME_VERSION, REFERENCE_JVM_VENDOR_VERSION,
+        REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT, UNICODE_VERSION,
+        UTF16_CHAR_RECORD_COUNT,
     };
     use crate::value_conversion::InvocationValue;
     use scribium_ir::{
@@ -2565,9 +2581,10 @@ mod tests {
             // `replaceFirstChar` receives a UTF-16 Char, so a supplementary
             // first character is unchanged by the pinned Kotlin contract.
             ("𐐨abc", "𐐨abc"),
-            // U+A7D0/U+A7D1 were added after Unicode 13. The pinned JDK 17
-            // contract therefore leaves this unmapped character unchanged.
-            ("ꟑabc", "ꟑabc"),
+            // U+A7D0/U+A7D1 are among the case mappings added after the former
+            // JDK 17/Unicode 13 baseline and are now covered by the pinned
+            // Temurin 25/Unicode 16 oracle.
+            ("ꟑabc", "Ꟑabc"),
         ] {
             assert_eq!(
                 evaluate("capitalize", &[IrValue::String(input.into())], &[], false)
@@ -2610,15 +2627,25 @@ mod tests {
     }
 
     #[test]
-    fn unicode_case_mapping_version_is_pinned_to_jdk_17_data() {
+    fn unicode_case_mapping_version_is_pinned_to_temurin_25_oracle() {
         assert_eq!(
             UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
-            "case mappings must stay on the pinned JDK 17 Unicode version"
+            "case mappings must stay on the pinned Temurin 25 Unicode version"
         );
         assert_eq!(
-            SIMPLE_MAPPING_UNICODE_VERSION, PINNED_JVM_UNICODE_VERSION,
-            "simple case mappings must stay on the pinned JDK 17 Unicode version"
+            REFERENCE_JVM_VERSION, PINNED_JVM_VERSION,
+            "case mappings must stay on the pinned Temurin Java version"
         );
+        assert_eq!(
+            REFERENCE_JVM_RUNTIME_VERSION, PINNED_JVM_RUNTIME_VERSION,
+            "case mappings must stay on the pinned Temurin runtime"
+        );
+        assert_eq!(
+            REFERENCE_JVM_VENDOR_VERSION, PINNED_JVM_VENDOR_VERSION,
+            "case mappings must stay on the pinned Temurin vendor build"
+        );
+        assert_eq!(REFERENCE_JVM_ARCHIVE_SHA256, PINNED_JVM_ARCHIVE_SHA256);
+        assert_eq!(ORACLE_OUTPUT_SHA256, PINNED_ORACLE_OUTPUT_SHA256);
     }
 
     #[test]
@@ -2626,10 +2653,178 @@ mod tests {
         assert_eq!(unicode_simple_uppercase('\u{1F80}'), '\u{1F88}');
         assert_eq!(unicode_simple_lowercase('\u{1F88}'), '\u{1F80}');
         assert_eq!(
-            to_uppercase('\u{1F80}'),
+            unicode_full_uppercase('\u{1F80}'),
             [0x1F08, 0x0399, 0],
             "U+1F80 must retain its distinct full uppercase mapping"
         );
+    }
+
+    fn oracle_codepoint(value: &str) -> u32 {
+        u32::from_str_radix(value, 16).expect("oracle code point should be hexadecimal")
+    }
+
+    fn oracle_mapping(value: &str) -> [u32; 3] {
+        if value == "-" {
+            return [0; 3];
+        }
+        let mut mapping = [0; 3];
+        for (index, codepoint) in value.split(',').enumerate() {
+            assert!(
+                index < mapping.len(),
+                "oracle mapping has more than three scalars"
+            );
+            mapping[index] = oracle_codepoint(codepoint);
+        }
+        mapping
+    }
+
+    fn decode_oracle_string(value: &str) -> String {
+        if value == "-" {
+            return String::new();
+        }
+        value
+            .split(',')
+            .map(oracle_codepoint)
+            .map(|codepoint| char::from_u32(codepoint).expect("oracle output is Unicode"))
+            .collect()
+    }
+
+    #[test]
+    fn jdk25_oracle_matches_all_generated_case_mappings() {
+        let Ok(path) = std::env::var("SCRIBIUM_JDK25_UNICODE_MAPS") else {
+            return;
+        };
+        let maps = std::fs::read_to_string(path).expect("read transient JDK25 mapping oracle");
+        let mut scalar_count = 0;
+        let mut char_count = 0;
+        for line in maps.lines() {
+            let fields: Vec<_> = line.split('\t').collect();
+            match fields.first().copied() {
+                Some("SCALAR") => {
+                    assert_eq!(fields.len(), 4, "malformed SCALAR oracle row: {line}");
+                    let character = char::from_u32(oracle_codepoint(fields[1]))
+                        .expect("SCALAR oracle input is a Unicode scalar");
+                    assert_eq!(
+                        unicode_simple_uppercase(character) as u32,
+                        oracle_codepoint(fields[2]),
+                        "simple uppercase mismatch for {line}"
+                    );
+                    assert_eq!(
+                        unicode_simple_lowercase(character) as u32,
+                        oracle_codepoint(fields[3]),
+                        "simple lowercase mismatch for {line}"
+                    );
+                    scalar_count += 1;
+                }
+                Some("CHAR") => {
+                    assert_eq!(fields.len(), 8, "malformed CHAR oracle row: {line}");
+                    let code_unit = oracle_codepoint(fields[1]);
+                    let Some(character) = char::from_u32(code_unit) else {
+                        // Rust chars cannot represent the isolated UTF-16
+                        // surrogate rows; leading supplementary surrogates
+                        // are intentionally bypassed by evaluate_case.
+                        char_count += 1;
+                        continue;
+                    };
+                    assert_eq!(
+                        unicode_simple_uppercase(character) as u32,
+                        oracle_codepoint(fields[2]),
+                        "simple UTF-16 uppercase mismatch for {line}"
+                    );
+                    assert_eq!(
+                        unicode_simple_lowercase(character) as u32,
+                        oracle_codepoint(fields[3]),
+                        "simple UTF-16 lowercase mismatch for {line}"
+                    );
+                    assert_eq!(
+                        unicode_simple_titlecase_mapping(character).unwrap_or(character) as u32,
+                        oracle_codepoint(fields[4]),
+                        "simple titlecase mismatch for {line}"
+                    );
+                    assert_eq!(
+                        unicode_full_uppercase(character),
+                        oracle_mapping(fields[5]),
+                        "full uppercase mismatch for {line}"
+                    );
+                    assert_eq!(
+                        unicode_full_lowercase(character),
+                        oracle_mapping(fields[6]),
+                        "full lowercase mismatch for {line}"
+                    );
+                    char_count += 1;
+                }
+                Some(kind) => panic!("unknown JDK25 oracle row type {kind}"),
+                None => panic!("empty JDK25 oracle row"),
+            }
+        }
+        assert_eq!(scalar_count, SCALAR_MAPPING_RECORD_COUNT);
+        assert_eq!(char_count, UTF16_CHAR_RECORD_COUNT);
+    }
+
+    #[test]
+    fn jdk25_oracle_matches_public_string_builtins() {
+        let (Ok(corpus_path), Ok(output_path)) = (
+            std::env::var("SCRIBIUM_JDK25_UNICODE_CORPUS"),
+            std::env::var("SCRIBIUM_JDK25_UNICODE_CORPUS_OUTPUT"),
+        ) else {
+            return;
+        };
+        let corpus = std::fs::read_to_string(corpus_path).expect("read JDK25 corpus");
+        let output_text =
+            std::fs::read_to_string(output_path).expect("read transient JDK25 corpus oracle");
+        let outputs: Vec<_> = output_text.lines().collect();
+        let requests: Vec<_> = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect();
+        assert_eq!(outputs.len(), requests.len(), "JDK25 corpus result count");
+
+        for (request, output) in requests.into_iter().zip(outputs) {
+            let fields: Vec<_> = request.split('\t').collect();
+            let result_fields: Vec<_> = output.split('\t').collect();
+            assert_eq!(
+                result_fields.first(),
+                fields.first(),
+                "corpus operation: {request}"
+            );
+            match fields.first().copied() {
+                Some("CAP") => {
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(result_fields.len(), 2);
+                    let expected = IrValue::String(decode_oracle_string(result_fields[1]));
+                    let actual = evaluate(
+                        "capitalize",
+                        &[IrValue::String(fields[1].to_string())],
+                        &[],
+                        false,
+                    )
+                    .expect("capitalize should evaluate");
+                    assert_eq!(actual, expected, "capitalize({:?})", fields[1]);
+                }
+                Some("START") => {
+                    assert_eq!(fields.len(), 3);
+                    assert_eq!(result_fields.len(), 2);
+                    let expected = IrValue::Boolean(result_fields[1] == "true");
+                    let actual = evaluate(
+                        "startswith",
+                        &[
+                            IrValue::String(fields[1].to_string()),
+                            IrValue::String(fields[2].to_string()),
+                        ],
+                        &[named_arg("ignorecase", IrValue::Boolean(true))],
+                        false,
+                    )
+                    .expect("startswith should evaluate");
+                    assert_eq!(
+                        actual, expected,
+                        "startswith({:?}, {:?})",
+                        fields[1], fields[2]
+                    );
+                }
+                Some(kind) => panic!("unknown corpus operation {kind}"),
+                None => panic!("empty corpus request"),
+            }
+        }
     }
 
     #[test]
@@ -2658,9 +2853,8 @@ mod tests {
             ("ßeta", "ss", true, false),
             // Case comparison does not normalize a decomposed prefix to NFC.
             ("Éclair", "e\u{301}", true, false),
-            // U+A7D0/U+A7D1 were added after Unicode 13 and must not acquire
-            // a case pair from a newer mapping table.
-            ("ꟑabc", "Ꟑ", true, false),
+            // U+A7D0/U+A7D1 are case-paired in the pinned Unicode 16 oracle.
+            ("ꟑabc", "Ꟑ", true, true),
         ] {
             assert_eq!(
                 evaluate(

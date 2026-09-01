@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Temurin 25 reference-JVM migration (#224):** The bounded #172
+  `.capitalize` and `.startswith(ignorecase:true)` compatibility data now
+  comes from the exact Eclipse Temurin `25.0.4.1+1` / Unicode 16.0 oracle.
+  Generation validates the pinned archive, helper, transient oracle, and
+  generated artifact fingerprints; runtime behavior remains JVM-free. Locale
+  and `.doclang` data remain a separate Phase B migration.
+
 - **Shared invocation binder validation (#165):** Native builtins,
   source-defined functions, and callback/lambda paths now consume one
   engine-owned binder with explicit parameter metadata for ordered positional
