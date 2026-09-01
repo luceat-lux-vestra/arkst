@@ -18,9 +18,7 @@ run = [
   "examples/**",
   "docs/compatibility/**",
   ".github/gate-policy.toml",
-  ".github/workflows/ci.yml",
-  ".github/workflows/markdown-compat.yml",
-  ".github/workflows/reference-jvm.yml",
+  ".github/workflows/**",
 ]
 skip = [
   ".github/**",
