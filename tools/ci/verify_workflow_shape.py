@@ -23,6 +23,14 @@ def _require_simple_mapping_key(rel: str, code: str, label: str) -> None:
         raise WorkflowShapeError(f"{rel}: unsupported {label} syntax: {code.strip()!r}")
 
 
+def _block_end(lines: list[str], start: int) -> int:
+    for i in range(start + 1, len(lines)):
+        raw = lines[i]
+        if _code(raw).strip() and _indent(raw) == 0:
+            return i
+    return len(lines)
+
+
 def verify_workflow(path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     rel = path.as_posix()
@@ -30,7 +38,9 @@ def verify_workflow(path: Path) -> None:
     for line in lines:
         leading = line[: len(line) - len(line.lstrip())]
         if "\t" in leading:
-            raise WorkflowShapeError(f"{rel}: tab-indented YAML is not supported by the gate verifier")
+            raise WorkflowShapeError(
+                f"{rel}: tab-indented YAML is not supported by the gate verifier"
+            )
 
     try:
         on_index = next(
@@ -52,7 +62,8 @@ def verify_workflow(path: Path) -> None:
             f"{rel}: inline top-level on: syntax is not supported by the gate verifier"
         )
 
-    for raw in lines[on_index + 1 : jobs_index]:
+    on_end = _block_end(lines, on_index)
+    for raw in lines[on_index + 1 : on_end]:
         code = _code(raw)
         stripped = code.strip()
         if not stripped:
@@ -72,14 +83,8 @@ def verify_workflow(path: Path) -> None:
             else:
                 _require_simple_mapping_key(rel, code, "trigger mapping")
 
-    end = len(lines)
-    for i in range(jobs_index + 1, len(lines)):
-        raw = lines[i]
-        if _code(raw).strip() and _indent(raw) == 0:
-            end = i
-            break
-
-    for raw in lines[jobs_index + 1 : end]:
+    jobs_end = _block_end(lines, jobs_index)
+    for raw in lines[jobs_index + 1 : jobs_end]:
         code = _code(raw)
         stripped = code.strip()
         if not stripped:
