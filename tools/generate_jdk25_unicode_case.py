@@ -255,15 +255,20 @@ def rust_ranges(name: str, mapping: Iterable[tuple[int, int]]) -> str:
 def rust_full_table(name: str, rows: Iterable[tuple[int, tuple[int, ...]]]) -> str:
     lines = [f"#[rustfmt::skip]\nstatic {name}: &[(u32, [u32; 3])] = &[\n"]
     for codepoint, mapping in rows:
-        values = list(mapping) + [0, 0, 0]
+        values = mapping_array(mapping, codepoint)
         lines.append(
-            f"    (0x{codepoint:04X}, [{', '.join(f'0x{value:04X}' for value in values[:3])}]),\n"
+            f"    (0x{codepoint:04X}, [{', '.join(f'0x{value:04X}' for value in values)}]),\n"
         )
     lines.append("];\n")
     return "".join(lines)
 
 
 def mapping_array(mapping: tuple[int, ...], fallback: int) -> tuple[int, int, int]:
+    if len(mapping) > 3:
+        raise ValueError(
+            "full Unicode mapping cannot be represented by the runtime's "
+            f"[u32; 3] layout: U+{fallback:04X} has {len(mapping)} scalars"
+        )
     if not mapping:
         mapping = (fallback,)
     values = list(mapping) + [0, 0, 0]

@@ -854,7 +854,7 @@ fn unicode_titlecase(character: char) -> String {
     }
 
     unicode_simple_titlecase_mapping(character)
-        .unwrap_or_else(|| unicode_simple_uppercase(character))
+        .unwrap_or(character)
         .to_string()
 }
 
@@ -1499,9 +1499,9 @@ mod tests {
     use super::{
         deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
         simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
-        BuiltinBodyPolicy, PINNED_JVM_ARCHIVE_SHA256, PINNED_JVM_RUNTIME_VERSION,
-        PINNED_JVM_UNICODE_VERSION, PINNED_JVM_VENDOR_VERSION, PINNED_JVM_VERSION,
-        PINNED_ORACLE_OUTPUT_SHA256,
+        unicode_titlecase, BuiltinBodyPolicy, PINNED_JVM_ARCHIVE_SHA256,
+        PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION, PINNED_JVM_VENDOR_VERSION,
+        PINNED_JVM_VERSION, PINNED_ORACLE_OUTPUT_SHA256,
     };
     use crate::unicode_case::{
         full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
@@ -2697,6 +2697,7 @@ mod tests {
         let maps = std::fs::read_to_string(path).expect("read transient JDK25 mapping oracle");
         let mut scalar_count = 0;
         let mut char_count = 0;
+        let mut bmp_capitalize_count = 0;
         for line in maps.lines() {
             let fields: Vec<_> = line.split('\t').collect();
             match fields.first().copied() {
@@ -2720,9 +2721,18 @@ mod tests {
                     assert_eq!(fields.len(), 8, "malformed CHAR oracle row: {line}");
                     let code_unit = oracle_codepoint(fields[1]);
                     let Some(character) = char::from_u32(code_unit) else {
-                        // Rust chars cannot represent the isolated UTF-16
-                        // surrogate rows; leading supplementary surrogates
-                        // are intentionally bypassed by evaluate_case.
+                        // Java's Char case mappings preserve every isolated
+                        // UTF-16 surrogate. Rust chars cannot represent
+                        // those rows, and replaceFirstChar bypasses a
+                        // supplementary leading scalar after observing its
+                        // high surrogate, so assert the exact identity
+                        // invariant here instead of treating them as covered.
+                        for field in &fields[2..8] {
+                            assert_eq!(
+                                *field, fields[1],
+                                "isolated surrogate mapping changed for {line}"
+                            );
+                        }
                         char_count += 1;
                         continue;
                     };
@@ -2751,6 +2761,29 @@ mod tests {
                         oracle_mapping(fields[6]),
                         "full lowercase mismatch for {line}"
                     );
+                    assert_eq!(
+                        unicode_titlecase(character),
+                        decode_oracle_string(fields[7]),
+                        "final titlecase mismatch for {line}"
+                    );
+
+                    // Tie the public builtin itself to the external oracle
+                    // for the complete valid BMP first-character domain,
+                    // rather than relying only on helper-level assertions
+                    // and a small hand-selected corpus.
+                    let sentinel = '\u{E000}';
+                    let mut input = character.to_string();
+                    input.push(sentinel);
+                    let mut expected = decode_oracle_string(fields[7]);
+                    expected.push(sentinel);
+                    let actual = evaluate("capitalize", &[IrValue::String(input)], &[], false)
+                        .expect("capitalize should evaluate");
+                    assert_eq!(
+                        actual,
+                        IrValue::String(expected),
+                        "capitalize first-character mismatch for {line}"
+                    );
+                    bmp_capitalize_count += 1;
                     char_count += 1;
                 }
                 Some(kind) => panic!("unknown JDK25 oracle row type {kind}"),
@@ -2759,6 +2792,7 @@ mod tests {
         }
         assert_eq!(scalar_count, SCALAR_MAPPING_RECORD_COUNT);
         assert_eq!(char_count, UTF16_CHAR_RECORD_COUNT);
+        assert_eq!(bmp_capitalize_count, 63488);
     }
 
     #[test]
