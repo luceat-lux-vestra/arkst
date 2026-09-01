@@ -43,3 +43,22 @@ The generated case-data baseline corresponds to Unicode 16.0. Unicode,
 Unicode Inc., and the Unicode logo are trademarks of Unicode, Inc.; Unicode
 data licensing and notice terms are available at
 https://www.unicode.org/copyright.html.
+
+== Generated JDK/CLDR locale compatibility data ==
+
+The locale compatibility snapshot in
+crates/scribium-engine/data/jdk25_locale_display.bin and the generated locale
+metadata in crates/scribium-engine/src/locale_data.rs contain values observed
+from the exact Eclipse Temurin 25.0.4.1+1 CLDR provider, including JDK
+FALLBACK-root values and CLDR/Unicode locale data. The JDK archive is a
+generation-time input and is not distributed with Scribium. These derived
+values are covered by the applicable OpenJDK GPLv2 with Classpath Exception
+and CLDR/Unicode attribution and notice terms:
+
+- OpenJDK legal information: https://openjdk.org/legal/
+- GPLv2 with Classpath Exception: https://openjdk.org/legal/gplv2+ce.html
+- Unicode terms: https://www.unicode.org/copyright.html
+
+The generated values are distinguished from Scribium's independently authored
+Apache-2.0 generator, binary parser, lookup code, tests, and integration; no
+JDK implementation source is bundled.

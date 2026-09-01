@@ -27,9 +27,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+REFERENCE_RELEASE_VERSION = "25.0.4.1+1"
 REFERENCE_RUNTIME_VERSION = "25.0.4.1+1-LTS"
 REFERENCE_VENDOR = "Eclipse Adoptium"
 REFERENCE_VENDOR_VERSION = "Temurin-25.0.4.1+1"
+REFERENCE_RUNTIME_DISPLAY = "Eclipse Temurin 25.0.4.1+1"
 REFERENCE_LOCALE_PROVIDERS = "CLDR"
 REFERENCE_JDK_URL = (
     "https://github.com/adoptium/temurin25-binaries/releases/download/"
@@ -38,24 +40,29 @@ REFERENCE_JDK_URL = (
 )
 REFERENCE_JDK_SHA256 = "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e"
 REFERENCE_JDK_SIZE = 141329719
-EXPECTED_AVAILABLE_RECORD_COUNT = 0
-EXPECTED_TAG_RECORD_COUNT = 0
-EXPECTED_SOURCE_SHA256 = ""
-EXPECTED_DUMP_SOURCE_SHA256 = ""
-EXPECTED_DISPLAY_RECORD_COUNT = 0
-EXPECTED_DISPLAY_SOURCE_SHA256 = ""
-EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = ""
-EXPECTED_COMPACT_RECORD_COUNT = 0
-EXPECTED_COMPACT_PROFILE_COUNT = 0
-EXPECTED_COMPACT_KEY_COUNT = 0
-EXPECTED_COMPACT_VALUE_COUNT = 0
-EXPECTED_COMPACT_SHA256 = ""
+EXPECTED_AVAILABLE_RECORD_COUNT = 1157
+EXPECTED_TAG_RECORD_COUNT = 1156
+EXPECTED_SOURCE_SHA256 = "286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6"
+EXPECTED_DUMP_SOURCE_SHA256 = "e32b98afb810ebce10930946078c05e33a830df81abbb8f0469057145aeb83f9"
+EXPECTED_DISPLAY_RECORD_COUNT = 453459
+EXPECTED_DISPLAY_SOURCE_SHA256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
+EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "655184788175752bed232b561b70cdcdc1bf99d5d655c41380c70685a4722588"
+EXPECTED_COMPACT_RECORD_COUNT = 267017
+EXPECTED_COMPACT_PROFILE_COUNT = 320
+EXPECTED_COMPACT_KEY_COUNT = 2525
+EXPECTED_COMPACT_VALUE_COUNT = 178930
+EXPECTED_COMPACT_SHA256 = "d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1"
 
 REFERENCE_JDK_TZ_SOURCE_MEMBER = "java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java"
-REFERENCE_JDK_TZ_SOURCE_SHA256 = ""
-EXPECTED_TZ_SOURCE_ENTRY_COUNT = 0
-EXPECTED_TZ_ID_COUNT = 0
+REFERENCE_JDK_TZ_SOURCE_SHA256 = "dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2"
+EXPECTED_TZ_SOURCE_ENTRY_COUNT = 681
+EXPECTED_TZ_UNIQUE_ENTRY_COUNT = 622
+EXPECTED_TZ_ID_COUNT = 468
+REFERENCE_CLDR_SOURCE_MEMBER = REFERENCE_JDK_TZ_SOURCE_MEMBER
+REFERENCE_CLDR_SOURCE_SHA256 = REFERENCE_JDK_TZ_SOURCE_SHA256
 DISPLAY_DUMP_HELPER = "dump_jdk25_locale_display_data.java"
+PUBLIC_ORACLE_HELPER = "dump_jdk25_locale_oracle.java"
+EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "85f10261814900866ce116b3948ec9d67252a64fb0b4aa0277c14ccaa5c39a41"
 JDK_EXPORTS = (
     "--add-exports=java.base/sun.util.resources=ALL-UNNAMED",
     "--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED",
@@ -67,18 +74,6 @@ COMPACT_FORMAT_VERSION = 1
 MAX_GENERATED_RUST_SOURCE_BYTES = 1 * 1024 * 1024
 MAX_GENERATED_RUST_SOURCE_LINES = 100_000
 MAX_COMPACT_SNAPSHOT_BYTES = 8 * 1024 * 1024
-
-# This is the single semantic fallback order used by compaction. The runtime
-# consumes the same ordered profile candidates; it must not invent a second
-# provider fallback policy.
-DISPLAY_FALLBACK_ORDER = (
-    "language-script-region",
-    "language-script",
-    "language-region",
-    "language",
-    "en",
-    "root",
-)
 
 DISPLAY_MAGIC = b"SCLD"
 DISPLAY_HEADER_FORMAT = "<4s17I"
@@ -142,24 +137,7 @@ def verify_reference_archive(archive: Path, java: Path) -> None:
 
 
 def reference_timezone_ids(archive: Path) -> list[str]:
-    with tarfile.open(archive, mode="r:gz") as tar:
-        src_zip_members = [
-            member
-            for member in tar.getmembers()
-            if member.name.endswith("/lib/src.zip")
-        ]
-        if len(src_zip_members) != 1:
-            raise ValueError(
-                "reference JDK archive must contain exactly one lib/src.zip, "
-                f"found {len(src_zip_members)}"
-            )
-        src_zip = tar.extractfile(src_zip_members[0])
-        if src_zip is None:
-            raise ValueError("reference JDK src.zip archive member is not a regular file")
-        src_zip_bytes = src_zip.read()
-
-    with zipfile.ZipFile(io.BytesIO(src_zip_bytes)) as source_archive:
-        source = source_archive.read(REFERENCE_JDK_TZ_SOURCE_MEMBER)
+    source = reference_cldr_source(archive)
     source_sha256 = sha256(source)
     if REFERENCE_JDK_TZ_SOURCE_SHA256 and source_sha256 != REFERENCE_JDK_TZ_SOURCE_SHA256:
         raise ValueError(
@@ -170,9 +148,13 @@ def reference_timezone_ids(archive: Path) -> list[str]:
     matches = re.findall(rb'tzCanonicalIDMap\.put\("([^"]+)",', source)
     if EXPECTED_TZ_SOURCE_ENTRY_COUNT and len(matches) != EXPECTED_TZ_SOURCE_ENTRY_COUNT:
         raise ValueError(
-            "reference JDK timezone source entry count/uniqueness mismatch: "
-            f"expected {EXPECTED_TZ_SOURCE_ENTRY_COUNT} unique entries, got "
-            f"{len(matches)} entries and {len(set(matches))} unique entries"
+            "reference JDK timezone source entry count mismatch: "
+            f"expected {EXPECTED_TZ_SOURCE_ENTRY_COUNT}, got {len(matches)}"
+        )
+    if EXPECTED_TZ_UNIQUE_ENTRY_COUNT and len(set(matches)) != EXPECTED_TZ_UNIQUE_ENTRY_COUNT:
+        raise ValueError(
+            "reference JDK timezone source unique-entry count mismatch: "
+            f"expected {EXPECTED_TZ_UNIQUE_ENTRY_COUNT}, got {len(set(matches))}"
         )
     timezone_ids = sorted(
         {
@@ -190,6 +172,66 @@ def reference_timezone_ids(archive: Path) -> list[str]:
             f"expected {EXPECTED_TZ_ID_COUNT}, got {len(timezone_ids)}"
         )
     return timezone_ids
+
+
+def reference_cldr_source(archive: Path) -> bytes:
+    with tarfile.open(archive, mode="r:gz") as tar:
+        src_zip_members = [
+            member
+            for member in tar.getmembers()
+            if member.name.endswith("/lib/src.zip")
+        ]
+        if len(src_zip_members) != 1:
+            raise ValueError(
+                "reference JDK archive must contain exactly one lib/src.zip, "
+                f"found {len(src_zip_members)}"
+            )
+        src_zip = tar.extractfile(src_zip_members[0])
+        if src_zip is None:
+            raise ValueError("reference JDK src.zip archive member is not a regular file")
+        src_zip_bytes = src_zip.read()
+
+    with zipfile.ZipFile(io.BytesIO(src_zip_bytes)) as source_archive:
+        source = source_archive.read(REFERENCE_CLDR_SOURCE_MEMBER)
+    source_sha256 = sha256(source)
+    if REFERENCE_CLDR_SOURCE_SHA256 and source_sha256 != REFERENCE_CLDR_SOURCE_SHA256:
+        raise ValueError(
+            "reference CLDR routing source fingerprint mismatch: "
+            f"expected {REFERENCE_CLDR_SOURCE_SHA256}, got {source_sha256}"
+        )
+    return source
+
+
+def reference_cldr_routing(archive: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    source = reference_cldr_source(archive).decode("utf-8")
+    parent_locales: list[tuple[str, str]] = []
+    for parent, body in re.findall(
+        r'parentLocalesMap\.put\(Locale\.forLanguageTag\("([^"]+)"\),'
+        r"\s*new String\[\] \{(.*?)\}\);",
+        source,
+        re.DOTALL,
+    ):
+        parent_locales.extend((child, parent) for child in re.findall(r'"([^"]+)"', body))
+
+    likely_scripts: dict[str, str] = {}
+    for script, body in re.findall(
+        r'likelyScriptMap\.put\("([^"]+)", "([^"]*)"\);', source
+    ):
+        for language in body.split():
+            previous = likely_scripts.setdefault(language, script)
+            if previous != script:
+                raise ValueError(
+                    f"reference CLDR likely-script map has conflicting entries for {language}"
+                )
+
+    language_aliases = re.findall(
+        r'languageAliasMap\.put\("([^"]+)", "([^"]+)"\);', source
+    )
+    return (
+        sorted(set(parent_locales)),
+        sorted(likely_scripts.items()),
+        sorted(set(language_aliases)),
+    )
 
 
 def run_reference_java(java: Path, helper: Path) -> bytes:
@@ -372,41 +414,141 @@ def is_ascii_alpha(value: str) -> bool:
     return bool(value) and value.isascii() and value.isalpha()
 
 
-def fallback_profiles(profile: str) -> list[str]:
-    """Return the one canonical provider fallback sequence for one profile."""
+def is_variant_subtag(value: str) -> bool:
+    return (
+        5 <= len(value) <= 8 and value.isascii() and value.isalnum()
+    ) or (
+        len(value) == 4
+        and value[0].isdigit()
+        and value.isascii()
+        and value.isalnum()
+    )
+
+
+def parse_profile(profile: str) -> tuple[str, str, str, list[str]]:
     if not profile:
-        return []
+        return "", "", "", []
     parts = profile.split("-")
-    language = parts[0]
-    script = next(
-        (part for part in parts[1:] if len(part) == 4 and is_ascii_alpha(part)),
-        None,
-    )
-    region = next(
-        (
-            part
-            for part in parts[1:]
-            if (len(part) == 2 and is_ascii_alpha(part))
-            or (len(part) == 3 and part.isascii() and part.isdigit())
-        ),
-        None,
-    )
-    candidates: list[str] = []
+    language = parts[0].lower()
+    index = 1
+    script = ""
+    if index < len(parts) and len(parts[index]) == 4 and is_ascii_alpha(parts[index]):
+        script = parts[index][0].upper() + parts[index][1:].lower()
+        index += 1
+    region = ""
+    if index < len(parts) and (
+        (len(parts[index]) == 2 and is_ascii_alpha(parts[index]))
+        or (len(parts[index]) == 3 and parts[index].isascii() and parts[index].isdigit())
+    ):
+        region = parts[index].upper()
+        index += 1
+    variants: list[str] = []
+    while index < len(parts) and is_variant_subtag(parts[index]):
+        variants.append(parts[index])
+        index += 1
+    return language, script, region, variants
 
-    def add(candidate: str) -> None:
-        if candidate != profile and candidate not in candidates:
-            candidates.append(candidate)
 
-    if script is not None and region is not None:
-        add(f"{language}-{script}-{region}")
-    if script is not None:
-        add(f"{language}-{script}")
-    if region is not None:
-        add(f"{language}-{region}")
-    add(language)
-    add("en")
-    add("")
-    return candidates
+def candidate_tag(
+    language: str, script: str, region: str, variants: list[str]
+) -> str:
+    if not language and not script and not region and not variants:
+        return ""
+    parts: list[str] = []
+    if language:
+        parts.append(language.lower())
+    if script:
+        parts.append(script[0].upper() + script[1:].lower())
+    if region:
+        parts.append(region.upper())
+    valid_count = 0
+    for variant in variants:
+        if not is_variant_subtag(variant):
+            break
+        parts.append(variant)
+        valid_count += 1
+    if valid_count < len(variants):
+        parts.extend(["x", "lvariant", *variants[valid_count:]])
+    return "-".join(parts)
+
+
+def default_candidates(
+    language: str, script: str, region: str, variants: list[str]
+) -> list[tuple[str, str, str, list[str]]]:
+    prefixes = [variants[:count] for count in range(len(variants), 0, -1)]
+    result: list[tuple[str, str, str, list[str]]] = []
+    result.extend((language, script, region, prefix) for prefix in prefixes)
+    if region:
+        result.append((language, script, region, []))
+    restart_region = region
+    if script:
+        result.append((language, script, "", []))
+        if language == "zh" and not restart_region:
+            if script == "Hans":
+                restart_region = "CN"
+            elif script == "Hant":
+                restart_region = "TW"
+        result.extend((language, "", restart_region, prefix) for prefix in prefixes)
+        if restart_region:
+            result.append((language, "", restart_region, []))
+    if language:
+        result.append((language, "", "", []))
+    result.append(("", "", "", []))
+    return result
+
+
+def candidate_profiles(profile: str) -> list[str]:
+    language, script, region, variants = parse_profile(profile)
+    is_bokmal = False
+    is_nynorsk = False
+    if language == "no":
+        if region == "NO" and variants == ["NY"]:
+            variants = []
+            is_nynorsk = True
+        else:
+            is_bokmal = True
+
+    candidates: list[tuple[str, str, str, list[str]]]
+    if language == "nb" or is_bokmal:
+        base = default_candidates("nb", script, region, variants)
+        candidates = []
+        for candidate in base:
+            cand_language, cand_script, cand_region, cand_variants = candidate
+            if not cand_language:
+                candidates.append(candidate)
+                break
+            other = ("no", cand_script, cand_region, cand_variants)
+            if is_bokmal:
+                candidates.extend([other, candidate])
+            else:
+                candidates.extend([candidate, other])
+    elif language == "nn" or is_nynorsk:
+        candidates = default_candidates("nn", script, region, variants)
+        root_index = len(candidates) - 1
+        candidates[root_index:root_index] = [
+            ("no", "", "NO", ["NY"]),
+            ("no", "", "NO", []),
+            ("no", "", "", []),
+        ]
+    else:
+        if language == "zh" and not script and region:
+            if region in {"TW", "HK", "MO"}:
+                script = "Hant"
+            elif region in {"CN", "SG"}:
+                script = "Hans"
+        candidates = default_candidates(language, script, region, variants)
+
+    result: list[str] = []
+    for cand_language, cand_script, cand_region, cand_variants in candidates:
+        tag = candidate_tag(cand_language, cand_script, cand_region, cand_variants)
+        if tag not in result:
+            result.append(tag)
+    return result
+
+
+def fallback_profiles(profile: str) -> list[str]:
+    candidates = candidate_profiles(profile)
+    return candidates[1:] if candidates and candidates[0] == profile else candidates
 
 
 def pool_section(strings: list[str]) -> tuple[bytes, int]:
@@ -444,49 +586,99 @@ class CompactModel:
         return self.values[self.records[start + record_id][1]]
 
     def resolve_profile(self, profile_id: int, key: str) -> str | None:
+        if not 0 <= profile_id < len(self.profiles):
+            return None
+        return self._resolve_profile(profile_id, key, set())
+
+    def _resolve_profile(
+        self, profile_id: int, key: str, visiting: set[int]
+    ) -> str | None:
+        if profile_id in visiting:
+            return None
+        visiting.add(profile_id)
         profile = self.profiles[profile_id]
         value = self.lookup(profile, key)
         if value is not None:
             return value
         start, end = self.fallback_ranges[profile_id : profile_id + 2]
         for fallback_id in self.fallback_ids[start:end]:
-            value = self.resolve_profile(fallback_id, key)
+            value = self._resolve_profile(fallback_id, key, visiting)
             if value is not None:
+                visiting.remove(profile_id)
                 return value
+        visiting.remove(profile_id)
         return None
 
     def resolve(self, profile: str, key: str) -> str | None:
-        for candidate in [profile, *fallback_profiles(profile)]:
-            profile_id = bisect.bisect_left(self.profiles, candidate)
-            if profile_id < len(self.profiles) and self.profiles[profile_id] == candidate:
-                value = self.resolve_profile(profile_id, key)
-                if value is not None:
-                    return value
-        return None
+        profile_id = bisect.bisect_left(self.profiles, profile)
+        if profile_id == len(self.profiles) or self.profiles[profile_id] != profile:
+            return None
+        return self.resolve_profile(profile_id, key)
+
+
+def fallback_graph(
+    profiles: list[str], profile_ids: dict[str, int]
+) -> tuple[list[int], list[int]]:
+    """Build the one fallback graph shared by compaction and the blob runtime.
+
+    The graph is serialized into the snapshot. The compacting proof and the
+    Rust resolver both consume these exact edges, so they cannot drift into
+    separate fallback approximations.
+    """
+    fallback_ids: list[int] = []
+    fallback_ranges = [0]
+    for profile in profiles:
+        seen: set[int] = set()
+        for candidate in fallback_profiles(profile):
+            profile_id = profile_ids.get(candidate)
+            if profile_id is not None and profile_id not in seen:
+                fallback_ids.append(profile_id)
+                seen.add(profile_id)
+        fallback_ranges.append(len(fallback_ids))
+    return fallback_ranges, fallback_ids
 
 
 def compact_display(
     display: list[tuple[str, str, str]],
 ) -> tuple[bytes, CompactModel, dict[str, int]]:
-    full = {(profile, key): value for profile, key, value in display}
     profiles = sorted({profile for profile, _key, _value in display} | {""})
     keys = sorted({key for _profile, key, _value in display})
+    profile_ids = {profile: index for index, profile in enumerate(profiles)}
+    key_ids = {key: index for index, key in enumerate(keys)}
+    fallback_ranges, fallback_ids = fallback_graph(profiles, profile_ids)
+    # Resolve each oracle row through the same serialized fallback graph that
+    # the final runtime will use. This is the semantic-delta decision point.
+    all_values = sorted({value for _profile, _key, value in display})
+    all_value_ids = {value: index for index, value in enumerate(all_values)}
+    rows_by_profile: dict[str, list[tuple[int, int]]] = {profile: [] for profile in profiles}
+    for profile, key, value in display:
+        rows_by_profile[profile].append((key_ids[key], all_value_ids[value]))
+    full_ranges = [0]
+    full_records: list[tuple[int, int]] = []
+    for profile in profiles:
+        full_records.extend(sorted(rows_by_profile[profile], key=lambda row: row[0]))
+        full_ranges.append(len(full_records))
+    full_model = CompactModel(
+        profiles,
+        keys,
+        all_values,
+        full_ranges,
+        fallback_ranges,
+        fallback_ids,
+        full_records,
+    )
     retained: list[tuple[str, str, str]] = []
     for profile, key, value in display:
-        fallback_value = next(
-            (
-                full[(candidate, key)]
-                for candidate in fallback_profiles(profile)
-                if (candidate, key) in full
-            ),
-            None,
-        )
+        profile_id = profile_ids[profile]
+        fallback_value = None
+        for fallback_id in fallback_ids[fallback_ranges[profile_id] : fallback_ranges[profile_id + 1]]:
+            fallback_value = full_model._resolve_profile(fallback_id, key, {profile_id})
+            if fallback_value is not None:
+                break
         if fallback_value != value:
             retained.append((profile, key, value))
 
     values = sorted({value for _profile, _key, value in retained})
-    profile_ids = {profile: index for index, profile in enumerate(profiles)}
-    key_ids = {key: index for index, key in enumerate(keys)}
     value_ids = {value: index for index, value in enumerate(values)}
     numeric_records = [
         (key_ids[key], value_ids[value]) for profile, key, value in retained
@@ -497,16 +689,6 @@ def compact_display(
         while retained_index < len(retained) and retained[retained_index][0] == profile:
             retained_index += 1
         ranges.append(retained_index)
-
-    fallback_ids: list[int] = []
-    fallback_ranges = [0]
-    for profile in profiles:
-        fallback_ids.extend(
-            profile_ids[candidate]
-            for candidate in fallback_profiles(profile)
-            if candidate in profile_ids
-        )
-        fallback_ranges.append(len(fallback_ids))
 
     profile_section, raw_profile_bytes = pool_section(profiles)
     key_section, raw_key_bytes = pool_section(keys)
@@ -731,6 +913,9 @@ def render_rust_source(
     display_source_sha256: str,
     display_stats: dict[str, int],
     compact_sha256: str,
+    cldr_parent_locales: list[tuple[str, str]],
+    cldr_likely_scripts: list[tuple[str, str]],
+    cldr_language_aliases: list[tuple[str, str]],
 ) -> str:
     lines = [
         "// Generated by `tools/generate_jdk25_locale_data.py`.",
@@ -739,19 +924,22 @@ def render_rust_source(
         "// CLDR display data",
         "// is stored in `data/jdk25_locale_display.bin` after semantic fallback",
         "// delta compaction and string interning.",
-        f"// Reference runtime: {REFERENCE_VENDOR} {REFERENCE_VENDOR_VERSION},",
+        f"// Reference runtime: {REFERENCE_RUNTIME_DISPLAY} ({REFERENCE_VENDOR}),",
         f"// `java.locale.providers={REFERENCE_LOCALE_PROVIDERS}`.",
         "// Reference archive:",
         f"// {REFERENCE_JDK_URL}",
         f"// Reference archive SHA-256: {REFERENCE_JDK_SHA256}",
         f"// Dump helper SHA-256: {EXPECTED_DUMP_SOURCE_SHA256}",
         f"// Display-data dump helper SHA-256: {EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}",
+        f"// Public differential oracle helper SHA-256: {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}",
         f"// Unicode time-zone source: {REFERENCE_JDK_TZ_SOURCE_MEMBER}",
         f"// Unicode time-zone source SHA-256: {REFERENCE_JDK_TZ_SOURCE_SHA256}",
+        f"// Unicode time-zone source rows: {EXPECTED_TZ_SOURCE_ENTRY_COUNT}",
+        f"// Unicode time-zone unique source rows: {EXPECTED_TZ_UNIQUE_ENTRY_COUNT}",
         f"// Unicode time-zone candidate count: {EXPECTED_TZ_ID_COUNT}",
         "",
         "#[allow(dead_code)]",
-        f"pub const LOCALE_DATASET_VERSION: &str = {rust_string(REFERENCE_RUNTIME_VERSION)};",
+        f"pub const LOCALE_DATASET_VERSION: &str = {rust_string(REFERENCE_RELEASE_VERSION)};",
         "#[allow(dead_code)]",
         f"pub const LOCALE_DATASET_SOURCE_SHA256: &str = {rust_string(source_sha256)};",
         "#[allow(dead_code)]",
@@ -788,12 +976,45 @@ def render_rust_source(
         "#[allow(dead_code)]",
         "pub const LOCALE_DISPLAY_MAX_COMPACT_SNAPSHOT_BYTES: usize = "
         f"{MAX_COMPACT_SNAPSHOT_BYTES};",
-        "pub const LOCALE_DISPLAY_FALLBACK_ORDER: &[&str] = &[",
-        *[f"    {rust_string(item)}," for item in DISPLAY_FALLBACK_ORDER],
-        "];",
         "",
-        "static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[",
+        "// Generated from the pinned JDK25 CLDR routing metadata. These maps",
+        "// reproduce provider bundle selection; ResourceBundle candidate",
+        "// identities remain implemented by the shared runtime algorithm.",
+        "#[allow(dead_code)]",
+        f"pub const CLDR_ROUTING_SOURCE_SHA256: &str = {rust_string(REFERENCE_CLDR_SOURCE_SHA256)};",
+        "#[allow(dead_code)]",
+        "pub static CLDR_PARENT_LOCALES: &[(&str, &str)] = &[",
     ]
+    lines.extend(
+        f"    ({rust_string(child)}, {rust_string(parent)}),"
+        for child, parent in cldr_parent_locales
+    )
+    lines.extend(
+        [
+            "];",
+            "pub static CLDR_LIKELY_SCRIPTS: &[(&str, &str)] = &[",
+        ]
+    )
+    lines.extend(
+        f"    ({rust_string(language)}, {rust_string(script)}),"
+        for language, script in cldr_likely_scripts
+    )
+    lines.extend(
+        [
+            "];",
+            "pub static CLDR_LANGUAGE_ALIASES: &[(&str, &str)] = &[",
+        ]
+    )
+    lines.extend(
+        f"    ({rust_string(alias)}, {rust_string(target)}),"
+        for alias, target in cldr_language_aliases
+    )
+    lines.extend(
+        [
+            "];",
+        "static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[",
+        ]
+    )
     for tag, display_name, localized_name in available:
         lines.extend(
             [
@@ -844,7 +1065,24 @@ def render_with_source_size(**kwargs: object) -> str:
     raise ValueError("could not stabilize generated Rust source-size metadata")
 
 
-def print_stats(stats: dict[str, int], display_source_sha256: str, compact_sha256: str) -> None:
+def print_stats(
+    available: list[tuple[str, str, str]],
+    tags: list[tuple[str, str, str]],
+    source_sha256: str,
+    stats: dict[str, int],
+    display_source_sha256: str,
+    compact_sha256: str,
+) -> None:
+    print(f"available_records={len(available)}")
+    print(f"canonical_tag_records={len(tags)}")
+    print(f"logical_source_sha256={source_sha256}")
+    print(f"locale_dump_helper_sha256={EXPECTED_DUMP_SOURCE_SHA256}")
+    print(f"display_dump_helper_sha256={EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}")
+    print(f"public_oracle_helper_sha256={EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}")
+    print(f"timezone_source_sha256={REFERENCE_JDK_TZ_SOURCE_SHA256}")
+    print(f"timezone_source_rows={EXPECTED_TZ_SOURCE_ENTRY_COUNT}")
+    print(f"timezone_unique_source_rows={EXPECTED_TZ_UNIQUE_ENTRY_COUNT}")
+    print(f"accepted_timezone_ids={EXPECTED_TZ_ID_COUNT}")
     for key in (
         "oracle_records",
         "compact_records",
@@ -868,6 +1106,9 @@ def generate(
     source_sha256: str,
     display: list[tuple[str, str, str]],
     display_source_sha256: str,
+    cldr_parent_locales: list[tuple[str, str]],
+    cldr_likely_scripts: list[tuple[str, str]],
+    cldr_language_aliases: list[tuple[str, str]],
 ) -> tuple[str, bytes, dict[str, int]]:
     binary, model, stats = compact_display(display)
     compact_sha256 = sha256(binary)
@@ -899,6 +1140,9 @@ def generate(
         display_source_sha256=display_source_sha256,
         display_stats=stats,
         compact_sha256=compact_sha256,
+        cldr_parent_locales=cldr_parent_locales,
+        cldr_likely_scripts=cldr_likely_scripts,
+        cldr_language_aliases=cldr_language_aliases,
     )
     enforce_budgets(source, binary, stats)
     stats["compact_artifact_sha256"] = compact_sha256
@@ -926,16 +1170,40 @@ def main() -> None:
     args = parser.parse_args()
     verify_reference_archive(args.archive, args.java)
     timezone_ids = reference_timezone_ids(args.archive)
+    cldr_parent_locales, cldr_likely_scripts, cldr_language_aliases = reference_cldr_routing(
+        args.archive
+    )
     helper = Path(__file__).with_name("dump_jdk25_locale_data.java")
     display_helper = Path(__file__).with_name(DISPLAY_DUMP_HELPER)
+    public_oracle_helper = Path(__file__).with_name(PUBLIC_ORACLE_HELPER)
+    public_oracle_sha256 = sha256_file(public_oracle_helper)
+    if public_oracle_sha256 != EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256:
+        raise ValueError(
+            "reference public locale oracle helper fingerprint mismatch: "
+            f"expected {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}, got {public_oracle_sha256}"
+        )
     available, tags, source_sha256 = parse_dump(run_reference_java(args.java, helper))
     display, display_source_sha256 = parse_display_dump(
         run_reference_display_java(args.java, display_helper, timezone_ids)
     )
     generated, binary, stats = generate(
-        available, tags, source_sha256, display, display_source_sha256
+        available,
+        tags,
+        source_sha256,
+        display,
+        display_source_sha256,
+        cldr_parent_locales,
+        cldr_likely_scripts,
+        cldr_language_aliases,
     )
-    print_stats(stats, display_source_sha256, stats["compact_artifact_sha256"])
+    print_stats(
+        available,
+        tags,
+        source_sha256,
+        stats,
+        display_source_sha256,
+        stats["compact_artifact_sha256"],
+    )
     if args.check:
         if args.output.read_bytes() != generated.encode("utf-8"):
             raise SystemExit(f"generated output differs: {args.output}")

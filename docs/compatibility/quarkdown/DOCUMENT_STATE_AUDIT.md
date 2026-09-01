@@ -198,43 +198,42 @@ resource-seeded initial state without reopening #151's canonical semantic
 classification.
 
 Scribium deliberately uses a deterministic checked-in locale snapshot rather
-than an OS/JVM dependency. Issue #173 generated the snapshot from
+than an OS/JVM dependency. Issue #173 generates the snapshot from
 `java.util.Locale.getAvailableLocales()` and the pinned `JVMLocale` getters
-under Eclipse Temurin `17.0.20.1+1` with
-`java.locale.providers=CLDR,COMPAT`: 1,017 JDK records include the root
-locale, 1,016 non-root available records are retained in source order, and
-1,015 deduplicated canonical tag records form the binary-search tag index. The
-available-order name records and distinct display names preserve the real
-`nn-NO` canonical-tag collision;
-name lookup is first-match and character-wise JVM/Kotlin ignore-case, then tag
-lookup uses `Locale.forLanguageTag`-compatible canonicalization. This includes
-language, script, region, variant, observed deprecated aliases, and valid
-unavailable tags such as `xx-YY`; malformed/root-only values remain failures.
+under Eclipse Temurin `25.0.4.1+1` with `java.locale.providers=CLDR`.
+The 1,157 available records (including the root record) and 1,156
+deduplicated canonical-tag records preserve the observed `nn-NO` collision;
+the helper freezes the JDK's otherwise unspecified available-locale set order
+before emitting the name-first table. Name lookup remains first-match and
+character-wise JVM/Kotlin ignore-case, while tag lookup uses
+`Locale.forLanguageTag`-compatible canonicalization. This includes language,
+script, region, variant, observed deprecated aliases, and valid unavailable
+tags such as `xx-YY`; malformed/root-only values remain failures.
 The parser preserves Java's legacy `no_NO_NY` mapping after private-use
 `lvariant` extraction, so `no-NO-x-lvariant-NY` canonicalizes to `nn-NO` while
 localized display retains the derived `no`/`NO`/`NY` base identity; residual
-private-use subtags remain part of the result. The complete logical
-display oracle has 308,533 deterministic effective CLDR→COMPAT provider
-records. Semantic fallback-delta compaction retains 152,731 genuine overrides
-in the checked-in
-`crates/scribium-engine/data/jdk17_locale_display.bin` snapshot (format 1):
-287 profiles, 1,569 keys, 88,024 interned values, 2,045,327 raw string-pool
-bytes, 1,226,720 numeric-index bytes, and 3,631,651 total bytes. The
-299,920-byte generated Rust metadata performs static binary-search lookup;
+private-use subtags remain part of the result.
+
+The complete logical display oracle has 453,459 JDK25 CLDR/FALLBACK-root
+records. Semantic fallback-delta compaction retains 267,017 genuine
+overrides in the checked-in
+`crates/scribium-engine/data/jdk25_locale_display.bin` snapshot (format 1):
+320 profiles, 2,525 keys, 178,930 interned values, 3,682,380 raw string-pool
+bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
+Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
 the generator exhaustively reconstructs every full-oracle `(profile,key)` and
-requires the compact value to match exactly. Logical source SHA-256 is
-`03d633326dc30ac8423cfb14b4bc0d3fa4f35e7a86575e8eefbdf540c620d489` and
-compact artifact SHA-256 is
-`c6666932c941652192cc351e75fb613d040e78bca8dc3b3623276c239e2fa8cb`.
+requires the compact value to match exactly. The locale logical source
+SHA-256 is `286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6`,
+the display logical source SHA-256 is
+`96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and
+the compact artifact SHA-256 is
+`d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
 Generic assembly uses the snapshot for `Locale.getDisplayName`, including
-Unicode extension provider fallbacks. Its generation is guarded by the exact
-display-helper, timezone-source, logical-source, compact-artifact, and size
-fingerprints.
-The archive URL and SHA-256, exact archive Java/javac-member verification,
-dump-helper fingerprint, generated source fingerprint, and regeneration guard
-are recorded in
-`tools/generate_jdk17_locale_data.py` and `locale_data.rs`. Runtime behavior
-has no JVM, OS locale database, filesystem, network, or global locale state.
+JDK25 CLDR parent-locale/likely-script provider routing, Unicode extension
+fallbacks, and the active FALLBACK root values; no JDK17 COMPAT/JRE data is
+used. Generation is guarded by the exact archive, helper, timezone-source,
+logical-source, compact-artifact, and size fingerprints. Runtime behavior has
+no JVM, OS locale database, filesystem, network, or global locale state.
 
 The IR still stores only canonical tag and localized-name data and has no
 localization-table state. #166 covers the bounded source-backed raw-body
@@ -399,7 +398,7 @@ semantics. The 2 localization rows are canonical #151 handoffs and are also
 | `.docauthors` | [#137](https://github.com/luceat-lux-vestra/scribium/issues/137), [PR #138](https://github.com/luceat-lux-vestra/scribium/pull/138), merge `2b685f0` | Revalidated as ordered nested dictionary append with mixed-family state sharing; `PARTIAL` |
 | `.dockeywords` | [#139](https://github.com/luceat-lux-vestra/scribium/issues/139), [PR #140](https://github.com/luceat-lux-vestra/scribium/pull/140), merge `8771bd7` | Revalidated as replacement with ordering and duplicate preservation; `PARTIAL` for body/conversion/output boundary |
 | `.theme` | [#141](https://github.com/luceat-lux-vestra/scribium/issues/141), [PR #142](https://github.com/luceat-lux-vestra/scribium/pull/142), merge `bf32038` | Pinned implementation resolves the KDoc ambiguity in favor of whole-state replacement; explicit-empty option survives serde; `PARTIAL` |
-| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior while replacing the former 13-row table with a checked-in 1,016-record Temurin 17.0.20.1+1 snapshot plus a 1,015-tag canonical index. Source/runtime fingerprints and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
+| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,157-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,156-tag canonical index. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
 | `.captionposition` | [#145](https://github.com/luceat-lux-vestra/scribium/issues/145), [PR #146](https://github.com/luceat-lux-vestra/scribium/pull/146), merge `247d945` | Seen and retained as #153 layout ownership; no #152 canonical status assigned |
 | Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/scribium/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
 
@@ -407,7 +406,7 @@ Relevant current evidence includes
 [`evaluator.rs`](../../../crates/scribium-engine/src/evaluator.rs),
 [`locale.rs`](../../../crates/scribium-engine/src/locale.rs),
 [`locale_data.rs`](../../../crates/scribium-engine/src/locale_data.rs),
-[`generate_jdk17_locale_data.py`](../../../tools/generate_jdk17_locale_data.py),
+[`generate_jdk25_locale_data.py`](../../../tools/generate_jdk25_locale_data.py),
 [`scribium-ir`](../../../crates/scribium-ir/src/lib.rs), the core document-state
 tests, and the independent author/keyword/locale/theme fixtures. The focused
 Issue #152 witnesses are in

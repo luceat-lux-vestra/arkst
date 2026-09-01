@@ -56,6 +56,47 @@ These upstream notices apply to the generation sources/data provenance; the
 Scribium generator and runtime integration remain Apache-2.0 independently
 authored code.
 
+## Reference locale snapshot
+
+`crates/scribium-engine/data/jdk25_locale_display.bin` and the locale records
+in `crates/scribium-engine/src/locale_data.rs` are generated compatibility
+data, not copied JDK implementation code. Their source is the exact Eclipse
+Temurin `25.0.4.1+1` Linux x64 archive pinned in
+[`reference-jvm.toml`](../compatibility/quarkdown/reference-jvm.toml):
+`OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz`, 141,329,719 bytes,
+SHA-256
+`dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e`.
+The locale provider is JDK25 CLDR, with the active JDK FALLBACK root values
+included where CLDR has no value; JDK17 JRE/COMPAT provider data is not part of
+the active snapshot. The locale, display, and public differential helpers are
+`tools/dump_jdk25_locale_data.java`,
+`tools/dump_jdk25_locale_display_data.java`, and
+`tools/dump_jdk25_locale_oracle.java`, whose SHA-256 fingerprints are recorded
+in the generated metadata and generator constants.
+
+The locale snapshot covers available names/tags, display-language/script/
+region/variant values, Unicode-extension names, currencies, and accepted
+Unicode timezone identifiers. The timezone source is
+`java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java`, SHA-256
+`dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2`;
+it contains 681 source `tzCanonicalIDMap.put` rows, 622 unique source keys,
+and 468 accepted lowercase IDs. The generated logical display oracle has
+453,459 rows (SHA-256
+`96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`) and
+the compact artifact has 267,017 records, 6,549,860 bytes, and SHA-256
+`d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
+The compact format is version 1, uses explicit little-endian numeric fields,
+and is parsed as static read-only data without a JVM, filesystem, network,
+host-locale database, unsafe code, or runtime decompression. The generator
+exhaustively reconstructs every logical oracle row and `--check` compares both
+generated artifacts byte-for-byte.
+
+The JDK/CLDR-derived values remain subject to the OpenJDK GPLv2 with Classpath
+Exception and upstream CLDR/Unicode notice terms described above. Scribium's
+generator, compact-format parser, lookup algorithm, tests, and integration
+are independently authored Apache-2.0 code and are not redistributed OpenJDK
+implementation material.
+
 ## Trademarks
 
 - **Scribium** is a working name. A naming due diligence search must be

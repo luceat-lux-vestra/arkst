@@ -121,7 +121,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded `.docauthor` document-state semantics | Completed (v2.5.1 evidenced slice) |
 | Bounded `.docauthors` document-state semantics | Completed (v2.5.1 evidenced slice) |
 | Bounded `.dockeywords` document-state semantics | Completed (v2.5.1 evidenced slice) |
-| Bounded `.doclang` document-state semantics | Completed (deterministic Temurin 17.0.20.1+1 locale closure at the evaluator/IR boundary; localization and rendering deferred) |
+| Bounded `.doclang` document-state semantics | Completed (deterministic Temurin 25.0.4.1+1 CLDR locale closure at the evaluator/IR boundary; localization and rendering deferred) |
 | Bounded `.theme` document-state semantics | Completed (bounded evaluator/IR boundary; upstream block-body fallback deferred) |
 | Bounded `.captionposition` document-state semantics | Completed (bounded evaluator/IR snapshot; caption rendering deferred) |
 | Bounded Quarkdown v2.5.1 `.extend` / `.super` evaluator semantics (#169) | Completed (source-defined and regular scalar-native targets; specialized native owners and renderer/output compatibility deferred) |

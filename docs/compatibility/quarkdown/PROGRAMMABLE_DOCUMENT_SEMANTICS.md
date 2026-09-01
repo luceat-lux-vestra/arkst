@@ -165,36 +165,41 @@ clearing state. The IR carries only plain `{ tag, localized_name }` data.
 
 Because upstream delegates lookup to `java.util.Locale`, Scribium does not
 use a JVM, OS, environment, or native locale database at runtime. Issue #173
-checked in the complete evidenced available-locale snapshot from the exact
-reference contract: Eclipse Temurin `17.0.20.1+1` with
-`java.locale.providers=CLDR,COMPAT`. It retains 1,016 non-root records in
-`getAvailableLocales()` order for first-match English-name lookup and a
-deduplicated 1,015-record canonical tag binary-search index for
-`Locale.forLanguageTag`
-lookup. Generation verifies the pinned archive checksum and that `--java` is
-the archive's exact `Contents/Home/bin/java` and `javac` members, then guards
-the dump-helper checksums, runtime/provider metadata, locale-source
-fingerprints, and the exact JDK 17 timezone-source fingerprint; regeneration
+checks in the complete evidenced available-locale snapshot from the exact
+reference contract: Eclipse Temurin `25.0.4.1+1` with
+`java.locale.providers=CLDR`. It retains 1,157 records, including the root
+record, and a deduplicated 1,156-record canonical tag binary-search index for
+`Locale.forLanguageTag` lookup. The helper freezes the JDK's otherwise
+unspecified available-locale set order before preserving the first-match
+English-name table. Generation verifies the pinned archive checksum and that
+`--java` is the archive's exact `Contents/Home/bin/java` and `javac` members,
+then guards the dump-helper checksums, runtime/provider metadata, locale-source
+fingerprints, and the exact JDK25 timezone-source fingerprint; regeneration
 fails on a wrong runtime or altered input and `--check` verifies idempotence.
-The complete logical display oracle has 308,533 effective CLDR→COMPAT provider
-records. The checked-in representation retains 152,731 semantic fallback-delta
-records in the 3,631,651-byte compact binary snapshot, with 287 profiles,
-1,569 keys, 88,024 interned values, 2,045,327 raw string-pool bytes, and 1,226,720
-numeric-index bytes. The 299,920-byte generated Rust metadata performs
-static binary-search lookup. Display-name construction is generic over those
-records,
-so Unicode extensions such as `ca-buddhist`, `ca-japanese`, `nu-arab`,
-`co-phonebk`, `cu-usd`, `rg-uszzzz`, and `tz-usnyc` use the pinned provider
-data rather than handwritten value cases. Java's legacy
-`no-NO-x-lvariant-NY` → `nn-NO` canonicalization is also preserved while its
-localized name uses the derived `no`/`NO`/`NY` base identity.
+
+The complete logical display oracle has 453,459 effective JDK25
+CLDR/FALLBACK-root records. The checked-in representation retains 267,017
+semantic fallback-delta records in the 6,549,860-byte compact binary snapshot,
+with 320 profiles, 2,525 keys, 178,930 interned values, 3,682,380 raw
+string-pool bytes, and 2,140,296 numeric-index bytes. The generated Rust
+metadata is below the executable 1 MiB source budget and performs static
+binary-search lookup. Display-name construction is generic over those
+records, so Unicode extensions such as `ca-buddhist`, `ca-japanese`, `nu-arab`,
+`co-phonebk`, `cu-usd`, `rg-uszzzz`, and `tz-usnyc` use the pinned JDK25
+provider data rather than handwritten value cases. Java's legacy
+`no-NO-x-lvariant-NY` → `nn-NO` canonicalization is preserved while its
+localized name uses the derived `no`/`NO`/`NY` base identity. The provider
+routing metadata captures JDK25 CLDR parent-locale, likely-script, and alias
+maps; the active FALLBACK root values are included, while legacy JRE/COMPAT
+data is not.
+
 Regeneration must provide the exact archive and its extracted `java` member
 with its sibling `javac` member, for example:
 
 ```text
-python3 tools/generate_jdk17_locale_data.py \
-  --java /path/to/Temurin-17.0.20.1+1/Contents/Home/bin/java \
-  --archive /path/to/OpenJDK17U-jdk_aarch64_mac_hotspot_17.0.20.1_1.tar.gz \
+python3 tools/generate_jdk25_locale_data.py \
+  --java /path/to/Temurin-25.0.4.1+1/Contents/Home/bin/java \
+  --archive /path/to/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz \
   --check
 ```
 

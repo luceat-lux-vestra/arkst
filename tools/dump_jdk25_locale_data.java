@@ -1,4 +1,7 @@
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Locale;
+import java.util.List;
 import java.util.TreeSet;
 
 /** Emits the locale facts consumed by generate_jdk25_locale_data.py. */
@@ -12,7 +15,7 @@ final class DumpJdk25LocaleData {
         System.out.println("java.locale.providers\t" + System.getProperty("java.locale.providers"));
 
         TreeSet<String> canonicalTags = new TreeSet<>();
-        for (Locale locale : Locale.getAvailableLocales()) {
+        for (Locale locale : orderedAvailableLocales()) {
             if (locale.getLanguage().isBlank()) {
                 continue;
             }
@@ -35,6 +38,23 @@ final class DumpJdk25LocaleData {
                     + locale.getDisplayName(locale)
             );
         }
+    }
+
+    private static List<Locale> orderedAvailableLocales() {
+        // Locale.getAvailableLocales() does not specify an iteration order and
+        // the provider union is assembled through hash-based collections. The
+        // reference contract fixes the order of that exact returned set so
+        // Quarkdown's name-first collision policy is deterministic across
+        // regeneration runs and platforms.
+        ArrayList<Locale> locales = new ArrayList<>(List.of(Locale.getAvailableLocales()));
+        locales.sort(Comparator
+                .comparing(Locale::toLanguageTag)
+                .thenComparing(Locale::getLanguage)
+                .thenComparing(Locale::getScript)
+                .thenComparing(Locale::getCountry)
+                .thenComparing(Locale::getVariant)
+                .thenComparing(Locale::toString));
+        return locales;
     }
 
     private static void rejectControlCharacters(String value, String label) {

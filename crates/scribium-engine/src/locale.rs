@@ -272,6 +272,20 @@ impl<'a> DisplaySnapshot<'a> {
     }
 
     fn resolve_profile(&self, profile_id: usize, key: &str) -> Option<&'a str> {
+        self.resolve_profile_bounded(profile_id, key, 0)
+    }
+
+    fn resolve_profile_bounded(
+        &self,
+        profile_id: usize,
+        key: &str,
+        depth: usize,
+    ) -> Option<&'a str> {
+        // A valid generated graph is acyclic. The bound also makes a
+        // corrupted embedded blob fail closed instead of recursing forever.
+        if depth > self.profile_count {
+            return None;
+        }
         let key_id = self.key_id(key)?;
         if let Some(value) = self.find_record(profile_id, key_id) {
             return Some(value);
@@ -279,7 +293,7 @@ impl<'a> DisplaySnapshot<'a> {
         let (start, end) = self.fallback_range(profile_id)?;
         (start..end).find_map(|index| {
             self.fallback_id(index)
-                .and_then(|fallback_id| self.resolve_profile(fallback_id, key))
+                .and_then(|fallback_id| self.resolve_profile_bounded(fallback_id, key, depth + 1))
         })
     }
 
@@ -405,8 +419,10 @@ fn validate_string_pool(
 
 /// Resolves an English display name before a canonical language tag.
 ///
-/// Name records retain the exact `getAvailableLocales()` order because
-/// upstream `fromName` returns the first case-insensitive display-name match.
+/// Name records retain the deterministic order of the exact
+/// `getAvailableLocales()` result set used by the pinned oracle. Java does not
+/// specify that provider-union order, so generation freezes a canonical
+/// order before applying upstream's first case-insensitive display-name match.
 /// Canonical tag records are a separate deduplicated index because upstream
 /// available locales contains one observable `nn-NO` collision while
 /// `fromTag` constructs a canonical `Locale` (`nn_NO`) directly.
@@ -456,8 +472,7 @@ fn char_equals_ignore_case(left: char, right: char) -> bool {
     }
     let left_upper = simple_uppercase(left);
     let right_upper = simple_uppercase(right);
-    left_upper == right_upper
-        || simple_lowercase(left_upper) == simple_lowercase(right_upper)
+    left_upper == right_upper || simple_lowercase(left_upper) == simple_lowercase(right_upper)
 }
 
 fn find_tag_record(tag: &str) -> Option<&'static LocaleRecord> {
@@ -936,9 +951,9 @@ fn titlecase_ascii(value: &str) -> String {
 
 fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
     let base = find_tag_record(&parsed.display_language);
-    let localized_base = base.map_or(parsed.display_language.as_str(), |record| {
-        record.localized_name
-    });
+    let localized_base = display_data_value(parsed, &parsed.display_language)
+        .or_else(|| base.map(|record| record.localized_name))
+        .unwrap_or(parsed.display_language.as_str());
     let mut components = Vec::new();
     if let Some(script) = &parsed.script {
         components.push(
@@ -951,9 +966,7 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
         );
     }
     if let Some(region) = &parsed.region {
-        components.push(if region == "001" {
-            "World".to_string()
-        } else {
+        components.push(
             display_data_value(parsed, region)
                 .map(str::to_string)
                 .or_else(|| {
@@ -961,8 +974,9 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
                 })
                 .or_else(|| locale_component(&format!("en-{region}"), find_tag_record("en")))
                 .or_else(|| english_region_name(region))
-                .unwrap_or_else(|| region.clone())
-        });
+                .or_else(|| (region == "001").then_some("World".to_string()))
+                .unwrap_or_else(|| region.clone()),
+        );
     }
     components.extend(
         parsed
@@ -1015,36 +1029,369 @@ fn english_region_name(region: &str) -> Option<String> {
     })
 }
 
-fn display_data_value(parsed: &ParsedLanguageTag, key: &str) -> Option<&'static str> {
-    let snapshot = DisplaySnapshot::parse(LOCALE_DISPLAY_DATA)?;
-    let mut profiles = Vec::with_capacity(LOCALE_DISPLAY_FALLBACK_ORDER.len());
-    for profile_kind in LOCALE_DISPLAY_FALLBACK_ORDER {
-        let profile = match *profile_kind {
-            "language-script-region" => parsed
-                .script
-                .as_ref()
-                .zip(parsed.region.as_ref())
-                .map(|(script, region)| format!("{}-{script}-{region}", parsed.language)),
-            "language-script" => parsed
-                .script
-                .as_ref()
-                .map(|script| format!("{}-{script}", parsed.language)),
-            "language-region" => parsed
-                .region
-                .as_ref()
-                .map(|region| format!("{}-{region}", parsed.language)),
-            "language" => Some(parsed.language.clone()),
-            "en" => Some(String::from("en")),
-            "root" => Some(String::new()),
-            _ => None,
-        };
-        if let Some(profile) = profile.filter(|profile| !profiles.contains(profile)) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CandidateLocale {
+    language: String,
+    script: String,
+    region: String,
+    variants: Vec<String>,
+}
+
+fn candidate_tag(candidate: &CandidateLocale) -> String {
+    if candidate.language.is_empty()
+        && candidate.script.is_empty()
+        && candidate.region.is_empty()
+        && candidate.variants.is_empty()
+    {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    if !candidate.language.is_empty() {
+        parts.push(candidate.language.to_ascii_lowercase());
+    }
+    if !candidate.script.is_empty() {
+        parts.push(titlecase_ascii(&candidate.script));
+    }
+    if !candidate.region.is_empty() {
+        parts.push(candidate.region.to_ascii_uppercase());
+    }
+    let valid_count = candidate
+        .variants
+        .iter()
+        .take_while(|variant| is_variant_subtag(variant))
+        .count();
+    parts.extend(candidate.variants[..valid_count].iter().cloned());
+    if valid_count < candidate.variants.len() {
+        parts.push("x".to_string());
+        parts.push("lvariant".to_string());
+        parts.extend(candidate.variants[valid_count..].iter().cloned());
+    }
+    parts.join("-")
+}
+
+fn default_candidate_locales(
+    language: &str,
+    script: &str,
+    region: &str,
+    variants: &[String],
+) -> Vec<CandidateLocale> {
+    let prefixes = (1..=variants.len())
+        .rev()
+        .map(|count| variants[..count].to_vec())
+        .collect::<Vec<_>>();
+    let mut result = Vec::new();
+    for prefix in &prefixes {
+        result.push(CandidateLocale {
+            language: language.to_string(),
+            script: script.to_string(),
+            region: region.to_string(),
+            variants: prefix.clone(),
+        });
+    }
+    if !region.is_empty() {
+        result.push(CandidateLocale {
+            language: language.to_string(),
+            script: script.to_string(),
+            region: region.to_string(),
+            variants: Vec::new(),
+        });
+    }
+    let mut restart_region = region.to_string();
+    if !script.is_empty() {
+        result.push(CandidateLocale {
+            language: language.to_string(),
+            script: script.to_string(),
+            region: String::new(),
+            variants: Vec::new(),
+        });
+        if language == "zh" && restart_region.is_empty() {
+            restart_region = match script {
+                "Hans" => "CN".to_string(),
+                "Hant" => "TW".to_string(),
+                _ => String::new(),
+            };
+        }
+        for prefix in &prefixes {
+            result.push(CandidateLocale {
+                language: language.to_string(),
+                script: String::new(),
+                region: restart_region.clone(),
+                variants: prefix.clone(),
+            });
+        }
+        if !restart_region.is_empty() {
+            result.push(CandidateLocale {
+                language: language.to_string(),
+                script: String::new(),
+                region: restart_region.clone(),
+                variants: Vec::new(),
+            });
+        }
+    }
+    if !language.is_empty() {
+        result.push(CandidateLocale {
+            language: language.to_string(),
+            script: String::new(),
+            region: String::new(),
+            variants: Vec::new(),
+        });
+    }
+    result.push(CandidateLocale {
+        language: String::new(),
+        script: String::new(),
+        region: String::new(),
+        variants: Vec::new(),
+    });
+    result
+}
+
+fn candidate_locales(parsed: &ParsedLanguageTag) -> Vec<CandidateLocale> {
+    // ResourceBundle.Control receives the historical BaseLocale-like fields,
+    // not Locale.toLanguageTag()'s compatibility serialization. In particular,
+    // no/NO/NY remains the request identity while the language-tag output is
+    // nn-NO.
+    let language = parsed.display_language.as_str();
+    let script = parsed.script.as_deref().unwrap_or("");
+    let region = parsed.region.as_deref().unwrap_or("");
+    let mut variants = parsed.display_variants.clone();
+    let mut is_bokmal = false;
+    let mut is_nynorsk = false;
+    if language == "no" {
+        if region == "NO" && variants == ["NY"] {
+            variants.clear();
+            is_nynorsk = true;
+        } else {
+            is_bokmal = true;
+        }
+    }
+
+    let candidates = if language == "nb" || is_bokmal {
+        let base = default_candidate_locales("nb", script, region, &variants);
+        let mut result = Vec::new();
+        for candidate in base {
+            if candidate.language.is_empty() {
+                result.push(candidate);
+                break;
+            }
+            let mut other = candidate.clone();
+            other.language = "no".to_string();
+            if is_bokmal {
+                result.push(other);
+                result.push(candidate);
+            } else {
+                result.push(candidate);
+                result.push(other);
+            }
+        }
+        result
+    } else if language == "nn" || is_nynorsk {
+        let mut result = default_candidate_locales("nn", script, region, &variants);
+        let root_index = result.len().saturating_sub(1);
+        result.splice(
+            root_index..root_index,
+            [
+                CandidateLocale {
+                    language: "no".to_string(),
+                    script: String::new(),
+                    region: "NO".to_string(),
+                    variants: vec!["NY".to_string()],
+                },
+                CandidateLocale {
+                    language: "no".to_string(),
+                    script: String::new(),
+                    region: "NO".to_string(),
+                    variants: Vec::new(),
+                },
+                CandidateLocale {
+                    language: "no".to_string(),
+                    script: String::new(),
+                    region: String::new(),
+                    variants: Vec::new(),
+                },
+            ],
+        );
+        result
+    } else {
+        let mut inferred_script = script.to_string();
+        if language == "zh" && inferred_script.is_empty() && !region.is_empty() {
+            inferred_script = match region {
+                "TW" | "HK" | "MO" => "Hant".to_string(),
+                "CN" | "SG" => "Hans".to_string(),
+                _ => String::new(),
+            };
+        }
+        default_candidate_locales(language, &inferred_script, region, &variants)
+    };
+
+    candidates
+}
+
+#[cfg(test)]
+fn display_candidate_profiles(parsed: &ParsedLanguageTag) -> Vec<String> {
+    let mut profiles = Vec::new();
+    for candidate in candidate_locales(parsed) {
+        let profile = candidate_tag(&candidate);
+        if !profiles.contains(&profile) {
             profiles.push(profile);
         }
     }
-    profiles.iter().find_map(|profile| {
+    profiles
+}
+
+fn cldr_parent_locale(candidate: &CandidateLocale) -> Option<CandidateLocale> {
+    let tag = candidate_tag(candidate);
+    if let Some((_, parent)) = CLDR_PARENT_LOCALES.iter().find(|(child, _)| *child == tag) {
+        return parse_candidate(parent);
+    }
+    if candidate.region.is_empty() && !candidate.script.is_empty() {
+        let likely_script = CLDR_LIKELY_SCRIPTS
+            .iter()
+            .find(|(language, _)| *language == candidate.language)
+            .map(|(_, script)| *script);
+        if likely_script.is_some_and(|script| script != candidate.script) {
+            return Some(CandidateLocale {
+                language: String::new(),
+                script: String::new(),
+                region: String::new(),
+                variants: Vec::new(),
+            });
+        }
+    }
+    None
+}
+
+fn parse_candidate(tag: &str) -> Option<CandidateLocale> {
+    if tag.is_empty() {
+        return Some(CandidateLocale {
+            language: String::new(),
+            script: String::new(),
+            region: String::new(),
+            variants: Vec::new(),
+        });
+    }
+    let mut parts = tag.split('-');
+    let language = parts.next()?.to_string();
+    let script = parts
+        .next()
+        .filter(|part| part.len() == 4)
+        .map(str::to_string)
+        .unwrap_or_default();
+    let region = if script.is_empty() {
+        parts
+            .next()
+            .filter(|part| (part.len() == 2 && is_alpha_subtag(part)) || part.len() == 3)
+            .map(str::to_string)
+            .unwrap_or_default()
+    } else {
+        parts
+            .next()
+            .filter(|part| (part.len() == 2 && is_alpha_subtag(part)) || part.len() == 3)
+            .map(str::to_string)
+            .unwrap_or_default()
+    };
+    let variants = parts.map(str::to_string).collect();
+    Some(CandidateLocale {
+        language,
+        script,
+        region,
+        variants,
+    })
+}
+
+fn cldr_candidate_locales(parsed: &ParsedLanguageTag) -> Vec<CandidateLocale> {
+    let initial = candidate_tag(&CandidateLocale {
+        language: parsed.display_language.clone(),
+        script: parsed.script.clone().unwrap_or_default(),
+        region: parsed.region.clone().unwrap_or_default(),
+        variants: parsed.display_variants.clone(),
+    });
+    let aliased = CLDR_LANGUAGE_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == initial)
+        .and_then(|(_, target)| parse_candidate(target));
+    let mut base = if let Some(aliased) = aliased {
+        default_candidate_locales(
+            &aliased.language,
+            &aliased.script,
+            &aliased.region,
+            &aliased.variants,
+        )
+    } else {
+        candidate_locales(parsed)
+    };
+
+    // CLDR's parent-locale graph is applied after ResourceBundle.Control's
+    // ordinary candidate construction. This is provider routing, not the
+    // public BaseLocale candidate identity exposed by the oracle test.
+    for index in 0..base.len().saturating_sub(1) {
+        let Some(parent) = cldr_parent_locale(&base[index]) else {
+            continue;
+        };
+        if parent == base[index + 1] {
+            continue;
+        }
+        let mut replacement = base[..=index].to_vec();
+        if parent.language.is_empty()
+            && parent.script.is_empty()
+            && parent.region.is_empty()
+            && parent.variants.is_empty()
+        {
+            replacement.push(parent);
+        } else if parent.language == "no" {
+            replacement.push(parent);
+            replacement.push(CandidateLocale {
+                language: String::new(),
+                script: String::new(),
+                region: String::new(),
+                variants: Vec::new(),
+            });
+        } else {
+            replacement.extend(cldr_candidate_locales_for_components(
+                &parent.language,
+                &parent.script,
+                &parent.region,
+                &parent.variants,
+            ));
+        }
+        base = replacement;
+        break;
+    }
+    base
+}
+
+fn cldr_candidate_locales_for_components(
+    language: &str,
+    script: &str,
+    region: &str,
+    variants: &[String],
+) -> Vec<CandidateLocale> {
+    let parsed = ParsedLanguageTag {
+        canonical: candidate_tag(&CandidateLocale {
+            language: language.to_string(),
+            script: script.to_string(),
+            region: region.to_string(),
+            variants: variants.to_vec(),
+        }),
+        language: language.to_string(),
+        display_language: language.to_string(),
+        display_base: String::new(),
+        canonical_base: String::new(),
+        script: (!script.is_empty()).then(|| script.to_string()),
+        region: (!region.is_empty()).then(|| region.to_string()),
+        variants: variants.to_vec(),
+        display_variants: variants.to_vec(),
+        unicode_attributes: Vec::new(),
+        unicode_keywords: Vec::new(),
+    };
+    cldr_candidate_locales(&parsed)
+}
+
+fn display_data_value(parsed: &ParsedLanguageTag, key: &str) -> Option<&'static str> {
+    let snapshot = DisplaySnapshot::parse(LOCALE_DISPLAY_DATA)?;
+    cldr_candidate_locales(parsed).iter().find_map(|candidate| {
+        let profile = candidate_tag(candidate);
         snapshot
-            .profile_id(profile)
+            .profile_id(&profile)
             .and_then(|profile_id| snapshot.resolve_profile(profile_id, key))
     })
 }
@@ -1142,7 +1489,10 @@ fn format_display_choice(pattern: &str, main: &str, qualifiers: &str) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::{find_tag_record, parse_language_tag, resolve, string_equals_ignore_case};
+    use super::{
+        display_candidate_profiles, find_tag_record, parse_language_tag, resolve,
+        string_equals_ignore_case,
+    };
     use super::{
         read_u32, DisplaySnapshot, LOCALE_AVAILABLE_RECORD_COUNT, LOCALE_DATASET_SOURCE_SHA256,
         LOCALE_DATASET_VERSION, LOCALE_DISPLAY_COMPACT_FORMAT_VERSION,
@@ -1160,31 +1510,31 @@ mod tests {
     fn dataset_identity_and_indexes_are_guarded() {
         assert_eq!(LOCALE_AVAILABLE_RECORD_COUNT, LOCALE_NAME_RECORDS.len());
         assert_eq!(LOCALE_TAG_RECORD_COUNT, LOCALE_TAG_RECORDS.len());
-        assert_eq!(LOCALE_TAG_RECORDS.len(), 1015);
-        assert_eq!(LOCALE_NAME_RECORDS.len(), 1016);
-        assert_eq!(LOCALE_NAME_RECORDS[0].tag, "he");
+        assert_eq!(LOCALE_TAG_RECORDS.len(), 1156);
+        assert_eq!(LOCALE_NAME_RECORDS.len(), 1157);
+        assert_eq!(LOCALE_NAME_RECORDS[0].tag, "af");
         assert_eq!(LOCALE_TAG_RECORDS[0].tag, "af");
         assert_eq!(LOCALE_TAG_RECORDS.last().unwrap().tag, "zu-ZA");
-        assert_eq!(LOCALE_DATASET_VERSION, "17.0.20.1+1");
+        assert_eq!(LOCALE_DATASET_VERSION, "25.0.4.1+1");
         assert_eq!(
             LOCALE_DATASET_SOURCE_SHA256,
-            "a21268dd1fb3cc6fd5cea32b52fa63099eb390a7e82c27636195db1086d645fd"
+            "286e9cddee48b39faa7bd26faafd86c17db1a899b8a6b86ca609a2322ab49ac6"
         );
-        assert_eq!(LOCALE_DISPLAY_RECORD_COUNT, 308533);
+        assert_eq!(LOCALE_DISPLAY_RECORD_COUNT, 453459);
         assert_eq!(
             LOCALE_DISPLAY_RECORD_COUNT,
             LOCALE_DISPLAY_ORACLE_RECORD_COUNT
         );
         assert_eq!(
             LOCALE_DISPLAY_SOURCE_SHA256,
-            "03d633326dc30ac8423cfb14b4bc0d3fa4f35e7a86575e8eefbdf540c620d489"
+            "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
         );
-        assert_eq!(LOCALE_DISPLAY_COMPACT_RECORD_COUNT, 152731);
-        assert_eq!(LOCALE_DISPLAY_PROFILE_COUNT, 287);
-        assert_eq!(LOCALE_DISPLAY_KEY_COUNT, 1569);
-        assert_eq!(LOCALE_DISPLAY_VALUE_COUNT, 88024);
-        assert_eq!(LOCALE_DISPLAY_RAW_STRING_POOL_BYTES, 2045327);
-        assert_eq!(LOCALE_DISPLAY_NUMERIC_INDEX_BYTES, 1226720);
+        assert_eq!(LOCALE_DISPLAY_COMPACT_RECORD_COUNT, 267017);
+        assert_eq!(LOCALE_DISPLAY_PROFILE_COUNT, 320);
+        assert_eq!(LOCALE_DISPLAY_KEY_COUNT, 2525);
+        assert_eq!(LOCALE_DISPLAY_VALUE_COUNT, 178930);
+        assert_eq!(LOCALE_DISPLAY_RAW_STRING_POOL_BYTES, 3682380);
+        assert_eq!(LOCALE_DISPLAY_NUMERIC_INDEX_BYTES, 2140296);
         assert_eq!(
             LOCALE_DISPLAY_COMPACT_SNAPSHOT_BYTES,
             LOCALE_DISPLAY_DATA.len()
@@ -1329,11 +1679,18 @@ mod tests {
     }
 
     #[test]
-    fn every_reference_tag_resolves_to_the_canonical_snapshot() {
+    fn every_reference_tag_has_canonical_snapshot_data() {
         for record in LOCALE_TAG_RECORDS {
-            let resolved = resolve(record.tag).expect("reference tag should resolve");
-            assert_eq!(resolved.tag, record.tag);
-            assert_eq!(resolved.localized_name, record.localized_name);
+            let parsed = parse_language_tag(record.tag).expect("reference tag should parse");
+            assert_eq!(parsed.canonical, record.tag);
+            let name_collision = LOCALE_NAME_RECORDS
+                .iter()
+                .any(|name| string_equals_ignore_case(name.display_name, record.tag));
+            if !name_collision {
+                let resolved = resolve(record.tag).expect("reference tag should resolve");
+                assert_eq!(resolved.tag, record.tag);
+                assert_eq!(resolved.localized_name, record.localized_name);
+            }
         }
     }
 
@@ -1349,7 +1706,77 @@ mod tests {
     }
 
     #[test]
-    fn name_matching_reuses_unicode_13_characterwise_case() {
+    fn jdk25_locale_oracle_matches_candidate_graph_and_public_resolution() {
+        let Ok(path) = std::env::var("SCRIBIUM_JDK25_LOCALE_ORACLE") else {
+            return;
+        };
+        let oracle = std::fs::read_to_string(path).expect("read transient JDK25 locale oracle");
+        let mut checked = 0usize;
+        let mut candidate_checked = 0usize;
+        for line in oracle.lines() {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 6, "malformed locale oracle row: {line}");
+            assert_eq!(fields[0], "locale");
+            let request = fields[1];
+            let path_kind = fields[2];
+            let expected_tag = fields[3];
+            let expected_name = fields[4];
+            if path_kind == "unresolved" {
+                assert!(fields[3].is_empty() && fields[4].is_empty() && fields[5].is_empty());
+                assert!(
+                    resolve(request).is_none(),
+                    "oracle rejected request: {request}"
+                );
+                checked += 1;
+                continue;
+            }
+            if path_kind == "tag" {
+                let expected_candidates = fields[5]
+                    .split('|')
+                    .map(|value| {
+                        if value == "<root>" {
+                            String::new()
+                        } else {
+                            value.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let parsed = parse_language_tag(request)
+                    .unwrap_or_else(|| panic!("oracle tag request should be accepted: {request}"));
+                assert_eq!(
+                    display_candidate_profiles(&parsed),
+                    expected_candidates,
+                    "candidate graph mismatch for {request}"
+                );
+                candidate_checked += 1;
+            } else {
+                assert_eq!(path_kind, "name", "unknown oracle path: {line}");
+                assert!(fields[5].is_empty(), "name path must not expose candidates");
+            }
+            let actual = resolve(request)
+                .unwrap_or_else(|| panic!("oracle request should resolve: {request}"));
+            assert_eq!(
+                actual.tag, expected_tag,
+                "canonical tag mismatch for {request}"
+            );
+            assert_eq!(
+                actual.localized_name, expected_name,
+                "localized name mismatch for {request}"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 7_000,
+            "expected broad JDK25 locale oracle coverage"
+        );
+        assert!(
+            candidate_checked >= 4_500,
+            "expected broad tag-path candidate coverage"
+        );
+    }
+
+    #[test]
+    fn name_matching_reuses_pinned_jdk25_characterwise_case() {
         assert!(string_equals_ignore_case("English", "eNgLiSh"));
         assert!(string_equals_ignore_case("İ", "i"));
         assert!(!string_equals_ignore_case("É", "e\u{301}"));
@@ -1432,26 +1859,26 @@ mod tests {
     #[test]
     fn legacy_no_ny_uses_the_derived_base_locale_for_localized_names() {
         for (input, expected_tag, expected_name) in [
-            ("no-NO-x-lvariant-NY", "nn-NO", "norsk (Noreg, nynorsk)"),
+            ("no-NO-x-lvariant-NY", "nn-NO", "norsk (Noreg, Nynorsk)"),
             (
                 "no-NO-x-foo-lvariant-NY",
                 "nn-NO-x-foo",
-                "norsk (Noreg, nynorsk)",
+                "norsk (Noreg, Nynorsk)",
             ),
             (
                 "no-NO-u-ca-gregory-x-lvariant-NY",
                 "nn-NO-u-ca-gregory",
-                "norsk (Noreg, nynorsk, kalender: gregory)",
+                "norsk (Noreg, Nynorsk, kalender: gregory)",
             ),
             (
                 "no-NO-u-ca-gregory-x-foo-lvariant-NY",
                 "nn-NO-u-ca-gregory-x-foo",
-                "norsk (Noreg, nynorsk, kalender: gregory)",
+                "norsk (Noreg, Nynorsk, kalender: gregory)",
             ),
             (
                 "no-Latn-NO-x-lvariant-NY",
                 "nn-Latn-NO",
-                "norsk (latinsk, Noreg, nynorsk)",
+                "norsk (latinsk, Noreg, Nynorsk)",
             ),
             (
                 "no-NO-x-lvariant-ny",
@@ -1466,6 +1893,29 @@ mod tests {
         let ordinary = resolve("no-NO-NY").expect("valid-prefix locale should resolve");
         assert_eq!(ordinary.tag, "no-NO");
         assert_eq!(ordinary.localized_name, "norsk (Norge)");
+    }
+
+    #[test]
+    fn jdk25_chinese_provider_routing_and_display_names_are_regressed() {
+        for (input, expected) in [
+            ("zh-TW-u-ca-buddhist", "中文 (台灣，佛曆)"),
+            ("zh-HK-u-ca-buddhist", "中文 (中國香港特別行政區，佛曆)"),
+            ("zh-MO-u-ca-buddhist", "中文 (中國澳門特別行政區，佛曆)"),
+            ("zh-CN-u-ca-buddhist", "中文 (中国，佛历)"),
+            ("zh-SG-u-ca-buddhist", "中文 (新加坡，佛历)"),
+            ("zh-Hant-TW-u-ca-buddhist", "中文 (繁體，台灣，佛曆)"),
+            ("zh-Hans-CN-u-ca-buddhist", "中文 (简体，中国，佛历)"),
+            ("zh-Hant", "中文 (繁體)"),
+            ("zh-Hans", "中文 (简体)"),
+        ] {
+            assert_eq!(
+                resolve(input)
+                    .expect("Chinese locale should resolve")
+                    .localized_name,
+                expected,
+                "input: {input}"
+            );
+        }
     }
 
     #[test]

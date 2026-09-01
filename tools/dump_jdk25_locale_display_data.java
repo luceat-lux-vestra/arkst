@@ -15,9 +15,13 @@ final class DumpJdk25LocaleDisplayData {
     private DumpJdk25LocaleDisplayData() {}
 
     public static void main(String[] args) {
-        // JDK 25 uses CLDR only. The legacy JRE/COMPAT locale-data
-        // provider is not part of the pinned reference runtime.
+        // JDK 25 uses CLDR as the locale-data provider and retains the small
+        // FALLBACK adapter for root/default provider values. The legacy
+        // JRE/COMPAT locale-data provider is not part of the pinned reference
+        // runtime. LocaleNameProvider lookup tries CLDR and then FALLBACK;
+        // both layers are therefore part of the effective oracle.
         LocaleData cldr = new LocaleData(LocaleProviderAdapter.Type.CLDR);
+        LocaleData fallback = new LocaleData(LocaleProviderAdapter.Type.FALLBACK);
         TreeMap<String, String> rows = new TreeMap<>();
         TreeMap<String, Locale> profiles = new TreeMap<>();
         TreeMap<String, String> timezoneIds = new TreeMap<>();
@@ -36,6 +40,9 @@ final class DumpJdk25LocaleDisplayData {
         for (Locale locale : Locale.getAvailableLocales()) {
             addBundle(locale, cldr, rows, profiles, false, null);
         }
+        // FALLBACK supports the root locale only. Add only keys absent from
+        // CLDR so the effective provider precedence remains CLDR first.
+        addBundle(Locale.ROOT, fallback, rows, profiles, true, null);
         addCurrencyData(profiles, rows);
         addTimezoneData(profiles, timezoneIds, rows);
 
@@ -54,7 +61,13 @@ final class DumpJdk25LocaleDisplayData {
             TreeMap<String, String> preferredRows
     ) {
         OpenListResourceBundle bundle = data.getLocaleNames(requestedLocale);
-        String profile = bundle.getLocale().toLanguageTag();
+        // ResourceBundle may label the FALLBACK root bundle as "und", but
+        // provider lookup addresses it as Locale.ROOT. Keep one canonical
+        // root profile so CLDR-first/FALLBACK-second composition matches the
+        // public LocaleNameProvider path.
+        String profile = requestedLocale.equals(Locale.ROOT)
+                ? ""
+                : bundle.getLocale().toLanguageTag();
         if (preserveExisting) {
             profiles.putIfAbsent(profile, bundle.getLocale());
         } else {
@@ -185,6 +198,7 @@ final class DumpJdk25LocaleDisplayData {
             || key.startsWith("key.")
             || key.startsWith("type.")
             || key.startsWith("%%")
+            || key.matches("[a-z]{2,3}")
             || key.matches("[A-Za-z]{4}")
             || key.matches("[A-Z]{2}|[0-9]{3}");
     }

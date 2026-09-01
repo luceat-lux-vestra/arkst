@@ -64,6 +64,16 @@ jobs:
           REFERENCE_JAVA: ${{ steps.runtime.outputs.java }}
           ARCHIVE_PATH: ${{ steps.jdk.outputs.archive_path }}
         run: |
+          python3 tools/generate_jdk25_locale_data.py \
+            --java "$REFERENCE_JAVA" \
+            --archive "$ARCHIVE_PATH" \
+            --check
+          "$REFERENCE_JAVA" -Djava.locale.providers=CLDR --source 25 \
+            tools/dump_jdk25_locale_oracle.java > "$RUNNER_TEMP/locale-oracle.tsv"
+          SCRIBIUM_JDK25_LOCALE_ORACLE="$RUNNER_TEMP/locale-oracle.tsv" \
+            cargo test -p scribium-engine --locked \
+            'locale::tests::jdk25_locale_oracle_matches_candidate_graph_and_public_resolution' \
+            -- --exact
           python3 tools/generate_jdk25_unicode_case.py \
             --java "$REFERENCE_JAVA" \
             --archive "$ARCHIVE_PATH" \
