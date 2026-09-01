@@ -43,7 +43,7 @@ jobs:
           python3 tools/phase_b_tests.py
           python3 tools/generate_jdk25_locale_data.py --java "$REFERENCE_JAVA" --archive "$ARCHIVE_PATH"
           sha256sum crates/scribium-engine/src/locale_data.rs crates/scribium-engine/data/jdk25_locale_display.bin
-      - name: Run external JDK25 locale differential
+      - name: Run external JDK25 BaseLocale and public-resolution differential
         env:
           REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
         run: |
