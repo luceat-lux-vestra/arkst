@@ -54,7 +54,7 @@ final class DumpJdk25LocaleOracle {
             List<String> candidates = new ArrayList<>();
             if (!nameMatch) {
                 for (Locale candidate : control.getCandidateLocales("scribium", locale)) {
-                    candidates.add(candidate == Locale.ROOT ? "<root>" : candidate.toLanguageTag());
+                    candidates.add(candidate == Locale.ROOT ? "<root>" : baseIdentity(candidate));
                 }
             }
             reject(request);
@@ -76,6 +76,45 @@ final class DumpJdk25LocaleOracle {
             }
         }
         return null;
+    }
+
+    /** Stable text form of the ResourceBundle candidate's BaseLocale fields. */
+    private static String baseIdentity(Locale locale) {
+        List<String> parts = new ArrayList<>();
+        if (!locale.getLanguage().isBlank()) {
+            parts.add(locale.getLanguage());
+        }
+        if (!locale.getScript().isBlank()) {
+            parts.add(locale.getScript());
+        }
+        if (!locale.getCountry().isBlank()) {
+            parts.add(locale.getCountry());
+        }
+        if (!locale.getVariant().isBlank()) {
+            String[] variants = locale.getVariant().split("_", -1);
+            int valid = 0;
+            while (valid < variants.length && isVariant(variants[valid])) {
+                parts.add(variants[valid]);
+                valid++;
+            }
+            if (valid < variants.length) {
+                parts.add("x");
+                parts.add("lvariant");
+                for (int index = valid; index < variants.length; index++) {
+                    parts.add(variants[index]);
+                }
+            }
+        }
+        return String.join("-", parts);
+    }
+
+    private static boolean isVariant(String value) {
+        if (value.length() >= 5 && value.length() <= 8) {
+            return value.chars().allMatch(Character::isLetterOrDigit);
+        }
+        return value.length() == 4
+                && Character.isDigit(value.charAt(0))
+                && value.chars().allMatch(Character::isLetterOrDigit);
     }
 
     private static void reject(String value) {
