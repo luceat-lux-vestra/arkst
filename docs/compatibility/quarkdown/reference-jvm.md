@@ -95,23 +95,36 @@ support.
 PR #223's locale closure uses the same canonical archive and captures
 `Locale.getAvailableLocales()`, `Locale.forLanguageTag()`, the Quarkdown
 name-first lookup path, and the JDK25 `Locale.getDisplayName` provider result.
-The checked-in locale snapshot contains 1,157 available-locale records and
-1,156 canonical-tag records. Its logical display oracle contains 453,459
+The checked-in locale snapshot contains 1,158 available-locale records and
+1,157 canonical-tag records, including the blank-language root locale. Its
+logical display oracle contains 453,459
 records; semantic fallback-delta compaction retains 267,017 records in the
 6,549,860-byte little-endian binary snapshot, with 320 profiles, 2,525 keys,
 and 178,930 interned values. The logical locale source SHA-256 is
-`87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e`, the
+`85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16`, the
 logical display source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and the
 compact artifact SHA-256 is
 `d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
+The transient public Java differential emits 7,302 rows (4,984 tag-path and
+2,318 name-path rows), with SHA-256
+`7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4`; its
+helper source SHA-256 is
+`57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1`.
 The name-first table preserves a pinned raw-array capture of
 `Locale.getAvailableLocales()` in
 `tools/jdk25_available_locale_order.tsv` (SHA-256
-`db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28`); the
+`c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e`); the
 JDK25 character-wise English-name collision audit found zero collision
-classes. The generated Rust metadata is 502,124 bytes and remains below the
-1 MiB source budget.
+classes. The root/private-use records preserve empty `code`/`shortTag`-equivalent
+fields while retaining JDK `toLanguageTag()` serialization (`und`, or
+`x-private` for private-use-only tags). The direct oracle includes `""`, `und`,
+`x-private`, `en_US`, whitespace, and `en--US`; their JDK results are retained
+without an oracle-side unresolved rewrite or blank-language filtering. The
+generated Rust metadata is 502,655 bytes with
+SHA-256
+`5ebc94722c042340a84b03250ade2c9c716cfd228ad060c2186db2b41aa2ec2f` and
+remains below the 1 MiB source budget.
 The generator exhaustively reconstructs every logical display row, validates
 the binary index, and checks both generated artifacts byte-for-byte. JDK25's
 CLDR parent-locale, likely-script, and language-alias routing metadata is

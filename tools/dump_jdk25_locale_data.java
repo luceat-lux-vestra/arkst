@@ -19,10 +19,6 @@ final class DumpJdk25LocaleData {
 
         TreeSet<String> canonicalTags = new TreeSet<>();
         for (Locale locale : availableLocales) {
-            if (locale.getLanguage().isBlank()) {
-                continue;
-            }
-
             String tag = locale.toLanguageTag();
             String displayName = locale.getDisplayName(Locale.ENGLISH);
             String localizedName = locale.getDisplayName(locale);
@@ -54,9 +50,6 @@ final class DumpJdk25LocaleData {
     private static List<CollisionGroup> findNameCollisions(Locale[] availableLocales) {
         List<CollisionGroup> groups = new ArrayList<>();
         for (Locale locale : availableLocales) {
-            if (locale.getLanguage().isBlank()) {
-                continue;
-            }
             String displayName = locale.getDisplayName(Locale.ENGLISH);
             CollisionGroup group = null;
             for (CollisionGroup candidate : groups) {

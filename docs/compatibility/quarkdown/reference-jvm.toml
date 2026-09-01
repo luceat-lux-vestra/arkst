@@ -44,15 +44,17 @@ generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb52
 # Phase B JDK25 locale snapshot fingerprints. These fields describe the
 # generated locale artifacts, while the fields above remain the Phase A
 # Unicode case-data record.
-locale_dump_helper_source_sha256 = "1fe197bc9b6651853726c90543e638241d3957a4444251bb0a76d96e5d82d0a2"
+locale_dump_helper_source_sha256 = "bf6694982db1a2c619e9c759cb4177d6548cbc38f2384fe333224fe56fa8a274"
 locale_display_dump_helper_source_sha256 = "d90169543b8fd21df5a8baaeceba42e1d0f8bfd1c9b46b2d9b46fcb322bfe453"
-locale_public_oracle_helper_source_sha256 = "c6994f655ecf96557f0a6c5f3e99df788003af2ae66211bfe54f3759402b4548"
-locale_available_order_manifest_sha256 = "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28"
-locale_logical_source_sha256 = "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e"
+locale_public_oracle_helper_source_sha256 = "57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1"
+locale_public_oracle_record_count = 7302
+locale_public_oracle_output_sha256 = "7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4"
+locale_available_order_manifest_sha256 = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
+locale_logical_source_sha256 = "85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16"
 locale_logical_display_source_sha256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
 locale_compact_format_version = 1
-locale_available_record_count = 1157
-locale_canonical_tag_record_count = 1156
+locale_available_record_count = 1158
+locale_canonical_tag_record_count = 1157
 locale_name_collision_count = 0
 locale_logical_display_record_count = 453459
 locale_compact_record_count = 267017
@@ -61,8 +63,8 @@ locale_compact_key_count = 2525
 locale_compact_value_count = 178930
 locale_compact_snapshot_bytes = 6549860
 locale_compact_snapshot_sha256 = "d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1"
-locale_generated_rust_bytes = 502124
-locale_generated_rust_sha256 = "b6110002707f74fa54c80f642fb5f5951e5b43c06461aa53e04def5911e807d5"
+locale_generated_rust_bytes = 502655
+locale_generated_rust_sha256 = "5ebc94722c042340a84b03250ade2c9c716cfd228ad060c2186db2b41aa2ec2f"
 locale_timezone_source_sha256 = "dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2"
 locale_timezone_source_rows = 681
 locale_timezone_unique_source_rows = 622

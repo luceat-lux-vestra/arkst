@@ -15,13 +15,11 @@ final class DumpJdk25LocaleOracle {
         List<Locale> availableLocales = List.of(Locale.getAvailableLocales());
         TreeSet<String> requests = new TreeSet<>();
         for (Locale locale : availableLocales) {
-            if (!locale.getLanguage().isBlank()) {
-                requests.add(locale.toLanguageTag());
-                requests.add(locale.getDisplayName(Locale.ENGLISH));
-                String mixedCaseName = mixedCase(locale.getDisplayName(Locale.ENGLISH));
-                if (!mixedCaseName.equals(locale.getDisplayName(Locale.ENGLISH))) {
-                    requests.add(mixedCaseName);
-                }
+            requests.add(locale.toLanguageTag());
+            requests.add(locale.getDisplayName(Locale.ENGLISH));
+            String mixedCaseName = mixedCase(locale.getDisplayName(Locale.ENGLISH));
+            if (!mixedCaseName.equals(locale.getDisplayName(Locale.ENGLISH))) {
+                requests.add(mixedCaseName);
             }
         }
         requests.addAll(List.of(
@@ -55,10 +53,14 @@ final class DumpJdk25LocaleOracle {
                 "no-NO-NY",
                 "ja-JP-x-lvariant-JP",
                 "th-TH-x-lvariant-TH",
+                "",
+                "en_US",
+                "   ",
                 "en--US",
                 "en-u",
                 "en-u-ca",
                 "x-private",
+                "x-y-z-blork",
                 "und"
         ));
         addDeterministicStructuredRequests(requests);
@@ -70,11 +72,6 @@ final class DumpJdk25LocaleOracle {
             if (locale == null) {
                 locale = Locale.forLanguageTag(request);
             }
-            if (locale.getLanguage().isBlank()) {
-                reject(request);
-                System.out.println("locale\t" + request + "\tunresolved\t\t\t");
-                continue;
-            }
             List<String> candidates = new ArrayList<>();
             if (!nameMatch) {
                 for (Locale candidate : control.getCandidateLocales("scribium", locale)) {
@@ -83,13 +80,16 @@ final class DumpJdk25LocaleOracle {
             }
             reject(request);
             reject(locale.toLanguageTag());
+            reject(locale.getLanguage());
             String localizedName = locale.getDisplayName(locale);
             reject(localizedName);
             for (String candidate : candidates) {
                 reject(candidate);
             }
             System.out.println("locale\t" + request + "\t" + (nameMatch ? "name" : "tag") + "\t"
-                    + locale.toLanguageTag() + "\t" + localizedName + "\t" + String.join("|", candidates));
+                    + locale.toLanguageTag() + "\t" + locale.getLanguage() + "\t"
+                    + locale.getLanguage() + "\t" + localizedName + "\t"
+                    + String.join("|", candidates));
         }
     }
 

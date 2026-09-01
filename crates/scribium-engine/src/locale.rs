@@ -483,6 +483,12 @@ fn find_tag_record(tag: &str) -> Option<&'static LocaleRecord> {
 struct ParsedLanguageTag {
     canonical: String,
     language: String,
+    /// The JVMLocale `code` value. This is the BaseLocale language before
+    /// Java's legacy serialization adjustments (and is empty for root and
+    /// private-use-only locales).
+    code: String,
+    /// JVMLocale `shortTag` is the same language component for this surface.
+    short_tag: String,
     display_language: String,
     display_base: String,
     canonical_base: String,
@@ -495,23 +501,25 @@ struct ParsedLanguageTag {
 }
 
 fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
-    if input.is_empty() {
-        return None;
-    }
-
     let parts: Vec<&str> = input.split('-').collect();
 
     if let Some(alias) = grandfathered_alias(&parts) {
         return parse_language_tag(alias);
     }
 
-    let mut index = 0;
     let raw_language = *parts.first()?;
-    if !is_alpha_subtag(raw_language) || !(2..=8).contains(&raw_language.len()) {
-        return None;
-    }
-    let mut language = canonical_language(raw_language);
-    index += 1;
+    let private_use_only = raw_language.eq_ignore_ascii_case("x");
+    let (mut index, mut language) = if private_use_only || raw_language.eq_ignore_ascii_case("und")
+    {
+        (1, String::new())
+    } else if is_alpha_subtag(raw_language) && (2..=8).contains(&raw_language.len()) {
+        (1, canonical_language(raw_language))
+    } else {
+        // Locale.forLanguageTag returns Locale.ROOT when the first subtag is
+        // absent or malformed. This includes empty input, whitespace, and
+        // legacy forms such as "en_US"; it is not an unresolved lookup.
+        return Some(root_language_tag());
+    };
 
     let mut extlangs = Vec::new();
     while extlangs.len() < 3 {
@@ -553,54 +561,61 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
     }
 
     let mut variants = Vec::new();
-    while let Some(part) = parts.get(index).copied() {
-        if is_variant_subtag(part) {
-            variants.push(part.to_string());
-            index += 1;
-            continue;
+    if !private_use_only {
+        while let Some(part) = parts.get(index).copied() {
+            if is_variant_subtag(part) {
+                variants.push(part.to_string());
+                index += 1;
+                continue;
+            }
+            break;
         }
-        break;
     }
 
     let mut extensions: Vec<(char, Vec<String>)> = Vec::new();
     let mut parse_error = false;
-    while let Some(singleton) = parts.get(index).copied() {
-        if singleton.eq_ignore_ascii_case("x") {
-            break;
-        }
-        if !is_extension_singleton(singleton) {
-            break;
-        }
-        let singleton = singleton.as_bytes()[0].to_ascii_lowercase() as char;
-        index += 1;
-        let start = index;
-        let mut values = Vec::new();
-        while let Some(part) = parts.get(index).copied() {
-            if !(2..=8).contains(&part.len()) || !is_alphanumeric_subtag(part) {
+    if !private_use_only {
+        while let Some(singleton) = parts.get(index).copied() {
+            if singleton.eq_ignore_ascii_case("x") {
                 break;
             }
-            values.push(part.to_ascii_lowercase());
+            if !is_extension_singleton(singleton) {
+                break;
+            }
+            let singleton = singleton.as_bytes()[0].to_ascii_lowercase() as char;
             index += 1;
-        }
-        if index == start {
-            // LanguageTag.parse records an incomplete extension as an error,
-            // but Locale.forLanguageTag still retains the valid prefix parsed
-            // before that extension and ignores the rest.
-            parse_error = true;
-            break;
-        }
-        if !extensions.iter().any(|(key, _)| *key == singleton) {
-            extensions.push((singleton, values));
+            let start = index;
+            let mut values = Vec::new();
+            while let Some(part) = parts.get(index).copied() {
+                if !(2..=8).contains(&part.len()) || !is_alphanumeric_subtag(part) {
+                    break;
+                }
+                values.push(part.to_ascii_lowercase());
+                index += 1;
+            }
+            if index == start {
+                // LanguageTag.parse records an incomplete extension as an error,
+                // but Locale.forLanguageTag still retains the valid prefix parsed
+                // before that extension and ignores the rest.
+                parse_error = true;
+                break;
+            }
+            if !extensions.iter().any(|(key, _)| *key == singleton) {
+                extensions.push((singleton, values));
+            }
         }
     }
 
     let mut private_use = None;
     if !parse_error
-        && parts
-            .get(index)
-            .is_some_and(|part| part.eq_ignore_ascii_case("x"))
+        && (private_use_only
+            || parts
+                .get(index)
+                .is_some_and(|part| part.eq_ignore_ascii_case("x")))
     {
-        index += 1;
+        if !private_use_only {
+            index += 1;
+        }
         let start = index;
         let mut values = Vec::new();
         while let Some(part) = parts.get(index).copied() {
@@ -671,14 +686,10 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
     // Keep the Java BaseLocale-like identity used by getDisplayName separate
     // from the language/variant values that Locale.toLanguageTag serializes.
     // In particular, no_NO_NY emits nn-NO but still displays as no/NO/NY.
+    let code = language.clone();
+    let short_tag = language.clone();
     let display_language = language.clone();
     let display_variants = variants.clone();
-
-    // JVMLocaleLoader.toLocale() discards Locale objects whose language is
-    // blank. This includes root, undetermined, and private-use-only tags.
-    if language == "und" {
-        return None;
-    }
 
     if !unicode_attributes.is_empty() || !unicode_keywords.is_empty() {
         canonical_extensions.push((
@@ -740,7 +751,7 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
             canonical_parts.push(region.clone());
         }
     } else {
-        if language != "und" {
+        if !language.is_empty() {
             canonical_parts.push(language.clone());
         }
         if let Some(script) = &script {
@@ -757,6 +768,11 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
         );
     }
 
+    let has_base_or_extension = !canonical_parts.is_empty()
+        || compatibility_extension.is_some()
+        || !canonical_extensions.is_empty();
+
+    let has_private_use = private_use_extension.is_some();
     if let Some(extension) = compatibility_extension {
         canonical_parts.push(extension.to_string());
         if let Some(private_use) = private_use_extension {
@@ -770,6 +786,13 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
         if let Some(private_use) = private_use_extension {
             canonical_parts.push(format!("x-{private_use}"));
         }
+    }
+
+    // Java serializes an empty BaseLocale as "und" unless the result is a
+    // private-use-only locale. The explicit und marker is retained whenever
+    // a script, region, variant, or regular extension is present.
+    if language.is_empty() && (has_base_or_extension || !has_private_use) {
+        canonical_parts.insert(0, "und".to_string());
     }
 
     let display_base = base_locale_identity(
@@ -788,6 +811,8 @@ fn parse_language_tag(input: &str) -> Option<ParsedLanguageTag> {
     Some(ParsedLanguageTag {
         canonical: canonical_parts.join("-"),
         language: output_language,
+        code,
+        short_tag,
         display_language,
         display_base,
         canonical_base,
@@ -806,7 +831,10 @@ fn base_locale_identity(
     region: Option<&str>,
     variants: &[String],
 ) -> String {
-    let mut parts = vec![language.to_string()];
+    let mut parts = Vec::new();
+    if !language.is_empty() {
+        parts.push(language.to_string());
+    }
     if let Some(script) = script {
         parts.push(script.to_string());
     }
@@ -815,6 +843,24 @@ fn base_locale_identity(
     }
     parts.extend(variants.iter().cloned());
     parts.join("-")
+}
+
+fn root_language_tag() -> ParsedLanguageTag {
+    ParsedLanguageTag {
+        canonical: "und".to_string(),
+        language: String::new(),
+        code: String::new(),
+        short_tag: String::new(),
+        display_language: String::new(),
+        display_base: String::new(),
+        canonical_base: String::new(),
+        script: None,
+        region: None,
+        variants: Vec::new(),
+        display_variants: Vec::new(),
+        unicode_attributes: Vec::new(),
+        unicode_keywords: Vec::new(),
+    }
 }
 
 fn strip_legacy_no_ny_bridge(value: String) -> Option<String> {
@@ -951,8 +997,10 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
     let localized_base = display_data_value(parsed, &parsed.display_language)
         .or_else(|| base.map(|record| record.localized_name))
         .unwrap_or(parsed.display_language.as_str());
+    let mut base_component_count = 0;
     let mut components = Vec::new();
     if let Some(script) = &parsed.script {
+        base_component_count += 1;
         components.push(
             display_data_value(parsed, script)
                 .map(str::to_string)
@@ -963,6 +1011,7 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
         );
     }
     if let Some(region) = &parsed.region {
+        base_component_count += 1;
         components.push(
             display_data_value(parsed, region)
                 .map(str::to_string)
@@ -981,6 +1030,7 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
             .iter()
             .map(|variant| display_variant(parsed, variant)),
     );
+    base_component_count += parsed.display_variants.len();
     components.extend(
         parsed
             .unicode_attributes
@@ -993,9 +1043,23 @@ fn to_fallback_locale(parsed: &ParsedLanguageTag) -> IrDocumentLocale {
             .iter()
             .map(|(key, value)| display_unicode_keyword(parsed, key, value)),
     );
+    let (display_main, display_qualifiers) = if parsed.display_language.is_empty() {
+        if base_component_count == 0 {
+            ("", &components[..])
+        } else {
+            (components[0].as_str(), &components[1..])
+        }
+    } else {
+        (localized_base, &components[..])
+    };
+    let localized_name = if parsed.display_language.is_empty() && base_component_count == 0 {
+        String::new()
+    } else {
+        format_display_name(parsed, display_main, display_qualifiers)
+    };
     IrDocumentLocale {
         tag: parsed.canonical.clone(),
-        localized_name: format_display_name(parsed, localized_base, &components),
+        localized_name,
     }
 }
 
@@ -1370,6 +1434,8 @@ fn cldr_candidate_locales_for_components(
             variants: variants.to_vec(),
         }),
         language: language.to_string(),
+        code: language.to_string(),
+        short_tag: language.to_string(),
         display_language: language.to_string(),
         display_base: String::new(),
         canonical_base: String::new(),
@@ -1501,25 +1567,26 @@ mod tests {
         LOCALE_DISPLAY_PROFILE_COUNT, LOCALE_DISPLAY_RAW_STRING_POOL_BYTES,
         LOCALE_DISPLAY_RECORD_COUNT, LOCALE_DISPLAY_SOURCE_SHA256, LOCALE_DISPLAY_VALUE_COUNT,
         LOCALE_NAME_COLLISIONS, LOCALE_NAME_COLLISION_COUNT, LOCALE_NAME_COLLISION_MEMBER_TAGS,
-        LOCALE_NAME_RECORDS, LOCALE_TAG_RECORDS, LOCALE_TAG_RECORD_COUNT,
+        LOCALE_NAME_RECORDS, LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256, LOCALE_PUBLIC_ORACLE_RECORD_COUNT,
+        LOCALE_TAG_RECORDS, LOCALE_TAG_RECORD_COUNT,
     };
 
     #[test]
     fn dataset_identity_and_indexes_are_guarded() {
         assert_eq!(LOCALE_AVAILABLE_RECORD_COUNT, LOCALE_NAME_RECORDS.len());
         assert_eq!(LOCALE_TAG_RECORD_COUNT, LOCALE_TAG_RECORDS.len());
-        assert_eq!(LOCALE_TAG_RECORDS.len(), 1156);
-        assert_eq!(LOCALE_NAME_RECORDS.len(), 1157);
+        assert_eq!(LOCALE_TAG_RECORDS.len(), 1157);
+        assert_eq!(LOCALE_NAME_RECORDS.len(), 1158);
         assert_eq!(LOCALE_TAG_RECORDS[0].tag, "af");
         assert_eq!(LOCALE_TAG_RECORDS.last().unwrap().tag, "zu-ZA");
         assert_eq!(LOCALE_DATASET_VERSION, "25.0.4.1+1");
         assert_eq!(
             LOCALE_DATASET_SOURCE_SHA256,
-            "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e"
+            "85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16"
         );
         assert_eq!(
             LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256,
-            "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28"
+            "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
         );
         assert_eq!(LOCALE_DISPLAY_RECORD_COUNT, 453459);
         assert_eq!(
@@ -1751,28 +1818,27 @@ mod tests {
         let Ok(path) = std::env::var("SCRIBIUM_JDK25_LOCALE_ORACLE") else {
             return;
         };
-        let oracle = std::fs::read_to_string(path).expect("read transient JDK25 locale oracle");
+        let oracle_bytes = std::fs::read(path).expect("read transient JDK25 locale oracle");
+        assert_eq!(
+            sha256_hex(&oracle_bytes),
+            LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256,
+            "transient public oracle fingerprint changed"
+        );
+        let oracle = std::str::from_utf8(&oracle_bytes).expect("public oracle must be UTF-8");
         let mut checked = 0usize;
         let mut candidate_checked = 0usize;
         for line in oracle.lines() {
             let fields: Vec<_> = line.split('\t').collect();
-            assert_eq!(fields.len(), 6, "malformed locale oracle row: {line}");
+            assert_eq!(fields.len(), 8, "malformed locale oracle row: {line}");
             assert_eq!(fields[0], "locale");
             let request = fields[1];
             let path_kind = fields[2];
             let expected_tag = fields[3];
-            let expected_name = fields[4];
-            if path_kind == "unresolved" {
-                assert!(fields[3].is_empty() && fields[4].is_empty() && fields[5].is_empty());
-                assert!(
-                    resolve(request).is_none(),
-                    "oracle rejected request: {request}"
-                );
-                checked += 1;
-                continue;
-            }
+            let expected_code = fields[4];
+            let expected_short_tag = fields[5];
+            let expected_name = fields[6];
             if path_kind == "tag" {
-                let expected_candidates = fields[5]
+                let expected_candidates = fields[7]
                     .split('|')
                     .map(|value| {
                         if value == "<root>" {
@@ -1789,10 +1855,19 @@ mod tests {
                     expected_candidates,
                     "candidate graph mismatch for {request}"
                 );
+                assert_eq!(parsed.code, expected_code, "code mismatch for {request}");
+                assert_eq!(
+                    parsed.short_tag, expected_short_tag,
+                    "shortTag mismatch for {request}"
+                );
                 candidate_checked += 1;
             } else {
                 assert_eq!(path_kind, "name", "unknown oracle path: {line}");
-                assert!(fields[5].is_empty(), "name path must not expose candidates");
+                assert!(fields[7].is_empty(), "name path must not expose candidates");
+                assert_eq!(
+                    expected_code, expected_short_tag,
+                    "code/shortTag mismatch for name lookup {request}"
+                );
             }
             let actual = resolve(request)
                 .unwrap_or_else(|| panic!("oracle request should resolve: {request}"));
@@ -1806,13 +1881,13 @@ mod tests {
             );
             checked += 1;
         }
-        assert!(
-            checked >= 7_000,
-            "expected broad JDK25 locale oracle coverage"
+        assert_eq!(
+            checked, LOCALE_PUBLIC_ORACLE_RECORD_COUNT,
+            "JDK25 locale oracle row count changed"
         );
-        assert!(
-            candidate_checked >= 4_500,
-            "expected broad tag-path candidate coverage"
+        assert_eq!(
+            candidate_checked, 4_984,
+            "JDK25 tag-path oracle row count changed"
         );
     }
 
@@ -2095,17 +2170,51 @@ mod tests {
     }
 
     #[test]
-    fn rejects_root_only_and_malformed_tags() {
-        for identifier in ["", "   ", "en_US", "x-private", "und"] {
-            assert!(resolve(identifier).is_none(), "identifier: {identifier}");
+    fn preserves_jdk_root_private_use_and_valid_prefix_results() {
+        for (identifier, expected_tag, expected_name) in [
+            ("", "und", ""),
+            ("und", "und", ""),
+            ("x-private", "x-private", ""),
+            ("x-y-z-blork", "x-y-z-blork", ""),
+            ("en_US", "und", ""),
+            ("   ", "und", ""),
+            ("en--US", "en", "English"),
+            ("en-", "en", "English"),
+        ] {
+            let locale = resolve(identifier).expect("JDK returns a Locale for every input");
+            assert_eq!(locale.tag, expected_tag, "identifier: {identifier:?}");
+            assert_eq!(
+                locale.localized_name, expected_name,
+                "identifier: {identifier:?}"
+            );
         }
-        assert_eq!(resolve("en--US").unwrap().tag, "en");
-        assert_eq!(resolve("en-").unwrap().tag, "en");
         assert_eq!(
             resolve("ja-JP-x-lvariant-JP").unwrap().tag,
             "ja-JP-u-ca-japanese-x-lvariant-JP"
         );
         assert_eq!(resolve("no-NO-x-lvariant-NY").unwrap().tag, "nn-NO");
         assert!(find_tag_record("not-a-real-tag").is_none());
+    }
+
+    #[test]
+    fn blank_language_keeps_empty_code_fields_and_jdk_tag_serialization() {
+        for (input, expected_tag) in [
+            ("", "und"),
+            ("und", "und"),
+            ("x-private", "x-private"),
+            ("x-y-z-blork", "x-y-z-blork"),
+            ("en_US", "und"),
+            ("   ", "und"),
+        ] {
+            let parsed = parse_language_tag(input).expect("JDK returns a Locale for every input");
+            assert!(parsed.language.is_empty(), "input: {input:?}");
+            assert!(parsed.code.is_empty(), "input: {input:?}");
+            assert!(parsed.short_tag.is_empty(), "input: {input:?}");
+            assert!(parsed.display_language.is_empty(), "input: {input:?}");
+            assert_eq!(parsed.canonical, expected_tag, "input: {input:?}");
+        }
+        let parsed = parse_language_tag("en--US").expect("JDK keeps the valid prefix");
+        assert_eq!(parsed.language, "en");
+        assert_eq!(parsed.canonical, "en");
     }
 }

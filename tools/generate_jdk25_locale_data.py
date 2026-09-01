@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import csv
 import hashlib
 import io
 import re
@@ -40,13 +41,13 @@ REFERENCE_JDK_URL = (
 )
 REFERENCE_JDK_SHA256 = "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e"
 REFERENCE_JDK_SIZE = 141329719
-EXPECTED_AVAILABLE_RECORD_COUNT = 1157
-EXPECTED_TAG_RECORD_COUNT = 1156
+EXPECTED_AVAILABLE_RECORD_COUNT = 1158
+EXPECTED_TAG_RECORD_COUNT = 1157
 EXPECTED_NAME_COLLISION_COUNT = 0
 AVAILABLE_ORDER_MANIFEST = "jdk25_available_locale_order.tsv"
-EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28"
-EXPECTED_SOURCE_SHA256 = "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e"
-EXPECTED_DUMP_SOURCE_SHA256 = "1fe197bc9b6651853726c90543e638241d3957a4444251bb0a76d96e5d82d0a2"
+EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
+EXPECTED_SOURCE_SHA256 = "85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16"
+EXPECTED_DUMP_SOURCE_SHA256 = "bf6694982db1a2c619e9c759cb4177d6548cbc38f2384fe333224fe56fa8a274"
 EXPECTED_DISPLAY_RECORD_COUNT = 453459
 EXPECTED_DISPLAY_SOURCE_SHA256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
 EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "d90169543b8fd21df5a8baaeceba42e1d0f8bfd1c9b46b2d9b46fcb322bfe453"
@@ -65,7 +66,9 @@ REFERENCE_CLDR_SOURCE_MEMBER = REFERENCE_JDK_TZ_SOURCE_MEMBER
 REFERENCE_CLDR_SOURCE_SHA256 = REFERENCE_JDK_TZ_SOURCE_SHA256
 DISPLAY_DUMP_HELPER = "dump_jdk25_locale_display_data.java"
 PUBLIC_ORACLE_HELPER = "dump_jdk25_locale_oracle.java"
-EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "c6994f655ecf96557f0a6c5f3e99df788003af2ae66211bfe54f3759402b4548"
+EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1"
+EXPECTED_PUBLIC_ORACLE_RECORD_COUNT = 7302
+EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 = "7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4"
 JDK_EXPORTS = (
     "--add-exports=java.base/sun.util.resources=ALL-UNNAMED",
     "--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED",
@@ -247,6 +250,7 @@ def run_reference_java(java: Path, helper: Path) -> bytes:
     completed = subprocess.run(
         [
             str(java),
+            "-Dfile.encoding=UTF-8",
             f"-Djava.locale.providers={REFERENCE_LOCALE_PROVIDERS}",
             "--source",
             "25",
@@ -261,6 +265,53 @@ def run_reference_java(java: Path, helper: Path) -> bytes:
             + completed.stderr.decode("utf-8", errors="replace")
         )
     return completed.stdout
+
+
+def run_reference_public_oracle(java: Path, helper: Path) -> bytes:
+    helper_sha256 = sha256(helper.read_bytes())
+    if helper_sha256 != EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256:
+        raise ValueError(
+            "reference public locale oracle helper fingerprint mismatch: "
+            f"expected {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}, got {helper_sha256}"
+        )
+    completed = subprocess.run(
+        [
+            str(java),
+            "-Dfile.encoding=UTF-8",
+            f"-Djava.locale.providers={REFERENCE_LOCALE_PROVIDERS}",
+            "--source",
+            "25",
+            str(helper),
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "reference JDK public locale oracle failed:\n"
+            + completed.stderr.decode("utf-8", errors="replace")
+        )
+    return completed.stdout
+
+
+def validate_public_oracle(raw: bytes) -> str:
+    output_sha256 = sha256(raw)
+    if output_sha256 != EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256:
+        raise ValueError(
+            "reference public locale oracle output fingerprint mismatch: "
+            f"expected {EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256}, got {output_sha256}"
+        )
+    rows = raw.decode("utf-8").splitlines()
+    if len(rows) != EXPECTED_PUBLIC_ORACLE_RECORD_COUNT:
+        raise ValueError(
+            "reference public locale oracle record count mismatch: "
+            f"expected {EXPECTED_PUBLIC_ORACLE_RECORD_COUNT}, got {len(rows)}"
+        )
+    for line_number, line in enumerate(rows, 1):
+        fields = line.split("\t")
+        if len(fields) != 8 or fields[0] != "locale":
+            raise ValueError(f"public locale oracle row {line_number}: malformed row")
+    return output_sha256
 
 
 def run_reference_display_java(
@@ -288,6 +339,7 @@ def run_reference_display_java(
             [
                 str(java),
                 *JDK_EXPORTS,
+                "-Dfile.encoding=UTF-8",
                 f"-Djava.locale.providers={REFERENCE_LOCALE_PROVIDERS}",
                 "-cp",
                 output,
@@ -322,13 +374,13 @@ def parse_dump(
     for line_number, line in enumerate(lines, 1):
         fields = line.split("\t")
         if fields[0] in {"available", "tag"}:
-            if len(fields) != 4 or any(not field for field in fields[1:]):
+            if len(fields) != 4 or not fields[1]:
                 raise ValueError(f"dump line {line_number}: malformed locale {fields[0]}")
             (available if fields[0] == "available" else tags).append(
                 (fields[1], fields[2], fields[3])
             )
         elif fields[0] == "collision":
-            if len(fields) < 4 or any(not field for field in fields[1:]):
+            if len(fields) < 4 or any(not field for field in fields[2:]):
                 raise ValueError(f"dump line {line_number}: malformed name collision")
             collisions.append((fields[1], fields[2:]))
         else:
@@ -403,9 +455,10 @@ def apply_pinned_available_order(
             f"expected {EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256}, got {manifest_sha256}"
         )
     manifest = [
-        tuple(line.split("\t"))
-        for line in manifest_bytes.decode("utf-8").splitlines()
-        if line
+        tuple(row)
+        for row in csv.reader(
+            manifest_bytes.decode("utf-8").splitlines(), delimiter="\t"
+        )
     ]
     if any(len(row) != 3 for row in manifest):
         raise ValueError("pinned available-locale order manifest contains a malformed row")
@@ -418,7 +471,12 @@ def apply_pinned_available_order(
 
 
 def available_order_manifest_bytes(available: list[tuple[str, str, str]]) -> bytes:
-    return "".join("\t".join(row) + "\n" for row in available).encode("utf-8")
+    output = io.StringIO(newline="")
+    writer = csv.writer(
+        output, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_ALL
+    )
+    writer.writerows(available)
+    return output.getvalue().encode("utf-8")
 
 
 def rust_string(value: str) -> str:
@@ -991,6 +1049,7 @@ def render_rust_source(
         f"// Dump helper SHA-256: {EXPECTED_DUMP_SOURCE_SHA256}",
         f"// Display-data dump helper SHA-256: {EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}",
         f"// Public differential oracle helper SHA-256: {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}",
+        f"// Public differential oracle output SHA-256: {EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256}",
         f"// Unicode time-zone source: {REFERENCE_JDK_TZ_SOURCE_MEMBER}",
         f"// Unicode time-zone source SHA-256: {REFERENCE_JDK_TZ_SOURCE_SHA256}",
         f"// Unicode time-zone source rows: {EXPECTED_TZ_SOURCE_ENTRY_COUNT}",
@@ -1012,6 +1071,11 @@ def render_rust_source(
         "#[allow(dead_code)]",
         "pub const LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256: &str = "
         f"{rust_string(EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256)};",
+        "#[allow(dead_code)]",
+        f"pub const LOCALE_PUBLIC_ORACLE_RECORD_COUNT: usize = {EXPECTED_PUBLIC_ORACLE_RECORD_COUNT};",
+        "#[allow(dead_code)]",
+        "pub const LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256: &str = "
+        f"{rust_string(EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256)};",
         "#[allow(dead_code)]",
         f"pub const LOCALE_DISPLAY_ORACLE_RECORD_COUNT: usize = {display_stats['oracle_records']};",
         "#[allow(dead_code)]",
@@ -1292,6 +1356,9 @@ def main() -> None:
             "reference public locale oracle helper fingerprint mismatch: "
             f"expected {EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256}, got {public_oracle_sha256}"
         )
+    public_oracle_output_sha256 = validate_public_oracle(
+        run_reference_public_oracle(args.java, public_oracle_helper)
+    )
     available, tags, collisions, source_sha256 = parse_dump(run_reference_java(args.java, helper))
     display, display_source_sha256 = parse_display_dump(
         run_reference_display_java(args.java, display_helper, timezone_ids)
@@ -1316,6 +1383,8 @@ def main() -> None:
         display_source_sha256,
         stats["compact_artifact_sha256"],
     )
+    print(f"public_oracle_record_count={EXPECTED_PUBLIC_ORACLE_RECORD_COUNT}")
+    print(f"public_oracle_output_sha256={public_oracle_output_sha256}")
     if args.check:
         if args.output.read_bytes() != generated.encode("utf-8"):
             raise SystemExit(f"generated output differs: {args.output}")

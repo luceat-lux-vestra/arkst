@@ -10,10 +10,11 @@
 // https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz
 // Reference archive SHA-256: dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e
 // Available-locale raw-order manifest: jdk25_available_locale_order.tsv
-// Available-locale raw-order manifest SHA-256: db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28
-// Dump helper SHA-256: 1fe197bc9b6651853726c90543e638241d3957a4444251bb0a76d96e5d82d0a2
+// Available-locale raw-order manifest SHA-256: c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e
+// Dump helper SHA-256: bf6694982db1a2c619e9c759cb4177d6548cbc38f2384fe333224fe56fa8a274
 // Display-data dump helper SHA-256: d90169543b8fd21df5a8baaeceba42e1d0f8bfd1c9b46b2d9b46fcb322bfe453
-// Public differential oracle helper SHA-256: c6994f655ecf96557f0a6c5f3e99df788003af2ae66211bfe54f3759402b4548
+// Public differential oracle helper SHA-256: 57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1
+// Public differential oracle output SHA-256: 7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4
 // Unicode time-zone source: java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java
 // Unicode time-zone source SHA-256: dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2
 // Unicode time-zone source rows: 681
@@ -23,17 +24,21 @@
 #[allow(dead_code)]
 pub const LOCALE_DATASET_VERSION: &str = "25.0.4.1+1";
 #[allow(dead_code)]
-pub const LOCALE_DATASET_SOURCE_SHA256: &str = "87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e";
+pub const LOCALE_DATASET_SOURCE_SHA256: &str = "85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16";
 #[allow(dead_code)]
 pub const LOCALE_DISPLAY_SOURCE_SHA256: &str = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3";
 #[allow(dead_code)]
-pub const LOCALE_AVAILABLE_RECORD_COUNT: usize = 1157;
+pub const LOCALE_AVAILABLE_RECORD_COUNT: usize = 1158;
 #[allow(dead_code)]
-pub const LOCALE_TAG_RECORD_COUNT: usize = 1156;
+pub const LOCALE_TAG_RECORD_COUNT: usize = 1157;
 #[allow(dead_code)]
 pub const LOCALE_NAME_COLLISION_COUNT: usize = 0;
 #[allow(dead_code)]
-pub const LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256: &str = "db62b09df3b073a9f92d910f053fdf9ba8a28f2105542f1e60f9a33a72993e28";
+pub const LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256: &str = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e";
+#[allow(dead_code)]
+pub const LOCALE_PUBLIC_ORACLE_RECORD_COUNT: usize = 7302;
+#[allow(dead_code)]
+pub const LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256: &str = "7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4";
 #[allow(dead_code)]
 pub const LOCALE_DISPLAY_ORACLE_RECORD_COUNT: usize = 453459;
 #[allow(dead_code)]
@@ -7646,14 +7651,19 @@ static LOCALE_NAME_COLLISIONS: &[LocaleNameCollision] = &[
 ];
 static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
     LocaleRecord {
-        tag: "ksh",
-        display_name: "Colognian",
-        localized_name: "Kölsch",
+        tag: "und",
+        display_name: "",
+        localized_name: "",
     },
     LocaleRecord {
         tag: "sr-ME",
         display_name: "Serbian (Montenegro)",
         localized_name: "српски (Црна Гора)",
+    },
+    LocaleRecord {
+        tag: "ksh",
+        display_name: "Colognian",
+        localized_name: "Kölsch",
     },
     LocaleRecord {
         tag: "fr-SY",
@@ -7701,14 +7711,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Pulaar (Latin, Muritani)",
     },
     LocaleRecord {
-        tag: "ar-BH",
-        display_name: "Arabic (Bahrain)",
-        localized_name: "العربية (البحرين)",
-    },
-    LocaleRecord {
         tag: "raj",
         display_name: "Rajasthani",
         localized_name: "राजस्थानी",
+    },
+    LocaleRecord {
+        tag: "ar-BH",
+        display_name: "Arabic (Bahrain)",
+        localized_name: "العربية (البحرين)",
     },
     LocaleRecord {
         tag: "teo",
@@ -7731,11 +7741,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "français (Rwanda)",
     },
     LocaleRecord {
-        tag: "yo-Latn-NG",
-        display_name: "Yoruba (Latin, Nigeria)",
-        localized_name: "Èdè Yorùbá (Èdè Látìn, Nàìjíríà)",
-    },
-    LocaleRecord {
         tag: "ff-Latn-NG",
         display_name: "Fula (Latin, Nigeria)",
         localized_name: "Pulaar (Latin, Nijeriyaa)",
@@ -7746,9 +7751,9 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "नेपाली (देवानागरी, नेपाल)",
     },
     LocaleRecord {
-        tag: "es-419",
-        display_name: "Spanish (Latin America)",
-        localized_name: "español (Latinoamérica)",
+        tag: "yo-Latn-NG",
+        display_name: "Yoruba (Latin, Nigeria)",
+        localized_name: "Èdè Yorùbá (Èdè Látìn, Nàìjíríà)",
     },
     LocaleRecord {
         tag: "ff-Latn-NE",
@@ -7756,14 +7761,19 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Pulaar (Latin, Nijeer)",
     },
     LocaleRecord {
-        tag: "kam-Latn-KE",
-        display_name: "Kamba (Latin, Kenya)",
-        localized_name: "Kikamba (Latin, Kenya)",
+        tag: "es-419",
+        display_name: "Spanish (Latin America)",
+        localized_name: "español (Latinoamérica)",
     },
     LocaleRecord {
         tag: "fr-SC",
         display_name: "French (Seychelles)",
         localized_name: "français (Seychelles)",
+    },
+    LocaleRecord {
+        tag: "kam-Latn-KE",
+        display_name: "Kamba (Latin, Kenya)",
+        localized_name: "Kikamba (Latin, Kenya)",
     },
     LocaleRecord {
         tag: "gaa-GH",
@@ -7791,14 +7801,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "русский (кириллица, Россия)",
     },
     LocaleRecord {
-        tag: "xnr",
-        display_name: "Kangri",
-        localized_name: "कांगड़ी",
-    },
-    LocaleRecord {
         tag: "uz-UZ",
         display_name: "Uzbek (Uzbekistan)",
         localized_name: "o‘zbek (Oʻzbekiston)",
+    },
+    LocaleRecord {
+        tag: "xnr",
+        display_name: "Kangri",
+        localized_name: "कांगड़ी",
     },
     LocaleRecord {
         tag: "dsb-Latn-DE",
@@ -7811,14 +7821,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Hausa (Nijar)",
     },
     LocaleRecord {
-        tag: "ms-BN",
-        display_name: "Malay (Brunei)",
-        localized_name: "Melayu (Brunei)",
-    },
-    LocaleRecord {
         tag: "ceb",
         display_name: "Cebuano",
         localized_name: "Cebuano",
+    },
+    LocaleRecord {
+        tag: "ms-BN",
+        display_name: "Malay (Brunei)",
+        localized_name: "Melayu (Brunei)",
     },
     LocaleRecord {
         tag: "ha-NG",
@@ -7861,14 +7871,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "కువి (తెలుగు)",
     },
     LocaleRecord {
-        tag: "shi-Tfng-MA",
-        display_name: "Tachelhit (Tifinagh, Morocco)",
-        localized_name: "ⵜⴰⵛⵍⵃⵉⵜ (Tifinagh, ⵍⵎⵖⵔⵉⴱ)",
-    },
-    LocaleRecord {
         tag: "ar-DJ",
         display_name: "Arabic (Djibouti)",
         localized_name: "العربية (جيبوتي)",
+    },
+    LocaleRecord {
+        tag: "shi-Tfng-MA",
+        display_name: "Tachelhit (Tifinagh, Morocco)",
+        localized_name: "ⵜⴰⵛⵍⵃⵉⵜ (Tifinagh, ⵍⵎⵖⵔⵉⴱ)",
     },
     LocaleRecord {
         tag: "mzn",
@@ -7876,14 +7886,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "مازرونی",
     },
     LocaleRecord {
-        tag: "smn-Latn-FI",
-        display_name: "Inari Sami (Latin, Finland)",
-        localized_name: "anarâškielâ (Latin, Suomâ)",
-    },
-    LocaleRecord {
         tag: "sat-Olck",
         display_name: "Santali (Ol Chiki)",
         localized_name: "ᱥᱟᱱᱛᱟᱲᱤ (ᱚᱞ ᱪᱤᱠᱤ)",
+    },
+    LocaleRecord {
+        tag: "smn-Latn-FI",
+        display_name: "Inari Sami (Latin, Finland)",
+        localized_name: "anarâškielâ (Latin, Suomâ)",
     },
     LocaleRecord {
         tag: "yue-Hant-MO",
@@ -7901,14 +7911,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Pulaar (Latin, Liberiyaa)",
     },
     LocaleRecord {
-        tag: "bs-BA",
-        display_name: "Bosnian (Bosnia & Herzegovina)",
-        localized_name: "bosanski (Bosna i Hercegovina)",
-    },
-    LocaleRecord {
         tag: "om-Latn-ET",
         display_name: "Oromo (Latin, Ethiopia)",
         localized_name: "Oromoo (Laatinii, Itoophiyaa)",
+    },
+    LocaleRecord {
+        tag: "bs-BA",
+        display_name: "Bosnian (Bosnia & Herzegovina)",
+        localized_name: "bosanski (Bosna i Hercegovina)",
     },
     LocaleRecord {
         tag: "my-MM",
@@ -7931,14 +7941,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "italiano (latino, Italia)",
     },
     LocaleRecord {
-        tag: "eo-001",
-        display_name: "Esperanto (world)",
-        localized_name: "Esperanto (mondo)",
-    },
-    LocaleRecord {
         tag: "az-Cyrl",
         display_name: "Azerbaijani (Cyrillic)",
         localized_name: "азәрбајҹан (Кирил)",
+    },
+    LocaleRecord {
+        tag: "eo-001",
+        display_name: "Esperanto (world)",
+        localized_name: "Esperanto (mondo)",
     },
     LocaleRecord {
         tag: "zh-HK",
@@ -8151,14 +8161,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "српски (ћирилица, Босна и Херцеговина)",
     },
     LocaleRecord {
-        tag: "kok-IN",
-        display_name: "Konkani (India)",
-        localized_name: "कोंकणी (भारत)",
-    },
-    LocaleRecord {
         tag: "ckb",
         display_name: "Central Kurdish",
         localized_name: "کوردیی ناوەندی",
+    },
+    LocaleRecord {
+        tag: "kok-IN",
+        display_name: "Konkani (India)",
+        localized_name: "कोंकणी (भारत)",
     },
     LocaleRecord {
         tag: "ko-CN",
@@ -8186,14 +8196,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ᱥᱟᱱᱛᱟᱲᱤ (ᱤᱱᱰᱤᱭᱟ)",
     },
     LocaleRecord {
-        tag: "gsw",
-        display_name: "Swiss German",
-        localized_name: "Schwiizertüütsch",
-    },
-    LocaleRecord {
         tag: "agq",
         display_name: "Aghem",
         localized_name: "Aghem",
+    },
+    LocaleRecord {
+        tag: "gsw",
+        display_name: "Swiss German",
+        localized_name: "Schwiizertüütsch",
     },
     LocaleRecord {
         tag: "kok-Latn",
@@ -8231,14 +8241,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "پنجابی (عربی)",
     },
     LocaleRecord {
-        tag: "fy-Latn-NL",
-        display_name: "Western Frisian (Latin, Netherlands)",
-        localized_name: "Frysk (Latyn, Nederlân)",
-    },
-    LocaleRecord {
         tag: "lt-LT",
         display_name: "Lithuanian (Lithuania)",
         localized_name: "lietuvių (Lietuva)",
+    },
+    LocaleRecord {
+        tag: "fy-Latn-NL",
+        display_name: "Western Frisian (Latin, Netherlands)",
+        localized_name: "Frysk (Latyn, Nederlân)",
     },
     LocaleRecord {
         tag: "szl-PL",
@@ -8391,14 +8401,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "íslenska (latneskt, Ísland)",
     },
     LocaleRecord {
-        tag: "zh-MO",
-        display_name: "Chinese (Macao SAR China)",
-        localized_name: "中文 (中國澳門特別行政區)",
-    },
-    LocaleRecord {
         tag: "kxv-Latn",
         display_name: "Kuvi (Latin)",
         localized_name: "kuvi (laṭin)",
+    },
+    LocaleRecord {
+        tag: "zh-MO",
+        display_name: "Chinese (Macao SAR China)",
+        localized_name: "中文 (中國澳門特別行政區)",
     },
     LocaleRecord {
         tag: "naq-NA",
@@ -8406,14 +8416,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Khoekhoegowab (Namibiab)",
     },
     LocaleRecord {
-        tag: "ur-PK",
-        display_name: "Urdu (Pakistan)",
-        localized_name: "اردو (پاکستان)",
-    },
-    LocaleRecord {
         tag: "ceb-Latn-PH",
         display_name: "Cebuano (Latin, Philippines)",
         localized_name: "Cebuano (Latin, Pilipinas)",
+    },
+    LocaleRecord {
+        tag: "ur-PK",
+        display_name: "Urdu (Pakistan)",
+        localized_name: "اردو (پاکستان)",
     },
     LocaleRecord {
         tag: "ar-KW",
@@ -8446,11 +8456,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Neddersass’sch",
     },
     LocaleRecord {
-        tag: "qu-Latn-PE",
-        display_name: "Quechua (Latin, Peru)",
-        localized_name: "Runasimi (Latin Simi, Perú)",
-    },
-    LocaleRecord {
         tag: "ar-KM",
         display_name: "Arabic (Comoros)",
         localized_name: "العربية (جزر القمر)",
@@ -8461,14 +8466,19 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Sesotho (Afrika Borwa)",
     },
     LocaleRecord {
-        tag: "cy-Latn-GB",
-        display_name: "Welsh (Latin, United Kingdom)",
-        localized_name: "Cymraeg (Lladin, Y Deyrnas Unedig)",
+        tag: "qu-Latn-PE",
+        display_name: "Quechua (Latin, Peru)",
+        localized_name: "Runasimi (Latin Simi, Perú)",
     },
     LocaleRecord {
         tag: "lg-UG",
         display_name: "Ganda (Uganda)",
         localized_name: "Luganda (Yuganda)",
+    },
+    LocaleRecord {
+        tag: "cy-Latn-GB",
+        display_name: "Welsh (Latin, United Kingdom)",
+        localized_name: "Cymraeg (Lladin, Y Deyrnas Unedig)",
     },
     LocaleRecord {
         tag: "lij-Latn-IT",
@@ -8646,11 +8656,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Pulaar (Latin, Gine-Bisaawo)",
     },
     LocaleRecord {
-        tag: "bn-Beng-BD",
-        display_name: "Bangla (Bangla, Bangladesh)",
-        localized_name: "বাংলা (বাংলা, বাংলাদেশ)",
-    },
-    LocaleRecord {
         tag: "su-Latn-ID",
         display_name: "Sundanese (Latin, Indonesia)",
         localized_name: "Basa Sunda (Latin, Indonesia)",
@@ -8659,6 +8664,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "ti-ER",
         display_name: "Tigrinya (Eritrea)",
         localized_name: "ትግርኛ (ኤርትራ)",
+    },
+    LocaleRecord {
+        tag: "bn-Beng-BD",
+        display_name: "Bangla (Bangla, Bangladesh)",
+        localized_name: "বাংলা (বাংলা, বাংলাদেশ)",
     },
     LocaleRecord {
         tag: "cv-RU",
@@ -8706,14 +8716,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Obolo",
     },
     LocaleRecord {
-        tag: "fy-NL",
-        display_name: "Western Frisian (Netherlands)",
-        localized_name: "Frysk (Nederlân)",
-    },
-    LocaleRecord {
         tag: "ms-MY",
         display_name: "Malay (Malaysia)",
         localized_name: "Melayu (Malaysia)",
+    },
+    LocaleRecord {
+        tag: "fy-NL",
+        display_name: "Western Frisian (Netherlands)",
+        localized_name: "Frysk (Nederlân)",
     },
     LocaleRecord {
         tag: "ar-OM",
@@ -8741,14 +8751,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Kiswahili (Jamhuri ya Kidemokrasia ya Kongo)",
     },
     LocaleRecord {
-        tag: "os-GE",
-        display_name: "Ossetic (Georgia)",
-        localized_name: "ирон (Гуырдзыстон)",
-    },
-    LocaleRecord {
         tag: "brx-Deva-IN",
         display_name: "Bodo (Devanagari, India)",
         localized_name: "बर’ (देबनागिरि,भारत)",
+    },
+    LocaleRecord {
+        tag: "os-GE",
+        display_name: "Ossetic (Georgia)",
+        localized_name: "ирон (Гуырдзыстон)",
     },
     LocaleRecord {
         tag: "qu-EC",
@@ -8791,14 +8801,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Nordfriisk (Latin, Germany)",
     },
     LocaleRecord {
-        tag: "ur-Arab-PK",
-        display_name: "Urdu (Arabic, Pakistan)",
-        localized_name: "اردو (عربی،پاکستان)",
-    },
-    LocaleRecord {
         tag: "to-TO",
         display_name: "Tongan (Tonga)",
         localized_name: "lea fakatonga (Tonga)",
+    },
+    LocaleRecord {
+        tag: "ur-Arab-PK",
+        display_name: "Urdu (Arabic, Pakistan)",
+        localized_name: "اردو (عربی،پاکستان)",
     },
     LocaleRecord {
         tag: "ckb-IR",
@@ -8866,14 +8876,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "सिन्धी (देवनागिरी, भारत)",
     },
     LocaleRecord {
-        tag: "ca-IT",
-        display_name: "Catalan (Italy)",
-        localized_name: "català (Itàlia)",
-    },
-    LocaleRecord {
         tag: "dav-Latn-KE",
         display_name: "Taita (Latin, Kenya)",
         localized_name: "Kitaita (Latin, Kenya)",
+    },
+    LocaleRecord {
+        tag: "ca-IT",
+        display_name: "Catalan (Italy)",
+        localized_name: "català (Itàlia)",
     },
     LocaleRecord {
         tag: "mn-Cyrl-MN",
@@ -8891,14 +8901,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "中文 (繁體，台灣)",
     },
     LocaleRecord {
-        tag: "lag-Latn-TZ",
-        display_name: "Langi (Latin, Tanzania)",
-        localized_name: "Kɨlaangi (Latin, Taansanía)",
-    },
-    LocaleRecord {
         tag: "ar-QA",
         display_name: "Arabic (Qatar)",
         localized_name: "العربية (قطر)",
+    },
+    LocaleRecord {
+        tag: "lag-Latn-TZ",
+        display_name: "Langi (Latin, Tanzania)",
+        localized_name: "Kɨlaangi (Latin, Taansanía)",
     },
     LocaleRecord {
         tag: "xh-ZA",
@@ -8991,14 +9001,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "राजस्थानी (देवनागरी, भारत)",
     },
     LocaleRecord {
-        tag: "ha-Latn-NG",
-        display_name: "Hausa (Latin, Nigeria)",
-        localized_name: "Hausa (Latin, Nijeriya)",
-    },
-    LocaleRecord {
         tag: "asa",
         display_name: "Asu",
         localized_name: "Kipare",
+    },
+    LocaleRecord {
+        tag: "ha-Latn-NG",
+        display_name: "Hausa (Latin, Nigeria)",
+        localized_name: "Hausa (Latin, Nijeriya)",
     },
     LocaleRecord {
         tag: "ar-SD",
@@ -9091,14 +9101,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "čeština (latinka, Česko)",
     },
     LocaleRecord {
-        tag: "en-BW",
-        display_name: "English (Botswana)",
-        localized_name: "English (Botswana)",
-    },
-    LocaleRecord {
         tag: "gsw-Latn-CH",
         display_name: "Swiss German (Latin, Switzerland)",
         localized_name: "Schwiizertüütsch (Latiinisch, Schwiiz)",
+    },
+    LocaleRecord {
+        tag: "en-BW",
+        display_name: "English (Botswana)",
+        localized_name: "English (Botswana)",
     },
     LocaleRecord {
         tag: "pt-MO",
@@ -9121,6 +9131,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Kölsch (Doütschland)",
     },
     LocaleRecord {
+        tag: "ks-Arab-IN",
+        display_name: "Kashmiri (Arabic, India)",
+        localized_name: "کٲشُر (عربی, ہِندوستان)",
+    },
+    LocaleRecord {
         tag: "en-BM",
         display_name: "English (Bermuda)",
         localized_name: "English (Bermuda)",
@@ -9131,19 +9146,9 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Kĩmĩrũ (Kenya)",
     },
     LocaleRecord {
-        tag: "ks-Arab-IN",
-        display_name: "Kashmiri (Arabic, India)",
-        localized_name: "کٲشُر (عربی, ہِندوستان)",
-    },
-    LocaleRecord {
         tag: "lmo-IT",
         display_name: "Lombard (Italy)",
         localized_name: "Lombard (Italia)",
-    },
-    LocaleRecord {
-        tag: "tok-Latn-001",
-        display_name: "Toki Pona (Latin, world)",
-        localized_name: "toki pona (sitelen Lasina pi ma ale)",
     },
     LocaleRecord {
         tag: "haw",
@@ -9154,6 +9159,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "en-BI",
         display_name: "English (Burundi)",
         localized_name: "English (Burundi)",
+    },
+    LocaleRecord {
+        tag: "tok-Latn-001",
+        display_name: "Toki Pona (Latin, world)",
+        localized_name: "toki pona (sitelen Lasina pi ma ale)",
     },
     LocaleRecord {
         tag: "en-AG",
@@ -9196,14 +9206,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Australia)",
     },
     LocaleRecord {
-        tag: "nmg-CM",
-        display_name: "Kwasio (Cameroon)",
-        localized_name: "nmg (Kamerun)",
-    },
-    LocaleRecord {
         tag: "en-AT",
         display_name: "English (Austria)",
         localized_name: "English (Austria)",
+    },
+    LocaleRecord {
+        tag: "nmg-CM",
+        display_name: "Kwasio (Cameroon)",
+        localized_name: "nmg (Kamerun)",
     },
     LocaleRecord {
         tag: "en-AS",
@@ -9321,14 +9331,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Denmark)",
     },
     LocaleRecord {
-        tag: "en-CH",
-        display_name: "English (Switzerland)",
-        localized_name: "English (Switzerland)",
-    },
-    LocaleRecord {
         tag: "it-CH",
         display_name: "Italian (Switzerland)",
         localized_name: "italiano (Svizzera)",
+    },
+    LocaleRecord {
+        tag: "en-CH",
+        display_name: "English (Switzerland)",
+        localized_name: "English (Switzerland)",
     },
     LocaleRecord {
         tag: "pa-IN",
@@ -9341,14 +9351,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Cocos (Keeling) Islands)",
     },
     LocaleRecord {
-        tag: "en-CA",
-        display_name: "English (Canada)",
-        localized_name: "English (Canada)",
-    },
-    LocaleRecord {
         tag: "mai-Deva-IN",
         display_name: "Maithili (Devanagari, India)",
         localized_name: "मैथिली (देवनागरी, भारत)",
+    },
+    LocaleRecord {
+        tag: "en-CA",
+        display_name: "English (Canada)",
+        localized_name: "English (Canada)",
     },
     LocaleRecord {
         tag: "kea-CV",
@@ -9356,14 +9366,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "kabuverdianu (Kabu Verdi)",
     },
     LocaleRecord {
-        tag: "hu-HU",
-        display_name: "Hungarian (Hungary)",
-        localized_name: "magyar (Magyarország)",
-    },
-    LocaleRecord {
         tag: "sr-Cyrl-RS",
         display_name: "Serbian (Cyrillic, Serbia)",
         localized_name: "српски (ћирилица, Србија)",
+    },
+    LocaleRecord {
+        tag: "hu-HU",
+        display_name: "Hungarian (Hungary)",
+        localized_name: "magyar (Magyarország)",
     },
     LocaleRecord {
         tag: "pt-Latn-BR",
@@ -9386,6 +9396,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Cyprus)",
     },
     LocaleRecord {
+        tag: "ksf-CM",
+        display_name: "Bafia (Cameroon)",
+        localized_name: "rikpa (kamɛrún)",
+    },
+    LocaleRecord {
         tag: "en-CX",
         display_name: "English (Christmas Island)",
         localized_name: "English (Christmas Island)",
@@ -9394,11 +9409,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "su-Latn",
         display_name: "Sundanese (Latin)",
         localized_name: "Basa Sunda (Latin)",
-    },
-    LocaleRecord {
-        tag: "ksf-CM",
-        display_name: "Bafia (Cameroon)",
-        localized_name: "rikpa (kamɛrún)",
     },
     LocaleRecord {
         tag: "gsw-FR",
@@ -9436,14 +9446,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Fiji)",
     },
     LocaleRecord {
-        tag: "en-FI",
-        display_name: "English (Finland)",
-        localized_name: "English (Finland)",
-    },
-    LocaleRecord {
         tag: "sd-IN",
         display_name: "Sindhi (India)",
         localized_name: "سنڌي (ڀارت)",
+    },
+    LocaleRecord {
+        tag: "en-FI",
+        display_name: "English (Finland)",
+        localized_name: "English (Finland)",
     },
     LocaleRecord {
         tag: "bm-ML",
@@ -9451,14 +9461,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "bamanakan (Mali)",
     },
     LocaleRecord {
-        tag: "mk-Cyrl-MK",
-        display_name: "Macedonian (Cyrillic, North Macedonia)",
-        localized_name: "македонски (кирилско писмо, Северна Македонија)",
-    },
-    LocaleRecord {
         tag: "ga-GB",
         display_name: "Irish (United Kingdom)",
         localized_name: "Gaeilge (an Ríocht Aontaithe)",
+    },
+    LocaleRecord {
+        tag: "mk-Cyrl-MK",
+        display_name: "Macedonian (Cyrillic, North Macedonia)",
+        localized_name: "македонски (кирилско писмо, Северна Македонија)",
     },
     LocaleRecord {
         tag: "tk-TM",
@@ -9561,11 +9571,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Spain)",
     },
     LocaleRecord {
-        tag: "en-ER",
-        display_name: "English (Eritrea)",
-        localized_name: "English (Eritrea)",
-    },
-    LocaleRecord {
         tag: "om-ET",
         display_name: "Oromo (Ethiopia)",
         localized_name: "Oromoo (Itoophiyaa)",
@@ -9576,14 +9581,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "српски (ћирилица, Косово)",
     },
     LocaleRecord {
+        tag: "en-ER",
+        display_name: "English (Eritrea)",
+        localized_name: "English (Eritrea)",
+    },
+    LocaleRecord {
         tag: "az-Cyrl-AZ",
         display_name: "Azerbaijani (Cyrillic, Azerbaijan)",
         localized_name: "азәрбајҹан (Кирил, Азәрбајҹан)",
-    },
-    LocaleRecord {
-        tag: "ast-ES",
-        display_name: "Asturian (Spain)",
-        localized_name: "asturianu (España)",
     },
     LocaleRecord {
         tag: "sq-AL",
@@ -9601,6 +9606,16 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "português (Portugal)",
     },
     LocaleRecord {
+        tag: "ast-ES",
+        display_name: "Asturian (Spain)",
+        localized_name: "asturianu (España)",
+    },
+    LocaleRecord {
+        tag: "bs-Latn",
+        display_name: "Bosnian (Latin)",
+        localized_name: "bosanski (latinica)",
+    },
+    LocaleRecord {
         tag: "luy-KE",
         display_name: "Luyia (Kenya)",
         localized_name: "Luluhia (Kenya)",
@@ -9609,11 +9624,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "tr-CY",
         display_name: "Turkish (Cyprus)",
         localized_name: "Türkçe (Kıbrıs)",
-    },
-    LocaleRecord {
-        tag: "bs-Latn",
-        display_name: "Bosnian (Latin)",
-        localized_name: "bosanski (latinica)",
     },
     LocaleRecord {
         tag: "en-HK",
@@ -9626,14 +9636,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "azərbaycan (latın, Azərbaycan)",
     },
     LocaleRecord {
-        tag: "ses-ML",
-        display_name: "Koyraboro Senni (Mali)",
-        localized_name: "Koyraboro senni (Maali)",
-    },
-    LocaleRecord {
         tag: "ff-Latn-SL",
         display_name: "Fula (Latin, Sierra Leone)",
         localized_name: "Pulaar (Latin, Seraa liyon)",
+    },
+    LocaleRecord {
+        tag: "ses-ML",
+        display_name: "Koyraboro Senni (Mali)",
+        localized_name: "Koyraboro senni (Maali)",
     },
     LocaleRecord {
         tag: "ga-IE",
@@ -9671,11 +9681,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Rukiga (Latin, Uganda)",
     },
     LocaleRecord {
-        tag: "gsw-CH",
-        display_name: "Swiss German (Switzerland)",
-        localized_name: "Schwiizertüütsch (Schwiiz)",
-    },
-    LocaleRecord {
         tag: "kln-KE",
         display_name: "Kalenjin (Kenya)",
         localized_name: "Kalenjin (Emetab Kenya)",
@@ -9684,6 +9689,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "pt-ST",
         display_name: "Portuguese (São Tomé & Príncipe)",
         localized_name: "português (São Tomé e Príncipe)",
+    },
+    LocaleRecord {
+        tag: "gsw-CH",
+        display_name: "Swiss German (Switzerland)",
+        localized_name: "Schwiizertüütsch (Schwiiz)",
     },
     LocaleRecord {
         tag: "nnh-CM",
@@ -9716,11 +9726,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "føroyskt (Føroyar)",
     },
     LocaleRecord {
-        tag: "en-GI",
-        display_name: "English (Gibraltar)",
-        localized_name: "English (Gibraltar)",
-    },
-    LocaleRecord {
         tag: "saq-Latn-KE",
         display_name: "Samburu (Latin, Kenya)",
         localized_name: "Kisampur (Latin, Kenya)",
@@ -9731,14 +9736,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "български (България)",
     },
     LocaleRecord {
+        tag: "en-GI",
+        display_name: "English (Gibraltar)",
+        localized_name: "English (Gibraltar)",
+    },
+    LocaleRecord {
         tag: "en-GH",
         display_name: "English (Ghana)",
         localized_name: "English (Ghana)",
-    },
-    LocaleRecord {
-        tag: "en-GG",
-        display_name: "English (Guernsey)",
-        localized_name: "English (Guernsey)",
     },
     LocaleRecord {
         tag: "ig-NG",
@@ -9746,19 +9751,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Igbo (Naịjịrịa)",
     },
     LocaleRecord {
+        tag: "en-GG",
+        display_name: "English (Guernsey)",
+        localized_name: "English (Guernsey)",
+    },
+    LocaleRecord {
         tag: "en-GD",
         display_name: "English (Grenada)",
         localized_name: "English (Grenada)",
     },
     LocaleRecord {
-        tag: "teo-KE",
-        display_name: "Teso (Kenya)",
-        localized_name: "Kiteso (Kenia)",
-    },
-    LocaleRecord {
         tag: "rm-Latn-CH",
         display_name: "Romansh (Latin, Switzerland)",
         localized_name: "rumantsch (latin, Svizra)",
+    },
+    LocaleRecord {
+        tag: "teo-KE",
+        display_name: "Teso (Kenya)",
+        localized_name: "Kiteso (Kenia)",
     },
     LocaleRecord {
         tag: "en-GB",
@@ -9796,14 +9806,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (South Georgia & South Sandwich Islands)",
     },
     LocaleRecord {
-        tag: "sv-Latn-SE",
-        display_name: "Swedish (Latin, Sweden)",
-        localized_name: "svenska (latinska, Sverige)",
-    },
-    LocaleRecord {
         tag: "yi-Hebr-UA",
         display_name: "Yiddish (Hebrew, Ukraine)",
         localized_name: "ייִדיש (העברעיש, אוקראַינע)",
+    },
+    LocaleRecord {
+        tag: "sv-Latn-SE",
+        display_name: "Swedish (Latin, Sweden)",
+        localized_name: "svenska (latinska, Sverige)",
     },
     LocaleRecord {
         tag: "rn-Latn-BI",
@@ -9821,14 +9831,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Jamaica)",
     },
     LocaleRecord {
-        tag: "ebu-Latn-KE",
-        display_name: "Embu (Latin, Kenya)",
-        localized_name: "Kĩembu (Latin, Kenya)",
-    },
-    LocaleRecord {
         tag: "ckb-Arab-IQ",
         display_name: "Central Kurdish (Arabic, Iraq)",
         localized_name: "کوردیی ناوەندی (عەرەبی، عێراق)",
+    },
+    LocaleRecord {
+        tag: "ebu-Latn-KE",
+        display_name: "Embu (Latin, Kenya)",
+        localized_name: "Kĩembu (Latin, Kenya)",
     },
     LocaleRecord {
         tag: "sr-Latn-XK",
@@ -9881,6 +9891,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Hindi (Latin, Bharat)",
     },
     LocaleRecord {
+        tag: "dav",
+        display_name: "Taita",
+        localized_name: "Kitaita",
+    },
+    LocaleRecord {
         tag: "pa-PK",
         display_name: "Punjabi (Pakistan)",
         localized_name: "ਪੰਜਾਬੀ (ਪਾਕਿਸਤਾਨ)",
@@ -9889,11 +9904,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "lu-CD",
         display_name: "Luba-Katanga (Congo - Kinshasa)",
         localized_name: "Tshiluba (Ditunga wa Kongu)",
-    },
-    LocaleRecord {
-        tag: "dav",
-        display_name: "Taita",
-        localized_name: "Kitaita",
     },
     LocaleRecord {
         tag: "teo-Latn-UG",
@@ -9996,24 +10006,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "norsk nynorsk (Noreg)",
     },
     LocaleRecord {
-        tag: "kn-Knda-IN",
-        display_name: "Kannada (Kannada, India)",
-        localized_name: "ಕನ್ನಡ (ಕನ್ನಡ, ಭಾರತ)",
-    },
-    LocaleRecord {
         tag: "rn-BI",
         display_name: "Rundi (Burundi)",
         localized_name: "Ikirundi (Uburundi)",
     },
     LocaleRecord {
-        tag: "en-IT",
-        display_name: "English (Italy)",
-        localized_name: "English (Italy)",
+        tag: "kn-Knda-IN",
+        display_name: "Kannada (Kannada, India)",
+        localized_name: "ಕನ್ನಡ (ಕನ್ನಡ, ಭಾರತ)",
     },
     LocaleRecord {
         tag: "luo-Latn-KE",
         display_name: "Luo (Latin, Kenya)",
         localized_name: "Dholuo (Latin, Kenya)",
+    },
+    LocaleRecord {
+        tag: "en-IT",
+        display_name: "English (Italy)",
+        localized_name: "English (Italy)",
     },
     LocaleRecord {
         tag: "en-LR",
@@ -10041,11 +10051,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ⵜⴰⵛⵍⵃⵉⵜ (ⵍⵎⵖⵔⵉⴱ)",
     },
     LocaleRecord {
-        tag: "en-LC",
-        display_name: "English (St. Lucia)",
-        localized_name: "English (St Lucia)",
-    },
-    LocaleRecord {
         tag: "khq-Latn-ML",
         display_name: "Koyra Chiini (Latin, Mali)",
         localized_name: "Koyra ciini (Latin, Maali)",
@@ -10054,6 +10059,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "nl-NL",
         display_name: "Dutch (Netherlands)",
         localized_name: "Nederlands (Nederland)",
+    },
+    LocaleRecord {
+        tag: "en-LC",
+        display_name: "English (St. Lucia)",
+        localized_name: "English (St Lucia)",
     },
     LocaleRecord {
         tag: "so-DJ",
@@ -10066,14 +10076,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "саха тыла",
     },
     LocaleRecord {
-        tag: "sw-TZ",
-        display_name: "Swahili (Tanzania)",
-        localized_name: "Kiswahili (Tanzania)",
-    },
-    LocaleRecord {
         tag: "sw-Latn-TZ",
         display_name: "Swahili (Latin, Tanzania)",
         localized_name: "Kiswahili (Kilatini, Tanzania)",
+    },
+    LocaleRecord {
+        tag: "sw-TZ",
+        display_name: "Swahili (Tanzania)",
+        localized_name: "Kiswahili (Tanzania)",
     },
     LocaleRecord {
         tag: "en-LS",
@@ -10106,14 +10116,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Naijíriá Píjin (Látin, Naijíria)",
     },
     LocaleRecord {
-        tag: "sat",
-        display_name: "Santali",
-        localized_name: "ᱥᱟᱱᱛᱟᱲᱤ",
-    },
-    LocaleRecord {
         tag: "kxv-Orya",
         display_name: "Kuvi (Odia)",
         localized_name: "କୁୱି (ଅଡ଼ିଆ)",
+    },
+    LocaleRecord {
+        tag: "sat",
+        display_name: "Santali",
+        localized_name: "ᱥᱟᱱᱛᱟᱲᱤ",
     },
     LocaleRecord {
         tag: "en-KI",
@@ -10121,24 +10131,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Kiribati)",
     },
     LocaleRecord {
-        tag: "en-KE",
-        display_name: "English (Kenya)",
-        localized_name: "English (Kenya)",
-    },
-    LocaleRecord {
         tag: "dyo-SN",
         display_name: "Jola-Fonyi (Senegal)",
         localized_name: "joola (Senegal)",
     },
     LocaleRecord {
-        tag: "ia-001",
-        display_name: "Interlingua (world)",
-        localized_name: "interlingua (mundo)",
+        tag: "en-KE",
+        display_name: "English (Kenya)",
+        localized_name: "English (Kenya)",
     },
     LocaleRecord {
         tag: "dua-CM",
         display_name: "Duala (Cameroon)",
         localized_name: "duálá (Cameroun)",
+    },
+    LocaleRecord {
+        tag: "ia-001",
+        display_name: "Interlingua (world)",
+        localized_name: "interlingua (mundo)",
     },
     LocaleRecord {
         tag: "kgp-BR",
@@ -10206,14 +10216,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Dholuo",
     },
     LocaleRecord {
-        tag: "en-NL",
-        display_name: "English (Netherlands)",
-        localized_name: "English (Netherlands)",
-    },
-    LocaleRecord {
         tag: "fil",
         display_name: "Filipino",
         localized_name: "Filipino",
+    },
+    LocaleRecord {
+        tag: "en-NL",
+        display_name: "English (Netherlands)",
+        localized_name: "English (Netherlands)",
     },
     LocaleRecord {
         tag: "lu-Latn-CD",
@@ -10351,14 +10361,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Makua (Latin, Umozambiki)",
     },
     LocaleRecord {
-        tag: "az",
-        display_name: "Azerbaijani",
-        localized_name: "azərbaycan",
-    },
-    LocaleRecord {
         tag: "sd-PK",
         display_name: "Sindhi (Pakistan)",
         localized_name: "سنڌي (پاڪستان)",
+    },
+    LocaleRecord {
+        tag: "az",
+        display_name: "Azerbaijani",
+        localized_name: "azərbaycan",
     },
     LocaleRecord {
         tag: "en-MY",
@@ -10376,6 +10386,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Maldives)",
     },
     LocaleRecord {
+        tag: "so-ET",
+        display_name: "Somali (Ethiopia)",
+        localized_name: "Soomaali (Itoobiya)",
+    },
+    LocaleRecord {
         tag: "mni-IN",
         display_name: "Manipuri (India)",
         localized_name: "মৈতৈলোন্ (ইন্দিয়া)",
@@ -10384,11 +10399,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "en-MU",
         display_name: "English (Mauritius)",
         localized_name: "English (Mauritius)",
-    },
-    LocaleRecord {
-        tag: "so-ET",
-        display_name: "Somali (Ethiopia)",
-        localized_name: "Soomaali (Itoobiya)",
     },
     LocaleRecord {
         tag: "en-MT",
@@ -10606,14 +10616,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Rwanda)",
     },
     LocaleRecord {
-        tag: "ksf-Latn-CM",
-        display_name: "Bafia (Latin, Cameroon)",
-        localized_name: "rikpa (Latin, kamɛrún)",
-    },
-    LocaleRecord {
         tag: "te-Telu-IN",
         display_name: "Telugu (Telugu, India)",
         localized_name: "తెలుగు (తెలుగు, భారతదేశం)",
+    },
+    LocaleRecord {
+        tag: "ksf-Latn-CM",
+        display_name: "Bafia (Latin, Cameroon)",
+        localized_name: "rikpa (Latin, kamɛrún)",
     },
     LocaleRecord {
         tag: "so-KE",
@@ -10656,14 +10666,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ichibemba",
     },
     LocaleRecord {
-        tag: "en-SI",
-        display_name: "English (Slovenia)",
-        localized_name: "English (Slovenia)",
-    },
-    LocaleRecord {
         tag: "nl-SX",
         display_name: "Dutch (Sint Maarten)",
         localized_name: "Nederlands (Sint-Maarten)",
+    },
+    LocaleRecord {
+        tag: "en-SI",
+        display_name: "English (Slovenia)",
+        localized_name: "English (Slovenia)",
     },
     LocaleRecord {
         tag: "en-SH",
@@ -10751,14 +10761,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ichibemba (Zambia)",
     },
     LocaleRecord {
-        tag: "eo",
-        display_name: "Esperanto",
-        localized_name: "Esperanto",
-    },
-    LocaleRecord {
         tag: "de-BE",
         display_name: "German (Belgium)",
         localized_name: "Deutsch (Belgien)",
+    },
+    LocaleRecord {
+        tag: "eo",
+        display_name: "Esperanto",
+        localized_name: "Esperanto",
     },
     LocaleRecord {
         tag: "es",
@@ -10811,14 +10821,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ndaꞌa (Kamɛlûn)",
     },
     LocaleRecord {
-        tag: "fa",
-        display_name: "Persian",
-        localized_name: "فارسی",
-    },
-    LocaleRecord {
         tag: "kxv-Deva",
         display_name: "Kuvi (Devanagari)",
         localized_name: "कुवि (देवनागरी)",
+    },
+    LocaleRecord {
+        tag: "fa",
+        display_name: "Persian",
+        localized_name: "فارسی",
     },
     LocaleRecord {
         tag: "ann-Latn-NG",
@@ -10836,6 +10846,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ᱥᱟᱱᱛᱟᱲᱤ (ᱚᱞ ᱪᱤᱠᱤ, ᱤᱱᱰᱤᱭᱟ)",
     },
     LocaleRecord {
+        tag: "syr-SY",
+        display_name: "Syriac (Syria)",
+        localized_name: "ܣܘܪܝܝܐ (ܣܘܪܝܐ)",
+    },
+    LocaleRecord {
         tag: "bgc",
         display_name: "Haryanvi",
         localized_name: "हरियाणवी",
@@ -10844,11 +10859,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "bs-Cyrl",
         display_name: "Bosnian (Cyrillic)",
         localized_name: "босански (ћирилица)",
-    },
-    LocaleRecord {
-        tag: "syr-SY",
-        display_name: "Syriac (Syria)",
-        localized_name: "ܣܘܪܝܝܐ (ܣܘܪܝܐ)",
     },
     LocaleRecord {
         tag: "ff",
@@ -10876,14 +10886,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Tuvalu)",
     },
     LocaleRecord {
-        tag: "en-TT",
-        display_name: "English (Trinidad & Tobago)",
-        localized_name: "English (Trinidad & Tobago)",
-    },
-    LocaleRecord {
         tag: "zh-Latn",
         display_name: "Chinese (Latin)",
         localized_name: "Chinese (Latin)",
+    },
+    LocaleRecord {
+        tag: "en-TT",
+        display_name: "English (Trinidad & Tobago)",
+        localized_name: "English (Trinidad & Tobago)",
     },
     LocaleRecord {
         tag: "yue",
@@ -10906,14 +10916,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Hibena (Hutanzania)",
     },
     LocaleRecord {
-        tag: "en-TO",
-        display_name: "English (Tonga)",
-        localized_name: "English (Tonga)",
-    },
-    LocaleRecord {
         tag: "sr-Latn-BA",
         display_name: "Serbian (Latin, Bosnia & Herzegovina)",
         localized_name: "srpski (latinica, Bosna i Hercegovina)",
+    },
+    LocaleRecord {
+        tag: "en-TO",
+        display_name: "English (Tonga)",
+        localized_name: "English (Tonga)",
     },
     LocaleRecord {
         tag: "fr",
@@ -10946,14 +10956,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Uganda)",
     },
     LocaleRecord {
-        tag: "brx-IN",
-        display_name: "Bodo (India)",
-        localized_name: "बर’ (भारत)",
-    },
-    LocaleRecord {
         tag: "es-Latn-ES",
         display_name: "Spanish (Latin, Spain)",
         localized_name: "español (latino, España)",
+    },
+    LocaleRecord {
+        tag: "brx-IN",
+        display_name: "Bodo (India)",
+        localized_name: "बर’ (भारत)",
     },
     LocaleRecord {
         tag: "kk-Cyrl-KZ",
@@ -11041,14 +11051,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "English (Slovakia)",
     },
     LocaleRecord {
-        tag: "gv",
-        display_name: "Manx",
-        localized_name: "Gaelg",
-    },
-    LocaleRecord {
         tag: "ta-MY",
         display_name: "Tamil (Malaysia)",
         localized_name: "தமிழ் (மலேசியா)",
+    },
+    LocaleRecord {
+        tag: "gv",
+        display_name: "Manx",
+        localized_name: "Gaelg",
     },
     LocaleRecord {
         tag: "ff-Adlm-NG",
@@ -11061,6 +11071,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "duálá (Latin, Cameroun)",
     },
     LocaleRecord {
+        tag: "raj-IN",
+        display_name: "Rajasthani (India)",
+        localized_name: "राजस्थानी (भारत)",
+    },
+    LocaleRecord {
         tag: "it-SM",
         display_name: "Italian (San Marino)",
         localized_name: "italiano (San Marino)",
@@ -11069,11 +11084,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "ee-Latn-GH",
         display_name: "Ewe (Latin, Ghana)",
         localized_name: "eʋegbe (latingbeŋɔŋlɔ, Ghana nutome)",
-    },
-    LocaleRecord {
-        tag: "raj-IN",
-        display_name: "Rajasthani (India)",
-        localized_name: "राजस्थानी (भारत)",
     },
     LocaleRecord {
         tag: "tt-RU",
@@ -11126,14 +11136,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "مازرونی (عربی, ایران)",
     },
     LocaleRecord {
-        tag: "en-VU",
-        display_name: "English (Vanuatu)",
-        localized_name: "English (Vanuatu)",
-    },
-    LocaleRecord {
         tag: "uz-Arab-AF",
         display_name: "Uzbek (Arabic, Afghanistan)",
         localized_name: "اوزبیک (عربی, افغانستان)",
+    },
+    LocaleRecord {
+        tag: "en-VU",
+        display_name: "English (Vanuatu)",
+        localized_name: "English (Vanuatu)",
     },
     LocaleRecord {
         tag: "hsb-Latn-DE",
@@ -11146,14 +11156,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "hrvatski",
     },
     LocaleRecord {
-        tag: "ht",
-        display_name: "Haitian Creole",
-        localized_name: "Kreyòl Ayisyen",
-    },
-    LocaleRecord {
         tag: "csw-CA",
         display_name: "Swampy Cree (Canada)",
         localized_name: "ᓀᐦᐃᓇᐍᐏᐣ (ᑳᓇᑕ)",
+    },
+    LocaleRecord {
+        tag: "ht",
+        display_name: "Haitian Creole",
+        localized_name: "Kreyòl Ayisyen",
     },
     LocaleRecord {
         tag: "hu",
@@ -11196,6 +11206,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "саха тыла (Арассыыйа)",
     },
     LocaleRecord {
+        tag: "sr-Latn-ME",
+        display_name: "Serbian (Latin, Montenegro)",
+        localized_name: "srpski (latinica, Crna Gora)",
+    },
+    LocaleRecord {
         tag: "ii",
         display_name: "Sichuan Yi",
         localized_name: "ꆈꌠꉙ",
@@ -11204,11 +11219,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "wae-Latn-CH",
         display_name: "Walser (Latin, Switzerland)",
         localized_name: "Walser (Latiniš, Schwiz)",
-    },
-    LocaleRecord {
-        tag: "sr-Latn-ME",
-        display_name: "Serbian (Latin, Montenegro)",
-        localized_name: "srpski (latinica, Crna Gora)",
     },
     LocaleRecord {
         tag: "nmg-Latn-CM",
@@ -11221,14 +11231,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ລາວ (ລາວ, ລາວ)",
     },
     LocaleRecord {
-        tag: "it-VA",
-        display_name: "Italian (Vatican City)",
-        localized_name: "italiano (Città del Vaticano)",
-    },
-    LocaleRecord {
         tag: "frr",
         display_name: "Northern Frisian",
         localized_name: "Nordfriisk",
+    },
+    LocaleRecord {
+        tag: "it-VA",
+        display_name: "Italian (Vatican City)",
+        localized_name: "italiano (Città del Vaticano)",
     },
     LocaleRecord {
         tag: "en-US",
@@ -11351,14 +11361,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "español (Brasil)",
     },
     LocaleRecord {
-        tag: "ksb-Latn-TZ",
-        display_name: "Shambala (Latin, Tanzania)",
-        localized_name: "Kishambaa (Latin, Tanzania)",
-    },
-    LocaleRecord {
         tag: "yue-HK",
         display_name: "Cantonese (Hong Kong SAR China)",
         localized_name: "粵語 (中國香港特別行政區)",
+    },
+    LocaleRecord {
+        tag: "ksb-Latn-TZ",
+        display_name: "Shambala (Latin, Tanzania)",
+        localized_name: "Kishambaa (Latin, Tanzania)",
     },
     LocaleRecord {
         tag: "mai",
@@ -11396,14 +11406,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "پښتو (افغانستان)",
     },
     LocaleRecord {
-        tag: "ki",
-        display_name: "Kikuyu",
-        localized_name: "Gikuyu",
-    },
-    LocaleRecord {
         tag: "mas",
         display_name: "Masai",
         localized_name: "Maa",
+    },
+    LocaleRecord {
+        tag: "ki",
+        display_name: "Kikuyu",
+        localized_name: "Gikuyu",
     },
     LocaleRecord {
         tag: "kk",
@@ -11501,6 +11511,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ߒߞߏ (ߒߞߏ، ߖߌ߬ߣߍ߫)",
     },
     LocaleRecord {
+        tag: "fur",
+        display_name: "Friulian",
+        localized_name: "furlan",
+    },
+    LocaleRecord {
         tag: "sg-CF",
         display_name: "Sango (Central African Republic)",
         localized_name: "Sängö (Ködörösêse tî Bêafrîka)",
@@ -11509,11 +11524,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "ln",
         display_name: "Lingala",
         localized_name: "lingála",
-    },
-    LocaleRecord {
-        tag: "fur",
-        display_name: "Friulian",
-        localized_name: "furlan",
     },
     LocaleRecord {
         tag: "rwk-Latn-TZ",
@@ -11526,14 +11536,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ລາວ",
     },
     LocaleRecord {
-        tag: "seh-Latn-MZ",
-        display_name: "Sena (Latin, Mozambique)",
-        localized_name: "sena (Latin, Moçambique)",
-    },
-    LocaleRecord {
         tag: "lag-TZ",
         display_name: "Langi (Tanzania)",
         localized_name: "Kɨlaangi (Taansanía)",
+    },
+    LocaleRecord {
+        tag: "seh-Latn-MZ",
+        display_name: "Sena (Latin, Mozambique)",
+        localized_name: "sena (Latin, Moçambique)",
     },
     LocaleRecord {
         tag: "lt",
@@ -11566,14 +11576,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Soomaali (Soomaaliya)",
     },
     LocaleRecord {
-        tag: "asa-Latn-TZ",
-        display_name: "Asu (Latin, Tanzania)",
-        localized_name: "Kipare (Latin, Tadhania)",
-    },
-    LocaleRecord {
         tag: "yav-CM",
         display_name: "Yangben (Cameroon)",
         localized_name: "nuasue (Kemelún)",
+    },
+    LocaleRecord {
+        tag: "asa-Latn-TZ",
+        display_name: "Asu (Latin, Tanzania)",
+        localized_name: "Kipare (Latin, Tadhania)",
     },
     LocaleRecord {
         tag: "nds-Latn-DE",
@@ -11691,14 +11701,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "occitan (Espanha)",
     },
     LocaleRecord {
-        tag: "dsb",
-        display_name: "Lower Sorbian",
-        localized_name: "dolnoserbšćina",
-    },
-    LocaleRecord {
         tag: "es-CR",
         display_name: "Spanish (Costa Rica)",
         localized_name: "español (Costa Rica)",
+    },
+    LocaleRecord {
+        tag: "dsb",
+        display_name: "Lower Sorbian",
+        localized_name: "dolnoserbšćina",
     },
     LocaleRecord {
         tag: "en-ZM",
@@ -11721,14 +11731,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "isiNdebele",
     },
     LocaleRecord {
-        tag: "ne",
-        display_name: "Nepali",
-        localized_name: "नेपाली",
-    },
-    LocaleRecord {
         tag: "ta-SG",
         display_name: "Tamil (Singapore)",
         localized_name: "தமிழ் (சிங்கப்பூர்)",
+    },
+    LocaleRecord {
+        tag: "ne",
+        display_name: "Nepali",
+        localized_name: "नेपाली",
     },
     LocaleRecord {
         tag: "es-CL",
@@ -11796,14 +11806,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Pijin (Latin, Solomon Aelan)",
     },
     LocaleRecord {
-        tag: "ga-Latn-IE",
-        display_name: "Irish (Latin, Ireland)",
-        localized_name: "Gaeilge (Laidineach, Éire)",
-    },
-    LocaleRecord {
         tag: "fi-Latn-FI",
         display_name: "Finnish (Latin, Finland)",
         localized_name: "suomi (latinalainen, Suomi)",
+    },
+    LocaleRecord {
+        tag: "ga-Latn-IE",
+        display_name: "Irish (Latin, Ireland)",
+        localized_name: "Gaeilge (Laidineach, Éire)",
     },
     LocaleRecord {
         tag: "ja-JP-u-ca-japanese-x-lvariant-JP",
@@ -11846,24 +11856,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Oromoo",
     },
     LocaleRecord {
-        tag: "or",
-        display_name: "Odia",
-        localized_name: "ଓଡ଼ିଆ",
-    },
-    LocaleRecord {
         tag: "es-EC",
         display_name: "Spanish (Ecuador)",
         localized_name: "español (Ecuador)",
     },
     LocaleRecord {
-        tag: "os",
-        display_name: "Ossetic",
-        localized_name: "ирон",
-    },
-    LocaleRecord {
-        tag: "ms-Latn-MY",
-        display_name: "Malay (Latin, Malaysia)",
-        localized_name: "Melayu (Latin, Malaysia)",
+        tag: "or",
+        display_name: "Odia",
+        localized_name: "ଓଡ଼ିଆ",
     },
     LocaleRecord {
         tag: "sq-XK",
@@ -11874,6 +11874,16 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "de-LU",
         display_name: "German (Luxembourg)",
         localized_name: "Deutsch (Luxemburg)",
+    },
+    LocaleRecord {
+        tag: "os",
+        display_name: "Ossetic",
+        localized_name: "ирон",
+    },
+    LocaleRecord {
+        tag: "ms-Latn-MY",
+        display_name: "Malay (Latin, Malaysia)",
+        localized_name: "Melayu (Latin, Malaysia)",
     },
     LocaleRecord {
         tag: "es-EA",
@@ -11891,14 +11901,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Kalenjin (Latin, Emetab Kenya)",
     },
     LocaleRecord {
-        tag: "da-DK",
-        display_name: "Danish (Denmark)",
-        localized_name: "dansk (Danmark)",
-    },
-    LocaleRecord {
         tag: "za-CN",
         display_name: "Zhuang (China)",
         localized_name: "Vahcuengh (Cunghgoz)",
+    },
+    LocaleRecord {
+        tag: "da-DK",
+        display_name: "Danish (Denmark)",
+        localized_name: "dansk (Danmark)",
     },
     LocaleRecord {
         tag: "nd-Latn-ZW",
@@ -12006,14 +12016,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "português",
     },
     LocaleRecord {
-        tag: "kkj-Latn-CM",
-        display_name: "Kako (Latin, Cameroon)",
-        localized_name: "kakɔ (Latin, Kamɛrun)",
-    },
-    LocaleRecord {
         tag: "fr-CM",
         display_name: "French (Cameroon)",
         localized_name: "français (Cameroun)",
+    },
+    LocaleRecord {
+        tag: "kkj-Latn-CM",
+        display_name: "Kako (Latin, Cameroon)",
+        localized_name: "kakɔ (Latin, Kamɛrun)",
     },
     LocaleRecord {
         tag: "sg-Latn-CF",
@@ -12116,14 +12126,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "français (Burundi)",
     },
     LocaleRecord {
-        tag: "qu",
-        display_name: "Quechua",
-        localized_name: "Runasimi",
-    },
-    LocaleRecord {
         tag: "fr-BJ",
         display_name: "French (Benin)",
         localized_name: "français (Bénin)",
+    },
+    LocaleRecord {
+        tag: "qu",
+        display_name: "Quechua",
+        localized_name: "Runasimi",
     },
     LocaleRecord {
         tag: "fr-BL",
@@ -12141,14 +12151,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Chimakonde",
     },
     LocaleRecord {
-        tag: "kl-GL",
-        display_name: "Kalaallisut (Greenland)",
-        localized_name: "kalaallisut (Kalaallit Nunaat)",
-    },
-    LocaleRecord {
         tag: "es-GT",
         display_name: "Spanish (Guatemala)",
         localized_name: "español (Guatemala)",
+    },
+    LocaleRecord {
+        tag: "kl-GL",
+        display_name: "Kalaallisut (Greenland)",
+        localized_name: "kalaallisut (Kalaallit Nunaat)",
     },
     LocaleRecord {
         tag: "es-GQ",
@@ -12191,14 +12201,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ekegusii (Kenya)",
     },
     LocaleRecord {
-        tag: "rw",
-        display_name: "Kinyarwanda",
-        localized_name: "Ikinyarwanda",
-    },
-    LocaleRecord {
         tag: "ff-Adlm-BF",
         display_name: "Fula (Adlam, Burkina Faso)",
         localized_name: "𞤆𞤵𞤤𞤢𞤪 (𞤀𞤁𞤂𞤢𞤃⹁ 𞤄𞤵𞤪𞤳𞤭𞤲𞤢 𞤊𞤢𞤧𞤮𞥅)",
+    },
+    LocaleRecord {
+        tag: "rw",
+        display_name: "Kinyarwanda",
+        localized_name: "Ikinyarwanda",
     },
     LocaleRecord {
         tag: "nb-NO",
@@ -12216,19 +12226,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Gàidhlig (An Rìoghachd Aonaichte)",
     },
     LocaleRecord {
-        tag: "pcm-NG",
-        display_name: "Nigerian Pidgin (Nigeria)",
-        localized_name: "Naijíriá Píjin (Naijíria)",
-    },
-    LocaleRecord {
         tag: "ug-CN",
         display_name: "Uyghur (China)",
         localized_name: "ئۇيغۇرچە (جۇڭگو)",
     },
     LocaleRecord {
+        tag: "pcm-NG",
+        display_name: "Nigerian Pidgin (Nigeria)",
+        localized_name: "Naijíriá Píjin (Naijíria)",
+    },
+    LocaleRecord {
         tag: "sa",
         display_name: "Sanskrit",
         localized_name: "संस्कृत भाषा",
+    },
+    LocaleRecord {
+        tag: "gl-Latn-ES",
+        display_name: "Galician (Latin, Spain)",
+        localized_name: "galego (latino, España)",
     },
     LocaleRecord {
         tag: "sv-FI",
@@ -12241,9 +12256,9 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "sardu",
     },
     LocaleRecord {
-        tag: "gl-Latn-ES",
-        display_name: "Galician (Latin, Spain)",
-        localized_name: "galego (latino, España)",
+        tag: "nl-Latn-NL",
+        display_name: "Dutch (Latin, Netherlands)",
+        localized_name: "Nederlands (Latijns, Nederland)",
     },
     LocaleRecord {
         tag: "sd",
@@ -12251,19 +12266,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "سنڌي",
     },
     LocaleRecord {
-        tag: "nl-Latn-NL",
-        display_name: "Dutch (Latin, Netherlands)",
-        localized_name: "Nederlands (Latijns, Nederland)",
+        tag: "fr-DZ",
+        display_name: "French (Algeria)",
+        localized_name: "français (Algérie)",
     },
     LocaleRecord {
         tag: "se",
         display_name: "Northern Sami",
         localized_name: "davvisámegiella",
-    },
-    LocaleRecord {
-        tag: "fr-DZ",
-        display_name: "French (Algeria)",
-        localized_name: "français (Algérie)",
     },
     LocaleRecord {
         tag: "gv-Latn-IM",
@@ -12291,6 +12301,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "slovenščina",
     },
     LocaleRecord {
+        tag: "bho-IN",
+        display_name: "Bhojpuri (India)",
+        localized_name: "भोजपुरी (भारत)",
+    },
+    LocaleRecord {
         tag: "lij-IT",
         display_name: "Ligurian (Italy)",
         localized_name: "ligure (Italia)",
@@ -12299,11 +12314,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "sn",
         display_name: "Shona",
         localized_name: "chiShona",
-    },
-    LocaleRecord {
-        tag: "bho-IN",
-        display_name: "Bhojpuri (India)",
-        localized_name: "भोजपुरी (भारत)",
     },
     LocaleRecord {
         tag: "so",
@@ -12336,14 +12346,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Sesotho",
     },
     LocaleRecord {
-        tag: "su",
-        display_name: "Sundanese",
-        localized_name: "Basa Sunda",
-    },
-    LocaleRecord {
         tag: "fr-DJ",
         display_name: "French (Djibouti)",
         localized_name: "français (Djibouti)",
+    },
+    LocaleRecord {
+        tag: "su",
+        display_name: "Sundanese",
+        localized_name: "Basa Sunda",
     },
     LocaleRecord {
         tag: "sv",
@@ -12386,14 +12396,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ไทย",
     },
     LocaleRecord {
-        tag: "vmw-Latn-MZ",
-        display_name: "Makhuwa (Latin, Mozambique)",
-        localized_name: "emakhuwa (latim, oMosambikhi)",
-    },
-    LocaleRecord {
         tag: "ti",
         display_name: "Tigrinya",
         localized_name: "ትግርኛ",
+    },
+    LocaleRecord {
+        tag: "vmw-Latn-MZ",
+        display_name: "Makhuwa (Latin, Mozambique)",
+        localized_name: "emakhuwa (latim, oMosambikhi)",
     },
     LocaleRecord {
         tag: "tk",
@@ -12416,14 +12426,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Setswana",
     },
     LocaleRecord {
-        tag: "dyo",
-        display_name: "Jola-Fonyi",
-        localized_name: "joola",
-    },
-    LocaleRecord {
         tag: "to",
         display_name: "Tongan",
         localized_name: "lea fakatonga",
+    },
+    LocaleRecord {
+        tag: "dyo",
+        display_name: "Jola-Fonyi",
+        localized_name: "joola",
     },
     LocaleRecord {
         tag: "or-IN",
@@ -12461,14 +12471,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "türkmen dili (Latyn elipbiýi, Türkmenistan)",
     },
     LocaleRecord {
-        tag: "sk-SK",
-        display_name: "Slovak (Slovakia)",
-        localized_name: "slovenčina (Slovensko)",
-    },
-    LocaleRecord {
         tag: "fr-GP",
         display_name: "French (Guadeloupe)",
         localized_name: "français (Guadeloupe)",
+    },
+    LocaleRecord {
+        tag: "sk-SK",
+        display_name: "Slovak (Slovakia)",
+        localized_name: "slovenčina (Slovensko)",
     },
     LocaleRecord {
         tag: "fr-GQ",
@@ -12621,14 +12631,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ichibemba (Latin, Zambia)",
     },
     LocaleRecord {
-        tag: "gaa",
-        display_name: "Ga",
-        localized_name: "Gã",
-    },
-    LocaleRecord {
         tag: "es-NI",
         display_name: "Spanish (Nicaragua)",
         localized_name: "español (Nicaragua)",
+    },
+    LocaleRecord {
+        tag: "gaa",
+        display_name: "Ga",
+        localized_name: "Gã",
     },
     LocaleRecord {
         tag: "ru-KZ",
@@ -12641,24 +12651,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "ܣܘܪܝܝܐ",
     },
     LocaleRecord {
-        tag: "he-IL",
-        display_name: "Hebrew (Israel)",
-        localized_name: "עברית (ישראל)",
-    },
-    LocaleRecord {
         tag: "ann-NG",
         display_name: "Obolo (Nigeria)",
         localized_name: "Obolo (Nigeria)",
     },
     LocaleRecord {
-        tag: "bho-Deva-IN",
-        display_name: "Bhojpuri (Devanagari, India)",
-        localized_name: "भोजपुरी (देवानागारी, भारत)",
+        tag: "he-IL",
+        display_name: "Hebrew (Israel)",
+        localized_name: "עברית (ישראל)",
     },
     LocaleRecord {
         tag: "fur-Latn-IT",
         display_name: "Friulian (Latin, Italy)",
         localized_name: "furlan (latin, Italie)",
+    },
+    LocaleRecord {
+        tag: "bho-Deva-IN",
+        display_name: "Bhojpuri (Devanagari, India)",
+        localized_name: "भोजपुरी (देवानागारी, भारत)",
     },
     LocaleRecord {
         tag: "my-Mymr-MM",
@@ -12691,24 +12701,24 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "asturianu (llatín, España)",
     },
     LocaleRecord {
-        tag: "ewo-CM",
-        display_name: "Ewondo (Cameroon)",
-        localized_name: "ewondo (Kamərún)",
-    },
-    LocaleRecord {
         tag: "vun-TZ",
         display_name: "Vunjo (Tanzania)",
         localized_name: "Kyivunjo (Tanzania)",
     },
     LocaleRecord {
-        tag: "jmc-Latn-TZ",
-        display_name: "Machame (Latin, Tanzania)",
-        localized_name: "Kimachame (Latin, Tanzania)",
+        tag: "ewo-CM",
+        display_name: "Ewondo (Cameroon)",
+        localized_name: "ewondo (Kamərún)",
     },
     LocaleRecord {
         tag: "kkj-CM",
         display_name: "Kako (Cameroon)",
         localized_name: "kakɔ (Kamɛrun)",
+    },
+    LocaleRecord {
+        tag: "jmc-Latn-TZ",
+        display_name: "Machame (Latin, Tanzania)",
+        localized_name: "Kimachame (Latin, Tanzania)",
     },
     LocaleRecord {
         tag: "szl",
@@ -12781,14 +12791,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "हिन्दी (देवनागरी, भारत)",
     },
     LocaleRecord {
-        tag: "wo-SN",
-        display_name: "Wolof (Senegal)",
-        localized_name: "Wolof (Senegaal)",
-    },
-    LocaleRecord {
         tag: "pa-Arab-PK",
         display_name: "Punjabi (Arabic, Pakistan)",
         localized_name: "پنجابی (عربی, پاکستان)",
+    },
+    LocaleRecord {
+        tag: "wo-SN",
+        display_name: "Wolof (Senegal)",
+        localized_name: "Wolof (Senegaal)",
     },
     LocaleRecord {
         tag: "es-PH",
@@ -12841,14 +12851,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Èdè Yorùbá",
     },
     LocaleRecord {
-        tag: "mai-IN",
-        display_name: "Maithili (India)",
-        localized_name: "मैथिली (भारत)",
-    },
-    LocaleRecord {
         tag: "tn-ZA",
         display_name: "Tswana (South Africa)",
         localized_name: "Setswana (Aforika Borwa)",
+    },
+    LocaleRecord {
+        tag: "mai-IN",
+        display_name: "Maithili (India)",
+        localized_name: "मैथिली (भारत)",
     },
     LocaleRecord {
         tag: "es-PY",
@@ -12866,14 +12876,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "français (Comores)",
     },
     LocaleRecord {
-        tag: "vai",
-        display_name: "Vai",
-        localized_name: "ꕙꔤ",
-    },
-    LocaleRecord {
         tag: "es-PR",
         display_name: "Spanish (Puerto Rico)",
         localized_name: "español (Puerto Rico)",
+    },
+    LocaleRecord {
+        tag: "vai",
+        display_name: "Vai",
+        localized_name: "ꕙꔤ",
     },
     LocaleRecord {
         tag: "za-Latn-CN",
@@ -12886,11 +12896,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "𞤆𞤵𞤤𞤢𞤪 (𞤀𞤁𞤂𞤢𞤃⹁ 𞤘𞤭𞤲𞤫)",
     },
     LocaleRecord {
-        tag: "ff-Adlm-GM",
-        display_name: "Fula (Adlam, Gambia)",
-        localized_name: "𞤆𞤵𞤤𞤢𞤪 (𞤀𞤁𞤂𞤢𞤃⹁ 𞤘𞤢𞤥𞤦𞤭𞤴𞤢)",
-    },
-    LocaleRecord {
         tag: "za",
         display_name: "Zhuang",
         localized_name: "Vahcuengh",
@@ -12899,6 +12904,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "mr-Deva-IN",
         display_name: "Marathi (Devanagari, India)",
         localized_name: "मराठी (देवनागरी, भारत)",
+    },
+    LocaleRecord {
+        tag: "ff-Adlm-GM",
+        display_name: "Fula (Adlam, Gambia)",
+        localized_name: "𞤆𞤵𞤤𞤢𞤪 (𞤀𞤁𞤂𞤢𞤃⹁ 𞤘𞤢𞤥𞤦𞤭𞤴𞤢)",
     },
     LocaleRecord {
         tag: "ff-Adlm-GH",
@@ -13021,24 +13031,19 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "français (Maroc)",
     },
     LocaleRecord {
-        tag: "vai-Latn",
-        display_name: "Vai (Latin)",
-        localized_name: "Vai (Latin)",
-    },
-    LocaleRecord {
         tag: "fr-MC",
         display_name: "French (Monaco)",
         localized_name: "français (Monaco)",
     },
     LocaleRecord {
+        tag: "vai-Latn",
+        display_name: "Vai (Latin)",
+        localized_name: "Vai (Latin)",
+    },
+    LocaleRecord {
         tag: "fr-MF",
         display_name: "French (St. Martin)",
         localized_name: "français (Saint-Martin)",
-    },
-    LocaleRecord {
-        tag: "doi-IN",
-        display_name: "Dogri (India)",
-        localized_name: "डोगरी (भारत)",
     },
     LocaleRecord {
         tag: "fr-MG",
@@ -13049,6 +13054,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "jv-ID",
         display_name: "Javanese (Indonesia)",
         localized_name: "Jawa (Indonésia)",
+    },
+    LocaleRecord {
+        tag: "doi-IN",
+        display_name: "Dogri (India)",
+        localized_name: "डोगरी (भारत)",
     },
     LocaleRecord {
         tag: "se-Latn-NO",
@@ -13071,14 +13081,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Kikamba (Kenya)",
     },
     LocaleRecord {
-        tag: "jv-Latn-ID",
-        display_name: "Javanese (Latin, Indonesia)",
-        localized_name: "Jawa (Latin, Indonésia)",
-    },
-    LocaleRecord {
         tag: "sc-Latn-IT",
         display_name: "Sardinian (Latin, Italy)",
         localized_name: "sardu (latinu, Itàlia)",
+    },
+    LocaleRecord {
+        tag: "jv-Latn-ID",
+        display_name: "Javanese (Latin, Indonesia)",
+        localized_name: "Jawa (Latin, Indonésia)",
     },
     LocaleRecord {
         tag: "fr-LU",
@@ -13101,14 +13111,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "مازرونی (ایران)",
     },
     LocaleRecord {
-        tag: "zh-Hans-HK",
-        display_name: "Chinese (Simplified, Hong Kong SAR China)",
-        localized_name: "中文 (简体，中国香港特别行政区)",
-    },
-    LocaleRecord {
         tag: "kw-GB",
         display_name: "Cornish (United Kingdom)",
         localized_name: "kernewek (Rywvaneth Unys)",
+    },
+    LocaleRecord {
+        tag: "zh-Hans-HK",
+        display_name: "Chinese (Simplified, Hong Kong SAR China)",
+        localized_name: "中文 (简体，中国香港特别行政区)",
     },
     LocaleRecord {
         tag: "yo-NG",
@@ -13136,14 +13146,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "Ikinyarwanda (U Rwanda)",
     },
     LocaleRecord {
-        tag: "ii-Yiii-CN",
-        display_name: "Sichuan Yi (Yi, China)",
-        localized_name: "ꆈꌠꉙ (ꆈꌠꁱꂷ，ꍏꇩ)",
-    },
-    LocaleRecord {
         tag: "kok",
         display_name: "Konkani",
         localized_name: "कोंकणी",
+    },
+    LocaleRecord {
+        tag: "ii-Yiii-CN",
+        display_name: "Sichuan Yi (Yi, China)",
+        localized_name: "ꆈꌠꉙ (ꆈꌠꁱꂷ，ꍏꇩ)",
     },
     LocaleRecord {
         tag: "nnh-Latn-CM",
@@ -13351,14 +13361,14 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "español (Estados Unidos)",
     },
     LocaleRecord {
-        tag: "is-IS",
-        display_name: "Icelandic (Iceland)",
-        localized_name: "íslenska (Ísland)",
-    },
-    LocaleRecord {
         tag: "yav-Latn-CM",
         display_name: "Yangben (Latin, Cameroon)",
         localized_name: "nuasue (Latin, Kemelún)",
+    },
+    LocaleRecord {
+        tag: "is-IS",
+        display_name: "Icelandic (Iceland)",
+        localized_name: "íslenska (Ísland)",
     },
     LocaleRecord {
         tag: "en-Latn-US",
@@ -13386,11 +13396,6 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         localized_name: "русский (Россия)",
     },
     LocaleRecord {
-        tag: "cgg-UG",
-        display_name: "Chiga (Uganda)",
-        localized_name: "Rukiga (Uganda)",
-    },
-    LocaleRecord {
         tag: "bgc-IN",
         display_name: "Haryanvi (India)",
         localized_name: "हरियाणवी (भारत)",
@@ -13399,6 +13404,11 @@ static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[
         tag: "ses-Latn-ML",
         display_name: "Koyraboro Senni (Latin, Mali)",
         localized_name: "Koyraboro senni (Latin, Maali)",
+    },
+    LocaleRecord {
+        tag: "cgg-UG",
+        display_name: "Chiga (Uganda)",
+        localized_name: "Rukiga (Uganda)",
     },
     LocaleRecord {
         tag: "doi-Deva-IN",
@@ -18724,6 +18734,11 @@ static LOCALE_TAG_RECORDS: &[LocaleRecord] = &[
         localized_name: "українська (Україна)",
     },
     LocaleRecord {
+        tag: "und",
+        display_name: "",
+        localized_name: "",
+    },
+    LocaleRecord {
         tag: "ur",
         display_name: "Urdu",
         localized_name: "اردو",
@@ -19216,4 +19231,4 @@ static LOCALE_TAG_RECORDS: &[LocaleRecord] = &[
 ];
 
 #[allow(dead_code)]
-pub const LOCALE_DISPLAY_GENERATED_SOURCE_BYTES: usize = 502124;
+pub const LOCALE_DISPLAY_GENERATED_SOURCE_BYTES: usize = 502655;

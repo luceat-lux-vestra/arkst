@@ -201,7 +201,7 @@ Scribium deliberately uses a deterministic checked-in locale snapshot rather
 than an OS/JVM dependency. Issue #173 generates the snapshot from
 `java.util.Locale.getAvailableLocales()` and the pinned `JVMLocale` getters
 under Eclipse Temurin `25.0.4.1+1` with `java.locale.providers=CLDR`.
-The 1,157 available records and 1,156 deduplicated canonical-tag records keep
+The 1,158 available records and 1,157 deduplicated canonical-tag records keep
 the raw returned-array order in the pinned
 `tools/jdk25_available_locale_order.tsv` manifest; the JDK25 exhaustive
 character-wise English-name collision audit found zero collision classes.
@@ -209,7 +209,11 @@ Name lookup remains first-match and character-wise JVM/Kotlin ignore-case,
 while tag lookup uses
 `Locale.forLanguageTag`-compatible canonicalization. This includes language,
 script, region, variant, observed deprecated aliases, and valid unavailable
-tags such as `xx-YY`; malformed/root-only values remain failures.
+tags such as `xx-YY`. Valid blank-language results are retained: root/`und`
+keeps empty language/code/shortTag-equivalent fields, while `tag` preserves
+JDK serialization (`und` or a private-use-only tag such as `x-private`);
+malformed prefixes are compared against the exact JDK result rather than
+rejected by a language-nonempty predicate.
 The parser preserves Java's legacy `no_NO_NY` mapping after private-use
 `lvariant` extraction, so `no-NO-x-lvariant-NY` canonicalizes to `nn-NO` while
 localized display retains the derived `no`/`NO`/`NY` base identity; residual
@@ -224,7 +228,7 @@ bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
 Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
 the generator exhaustively reconstructs every full-oracle `(profile,key)` and
 requires the compact value to match exactly. The locale logical source
-SHA-256 is `87e582a0ce8d6b1fb80667b1069ac1c5737948fb0b35dc0689605e6985b9ef3e`,
+SHA-256 is `85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16`,
 the display logical source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and
 the compact artifact SHA-256 is
@@ -399,7 +403,7 @@ semantics. The 2 localization rows are canonical #151 handoffs and are also
 | `.docauthors` | [#137](https://github.com/luceat-lux-vestra/scribium/issues/137), [PR #138](https://github.com/luceat-lux-vestra/scribium/pull/138), merge `2b685f0` | Revalidated as ordered nested dictionary append with mixed-family state sharing; `PARTIAL` |
 | `.dockeywords` | [#139](https://github.com/luceat-lux-vestra/scribium/issues/139), [PR #140](https://github.com/luceat-lux-vestra/scribium/pull/140), merge `8771bd7` | Revalidated as replacement with ordering and duplicate preservation; `PARTIAL` for body/conversion/output boundary |
 | `.theme` | [#141](https://github.com/luceat-lux-vestra/scribium/issues/141), [PR #142](https://github.com/luceat-lux-vestra/scribium/pull/142), merge `bf32038` | Pinned implementation resolves the KDoc ambiguity in favor of whole-state replacement; explicit-empty option survives serde; `PARTIAL` |
-| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,157-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,156-tag canonical index. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
+| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,158-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,157-tag canonical index, including blank-language root/private-use serialization. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
 | `.captionposition` | [#145](https://github.com/luceat-lux-vestra/scribium/issues/145), [PR #146](https://github.com/luceat-lux-vestra/scribium/pull/146), merge `247d945` | Seen and retained as #153 layout ownership; no #152 canonical status assigned |
 | Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/scribium/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
 

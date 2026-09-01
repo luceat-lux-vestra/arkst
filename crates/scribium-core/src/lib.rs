@@ -2371,8 +2371,6 @@ mod tests {
     #[test]
     fn invalid_doclang_setters_are_source_backed_and_atomic() {
         for invalid in [
-            ".doclang {en_US}",
-            ".doclang {   }",
             ".doclang {.pair {one} {two}}",
             ".doclang {en} {it}",
             ".doclang unknown:{it}",
@@ -2405,17 +2403,33 @@ mod tests {
     }
 
     #[test]
+    fn doclang_preserves_jdk_root_results_for_blank_or_legacy_inputs() {
+        for input in ["en_US", "   "] {
+            let source = format!(".doclang {{{input}}}\n.doclang\n");
+            let (result, _) = compile_source(&source);
+            assert!(result.diagnostics.is_empty(), "{input:?}: {result:?}");
+            assert_eq!(output_text(&result), "", "{input:?}: {result:?}");
+            assert_eq!(
+                result
+                    .ir
+                    .metadata
+                    .document_state
+                    .locale
+                    .as_ref()
+                    .map(|locale| locale.tag.as_str()),
+                Some("und"),
+                "{input:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
     fn doclang_block_body_uses_raw_target_conversion_before_nested_mutations() {
         let source =
             ".doclang {en}\n.doclang\n    .doclang {it}\n    .uppercase {nested}\n.doclang\n";
-        let (result, source_id) = compile_source(source);
-        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
-        assert_eq!(result.diagnostics[0].code, "E3001");
-        assert_eq!(
-            result.diagnostics[0].primary.map(|span| span.source_id),
-            Some(source_id)
-        );
-        assert_eq!(output_text(&result), "English");
+        let (result, _) = compile_source(source);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert_eq!(output_text(&result), "");
         assert_eq!(
             result
                 .ir
@@ -2425,7 +2439,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .tag,
-            "en"
+            "und"
         );
     }
 
