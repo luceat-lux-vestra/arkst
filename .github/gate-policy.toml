@@ -11,6 +11,7 @@ run = [
   "Cargo.toml",
   "Cargo.lock",
   "rust-toolchain.toml",
+  "zizmor.yml",
   "crates/**",
   "tools/**",
   "tests/**",
