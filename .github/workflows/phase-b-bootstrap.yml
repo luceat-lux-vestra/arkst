@@ -35,9 +35,9 @@ jobs:
             docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT_MANIFEST.tsv
             docs/compatibility/quarkdown/PROGRAMMABLE_DOCUMENT_SEMANTICS.md
             fixtures/quarkdown-conformance/README.md
-            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/case.toml
-            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/expected/ir.json
-            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/input.qd
+            fixtures/quarkdown-conformance/cases/doclang-locale-closure/case.toml
+            fixtures/quarkdown-conformance/cases/doclang-locale-closure/expected/ir.json
+            fixtures/quarkdown-conformance/cases/doclang-locale-closure/input.qd
             tools/dump_jdk17_locale_data.java
             tools/dump_jdk17_locale_display_data.java
             tools/generate_jdk17_locale_data.py
