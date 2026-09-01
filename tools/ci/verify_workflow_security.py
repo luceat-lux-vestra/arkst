@@ -75,17 +75,17 @@ def _job_blocks(lines: list[str], rel: str) -> list[tuple[str, list[str]]]:
     return result
 
 
-def _run_blocks(lines: list[str]) -> list[str]:
-    blocks: list[str] = []
+def _executable_blocks(lines: list[str]) -> list[tuple[str, str]]:
+    blocks: list[tuple[str, str]] = []
     index = 0
     while index < len(lines):
         code = _code(lines[index])
-        scalar = re.match(r"^(\s*)(?:-\s+)?run:\s*(.+)$", code)
-        if scalar and scalar.group(2).strip() not in {"|", ">", "|-", ">-"}:
-            blocks.append(scalar.group(2))
+        scalar = re.match(r"^(\s*)(?:-\s+)?(run|script):\s*(.+)$", code)
+        if scalar and scalar.group(3).strip() not in {"|", ">", "|-", ">-"}:
+            blocks.append((scalar.group(2), scalar.group(3)))
             index += 1
             continue
-        block = re.match(r"^(\s*)(?:-\s+)?run:\s*[|>]-?\s*$", code)
+        block = re.match(r"^(\s*)(?:-\s+)?(run|script):\s*[|>]-?\s*$", code)
         if not block:
             index += 1
             continue
@@ -97,7 +97,7 @@ def _run_blocks(lines: list[str]) -> list[str]:
                 break
             body.append(lines[index])
             index += 1
-        blocks.append("\n".join(body))
+        blocks.append((block.group(2), "\n".join(body)))
     return blocks
 
 
@@ -189,14 +189,15 @@ def verify_workflow(path: Path, root: Path) -> None:
             f"{rel}: pull_request_target workflow must not checkout repository content"
         )
 
-    for body in _run_blocks(lines):
+    for kind, body in _executable_blocks(lines):
         for expression in UNTRUSTED_EXPRESSIONS:
             if "${{" in body and expression in body:
                 raise WorkflowSecurityError(
-                    f"{rel}: untrusted GitHub expression interpolated directly into run: {expression}"
+                    f"{rel}: untrusted GitHub expression interpolated directly into {kind}: {expression}"
                 )
-        if re.search(r"--jq\s+[\"']?\$\(", body) or re.search(
-            r"--jq\s+[\"']?\$[A-Za-z_]", body
+        if kind == "run" and (
+            re.search(r"--jq\s+[\"']?\$\(", body)
+            or re.search(r"--jq\s+[\"']?\$[A-Za-z_]", body)
         ):
             raise WorkflowSecurityError(
                 f"{rel}: dynamic shell value used as jq program text; bind data with --arg"
