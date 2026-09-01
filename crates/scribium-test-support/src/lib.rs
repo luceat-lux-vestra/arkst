@@ -451,6 +451,18 @@ mod tests {
     }
 
     #[test]
+    fn test_load_doclang_locale_closure_fixture() {
+        let case = ConformanceCase::load("doclang-locale-closure");
+        assert_eq!(case.meta.id, "doclang-locale-closure");
+        assert_eq!(case.meta.feature, "document-state-doclang-locale-closure");
+        assert_eq!(
+            case.meta.compatibility_level,
+            CompatibilityLevel::SemanticallySupported
+        );
+        assert!(!case.input.is_empty());
+    }
+
+    #[test]
     fn quarkdown_conformance_corpus_obeys_declared_levels() {
         run_all_conformance_cases();
     }

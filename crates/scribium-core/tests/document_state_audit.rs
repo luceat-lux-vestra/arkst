@@ -161,7 +161,7 @@ fn document_state_witness_covers_defaults_and_mutation_contracts() {
 
 #[test]
 fn document_state_witness_covers_nested_visibility_and_atomic_failure() {
-    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid}}\n.doclang\n";
+    let source = ".doclang {en}\n.doclang {.pair {.doclang {it}} {invalid1}}\n.doclang\n";
     let (result, source_id) = compile_source(source);
     assert_eq!(result.diagnostics.len(), 1, "{result:?}");
     assert_eq!(result.diagnostics[0].code, "E3001");

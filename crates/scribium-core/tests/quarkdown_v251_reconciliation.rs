@@ -65,7 +65,7 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
             "missing artifact: {artifact}"
         );
     }
-    assert!(RECONCILIATION.contains("17 cases"));
+    assert!(RECONCILIATION.contains("18 cases"));
     assert!(RECONCILIATION.contains("No Quarkdown source, test, or fixture was copied"));
     assert!(RECONCILIATION.contains("SUPPORTED_END_TO_END"));
     assert!(RECONCILIATION.contains("SUPPORTED_SEMANTICS"));

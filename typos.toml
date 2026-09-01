@@ -1,5 +1,10 @@
 [files]
-extend-exclude = ["*.lock", "target/*", "tests/compat/corpus/*"]
+extend-exclude = [
+    "*.lock",
+    "target/*",
+    "tests/compat/corpus/*",
+    "crates/scribium-engine/src/locale_data.rs",
+]
 
 [default]
 extend-ignore-re = [
@@ -12,3 +17,13 @@ Scribium = "Scribium"
 Quarkdown = "Quarkdown"
 Typst = "Typst"
 Markdown = "Markdown"
+BA = "BA"
+Beng = "Beng"
+FO = "FO"
+PN = "PN"
+Vai = "Vai"
+fo = "fo"
+nd = "nd"
+seh = "seh"
+vai = "vai"
+Nam = "Nam"
