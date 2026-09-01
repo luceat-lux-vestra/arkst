@@ -21,11 +21,14 @@ UNTRUSTED_EXPRESSIONS = (
     "github.event.inputs.",
     "inputs.",
 )
-ALLOWED_WRITE_PERMISSIONS = {
+ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {
     ".github/workflows/ai-review.yml": {"pull-requests"},
     ".github/workflows/issue-labeler.yml": {"issues"},
     ".github/workflows/pr-labeler.yml": {"issues", "pull-requests"},
     ".github/workflows/upstream-quarkdown.yml": {"issues"},
+}
+ALLOWED_JOB_WRITE_PERMISSIONS = {
+    (".github/workflows/security.yml", "report-failure"): {"issues"},
 }
 
 
@@ -152,13 +155,17 @@ def verify_workflow(path: Path, root: Path) -> None:
     rel = path.relative_to(root).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
     text = "\n".join(lines)
-    allowed_writes = ALLOWED_WRITE_PERMISSIONS.get(rel, set())
+    workflow_allowed_writes = ALLOWED_WORKFLOW_WRITE_PERMISSIONS.get(rel, set())
 
     permissions = _top_level_block(lines, "permissions")
     if permissions is None:
         raise WorkflowSecurityError(f"{rel}: explicit top-level permissions are required")
     _check_write_permissions(
-        lines[permissions[0] : permissions[1]], rel, allowed_writes, 0, "workflow-level"
+        lines[permissions[0] : permissions[1]],
+        rel,
+        workflow_allowed_writes,
+        0,
+        "workflow-level",
     )
 
     if _top_level_block(lines, "concurrency") is None:
@@ -170,7 +177,10 @@ def verify_workflow(path: Path, root: Path) -> None:
             for line in block
         ):
             raise WorkflowSecurityError(f"{rel}:{job_id}: timeout-minutes is required")
-        _check_write_permissions(block, rel, allowed_writes, 4, f"job {job_id}")
+        job_allowed_writes = workflow_allowed_writes | ALLOWED_JOB_WRITE_PERMISSIONS.get(
+            (rel, job_id), set()
+        )
+        _check_write_permissions(block, rel, job_allowed_writes, 4, f"job {job_id}")
 
     for index, raw in enumerate(lines):
         match = re.search(r"\buses:\s*([^\s#]+)", _code(raw))
