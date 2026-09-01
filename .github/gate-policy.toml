@@ -1,0 +1,150 @@
+schema = 1
+
+[ruleset]
+name = "Protect main"
+required_check_integration_id = 15368
+
+[compatibility_scope]
+# First-match policy: `run` is evaluated before `skip`. New, unmatched path
+# classes fail closed until this registry is updated deliberately.
+run = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "crates/**",
+  "tools/**",
+  "tests/**",
+  "fixtures/**",
+  "examples/**",
+  "docs/compatibility/**",
+  ".github/gate-policy.toml",
+  ".github/workflows/ci.yml",
+  ".github/workflows/markdown-compat.yml",
+  ".github/workflows/reference-jvm.yml",
+]
+skip = [
+  ".github/**",
+  "docs/**",
+  "*.md",
+  ".gitignore",
+  ".gitattributes",
+  ".editorconfig",
+  "deny.toml",
+  "typos.toml",
+  "LICENSE",
+  "NOTICE",
+]
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "fmt"
+classification = "required"
+contexts = ["fmt"]
+always_present = true
+rationale = "Formatting plus canonical merge-gate policy verification; required on every PR."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "clippy"
+classification = "required"
+contexts = ["clippy"]
+always_present = true
+rationale = "Workspace lint gate."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "test"
+classification = "required"
+contexts = ["test (ubuntu-latest)", "test (macos-latest)", "test (windows-latest)"]
+always_present = true
+matrix_axis = "os"
+matrix_values = ["ubuntu-latest", "macos-latest", "windows-latest"]
+rationale = "Required three-OS workspace, CLI-boundary, and backend-parity tests."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "wasm"
+classification = "required"
+contexts = ["wasm"]
+always_present = true
+rationale = "Required platform-neutral WASM compile boundary."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "doc"
+classification = "required"
+contexts = ["docs"]
+always_present = true
+rationale = "Required Rust documentation build; distinct from path-scoped spelling checks."
+
+[[producer]]
+workflow = ".github/workflows/ci.yml"
+job = "deny"
+classification = "required"
+contexts = ["license"]
+always_present = true
+rationale = "Authoritative unconditional full-graph cargo-deny gate covering advisories, licenses, bans, and sources."
+
+[[producer]]
+workflow = ".github/workflows/markdown-compat.yml"
+job = "compatibility"
+classification = "required"
+contexts = ["compatibility"]
+always_present = true
+rationale = "Always-present compatibility context; expensive campaign is controlled by the fail-closed compatibility scope registry."
+
+[[producer]]
+workflow = ".github/workflows/msrv.yml"
+job = "msrv"
+classification = "required"
+contexts = ["msrv"]
+always_present = true
+rationale = "Required minimum-supported-Rust-version contract."
+
+[[producer]]
+workflow = ".github/workflows/dependency-review.yml"
+job = "dependency-review"
+classification = "advisory"
+contexts = ["dependency-review"]
+always_present = true
+rationale = "Diff-scoped dependency review is intentionally advisory: the required license job already validates the resulting Rust dependency graph unconditionally with cargo-deny. Keep this distinct evidence without adding a redundant blocking context."
+
+[[producer]]
+workflow = ".github/workflows/docs.yml"
+job = "spelling"
+classification = "path_scoped_optional"
+contexts = ["spelling"]
+always_present = false
+rationale = "Documentation spelling check only applies when docs or Markdown files change."
+
+[[producer]]
+workflow = ".github/workflows/reference-jvm.yml"
+job = "verify"
+classification = "reference_generated_data_deep_check"
+contexts = ["verify pinned Temurin 25 oracle"]
+always_present = true
+rationale = "Independent JDK25/reference-data oracle verification; deep evidence remains non-required until separately promoted by policy."
+
+[[producer]]
+workflow = ".github/workflows/security.yml"
+job = "audit"
+classification = "path_scoped_optional"
+contexts = ["audit"]
+always_present = false
+rationale = "PR-time advisories-only audit is path-scoped; scheduled supply-chain authority is reconciled separately by #228/#229."
+
+[[producer]]
+workflow = ".github/workflows/pr-labeler.yml"
+job = "label"
+classification = "advisory"
+contexts = ["label"]
+always_present = false
+rationale = "PR metadata automation is non-authoritative and must never satisfy a merge requirement."
+
+[[producer]]
+workflow = ".github/workflows/ai-review.yml"
+job = "review"
+classification = "advisory"
+contexts = ["advisory-review"]
+always_present = false
+rationale = "AI review is author/draft gated and advisory-only; it is never a required check or approval."
