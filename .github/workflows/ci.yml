@@ -36,6 +36,8 @@ jobs:
           python3 tools/ci/verify_workflow_shape.py
       - name: Test merge-gate policy verifier
         run: python3 tools/ci/test_verify_gate_policy.py
+      - name: Test upstream metadata-ingestion guards
+        run: python3 tools/ci/test_upstream_quarkdown_ingestion.py
       - name: Verify merge-gate policy and live ruleset
         env:
           GH_TOKEN: ${{ github.token }}
