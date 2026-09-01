@@ -15,6 +15,15 @@ mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 
+ZIZMOR_MODULE = Path(__file__).with_name("verify_zizmor_config.py")
+zizmor_spec = importlib.util.spec_from_file_location("verify_zizmor_config", ZIZMOR_MODULE)
+assert zizmor_spec and zizmor_spec.loader
+zizmor = importlib.util.module_from_spec(zizmor_spec)
+sys.modules[zizmor_spec.name] = zizmor
+zizmor_spec.loader.exec_module(zizmor)
+
+ROOT = Path(__file__).resolve().parents[2]
+
 BASE = """
 name: Fixture
 on:
@@ -130,6 +139,21 @@ class WorkflowSecurityTests(unittest.TestCase):
             "    runs-on: ubuntu-latest\n    container:\n      image: ubuntu:latest\n",
         )
         self.reject(bad, "digest pinned")
+
+    def test_repository_zizmor_suppression_inventory_is_exact(self) -> None:
+        zizmor.verify_config(ROOT / "zizmor.yml")
+
+    def test_broadened_zizmor_suppression_is_rejected(self) -> None:
+        valid = (ROOT / "zizmor.yml").read_text(encoding="utf-8")
+        broadened = valid.replace(
+            "      - pr-labeler.yml\n",
+            "      - pr-labeler.yml\n      - upstream-quarkdown.yml\n",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zizmor.yml"
+            path.write_text(broadened, encoding="utf-8")
+            with self.assertRaisesRegex(zizmor.ZizmorConfigError, "suppression policy drifted"):
+                zizmor.verify_config(path)
 
 
 if __name__ == "__main__":
