@@ -63,6 +63,7 @@ jobs:
         with:
           inputs: .github/workflows
           version: 1.29.0
+          config: zizmor.yml
           advanced-security: false
           online-audits: false
           annotations: false
