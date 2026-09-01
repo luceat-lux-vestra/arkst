@@ -16,24 +16,32 @@ test = r'''    #[test]
         };
         let oracle = std::fs::read_to_string(path).expect("read transient JDK25 locale oracle");
         let mut checked = 0usize;
+        let mut candidate_checked = 0usize;
         for line in oracle.lines() {
             let fields: Vec<_> = line.split('\t').collect();
-            assert_eq!(fields.len(), 5, "malformed locale oracle row: {line}");
+            assert_eq!(fields.len(), 6, "malformed locale oracle row: {line}");
             assert_eq!(fields[0], "locale");
             let request = fields[1];
-            let expected_tag = fields[2];
-            let expected_name = fields[3];
-            let expected_candidates = fields[4]
-                .split('|')
-                .map(|value| if value == "<root>" { String::new() } else { value.to_string() })
-                .collect::<Vec<_>>();
-            let parsed = parse_language_tag(request)
-                .unwrap_or_else(|| panic!("oracle request should be accepted: {request}"));
-            assert_eq!(
-                display_candidate_profiles(&parsed),
-                expected_candidates,
-                "candidate graph mismatch for {request}"
-            );
+            let path_kind = fields[2];
+            let expected_tag = fields[3];
+            let expected_name = fields[4];
+            if path_kind == "tag" {
+                let expected_candidates = fields[5]
+                    .split('|')
+                    .map(|value| if value == "<root>" { String::new() } else { value.to_string() })
+                    .collect::<Vec<_>>();
+                let parsed = parse_language_tag(request)
+                    .unwrap_or_else(|| panic!("oracle tag request should be accepted: {request}"));
+                assert_eq!(
+                    display_candidate_profiles(&parsed),
+                    expected_candidates,
+                    "candidate graph mismatch for {request}"
+                );
+                candidate_checked += 1;
+            } else {
+                assert_eq!(path_kind, "name", "unknown oracle path: {line}");
+                assert!(fields[5].is_empty(), "name path must not expose candidates");
+            }
             let actual = resolve(request)
                 .unwrap_or_else(|| panic!("oracle request should resolve: {request}"));
             assert_eq!(actual.tag, expected_tag, "canonical tag mismatch for {request}");
@@ -44,6 +52,7 @@ test = r'''    #[test]
             checked += 1;
         }
         assert!(checked >= 1_100, "expected broad available-locale oracle coverage");
+        assert!(candidate_checked >= 1_000, "expected broad tag-path candidate coverage");
     }
 
 '''
