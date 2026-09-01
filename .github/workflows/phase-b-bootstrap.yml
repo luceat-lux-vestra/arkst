@@ -1,0 +1,97 @@
+name: Phase B bootstrap
+
+on:
+  push:
+    branches: [compat/173-doclang-locale-closure]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: ${{ !contains(github.event.head_commit.message, '[phase-b-bootstrap]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Reconstruct Phase B on JDK25 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          old=83e12745acc4d3a1a3497b638f670e29030a8f22
+          git fetch origin "$old"
+          files=(
+            crates/scribium-core/src/lib.rs
+            crates/scribium-core/tests/document_state_audit.rs
+            crates/scribium-core/tests/quarkdown_v251_reconciliation.rs
+            crates/scribium-core/tests/quarkdown_value_model_audit.rs
+            crates/scribium-engine/src/locale.rs
+            crates/scribium-engine/src/locale_data.rs
+            crates/scribium-engine/data/jdk17_locale_display.bin
+            crates/scribium-test-support/src/lib.rs
+            docs/ROADMAP.md
+            docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT.md
+            docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT_MANIFEST.tsv
+            docs/compatibility/quarkdown/PROGRAMMABLE_DOCUMENT_SEMANTICS.md
+            fixtures/quarkdown-conformance/README.md
+            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/case.toml
+            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/expected/ir.json
+            fixtures/quarkdown-conformance/cases/doclang-jdk17-locale-closure/input.qd
+            tools/dump_jdk17_locale_data.java
+            tools/dump_jdk17_locale_display_data.java
+            tools/generate_jdk17_locale_data.py
+            typos.toml
+          )
+          git checkout "$old" -- "${files[@]}"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/scribium-engine/src/locale.rs')
+          text = path.read_text()
+          text = text.replace(
+              'use crate::unicode_case::equals_ignore_case;',
+              'use crate::unicode_case::{simple_lowercase, simple_uppercase};'
+          )
+          old = '''fn string_equals_ignore_case(left: &str, right: &str) -> bool {
+              let mut left_chars = left.chars();
+              let mut right_chars = right.chars();
+              loop {
+                  match (left_chars.next(), right_chars.next()) {
+                      (Some(left), Some(right)) if equals_ignore_case(left, right) => {}
+                      (None, None) => return true,
+                      _ => return false,
+                  }
+              }
+          }
+          '''
+          new = '''fn string_equals_ignore_case(left: &str, right: &str) -> bool {
+              let mut left_chars = left.chars();
+              let mut right_chars = right.chars();
+              loop {
+                  match (left_chars.next(), right_chars.next()) {
+                      (Some(left), Some(right)) if char_equals_ignore_case(left, right) => {}
+                      (None, None) => return true,
+                      _ => return false,
+                  }
+              }
+          }
+
+          fn char_equals_ignore_case(left: char, right: char) -> bool {
+              if left == right {
+                  return true;
+              }
+              let left_upper = simple_uppercase(left);
+              let right_upper = simple_uppercase(right);
+              left_upper == right_upper
+                  || simple_lowercase(left_upper) == simple_lowercase(right_upper)
+          }
+          '''
+          if old not in text:
+              raise SystemExit('locale ignore-case block not found')
+          path.write_text(text.replace(old, new))
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'compat(engine): rebuild doclang closure on JDK25 main [phase-b-bootstrap]'
+          git push origin HEAD:compat/173-doclang-locale-closure
