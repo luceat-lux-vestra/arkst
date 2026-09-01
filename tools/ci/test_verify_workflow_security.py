@@ -102,6 +102,16 @@ class WorkflowSecurityTests(unittest.TestCase):
         bad = BASE.replace("echo ok", "echo '${{ github.event.pull_request.body }}'")
         self.reject(bad, "untrusted GitHub expression")
 
+    def test_untrusted_pr_title_github_script_interpolation_is_rejected(self) -> None:
+        bad = BASE.replace(
+            "      - run: echo ok\n",
+            "      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3\n"
+            "        with:\n"
+            "          script: |\n"
+            "            core.info('${{ github.event.pull_request.title }}')\n",
+        )
+        self.reject(bad, "untrusted GitHub expression")
+
     def test_dynamic_jq_program_is_rejected(self) -> None:
         bad = BASE.replace("echo ok", 'FILTER=".[]"; gh api x --jq "$FILTER"')
         self.reject(bad, "dynamic shell value used as jq program text")
