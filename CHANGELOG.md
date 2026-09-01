@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bounded `.doclang` document state (M3):** `.doclang` now models upstream's
   general case-insensitive English full-name or IETF BCP 47 tag lookup against
   the exact Eclipse Temurin `25.0.4.1+1` CLDR oracle. The checked-in snapshot
-  preserves the 1,157 available-locale records, 1,156 canonical tags, and
+  preserves the 1,158 available-locale records, 1,157 canonical tags, and
   JDK25 localized-name behavior in an immutable compact binary representation;
   it returns `{ tag, localized_name }` through evaluator-owned shared state and
   the serde-compatible IR snapshot. Positional/named setters, nullable `.none`

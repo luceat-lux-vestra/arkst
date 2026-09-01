@@ -26,7 +26,10 @@ final class DumpJdk25LocaleData {
             rejectControlCharacters(displayName, "display name");
             rejectControlCharacters(localizedName, "localized name");
             canonicalTags.add(Locale.forLanguageTag(tag).toLanguageTag());
-            System.out.println("available\t" + tag + "\t" + displayName + "\t" + localizedName);
+            System.out.println("available\t" + tag + "\t" + displayName + "\t" + localizedName
+                    + "\t" + locale.getLanguage() + "\t" + locale.getScript() + "\t"
+                    + locale.getCountry() + "\t" + locale.getVariant() + "\t"
+                    + (locale.getCountry().isEmpty() ? "" : locale.getDisplayCountry(locale)));
         }
 
         for (CollisionGroup collision : collisions) {
@@ -42,7 +45,10 @@ final class DumpJdk25LocaleData {
             System.out.println(
                 "tag\t" + tag + "\t"
                     + locale.getDisplayName(Locale.ENGLISH) + "\t"
-                    + locale.getDisplayName(locale)
+                    + locale.getDisplayName(locale) + "\t"
+                    + locale.getLanguage() + "\t" + locale.getScript() + "\t"
+                    + locale.getCountry() + "\t" + locale.getVariant() + "\t"
+                    + (locale.getCountry().isEmpty() ? "" : locale.getDisplayCountry(locale))
             );
         }
     }

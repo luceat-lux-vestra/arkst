@@ -15,10 +15,9 @@ final class DumpJdk25LocaleDisplayData {
 
     public static void main(String[] args) {
         // JDK 25 uses CLDR as the locale-data provider and retains the small
-        // FALLBACK adapter for root/default provider values. The legacy
-        // JRE/COMPAT locale-data provider is not part of the pinned reference
-        // runtime. LocaleNameProvider lookup tries CLDR and then FALLBACK;
-        // both layers are therefore part of the effective oracle.
+        // FALLBACK adapter for root/default provider values. LocaleNameProvider
+        // lookup tries CLDR and then FALLBACK; both layers are therefore part
+        // of the effective oracle.
         LocaleData cldr = new LocaleData(LocaleProviderAdapter.Type.CLDR);
         LocaleData fallback = new LocaleData(LocaleProviderAdapter.Type.FALLBACK);
         TreeMap<String, String> rows = new TreeMap<>();

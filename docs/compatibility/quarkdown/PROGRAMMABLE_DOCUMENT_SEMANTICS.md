@@ -192,8 +192,8 @@ provider data rather than handwritten value cases. Java's legacy
 `no-NO-x-lvariant-NY` → `nn-NO` canonicalization is preserved while its
 localized name uses the derived `no`/`NO`/`NY` base identity. The provider
 routing metadata captures JDK25 CLDR parent-locale, likely-script, and alias
-maps; the active FALLBACK root values are included, while legacy JRE/COMPAT
-data is not.
+maps; the active FALLBACK root values are included as the only secondary
+provider layer.
 
 Regeneration must provide the exact archive and its extracted `java` member
 with its sibling `javac` member, for example:

@@ -66,9 +66,9 @@ Temurin `25.0.4.1+1` Linux x64 archive pinned in
 `OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz`, 141,329,719 bytes,
 SHA-256
 `dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e`.
-The locale provider is JDK25 CLDR, with the active JDK FALLBACK root values
-included where CLDR has no value; JDK17 JRE/COMPAT provider data is not part of
-the active snapshot. The locale, display, and public differential helpers are
+The locale provider is JDK25 CLDR, with JDK FALLBACK root values included only
+where CLDR has no value. The locale, display, and public differential helpers
+are
 `tools/dump_jdk25_locale_data.java`,
 `tools/dump_jdk25_locale_display_data.java`, and
 `tools/dump_jdk25_locale_oracle.java`, whose SHA-256 fingerprints are recorded

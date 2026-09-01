@@ -104,7 +104,7 @@ and conversion details are linked to the canonical [#149 value-model audit](VALU
 | `.docauthor` | `docauthor(author: String? = null)`; no alias | Empty ordered author list; getter is `""` | Getter returns the first author name or empty text. Setter appends one `DocumentAuthor`; duplicates are preserved; setter returns `VoidValue` | Current append path is bounded to scalar conversion and shares state; full upstream body/conversion contract remains open | `PARTIAL` |
 | `.docauthors` | `docauthors(authors: Map<String, DictionaryValue<OutputValue<String>>>? = null)`; no alias | Empty ordered author list | Getter returns an ordered dictionary keyed by author name with nested info. Setter maps entries and appends them; dictionary key collisions cannot represent two entries with the same key | Current validation is pre-commit and ordered, but body/value conversion is bounded; mixed singular/plural append behavior is tested | `PARTIAL` |
 | `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; source-backed body conversion and generalized target coverage remain partial | `PARTIAL` |
-| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; invalid identifiers fail before assignment | Issue #173 closes the available-locale gap with a deterministic checked-in snapshot of the pinned reference JDK universe; source-backed body text is converted before lookup without evaluating parsed body nodes. Locale-aware rendering and broader body/output behavior remain outside this slice | `PARTIAL` |
+| `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; malformed tags follow the JDK valid-prefix/root result, while type/arity/binding errors fail before assignment | Issue #173 closes the available-locale gap with a deterministic checked-in snapshot of the pinned reference JDK universe; source-backed body text is converted before lookup without evaluating parsed body nodes. Locale-aware rendering and broader body/output behavior remain outside this slice | `PARTIAL` |
 | `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction, raw-body fallback, and rollback are evidenced; theme resolution/rendering are not | `PARTIAL` |
 | `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `UNSUPPORTED` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; this evidence is retained here without re-auditing #151 semantics | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
 
@@ -228,15 +228,15 @@ bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
 Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
 the generator exhaustively reconstructs every full-oracle `(profile,key)` and
 requires the compact value to match exactly. The locale logical source
-SHA-256 is `85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16`,
+SHA-256 is `2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105`,
 the display logical source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and
 the compact artifact SHA-256 is
 `d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
 Generic assembly uses the snapshot for `Locale.getDisplayName`, including
 JDK25 CLDR parent-locale/likely-script provider routing, Unicode extension
-fallbacks, and the active FALLBACK root values; no JDK17 COMPAT/JRE data is
-used. Generation is guarded by the exact archive, helper, timezone-source,
+fallbacks, and the active FALLBACK root values; only the JDK FALLBACK root data
+is used. Generation is guarded by the exact archive, helper, timezone-source,
 logical-source, compact-artifact, and size fingerprints. Runtime behavior has
 no JVM, OS locale database, filesystem, network, or global locale state.
 

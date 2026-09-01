@@ -86,9 +86,9 @@ input.
 Locale data and `.doclang` implementation are a separate Phase B workstream,
 but they use this same active Temurin 25 baseline after the migration is
 accepted. The Phase B snapshot is regenerated from the pinned JDK25 CLDR
-oracle and does not carry forward the former JDK17 provider data. It remains a
-bounded observable `.doclang` surface, not a claim of complete Java Locale
-support.
+oracle and uses only the active CLDR/FALLBACK provider data from this pin. It
+remains a bounded observable `.doclang` surface, not a claim of complete Java
+Locale support.
 
 ## Phase B locale snapshot
 
@@ -101,16 +101,18 @@ logical display oracle contains 453,459
 records; semantic fallback-delta compaction retains 267,017 records in the
 6,549,860-byte little-endian binary snapshot, with 320 profiles, 2,525 keys,
 and 178,930 interned values. The logical locale source SHA-256 is
-`85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16`, the
+`2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105`, the
 logical display source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and the
 compact artifact SHA-256 is
 `d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
-The transient public Java differential emits 7,302 rows (4,984 tag-path and
+The transient public Java differential emits 7,438 rows (5,120 tag-path and
 2,318 name-path rows), with SHA-256
-`7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4`; its
+`59563ee565db97477b29035ae2480595bc1cea2ac603779b61a7882d6ce006c8`; its
 helper source SHA-256 is
-`57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1`.
+`8b0c1b05a192ce959fab78ca7c8875e0e357866cd14780871d664a736a21ecaf`.
+The locale generator source SHA-256 is
+`8b9622b8408d26fadea2f54cb90d7173547cbf4539634bd432423e33d49a0a54`.
 The name-first table preserves a pinned raw-array capture of
 `Locale.getAvailableLocales()` in
 `tools/jdk25_available_locale_order.tsv` (SHA-256
@@ -121,12 +123,12 @@ fields while retaining JDK `toLanguageTag()` serialization (`und`, or
 `x-private` for private-use-only tags). The direct oracle includes `""`, `und`,
 `x-private`, `en_US`, whitespace, and `en--US`; their JDK results are retained
 without an oracle-side unresolved rewrite or blank-language filtering. The
-generated Rust metadata is 502,655 bytes with
+generated Rust metadata is 814,205 bytes with
 SHA-256
-`5ebc94722c042340a84b03250ade2c9c716cfd228ad060c2186db2b41aa2ec2f` and
+`776fccb64d1097e6d7b594069568705a7960333bd0b07e0ba44aa33bbf5959c2` and
 remains below the 1 MiB source budget.
 The generator exhaustively reconstructs every logical display row, validates
 the binary index, and checks both generated artifacts byte-for-byte. JDK25's
 CLDR parent-locale, likely-script, and language-alias routing metadata is
-captured separately from the public ResourceBundle candidate identity; no
-JRE/COMPAT provider data is active.
+captured separately from the public ResourceBundle candidate identity; the
+active secondary provider layer is the JDK FALLBACK root data.

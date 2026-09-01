@@ -16,6 +16,7 @@ import bisect
 import csv
 import hashlib
 import io
+import os
 import re
 import struct
 import subprocess
@@ -46,11 +47,11 @@ EXPECTED_TAG_RECORD_COUNT = 1157
 EXPECTED_NAME_COLLISION_COUNT = 0
 AVAILABLE_ORDER_MANIFEST = "jdk25_available_locale_order.tsv"
 EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
-EXPECTED_SOURCE_SHA256 = "85b704ef5648633ad0b22a6a326ce508109fa56348e5380460c4bc4d73271e16"
-EXPECTED_DUMP_SOURCE_SHA256 = "bf6694982db1a2c619e9c759cb4177d6548cbc38f2384fe333224fe56fa8a274"
+EXPECTED_SOURCE_SHA256 = "2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105"
+EXPECTED_DUMP_SOURCE_SHA256 = "15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e"
 EXPECTED_DISPLAY_RECORD_COUNT = 453459
 EXPECTED_DISPLAY_SOURCE_SHA256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
-EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "d90169543b8fd21df5a8baaeceba42e1d0f8bfd1c9b46b2d9b46fcb322bfe453"
+EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "25ecb0d2dbc767ef1006a112ead0e2271686cf2dfd7d8f870e812dcfefab9131"
 EXPECTED_COMPACT_RECORD_COUNT = 267017
 EXPECTED_COMPACT_PROFILE_COUNT = 320
 EXPECTED_COMPACT_KEY_COUNT = 2525
@@ -66,13 +67,15 @@ REFERENCE_CLDR_SOURCE_MEMBER = REFERENCE_JDK_TZ_SOURCE_MEMBER
 REFERENCE_CLDR_SOURCE_SHA256 = REFERENCE_JDK_TZ_SOURCE_SHA256
 DISPLAY_DUMP_HELPER = "dump_jdk25_locale_display_data.java"
 PUBLIC_ORACLE_HELPER = "dump_jdk25_locale_oracle.java"
-EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "57e5e5dd3956ecf422d85cffc5fe0241e52a07911a8e820ebe9f095f7a5a63a1"
-EXPECTED_PUBLIC_ORACLE_RECORD_COUNT = 7302
-EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 = "7591c871e8cac354b29519bedad6a5cb3f389c94bce15ea44193e76299ff9ac4"
+EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "8b0c1b05a192ce959fab78ca7c8875e0e357866cd14780871d664a736a21ecaf"
+EXPECTED_PUBLIC_ORACLE_RECORD_COUNT = 7438
+EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 = "59563ee565db97477b29035ae2480595bc1cea2ac603779b61a7882d6ce006c8"
 JDK_EXPORTS = (
     "--add-exports=java.base/sun.util.resources=ALL-UNNAMED",
     "--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED",
 )
+
+LocaleRow = tuple[str, str, str, str, str, str, str, str]
 
 # Executable representation budgets. These are checked during every
 # regeneration, and the Rust integrity tests repeat the checked-in limits.
@@ -258,6 +261,7 @@ def run_reference_java(java: Path, helper: Path) -> bytes:
         ],
         check=False,
         capture_output=True,
+        env=reference_environment(),
     )
     if completed.returncode != 0:
         raise RuntimeError(
@@ -285,6 +289,7 @@ def run_reference_public_oracle(java: Path, helper: Path) -> bytes:
         ],
         check=False,
         capture_output=True,
+        env=reference_environment(),
     )
     if completed.returncode != 0:
         raise RuntimeError(
@@ -296,7 +301,7 @@ def run_reference_public_oracle(java: Path, helper: Path) -> bytes:
 
 def validate_public_oracle(raw: bytes) -> str:
     output_sha256 = sha256(raw)
-    if output_sha256 != EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256:
+    if EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 and output_sha256 != EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256:
         raise ValueError(
             "reference public locale oracle output fingerprint mismatch: "
             f"expected {EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256}, got {output_sha256}"
@@ -309,7 +314,7 @@ def validate_public_oracle(raw: bytes) -> str:
         )
     for line_number, line in enumerate(rows, 1):
         fields = line.split("\t")
-        if len(fields) != 8 or fields[0] != "locale":
+        if len(fields) != 11 or fields[0] != "locale":
             raise ValueError(f"public locale oracle row {line_number}: malformed row")
     return output_sha256
 
@@ -329,6 +334,7 @@ def run_reference_display_java(
             [str(javac), *JDK_EXPORTS, "-d", output, str(helper)],
             check=False,
             capture_output=True,
+            env=reference_environment(),
         )
         if compiled.returncode != 0:
             raise RuntimeError(
@@ -349,6 +355,7 @@ def run_reference_display_java(
             ],
             check=False,
             capture_output=True,
+            env=reference_environment(),
         )
     if completed.returncode != 0:
         raise RuntimeError(
@@ -358,26 +365,33 @@ def run_reference_display_java(
     return completed.stdout
 
 
+def reference_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["LANG"] = "C.UTF-8"
+    environment["LC_ALL"] = "C.UTF-8"
+    return environment
+
+
 def parse_dump(
     raw: bytes,
 ) -> tuple[
-    list[tuple[str, str, str]],
-    list[tuple[str, str, str]],
+    list[LocaleRow],
+    list[LocaleRow],
     list[tuple[str, list[str]]],
     str,
 ]:
     lines = raw.decode("utf-8").splitlines()
     metadata: dict[str, str] = {}
-    available: list[tuple[str, str, str]] = []
-    tags: list[tuple[str, str, str]] = []
+    available: list[LocaleRow] = []
+    tags: list[LocaleRow] = []
     collisions: list[tuple[str, list[str]]] = []
     for line_number, line in enumerate(lines, 1):
         fields = line.split("\t")
         if fields[0] in {"available", "tag"}:
-            if len(fields) != 4 or not fields[1]:
+            if len(fields) != 9 or not fields[1]:
                 raise ValueError(f"dump line {line_number}: malformed locale {fields[0]}")
             (available if fields[0] == "available" else tags).append(
-                (fields[1], fields[2], fields[3])
+                tuple(fields[1:9])
             )
         elif fields[0] == "collision":
             if len(fields) < 4 or any(not field for field in fields[2:]):
@@ -418,15 +432,15 @@ def parse_dump(
     available = apply_pinned_available_order(available)
     duplicate_available_tags = {
         tag: count
-        for tag, count in Counter(tag for tag, _display, _localized in available).items()
+        for tag, count in Counter(row[0] for row in available).items()
         if count > 1
     }
     print(f"duplicate_available_tags={duplicate_available_tags!r}")
 
     source_bytes = "".join(
-        f"{kind}\t{tag}\t{display_name}\t{localized_name}\n"
+        f"{kind}\t{tag}\t{display_name}\t{localized_name}\t{code}\t{script}\t{country}\t{variant}\t{localized_country}\n"
         for kind, rows in (("available", available), ("tag", tags))
-        for tag, display_name, localized_name in rows
+        for tag, display_name, localized_name, code, script, country, variant, localized_country in rows
     ).encode("utf-8")
     source_sha256 = sha256(source_bytes)
     if EXPECTED_SOURCE_SHA256 and source_sha256 != EXPECTED_SOURCE_SHA256:
@@ -438,8 +452,8 @@ def parse_dump(
 
 
 def apply_pinned_available_order(
-    available: list[tuple[str, str, str]],
-) -> list[tuple[str, str, str]]:
+    available: list[LocaleRow],
+) -> list[LocaleRow]:
     # The Java helper emits Locale.getAvailableLocales() without sorting. The
     # exact JDK provider union uses hash-based assembly whose unspecified raw
     # order is not stable across JVM starts, so this manifest is a captured
@@ -462,20 +476,29 @@ def apply_pinned_available_order(
     ]
     if any(len(row) != 3 for row in manifest):
         raise ValueError("pinned available-locale order manifest contains a malformed row")
-    if Counter(manifest) != Counter(available):
+    if Counter(manifest) != Counter(row[:3] for row in available):
         raise ValueError(
             "pinned available-locale order manifest does not contain the exact "
             "reference locale rows"
         )
-    return manifest
+    remaining = list(available)
+    ordered: list[LocaleRow] = []
+    for key in manifest:
+        for index, row in enumerate(remaining):
+            if row[:3] == key:
+                ordered.append(remaining.pop(index))
+                break
+        else:
+            raise ValueError("pinned available-locale order manifest row was not found")
+    return ordered
 
 
-def available_order_manifest_bytes(available: list[tuple[str, str, str]]) -> bytes:
+def available_order_manifest_bytes(available: list[LocaleRow]) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(
         output, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_ALL
     )
-    writer.writerows(available)
+    writer.writerows(row[:3] for row in available)
     return output.getvalue().encode("utf-8")
 
 
@@ -563,7 +586,7 @@ def parse_profile(profile: str) -> tuple[str, str, str, list[str]]:
     return language, script, region, variants
 
 
-def candidate_tag(
+def candidate_base_locale_tag(
     language: str, script: str, region: str, variants: list[str]
 ) -> str:
     if not language and not script and not region and not variants:
@@ -654,7 +677,7 @@ def candidate_profiles(profile: str) -> list[str]:
 
     result: list[str] = []
     for cand_language, cand_script, cand_region, cand_variants in candidates:
-        tag = candidate_tag(cand_language, cand_script, cand_region, cand_variants)
+        tag = candidate_base_locale_tag(cand_language, cand_script, cand_region, cand_variants)
         if tag not in result:
             result.append(tag)
     return result
@@ -1021,8 +1044,8 @@ def enforce_budgets(source: str, binary: bytes, stats: dict[str, int]) -> None:
 
 
 def render_rust_source(
-    available: list[tuple[str, str, str]],
-    tags: list[tuple[str, str, str]],
+    available: list[LocaleRow],
+    tags: list[LocaleRow],
     collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     display_source_sha256: str,
@@ -1179,25 +1202,35 @@ def render_rust_source(
             "static LOCALE_NAME_RECORDS: &[LocaleRecord] = &[",
         ]
     )
-    for tag, display_name, localized_name in available:
+    for tag, display_name, localized_name, code, script, country, variant, localized_country in available:
         lines.extend(
             [
                 "    LocaleRecord {",
                 f"        tag: {rust_string(tag)},",
                 f"        display_name: {rust_string(display_name)},",
                 f"        localized_name: {rust_string(localized_name)},",
+                f"        code: {rust_string(code)},",
+                f"        script: {rust_string(script)},",
+                f"        country_code: {rust_string(country)},",
+                f"        variant: {rust_string(variant)},",
+                f"        localized_country_name: {rust_string(localized_country)},",
                 "    },",
             ]
         )
     lines.append("];\n")
     lines.append("static LOCALE_TAG_RECORDS: &[LocaleRecord] = &[")
-    for tag, display_name, localized_name in tags:
+    for tag, display_name, localized_name, code, script, country, variant, localized_country in tags:
         lines.extend(
             [
                 "    LocaleRecord {",
                 f"        tag: {rust_string(tag)},",
                 f"        display_name: {rust_string(display_name)},",
                 f"        localized_name: {rust_string(localized_name)},",
+                f"        code: {rust_string(code)},",
+                f"        script: {rust_string(script)},",
+                f"        country_code: {rust_string(country)},",
+                f"        variant: {rust_string(variant)},",
+                f"        localized_country_name: {rust_string(localized_country)},",
                 "    },",
             ]
         )
@@ -1230,8 +1263,8 @@ def render_with_source_size(**kwargs: object) -> str:
 
 
 def print_stats(
-    available: list[tuple[str, str, str]],
-    tags: list[tuple[str, str, str]],
+    available: list[LocaleRow],
+    tags: list[LocaleRow],
     collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     stats: dict[str, int],
@@ -1268,8 +1301,8 @@ def print_stats(
 
 
 def generate(
-    available: list[tuple[str, str, str]],
-    tags: list[tuple[str, str, str]],
+    available: list[LocaleRow],
+    tags: list[LocaleRow],
     collisions: list[tuple[str, list[str]]],
     source_sha256: str,
     display: list[tuple[str, str, str]],
