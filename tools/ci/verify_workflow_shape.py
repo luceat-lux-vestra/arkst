@@ -18,32 +18,59 @@ def _code(line: str) -> str:
     return line.split("#", 1)[0].rstrip()
 
 
+def _require_simple_mapping_key(rel: str, code: str, label: str) -> None:
+    if not re.fullmatch(r"    [A-Za-z0-9_-]+:(?:\s*.*)?", code):
+        raise WorkflowShapeError(f"{rel}: unsupported {label} syntax: {code.strip()!r}")
+
+
 def verify_workflow(path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     rel = path.as_posix()
 
+    for line in lines:
+        leading = line[: len(line) - len(line.lstrip())]
+        if "\t" in leading:
+            raise WorkflowShapeError(f"{rel}: tab-indented YAML is not supported by the gate verifier")
+
     try:
         on_index = next(
-            i for i, line in enumerate(lines) if _indent(line) == 0 and _code(line).strip().startswith("on:")
+            i
+            for i, line in enumerate(lines)
+            if _indent(line) == 0 and _code(line).strip().startswith("on:")
         )
         jobs_index = next(
-            i for i, line in enumerate(lines) if _indent(line) == 0 and _code(line).strip() == "jobs:"
+            i
+            for i, line in enumerate(lines)
+            if _indent(line) == 0 and _code(line).strip() == "jobs:"
         )
     except StopIteration as exc:
         raise WorkflowShapeError(f"{rel}: missing top-level on:/jobs: block") from exc
 
     on_line = _code(lines[on_index]).strip()
     if on_line != "on:":
-        raise WorkflowShapeError(f"{rel}: inline top-level on: syntax is not supported by the gate verifier")
+        raise WorkflowShapeError(
+            f"{rel}: inline top-level on: syntax is not supported by the gate verifier"
+        )
 
     for raw in lines[on_index + 1 : jobs_index]:
         code = _code(raw)
-        if not code.strip() or _indent(raw) != 2:
+        stripped = code.strip()
+        if not stripped:
             continue
-        if not re.fullmatch(r"  [A-Za-z0-9_-]+:(?:\s*.*)?", code):
-            raise WorkflowShapeError(
-                f"{rel}: unsupported top-level trigger syntax: {code.strip()!r}"
-            )
+        indent = _indent(raw)
+        if indent == 2:
+            if not re.fullmatch(r"  [A-Za-z0-9_-]+:\s*", code):
+                raise WorkflowShapeError(
+                    f"{rel}: unsupported top-level trigger syntax: {stripped!r}"
+                )
+        elif indent == 4:
+            if stripped.startswith("- "):
+                if not re.fullmatch(r"    - [A-Za-z0-9_-]+:(?:\s*.*)?", code):
+                    raise WorkflowShapeError(
+                        f"{rel}: unsupported trigger-list syntax: {stripped!r}"
+                    )
+            else:
+                _require_simple_mapping_key(rel, code, "trigger mapping")
 
     end = len(lines)
     for i in range(jobs_index + 1, len(lines)):
@@ -54,12 +81,17 @@ def verify_workflow(path: Path) -> None:
 
     for raw in lines[jobs_index + 1 : end]:
         code = _code(raw)
-        if not code.strip() or _indent(raw) != 2:
+        stripped = code.strip()
+        if not stripped:
             continue
-        if not re.fullmatch(r"  [A-Za-z0-9_-]+:\s*", code):
-            raise WorkflowShapeError(
-                f"{rel}: unsupported job-key syntax: {code.strip()!r}"
-            )
+        indent = _indent(raw)
+        if indent == 2:
+            if not re.fullmatch(r"  [A-Za-z0-9_-]+:\s*", code):
+                raise WorkflowShapeError(
+                    f"{rel}: unsupported job-key syntax: {stripped!r}"
+                )
+        elif indent == 4:
+            _require_simple_mapping_key(rel, code, "job mapping")
 
 
 def verify_repository(root: Path) -> None:
