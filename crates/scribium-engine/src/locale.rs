@@ -456,6 +456,13 @@ fn char_equals_ignore_case(left: char, right: char) -> bool {
     left_upper == right_upper || simple_lowercase(left_upper) == simple_lowercase(right_upper)
 }
 
+/// JDK `LocaleUtils.toLowerString` semantics used by the
+/// `LanguageTag.LEGACY` lookup: only ASCII A-Z are lowercased. This must not
+/// reuse the Unicode-aware comparator used by Quarkdown's name-first lookup.
+fn ascii_tag_equals_ignore_case(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedExtension {
     singleton: char,
@@ -659,7 +666,7 @@ fn legacy_language_tag(input: &str) -> Option<&'static str> {
     ];
     LEGACY
         .iter()
-        .find(|(legacy, _mapped)| string_equals_ignore_case(legacy, input))
+        .find(|(legacy, _mapped)| ascii_tag_equals_ignore_case(legacy, input))
         .map(|(_legacy, mapped)| *mapped)
 }
 
@@ -1622,8 +1629,8 @@ fn format_display_choice(pattern: &str, main: &str, qualifiers: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::{
-        display_candidate_profiles, parse_language_tag, resolve, resolve_detailed,
-        string_equals_ignore_case,
+        ascii_tag_equals_ignore_case, display_candidate_profiles, parse_language_tag, resolve,
+        resolve_detailed, string_equals_ignore_case,
     };
     use super::{
         read_u32, DisplaySnapshot, LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256,
@@ -1971,7 +1978,7 @@ mod tests {
             "JDK25 locale oracle row count changed"
         );
         assert_eq!(
-            candidate_checked, 5_120,
+            candidate_checked, 5_122,
             "JDK25 tag-path oracle row count changed"
         );
     }
@@ -2376,5 +2383,15 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn legacy_lookup_does_not_apply_unicode_case_equivalence() {
+        assert!(string_equals_ignore_case("i-klingon", "i-Klingon"));
+        assert!(string_equals_ignore_case("sgn-be-fr", "ſgn-BE-FR"));
+        assert!(!ascii_tag_equals_ignore_case("i-klingon", "i-Klingon"));
+        assert!(!ascii_tag_equals_ignore_case("sgn-be-fr", "ſgn-BE-FR"));
+        assert_eq!(parse_language_tag("i-Klingon").unwrap().tag, "und");
+        assert_eq!(parse_language_tag("ſgn-BE-FR").unwrap().tag, "und");
     }
 }

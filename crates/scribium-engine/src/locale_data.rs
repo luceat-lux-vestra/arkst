@@ -13,8 +13,8 @@
 // Available-locale raw-order manifest SHA-256: c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e
 // Dump helper SHA-256: 15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e
 // Display-data dump helper SHA-256: 25ecb0d2dbc767ef1006a112ead0e2271686cf2dfd7d8f870e812dcfefab9131
-// Public differential oracle helper SHA-256: 8b0c1b05a192ce959fab78ca7c8875e0e357866cd14780871d664a736a21ecaf
-// Public differential oracle output SHA-256: 59563ee565db97477b29035ae2480595bc1cea2ac603779b61a7882d6ce006c8
+// Public differential oracle helper SHA-256: 80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02
+// Public differential oracle output SHA-256: 05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed
 // Unicode time-zone source: java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java
 // Unicode time-zone source SHA-256: dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2
 // Unicode time-zone source rows: 681
@@ -36,9 +36,9 @@ pub const LOCALE_NAME_COLLISION_COUNT: usize = 0;
 #[allow(dead_code)]
 pub const LOCALE_AVAILABLE_ORDER_MANIFEST_SHA256: &str = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e";
 #[allow(dead_code)]
-pub const LOCALE_PUBLIC_ORACLE_RECORD_COUNT: usize = 7438;
+pub const LOCALE_PUBLIC_ORACLE_RECORD_COUNT: usize = 7440;
 #[allow(dead_code)]
-pub const LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256: &str = "59563ee565db97477b29035ae2480595bc1cea2ac603779b61a7882d6ce006c8";
+pub const LOCALE_PUBLIC_ORACLE_OUTPUT_SHA256: &str = "05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed";
 #[allow(dead_code)]
 pub const LOCALE_DISPLAY_ORACLE_RECORD_COUNT: usize = 453459;
 #[allow(dead_code)]

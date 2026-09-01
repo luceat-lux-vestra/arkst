@@ -106,13 +106,13 @@ logical display source SHA-256 is
 `96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3`, and the
 compact artifact SHA-256 is
 `d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1`.
-The transient public Java differential emits 7,438 rows (5,120 tag-path and
+The transient public Java differential emits 7,440 rows (5,122 tag-path and
 2,318 name-path rows), with SHA-256
-`59563ee565db97477b29035ae2480595bc1cea2ac603779b61a7882d6ce006c8`; its
+`05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed`; its
 helper source SHA-256 is
-`8b0c1b05a192ce959fab78ca7c8875e0e357866cd14780871d664a736a21ecaf`.
+`80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02`.
 The locale generator source SHA-256 is
-`8b9622b8408d26fadea2f54cb90d7173547cbf4539634bd432423e33d49a0a54`.
+`65cc75da3de62d1a9eeda9d5e043c805112c4dbc7de81f72c4fba76937298fce`.
 The name-first table preserves a pinned raw-array capture of
 `Locale.getAvailableLocales()` in
 `tools/jdk25_available_locale_order.tsv` (SHA-256
@@ -125,7 +125,7 @@ fields while retaining JDK `toLanguageTag()` serialization (`und`, or
 without an oracle-side unresolved rewrite or blank-language filtering. The
 generated Rust metadata is 814,205 bytes with
 SHA-256
-`776fccb64d1097e6d7b594069568705a7960333bd0b07e0ba44aa33bbf5959c2` and
+`2d649ef01791bae54fe7be2904689123b57dfc817185a026aaabfe005d78e578` and
 remains below the 1 MiB source budget.
 The generator exhaustively reconstructs every logical display row, validates
 the binary index, and checks both generated artifacts byte-for-byte. JDK25's
