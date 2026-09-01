@@ -129,6 +129,25 @@ def _check_write_permissions(
                 )
 
 
+def _step_list_indent(lines: list[str], index: int) -> int:
+    current = _code(lines[index])
+    current_indent = _indent(lines[index])
+    if current.lstrip().startswith("- "):
+        return current_indent
+
+    for previous in range(index - 1, -1, -1):
+        code = _code(lines[previous])
+        if not code.strip():
+            continue
+        indent = _indent(lines[previous])
+        if indent < current_indent and code.lstrip().startswith("- "):
+            return indent
+        if indent < current_indent and indent <= 4:
+            break
+
+    raise WorkflowSecurityError("unable to resolve workflow step boundary")
+
+
 def verify_workflow(path: Path, root: Path) -> None:
     rel = path.relative_to(root).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -171,12 +190,13 @@ def verify_workflow(path: Path, root: Path) -> None:
             raise WorkflowSecurityError(f"{rel}: action reference is not a full SHA: {target}")
 
         if target.startswith("actions/checkout@"):
-            step_indent = _indent(raw)
+            step_indent = _step_list_indent(lines, index)
             found = False
             for candidate in lines[index + 1 :]:
-                if _code(candidate).strip() and _indent(candidate) <= step_indent:
+                candidate_code = _code(candidate)
+                if candidate_code.strip() and _indent(candidate) <= step_indent:
                     break
-                if re.fullmatch(r"\s*persist-credentials:\s*false\s*", _code(candidate)):
+                if re.fullmatch(r"\s*persist-credentials:\s*false\s*", candidate_code):
                     found = True
                     break
             if not found:
