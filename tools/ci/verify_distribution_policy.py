@@ -560,6 +560,11 @@ def verify_policy(root: Path, policy_path: Path, metadata: Mapping[str, Any]) ->
     package_map = _metadata_packages(metadata)
     metadata_names = set(package_map)
     policy_names = {entry["name"] for entry in entries}
+    cli_names = [entry["name"] for entry in entries if entry["distribution"] == "cli"]
+    if cli_names != ["arkst-cli"]:
+        raise DistributionPolicyError(
+            "policy must classify exactly arkst-cli as the sole cli distribution artifact"
+        )
     if metadata_names != policy_names:
         missing = sorted(metadata_names - policy_names)
         stale = sorted(policy_names - metadata_names)

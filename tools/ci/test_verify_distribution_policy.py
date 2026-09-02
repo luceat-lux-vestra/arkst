@@ -111,6 +111,18 @@ class DistributionPolicyTests(unittest.TestCase):
             policy_text=policy_text,
         )
 
+    def test_second_cli_distribution_classification_is_rejected(self) -> None:
+        policy_text = self.set_package_field(
+            POLICY.read_text(encoding="utf-8"),
+            "arkst-core",
+            "distribution",
+            '"cli"',
+        )
+        self.reject(
+            r"exactly arkst-cli as the sole cli distribution artifact",
+            policy_text=policy_text,
+        )
+
     def test_cli_wrong_publication_channel_is_rejected(self) -> None:
         policy_text = self.set_package_field(
             POLICY.read_text(encoding="utf-8"),
