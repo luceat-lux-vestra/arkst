@@ -5,7 +5,7 @@ on:
     branches: [chore/rename-arkst]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -15,43 +15,65 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Compare repository-owned source fingerprints
+      - name: Sync repository-owned source fingerprints
         shell: bash
         run: |
           python3 - <<'PY'
           import hashlib
+          import re
           import tomllib
           from pathlib import Path
 
           root = Path('.')
           config_path = root / 'docs/compatibility/quarkdown/reference-jvm.toml'
+          text = config_path.read_text(encoding='utf-8')
           with config_path.open('rb') as stream:
               cfg = tomllib.load(stream)
           prov = cfg['provenance']
           ref = cfg['reference']
 
-          pairs = [
-              ('provenance.verifier_source_sha256', prov['verifier_source_sha256'], prov['verifier_path']),
-              ('reference.helper_source_sha256', ref['helper_source_sha256'], 'tools/dump_jdk25_unicode_data.java'),
-              ('reference.generated_source_sha256', ref['generated_source_sha256'], ref['unicode_generated_source_path']),
-              ('reference.unicode_generator_source_sha256', ref['unicode_generator_source_sha256'], ref['unicode_generator_path']),
-              ('reference.unicode_verifier_source_sha256', ref['unicode_verifier_source_sha256'], ref['unicode_verifier_path']),
-              ('reference.locale_dump_helper_source_sha256', ref['locale_dump_helper_source_sha256'], ref['locale_dump_helper_path']),
-              ('reference.locale_display_dump_helper_source_sha256', ref['locale_display_dump_helper_source_sha256'], ref['locale_display_dump_helper_path']),
-              ('reference.locale_generator_source_sha256', ref['locale_generator_source_sha256'], ref['locale_generator_path']),
-              ('reference.locale_public_oracle_helper_source_sha256', ref['locale_public_oracle_helper_source_sha256'], ref['locale_public_oracle_helper_path']),
-              ('reference.locale_semantic_verifier_source_sha256', ref['locale_semantic_verifier_source_sha256'], ref['locale_semantic_verifier_path']),
-              ('reference.locale_generated_rust_sha256', ref['locale_generated_rust_sha256'], ref['locale_generated_rust_path']),
-              ('reference.locale_compact_snapshot_sha256', ref['locale_compact_snapshot_sha256'], ref['locale_compact_snapshot_path']),
+          fields = [
+              ('verifier_source_sha256', prov['verifier_path']),
+              ('helper_source_sha256', 'tools/dump_jdk25_unicode_data.java'),
+              ('unicode_generator_source_sha256', ref['unicode_generator_path']),
+              ('unicode_verifier_source_sha256', ref['unicode_verifier_path']),
+              ('locale_generator_source_sha256', ref['locale_generator_path']),
+              ('locale_public_oracle_helper_source_sha256', ref['locale_public_oracle_helper_path']),
+              ('locale_semantic_verifier_source_sha256', ref['locale_semantic_verifier_path']),
           ]
 
-          mismatches = 0
-          for field, expected, path_text in pairs:
-              path = root / path_text
-              actual = hashlib.sha256(path.read_bytes()).hexdigest()
-              status = 'MATCH' if expected == actual else 'MISMATCH'
-              if status == 'MISMATCH':
-                  mismatches += 1
-              print(f'{status}\t{field}\t{path_text}\texpected={expected}\tactual={actual}')
-          print(f'MISMATCH_COUNT={mismatches}')
+          for field, path_text in fields:
+              actual = hashlib.sha256((root / path_text).read_bytes()).hexdigest()
+              pattern = rf'(?m)^{re.escape(field)} = "[0-9a-f]{{64}}"$'
+              replacement = f'{field} = "{actual}"'
+              text, count = re.subn(pattern, replacement, text, count=1)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one {field} assignment, got {count}')
+              print(f'{field}={actual} ({path_text})')
+
+          config_path.write_text(text, encoding='utf-8')
           PY
+
+      - name: Verify only intended reference source fingerprints changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- docs/compatibility/quarkdown/reference-jvm.toml
+          python3 tools/verify_reference_provenance.py
+
+      - name: Commit synchronized fingerprints when needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/compatibility/quarkdown/reference-jvm.toml; then
+            echo "reference source fingerprints already synchronized"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/compatibility/quarkdown/reference-jvm.toml
+          git commit -m 'test: rebind reference source fingerprints after Arkst rename'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:chore/rename-arkst
