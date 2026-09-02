@@ -22,7 +22,6 @@ UNTRUSTED_EXPRESSIONS = (
     "inputs.",
 )
 ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {
-    ".github/workflows/ai-review.yml": {"pull-requests"},
     ".github/workflows/issue-labeler.yml": {"issues"},
     ".github/workflows/pr-labeler.yml": {"issues", "pull-requests"},
     ".github/workflows/upstream-quarkdown.yml": {"issues"},
