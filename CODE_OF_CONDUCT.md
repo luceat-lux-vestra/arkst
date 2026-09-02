@@ -44,8 +44,19 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers. All complaints will be reviewed and
-investigated promptly and fairly.
+reported privately through GitHub's private reporting form at
+https://github.com/luceat-lux-vestra/arkst/security/advisories/new.
+Begin the report title or first line with `[CONDUCT REPORT]` so it is handled
+under this Code of Conduct rather than as a vulnerability report.
+
+This reuses GitHub's private transport only to keep conduct reports
+confidential; a conduct report is not a security vulnerability. Security
+vulnerabilities must instead follow the process in [`SECURITY.md`](SECURITY.md)
+and should not use the conduct-report marker.
+
+All conduct complaints will be reviewed and investigated promptly and fairly.
+Reporters' privacy will be respected to the extent possible while investigating
+and resolving the report.
 
 ## Attribution
 
