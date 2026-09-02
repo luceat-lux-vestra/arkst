@@ -1,0 +1,48 @@
+name: Preserve Arkst rename history
+
+on:
+  push:
+    branches:
+      - fix/253-arkst-rename-reconciliation
+    paths:
+      - .github/workflows/253-historical-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arkst-rename-history-fix
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/253-arkst-rename-reconciliation
+          persist-credentials: true
+      - name: Restore historical extension statement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/research/codebase-health-audit-2026-08-21.md')
+          text = path.read_text(encoding='utf-8')
+          old = '| `.md`, `.qd`, `.arkst` extension handling and case-insensitive final extension | Explicit input contract |'
+          new = '| `.md`, `.qd`, `.scrib` extension handling and case-insensitive final extension | Explicit input contract |'
+          assert text.count(old) == 1
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+      - name: Commit historical evidence correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "luceat-lux-vestra"
+          git config user.email "heathkimdev@gmail.com"
+          git add docs/research/codebase-health-audit-2026-08-21.md
+          git commit -m "docs: preserve pre-rename extension audit evidence"
+          git push origin HEAD:fix/253-arkst-rename-reconciliation
