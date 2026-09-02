@@ -2,7 +2,7 @@
 
 This document describes a small **Arkst** project. It uses `arkst-core`
 to turn Markdown into a backend-neutral document and links to the
-[repository](https://github.com/luceat-lux-vestra/scribium).
+[repository](https://github.com/luceat-lux-vestra/arkst).
 
 Badges-like links are ordinary Markdown links: [build: passing][build].
 

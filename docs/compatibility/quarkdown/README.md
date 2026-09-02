@@ -33,11 +33,11 @@ layers, ownership handoffs, backlog dependencies, and implementation order:
 manifests linked below remain the row-level evidence authorities.
 
 The remaining #151 `UNSUPPORTED` families have cohesive implementation owners:
-[#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for `.get`,
-[#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for library
-inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196) for
+[#194](https://github.com/luceat-lux-vestra/arkst/issues/194) for `.get`,
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for library
+inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) for
 localization table/lookup, and
-[#197](https://github.com/luceat-lux-vestra/scribium/issues/197) for logger /
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197) for logger /
 diagnostic builtins. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 `.subdocumentgraph` is blocked by #188 with producer/output ownership in #199.
@@ -473,7 +473,7 @@ HTML output backend, whose physical crate/name is not frozen here, will emit the
 string verbatim. `arkst-html` continues to normalize Markdown/foreign HTML
 only and does not consume this payload. This is not a generic raw backend/MIME
 mechanism.
-Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.scrib` remains the
+Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.arkst` remains the
 separate source-language raw-HTML case and continues to fail closed with
 `E8001`. See [ADR-0018](../../adr/0018-quarkdown-target-specific-native-content.md)
 and [RAW_HTML_POLICY.md](../RAW_HTML_POLICY.md).

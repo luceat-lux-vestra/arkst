@@ -225,7 +225,7 @@ fn audit_records_texmacro_follow_up_ownership() {
     assert!(texmacro[11].contains("#180"));
     assert!(!texmacro[11].contains("#175"));
     assert!(AUDIT.contains("assigned to #180"));
-    assert!(AUDIT.contains("[#180](https://github.com/luceat-lux-vestra/scribium/issues/180)"));
+    assert!(AUDIT.contains("[#180](https://github.com/luceat-lux-vestra/arkst/issues/180)"));
 }
 
 #[test]

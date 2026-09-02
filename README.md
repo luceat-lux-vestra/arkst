@@ -1,8 +1,8 @@
 # Arkst
 
-[![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/scribium)
+[![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/arkst)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![CI](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml)
+[![CI](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml)
 
 **Arkst is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 
@@ -17,7 +17,7 @@ Arkst accepts Markdown and Quarkdown-compatible documents, evaluates supported p
 The current verified document path is:
 
 ```text
-Markdown or Quarkdown-compatible source (.md / .qd / .scrib)
+Markdown or Quarkdown-compatible source (.md / .qd / .arkst)
 → pinned Rushdown Markdown substrate + Arkst Quarkdown frontend
 → backend-neutral IR
 → single evaluator
@@ -81,7 +81,7 @@ subprocess backend. To include the native in-process compiler graph, pass
 `--features typst-inprocess` to the Cargo command and still select
 `--backend in-process` when building a PDF.
 
-Supported input extensions are `.md`, `.qd`, and `.scrib` (case-insensitive). Files without an extension are rejected. Native `.typ` passthrough is not implemented yet.
+Supported input extensions are `.md`, `.qd`, and `.arkst` (case-insensitive). Files without an extension are rejected. Native `.typ` passthrough is not implemented yet.
 
 `--output` can override the destination. Missing output directories are created automatically, input files cannot be overwritten through aliases/symlinks/hard links, and output replacement is atomic on normal error-return paths. PDF builds use `--backend subprocess` by default and invoke the configured Typst executable directly rather than through a shell; use `--typst-path <PATH>` to select a specific binary. `--backend in-process` requires both the `typst-inprocess` Cargo feature and explicit runtime selection. Without the feature it fails with an instruction to rebuild; it never silently falls back to subprocess and does not enable browser/WASM rendering.
 
@@ -167,9 +167,11 @@ Nested objects, arrays, and block strings are not supported. Duplicate keys use 
 | Watch/LSP | Planned |
 | WASM | Deferred |
 
-Arkst has no current public package or release distribution contract. The
-workspace package, CLI, binary-release, WASM, and internal-tool decisions are
-recorded and enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engineering/DISTRIBUTION_POLICY.md).
+Arkst's canonical distribution contract approves the `arkst` CLI binary for
+GitHub Releases, although no public Arkst release has shipped yet. crates.io /
+public `cargo install` and distributed WASM remain disabled. The workspace
+package, CLI, binary-release, WASM, and internal-tool decisions are recorded and
+enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engineering/DISTRIBUTION_POLICY.md).
 
 ## Architecture
 

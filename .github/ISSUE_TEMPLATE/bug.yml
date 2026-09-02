@@ -24,7 +24,7 @@ body:
     id: source
     attributes:
       label: Minimal source
-      description: "Minimal .qd, .md, or .scrib file that reproduces the issue"
+      description: "Minimal .qd, .md, or .arkst file that reproduces the issue"
       render: markdown
   - type: textarea
     id: expected

@@ -1,14 +1,14 @@
 # Quarkdown v2.5.1 layout, pagination, style, and document-configuration audit
 
-Status: complete strict audit artifact for Issue [#153](https://github.com/luceat-lux-vestra/scribium/issues/153). This is evidence and backlog work only. It does not implement a layout/configuration surface or promote the verified compatibility baseline.
+Status: complete strict audit artifact for Issue [#153](https://github.com/luceat-lux-vestra/arkst/issues/153). This is evidence and backlog work only. It does not implement a layout/configuration surface or promote the verified compatibility baseline.
 
 ## 1. Audit identity and evidence policy
 
 | Item | Pinned value |
 |---|---|
 | Quarkdown target | v2.5.1 at [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e) |
-| Arkst audit base | [`4a9112a9ee840374350dd9a90b65f58cce96eb08`](https://github.com/luceat-lux-vestra/scribium/tree/4a9112a9ee840374350dd9a90b65f58cce96eb08), the squash merge of reviewed PR #174 / completed Issue #152 |
-| Parent tracker | [#147](https://github.com/luceat-lux-vestra/scribium/issues/147) |
+| Arkst audit base | [`4a9112a9ee840374350dd9a90b65f58cce96eb08`](https://github.com/luceat-lux-vestra/arkst/tree/4a9112a9ee840374350dd9a90b65f58cce96eb08), the squash merge of reviewed PR #174 / completed Issue #152 |
+| Parent tracker | [#147](https://github.com/luceat-lux-vestra/arkst/issues/147) |
 | Canonical manifest | [`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv) |
 | Offline guard | [`layout_document_configuration_audit.rs`](../../../crates/arkst-core/tests/layout_document_configuration_audit.rs) |
 
@@ -526,11 +526,11 @@ New cohesive implementation follow-ups were created, but none was started:
 
 | Issue | Exact scope | Owner/layer | Prerequisites and order |
 |---|---|---|---|
-| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage plus border-side zeroing and color-only width inheritance | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
-| [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
-| [#177](https://github.com/luceat-lux-vestra/scribium/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
-| [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
-| [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
+| [#175](https://github.com/luceat-lux-vestra/arkst/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage plus border-side zeroing and color-only width inheritance | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
+| [#176](https://github.com/luceat-lux-vestra/arkst/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
+| [#177](https://github.com/luceat-lux-vestra/arkst/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
+| [#178](https://github.com/luceat-lux-vestra/arkst/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
+| [#180](https://github.com/luceat-lux-vestra/arkst/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
 
 The `.captionposition` raw-body work is implemented in the bounded slice by
 #166, while caption output remains separate. No issue is one-function-per-row

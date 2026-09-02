@@ -4515,7 +4515,7 @@ mod tests {
             );
         }
 
-        for entry in ["main.qd", "main.QD", "main.scrib", "main.SCRIB"] {
+        for entry in ["main.qd", "main.QD", "main.arkst", "main.ARKST"] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
                 .expect("valid path")
@@ -4569,7 +4569,7 @@ mod tests {
             );
         }
 
-        for entry in ["main.qd", "main.QD", "main.scrib", "main.SCRIB"] {
+        for entry in ["main.qd", "main.QD", "main.arkst", "main.ARKST"] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
                 .expect("valid path")
@@ -4601,8 +4601,8 @@ mod tests {
             "main.MD",
             "main.qd",
             "main.QD",
-            "main.scrib",
-            "main.SCRIB",
+            "main.arkst",
+            "main.ARKST",
         ] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
@@ -4627,7 +4627,7 @@ mod tests {
     #[test]
     fn compile_raw_html_semantics_follow_the_entry_source_mode() {
         let source = "before <em>one <strong>two</strong></em><br>after\n";
-        for entry in ["main.md", "main.qd", "main.scrib"] {
+        for entry in ["main.md", "main.qd", "main.arkst"] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
                 .expect("valid path")
@@ -4754,7 +4754,7 @@ mod tests {
                     .any(|inline| matches!(inline, IrInline::HardBreak { .. })));
             }
 
-            for entry in ["main.qd", "main.scrib"] {
+            for entry in ["main.qd", "main.arkst"] {
                 let project = VirtualProjectBuilder::new()
                     .entry(entry)
                     .expect("valid path")
@@ -4790,7 +4790,7 @@ mod tests {
     #[test]
     fn compile_raw_html_diagnostics_preserve_utf8_crlf_source_spans_in_each_quarkdown_mode() {
         let source = "한글 <em>내용</em> 끝\r\n";
-        for entry in ["main.qd", "main.scrib"] {
+        for entry in ["main.qd", "main.arkst"] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
                 .expect("valid path")
@@ -4819,7 +4819,7 @@ mod tests {
     #[test]
     fn compile_block_raw_html_remains_source_backed_and_unsupported_in_each_mode() {
         let source = "<div>\r\n**not Markdown**\r\n</div>\r\n";
-        for entry in ["main.md", "main.qd", "main.scrib"] {
+        for entry in ["main.md", "main.qd", "main.arkst"] {
             let project = VirtualProjectBuilder::new()
                 .entry(entry)
                 .expect("valid path")

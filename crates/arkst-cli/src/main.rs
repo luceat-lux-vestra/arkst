@@ -26,7 +26,7 @@ struct Cli {
 enum Commands {
     /// Compile input document(s) to output format(s)
     Build {
-        /// Input file (.qd, .scrib, .md)
+        /// Input file (.qd, .arkst, .md)
         input: String,
         /// Output format(s): typst, pdf (html, svg, png are not yet implemented)
         #[arg(short, long, default_value = "typst")]

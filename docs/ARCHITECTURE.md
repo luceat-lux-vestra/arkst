@@ -397,7 +397,7 @@ evaluator write, directory-listing, or network-fetch API.
   (lexicographic key) order
 - Malformed front matter blocks (indented delimiters, indented keys, lines
   without colons, empty keys) are rejected and treated as regular Markdown
-- Supported CLI inputs are `.qd`, `.scrib`, `.md`; `.typ` is rejected until
+- Supported CLI inputs are `.qd`, `.arkst`, `.md`; `.typ` is rejected until
   Typst passthrough is implemented. Extension matching is ASCII
   case-insensitive; files without an extension are rejected.
 - Typst default output path replaces file extension with `.typ`; the build
@@ -717,7 +717,7 @@ Quarkdown `.html` function. `.html {<em>x</em>}` is an evaluated Quarkdown
 function whose closed target-specific semantic representation and permission
 boundary are implemented under ADR-0018; its HTML output consumption remains a
 future backend concern and its intentional Typst/PDF omission is current
-behavior. Ordinary `<em>x</em>` in `.qd`/`.scrib` remains the source-backed
+behavior. Ordinary `<em>x</em>` in `.qd`/`.arkst` remains the source-backed
 `E8001` case in `RAW_HTML_POLICY.md`.
 
 The Quarkdown `.html` payload does not pass through `arkst-html`. A future

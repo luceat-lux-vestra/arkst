@@ -2,7 +2,7 @@
 
 Status: **Accepted compatibility policy**  
 Review date: **2026-08-19**
-Applies to: Markdown (`.md`), Quarkdown-compatible (`.qd`, `.scrib`), and the Typst backend boundary.
+Applies to: Markdown (`.md`), Quarkdown-compatible (`.qd`, `.arkst`), and the Typst backend boundary.
 
 This document separates four concepts that must not be conflated:
 
@@ -47,7 +47,7 @@ Reference:
 
 The Quarkdown compatibility contract is therefore:
 
-- ordinary mixed raw HTML in `.qd` / `.scrib` is **not** a compatibility feature;
+- ordinary mixed raw HTML in `.qd` / `.arkst` is **not** a compatibility feature;
 - Arkst must not promote Markdown raw-HTML recognition into successful Quarkdown semantics;
 - `.html` is a separate Quarkdown language feature with an implemented closed `Html` semantic slice; it does not enable arbitrary mixed HTML globally;
 - `.html {<em>x</em>}` evaluates a single `String` argument into a closed target-specific semantic representation after the explicit capability check; and
@@ -98,7 +98,7 @@ The Typst boundary must therefore remain downstream of Arkst's semantic decision
 | Input mode | Raw HTML recognition | Successful semantic support | Unsupported raw HTML | Explicit HTML escape hatch |
 |---|---|---|---|---|
 | Markdown (`.md`) | Rushdown/CommonMark+GFM | Bounded exact subset, including complete parser-owned HTML comments as semantic no-ops | Preserve provenance and fail closed with `E8001` at the document-output boundary | Not a Markdown language feature |
-| Quarkdown (`.qd`, `.scrib`) | Rushdown may still expose parser nodes because it is the shared substrate | Ordinary mixed raw HTML is **not** Quarkdown-compatible and must not be promoted to document semantics | Must fail closed rather than inherit the Markdown semantic whitelist | Quarkdown `.html`, separately tracked and target-specific |
+| Quarkdown (`.qd`, `.arkst`) | Rushdown may still expose parser nodes because it is the shared substrate | Ordinary mixed raw HTML is **not** Quarkdown-compatible and must not be promoted to document semantics | Must fail closed rather than inherit the Markdown semantic whitelist | Quarkdown `.html`, separately tracked and target-specific |
 | Typst backend | Not a source-language parser responsibility | Receives only already accepted backend-neutral IR | Must not recover/reparse rejected source HTML | Typst HTML facilities are backend/output concerns |
 
 ## Bounded Markdown semantic subset
@@ -136,7 +136,7 @@ Complete parser-recognized HTML comments are part of the bounded Markdown
 semantic subset as a semantic no-op. This support is deliberately narrow:
 
 - it applies only in Markdown mode (`.md`, case-insensitively), never in
-  `.qd` or `.scrib` mode;
+  `.qd` or `.arkst` mode;
 - it applies only to parser-owned `Inline::RawHtml` and `Block::RawHtml`
   nodes;
 - the accepted token forms are the CommonMark 0.31.2 short forms `<!-->` and
@@ -185,7 +185,7 @@ documents, even though that is not a Quarkdown v2.5.1 feature.
 This divergence is resolved. The compile entry boundary now determines one
 internal source mode and passes it to both frontend parsing and AST-to-IR
 conversion. The whitelist adapter is enabled only for Markdown; `.qd` and
-`.scrib` preserve parser-exposed raw HTML as source-backed nodes and emit
+`.arkst` preserve parser-exposed raw HTML as source-backed nodes and emit
 `E8001`. Arbitrary/non-comment block raw HTML remains unsupported; complete
 parser-owned Markdown comment-only blocks are the explicit bounded exception.
 
@@ -198,13 +198,13 @@ The implementation preserves these invariants:
 - Markdown's existing bounded subset remains supported and covered;
 - complete Markdown comments are discarded only as a parser-owned semantic
   no-op;
-- `.qd` / `.scrib` ordinary mixed raw HTML fails closed;
+- `.qd` / `.arkst` ordinary mixed raw HTML fails closed;
 - `.html` remains a separate language-feature decision.
 
 ## Implementation order
 
 1. **Mode separation:** **Completed.** The Markdown bounded raw-HTML semantic adapter cannot become Quarkdown mixed-HTML support.
-2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.scrib` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
+2. **Regression evidence:** **Completed.** Core end-to-end tests cover identical `.md`, `.qd`, and `.arkst` sources, the full whitelist, case-insensitive Markdown forms, nested structure, block HTML, and UTF-8/CRLF source spans.
 3. **Comment decision:** **Completed.** Complete parser-owned Markdown HTML comments are a bounded semantic no-op; trailing, malformed, and non-comment raw HTML remains fail-closed.
 4. **`.html` function:** **closed semantic slice implemented.** The evaluator
    creates only `TargetSpecificContent { target: Html, ... }` after the

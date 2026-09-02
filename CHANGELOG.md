@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Fail-closed distribution inventory (#233):** The complete Cargo workspace,
-  including both repository tooling packages, now has an explicit
-  non-publishable policy. Cargo metadata verification records that the CLI,
-  GitHub binary releases, and distributed WASM artifacts are not currently
-  intended; existing WASM compile checks remain unchanged.
+- **Arkst GitHub Release CLI contract (#233):** The canonical distribution
+  inventory now approves only the `arkst` binary from `arkst-cli` for GitHub
+  Releases. Every Cargo workspace package remains `publish = false`,
+  crates.io/public `cargo install` remains disabled, and WASM remains
+  compile-only and non-distributed.
+
+- **Arkst rename reconciliation (#253):** The pre-v0.1 working-name-specific
+  `.scrib` CLI alias is replaced by `.arkst`; `.md` and `.qd` remain supported.
+  Current repository, badge, Cargo metadata, clone, security, example, and
+  same-repository evidence links now use the canonical `/arkst` slug. Historical
+  records retain the old working-name facts where rewriting them would falsify
+  their audited state.
 
 - **Temurin 25 reference-JVM migration (#224):** The bounded #172
   `.capitalize` and `.startswith(ignorecase:true)` compatibility data now
@@ -220,7 +227,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its project root to the current directory.
 - `build --output <path>` to override the generated output path.
 - **PDF output via external Typst subprocess** — `arkst build --format pdf` compiles
-  supported input documents (`.qd`, `.scrib`, `.md`) directly to PDF using the
+  supported input documents (`.qd`, `.arkst`, `.md`) directly to PDF using the
   configured Typst executable. The `SubprocessBackend` implements the `TypstBackend`
   trait, invoking `typst compile` via `std::process::Command` without shell
   interpolation. Real `typst --version` detection is implemented. Typst diagnostics
@@ -316,7 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly unsupported with actionable error messages.
 - CLI help text updated: `--output` documents the format-dependent default
   (`.typ` for typst, `.pdf` for pdf) and `--format` lists only the supported formats.
-- Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
+- Supported CLI inputs are now `.qd`, `.arkst`, and `.md`; a `.typ` input is
   rejected as an unsupported format until Typst passthrough is implemented.
   Extension matching is ASCII case-insensitive, and files without an
   extension are rejected.
