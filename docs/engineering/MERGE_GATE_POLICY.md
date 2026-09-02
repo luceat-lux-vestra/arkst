@@ -25,7 +25,9 @@ The live ruleset must remain strict and contain exactly this set. Required conte
 
 `dependency-review` remains advisory rather than required. It is diff-scoped evidence about newly introduced dependency changes. The required `license` job independently runs full-graph `cargo deny check --all-features` on every PR and remains authoritative for the resulting Rust dependency graph. Keeping both controls distinct avoids making a second blocking context mandatory without weakening either check.
 
-The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, PR metadata automation, and advisory AI review are classified explicitly in the canonical policy. Their presence in the inventory prevents silent job/context drift without promoting conditional or advisory jobs into required checks.
+The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, and PR metadata automation are classified explicitly in the canonical policy. Their presence in the inventory prevents silent job/context drift without promoting conditional or advisory jobs into required checks.
+
+Arkst previously carried a custom advisory AI review workflow backed by GitHub Models. GitHub retired GitHub Models on July 30, 2026, so that dead integration and its review prompt were removed rather than preserved as a nonfunctional governance control. AI review is not part of merge authority; any future replacement requires a separate explicit trust-boundary review before being added to this inventory.
 
 ## Compatibility scope
 
