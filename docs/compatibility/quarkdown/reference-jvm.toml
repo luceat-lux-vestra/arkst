@@ -9,7 +9,7 @@ contract = "scribium.reference-data-integrity"
 contract_version = 1
 source_kind = "archive-backed"
 verifier_path = "tools/verify_reference_provenance.py"
-verifier_source_sha256 = "41b96984e962b297b0dfa283e957d13abfc1bfdb04cd16be910c55f498dc97cb"
+verifier_source_sha256 = "58e0cf909ba9677a10a6cffb44487cd56c2506dbc00971ef522d81e7a78c6c7e"
 notice_path = "NOTICE"
 notice_required_markers = [
   "== Reference JVM and generated compatibility data ==",

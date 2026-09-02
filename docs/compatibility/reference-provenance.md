@@ -22,7 +22,7 @@ The contract intentionally preserves two valid provenance transports:
 | Source kind | Applies to | Required source proof |
 |---|---|---|
 | `archive-backed` | Eclipse Temurin JDK25-derived data | exact archive URL, filename, byte count, SHA-256, runtime identity, and recorded JDK source/build revisions |
-| `immutable-git` | CommonMark, cmark, and cmark-gfm references | HTTPS repository, exact version, full commit, checked-out `HEAD`, source corpus bytes/digest, and required source license files |
+| `immutable-git` | CommonMark, cmark, and cmark-gfm references | HTTPS repository, exact version, full commit, checked-out `HEAD`, clean tracked worktree after any build, repository-relative corpus/license paths, source corpus bytes/digest, and required source license files |
 
 An archive SHA-256 is not required for the Markdown repositories. A git commit
 is not substituted for the JDK archive proof. When requested, the verifier can
@@ -42,13 +42,15 @@ Each applicable manifest records:
    and required retained `NOTICE` markers; and
 5. an independent semantic-result identity.
 
-The JDK verifier retains the existing archive/runtime/generator checks and
-validates the public locale oracle through the independent engine test. The
-Markdown verifier checks the pinned checkout, source corpus, license files,
-regenerated extracted JSON, and the byte-for-byte corpus comparison. The
-differential report is checked by recomputing its case counts and result
-classification; a producer-authored success field cannot turn a failed
-independent result into a pass.
+The JDK verifier retains the existing archive/runtime/generator checks,
+requires the Unicode generated-source count to equal the recorded scalar plus
+UTF-16 counts, and validates the public locale oracle through the independent
+engine test. The Markdown verifier checks the pinned checkout, source corpus,
+license files, regenerated extracted JSON, and the byte-for-byte corpus
+comparison. Build-created untracked files are ignored, but any tracked
+checkout mutation fails closed. The differential report is checked by
+recomputing its case counts and result classification; a producer-authored
+success field cannot turn a failed independent result into a pass.
 
 The exact checked-in artifact set is declared in each manifest's
 `exact_artifact_globs`. An unlisted retained artifact in those scoped

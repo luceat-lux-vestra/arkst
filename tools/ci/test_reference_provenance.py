@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -128,6 +129,72 @@ class ReferenceProvenanceTests(unittest.TestCase):
         )
         self.assert_rejected(self.verify_fixture)
 
+    def test_markdown_repository_requires_https(self) -> None:
+        self.fixture.mutate(
+            "tests/compat/references.toml",
+            'repository = "https://github.com/commonmark/commonmark-spec.git"',
+            'repository = "http://github.com/commonmark/commonmark-spec.git"',
+        )
+        self.assert_rejected(self.verify_fixture)
+
+    def test_markdown_corpus_path_cannot_escape(self) -> None:
+        self.fixture.mutate(
+            "tests/compat/references.toml",
+            'corpus_path = "spec.txt"',
+            'corpus_path = "../spec.txt"',
+        )
+        self.assert_rejected(self.verify_fixture)
+
+    def test_preparation_rejects_escaping_corpus_path(self) -> None:
+        script_path = ROOT / "tools/markdown-compat/prepare_references.py"
+        spec = importlib.util.spec_from_file_location("prepare_references_fixture", script_path)
+        if spec is None or spec.loader is None:
+            raise AssertionError("could not load Markdown preparation script")
+        preparation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preparation)
+        with self.assertRaises(SystemExit):
+            preparation.repository_relative_path("../spec.txt", "commonmark.corpus_path")
+        with self.assertRaises(SystemExit):
+            preparation.repository_relative_path("/tmp/spec.txt", "commonmark.corpus_path")
+
+    def test_dirty_tracked_markdown_checkout_rejected(self) -> None:
+        checkout = self.fixture.root / "dirty-markdown-checkout"
+        checkout.mkdir()
+        for command in (
+            ("init", "--quiet"),
+            ("config", "user.email", "fixture@example.invalid"),
+            ("config", "user.name", "Fixture"),
+        ):
+            subprocess.run(["git", *command], cwd=checkout, check=True, capture_output=True, text=True)
+        tracked = checkout / "tracked.txt"
+        tracked.write_text("original\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=checkout, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", "fixture"],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        tracked.write_text("mutated\n", encoding="utf-8")
+        (checkout / "untracked-build-output").write_text("ignored\n", encoding="utf-8")
+        self.assert_rejected(lambda: verifier.check_tracked_checkout_clean(checkout, "Markdown.fixture"))
+
+    def test_missing_peeled_jdk_tag_proof_rejected(self) -> None:
+        manifest = verifier.read_toml(self.fixture.root / "docs/compatibility/quarkdown/reference-jvm.toml")
+        reference = manifest["reference"]
+        output = f"{reference['source_revision']}\trefs/tags/{reference['source_tag']}\n"
+        self.assert_rejected(lambda: verifier.check_peeled_tag_proof(output, reference))
+
+    def test_wrong_peeled_jdk_tag_proof_rejected(self) -> None:
+        manifest = verifier.read_toml(self.fixture.root / "docs/compatibility/quarkdown/reference-jvm.toml")
+        reference = manifest["reference"]
+        output = (
+            f"{reference['source_revision']}\trefs/tags/{reference['source_tag']}\n"
+            f"{'0' * 40}\trefs/tags/{reference['source_tag']}^{{}}\n"
+        )
+        self.assert_rejected(lambda: verifier.check_peeled_tag_proof(output, reference))
+
     def test_wrong_jvm_vendor(self) -> None:
         self.fixture.mutate(
             "docs/compatibility/quarkdown/reference-jvm.toml",
@@ -165,6 +232,14 @@ class ReferenceProvenanceTests(unittest.TestCase):
             "docs/compatibility/quarkdown/reference-jvm.toml",
             'unicode_version = "16.0.0"',
             'unicode_version = "15.0.0"',
+        )
+        self.assert_rejected(self.verify_fixture)
+
+    def test_wrong_unicode_generated_source_record_count(self) -> None:
+        self.fixture.mutate(
+            "docs/compatibility/quarkdown/reference-jvm.toml",
+            "unicode_generated_source_record_count = 68469",
+            "unicode_generated_source_record_count = 68468",
         )
         self.assert_rejected(self.verify_fixture)
 

@@ -14,6 +14,15 @@ def run(*args: str, cwd: Path | None = None) -> str:
     return subprocess.check_output(args, cwd=cwd, text=True).strip()
 
 
+def repository_relative_path(value: object, field: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"{field} must be a non-empty repository-relative path")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise SystemExit(f"{field} must stay inside the pinned checkout: {value!r}")
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
@@ -26,6 +35,7 @@ def main() -> None:
     paths: dict[str, str] = {}
     for name in ("commonmark", "cmark", "cmark_gfm"):
         reference = config[name]
+        corpus_path = repository_relative_path(reference.get("corpus_path"), f"{name}.corpus_path")
         checkout = args.output_dir / name
         run("git", "clone", "--quiet", reference["repository"], str(checkout))
         run("git", "checkout", "--quiet", reference["revision"], cwd=checkout)
@@ -35,7 +45,7 @@ def main() -> None:
                 f"{name} revision mismatch: expected {reference['revision']}, got {actual}"
             )
         paths[f"{name}_root"] = str(checkout)
-        paths[f"{name}_spec"] = str(checkout / reference["corpus_path"])
+        paths[f"{name}_spec"] = str(checkout / corpus_path)
 
     paths_path = args.output_dir / "paths.json"
     paths_path.write_text(json.dumps(paths, indent=2) + "\n", encoding="utf-8")

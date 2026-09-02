@@ -342,14 +342,27 @@ def check_jdk_static(root: Path, manifest_path: Path) -> tuple[dict[str, Any], d
     unicode_source = unicode_path.read_text(encoding="utf-8")
     if f"//! Unicode {reference['unicode_version']} case mappings" not in unicode_source:
         raise VerificationError("JDK Unicode artifact: Unicode version identity is stale")
+    scalar_records = require_int(
+        reference, "unicode_scalar_mapping_record_count", "JDK Unicode scalar records"
+    )
+    utf16_records = require_int(
+        reference, "unicode_utf16_char_record_count", "JDK Unicode UTF-16 records"
+    )
+    generated_records = require_int(
+        reference, "unicode_generated_source_record_count", "JDK Unicode generated records"
+    )
+    if generated_records != scalar_records + utf16_records:
+        raise VerificationError(
+            "JDK Unicode generated records must equal scalar plus UTF-16 records"
+        )
     for name, expected in (
         ("REFERENCE_JVM_VERSION", reference["java_version"]),
         ("REFERENCE_JVM_RUNTIME_VERSION", reference["runtime_version"]),
         ("REFERENCE_JVM_VENDOR_VERSION", reference["implementor_version"]),
         ("REFERENCE_JVM_ARCHIVE_SHA256", reference["archive_sha256"]),
         ("ORACLE_OUTPUT_SHA256", reference["oracle_output_sha256"]),
-        ("SCALAR_MAPPING_RECORD_COUNT", reference["unicode_scalar_mapping_record_count"]),
-        ("UTF16_CHAR_RECORD_COUNT", reference["unicode_utf16_char_record_count"]),
+        ("SCALAR_MAPPING_RECORD_COUNT", scalar_records),
+        ("UTF16_CHAR_RECORD_COUNT", utf16_records),
     ):
         check_rust_const(unicode_source, name, expected, "JDK Unicode artifact")
     unicode_corpus = relative_path(root, reference.get("unicode_corpus_path"), "JDK Unicode corpus path")
@@ -468,10 +481,14 @@ def check_markdown_license_metadata(
     require_string(reference, "source_kind", f"{label}.source_kind")
     if reference["source_kind"] != "immutable-git":
         raise VerificationError(f"{label}: source_kind must be immutable-git")
-    require_string(reference, "repository", f"{label}.repository")
+    repository = require_string(reference, "repository", f"{label}.repository")
+    if not repository.startswith("https://"):
+        raise VerificationError(f"{label}.repository must be an HTTPS URL")
     require_string(reference, "version", f"{label}.version")
     require_revision(reference, "revision", f"{label}.revision")
-    require_string(reference, "corpus_path", f"{label}.corpus_path")
+    corpus_path = require_string(reference, "corpus_path", f"{label}.corpus_path")
+    if Path(corpus_path).is_absolute() or ".." in Path(corpus_path).parts:
+        raise VerificationError(f"{label}.corpus_path is unsafe")
     require_string(reference, "license", f"{label}.license")
     source_sha = require_sha(reference, "source_corpus_sha256", f"{label}.source_corpus_sha256")
     del source_sha
@@ -632,6 +649,12 @@ def normalized_remote(value: str) -> str:
     return value.removesuffix("/").removesuffix(".git")
 
 
+def check_tracked_checkout_clean(checkout: Path, label: str) -> None:
+    status = git_output(checkout, "status", "--porcelain", "--untracked-files=no")
+    if status:
+        raise VerificationError(f"{label}: pinned checkout has modified tracked files")
+
+
 def check_markdown_sources(
     root: Path, refs: dict[str, Any], paths_path: Path, extracted: dict[str, Path]
 ) -> None:
@@ -639,6 +662,7 @@ def check_markdown_sources(
     if not isinstance(paths, dict):
         raise VerificationError("Markdown preparation paths are not a JSON object")
     for name, reference in refs.items():
+        license_files = check_markdown_license_metadata(reference, f"Markdown.{name}")
         root_key = f"{name}_root"
         spec_key = f"{name}_spec"
         checkout = external_path(paths.get(root_key), f"Markdown paths.{root_key}")
@@ -647,10 +671,11 @@ def check_markdown_sources(
             raise VerificationError(f"Markdown.{name}: prepared checkout/spec is missing")
         if git_output(checkout, "rev-parse", "HEAD") != reference["revision"]:
             raise VerificationError(f"Markdown.{name}: immutable revision mismatch")
+        check_tracked_checkout_clean(checkout, f"Markdown.{name}")
         remote = git_output(checkout, "config", "--get", "remote.origin.url")
         if normalized_remote(remote) != normalized_remote(reference["repository"]):
             raise VerificationError(f"Markdown.{name}: source repository mismatch")
-        expected_spec = checkout / reference["corpus_path"]
+        expected_spec = checkout / Path(reference["corpus_path"])
         if spec.resolve() != expected_spec.resolve():
             raise VerificationError(f"Markdown.{name}: corpus path escaped the pinned checkout")
         check_artifact(
@@ -662,7 +687,7 @@ def check_markdown_sources(
             expected_sha256=reference["source_corpus_sha256"],
             policy="exact",
         )
-        for license_file in check_markdown_license_metadata(reference, f"Markdown.{name}"):
+        for license_file in license_files:
             check_artifact(
                 checkout / license_file["path"],
                 label=f"Markdown.{name} source {license_file['path']}",
@@ -762,21 +787,31 @@ def check_jdk_archive(reference: dict[str, Any], archive: Path) -> None:
     )
 
 
+def check_peeled_tag_proof(output: str, reference: dict[str, Any]) -> None:
+    if reference.get("source_tag_proof") != "peeled-git-tag":
+        raise VerificationError("JDK source tag proof must be peeled-git-tag")
+    tag_values = {
+        line.split("\t", 1)[1]: line.split("\t", 1)[0]
+        for line in output.splitlines()
+        if "\t" in line
+    }
+    peeled_ref = f"refs/tags/{reference['source_tag']}^{{}}"
+    actual_peeled = tag_values.get(peeled_ref)
+    if actual_peeled is None:
+        raise VerificationError("JDK source tag peeled ref is missing")
+    if actual_peeled != reference["source_revision"]:
+        raise VerificationError("JDK source peeled tag does not resolve to the pinned source revision")
+
+
 def verify_jdk_git_sources(root: Path, reference: dict[str, Any]) -> None:
-    tag_refs = git_output(
+    tag_output = git_output(
         root,
         "ls-remote",
         reference["source_repository"],
         f"refs/tags/{reference['source_tag']}",
         f"refs/tags/{reference['source_tag']}^{{}}",
-    ).splitlines()
-    tag_values = {line.split("\t", 1)[1]: line.split("\t", 1)[0] for line in tag_refs if "\t" in line}
-    actual_tag = tag_values.get(
-        f"refs/tags/{reference['source_tag']}^{{}}",
-        tag_values.get(f"refs/tags/{reference['source_tag']}"),
     )
-    if actual_tag != reference["source_revision"]:
-        raise VerificationError("JDK source tag does not resolve to the pinned source revision")
+    check_peeled_tag_proof(tag_output, reference)
     with tempfile.TemporaryDirectory(prefix="scribium-jdk-source-proof-") as temporary:
         probe = Path(temporary)
         git_output(probe, "init", "--quiet")
