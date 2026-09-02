@@ -35,7 +35,7 @@ name = "Protect main"
 required_check_integration_id = 15368
 [compatibility_scope]
 run = ["crates/**", "tools/**", "tests/**", "docs/compatibility/**"]
-skip = ["docs/**", "*.md", ".github/**"]
+skip = ["docs/**", "*.md", ".github/**", ".cargo/config.toml", ".mailmap", "clippy.toml"]
 [[producer]]
 workflow = ".github/workflows/ci.yml"
 job = "fmt"
@@ -170,6 +170,16 @@ class GatePolicyNegativeTests(unittest.TestCase):
         )
         self.assertTrue(relevant)
         self.assertEqual(paths, ["crates/new-crate/src/lib.rs", "tools/new-oracle.py"])
+
+    def test_repository_metadata_paths_skip_compatibility(self):
+        tmp, root, policy = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        relevant, paths, unknown = mod.compatibility_scope(
+            policy, [".cargo/config.toml", ".mailmap", "clippy.toml"]
+        )
+        self.assertFalse(relevant)
+        self.assertEqual(paths, [])
+        self.assertEqual(unknown, [])
 
     def test_matrix_contexts_are_exact(self):
         workflow = """
