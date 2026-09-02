@@ -1,0 +1,57 @@
+name: Arkst reference hash audit
+
+on:
+  push:
+    branches: [chore/rename-arkst]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare repository-owned source fingerprints
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import tomllib
+          from pathlib import Path
+
+          root = Path('.')
+          config_path = root / 'docs/compatibility/quarkdown/reference-jvm.toml'
+          with config_path.open('rb') as stream:
+              cfg = tomllib.load(stream)
+          prov = cfg['provenance']
+          ref = cfg['reference']
+
+          pairs = [
+              ('provenance.verifier_source_sha256', prov['verifier_source_sha256'], prov['verifier_path']),
+              ('reference.helper_source_sha256', ref['helper_source_sha256'], 'tools/dump_jdk25_unicode_data.java'),
+              ('reference.generated_source_sha256', ref['generated_source_sha256'], ref['unicode_generated_source_path']),
+              ('reference.unicode_generator_source_sha256', ref['unicode_generator_source_sha256'], ref['unicode_generator_path']),
+              ('reference.unicode_verifier_source_sha256', ref['unicode_verifier_source_sha256'], ref['unicode_verifier_path']),
+              ('reference.locale_dump_helper_source_sha256', ref['locale_dump_helper_source_sha256'], ref['locale_dump_helper_path']),
+              ('reference.locale_display_dump_helper_source_sha256', ref['locale_display_dump_helper_source_sha256'], ref['locale_display_dump_helper_path']),
+              ('reference.locale_generator_source_sha256', ref['locale_generator_source_sha256'], ref['locale_generator_path']),
+              ('reference.locale_public_oracle_helper_source_sha256', ref['locale_public_oracle_helper_source_sha256'], ref['locale_public_oracle_helper_path']),
+              ('reference.locale_semantic_verifier_source_sha256', ref['locale_semantic_verifier_source_sha256'], ref['locale_semantic_verifier_path']),
+              ('reference.locale_generated_rust_sha256', ref['locale_generated_rust_sha256'], ref['locale_generated_rust_path']),
+              ('reference.locale_compact_snapshot_sha256', ref['locale_compact_snapshot_sha256'], ref['locale_compact_snapshot_path']),
+          ]
+
+          mismatches = 0
+          for field, expected, path_text in pairs:
+              path = root / path_text
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              status = 'MATCH' if expected == actual else 'MISMATCH'
+              if status == 'MISMATCH':
+                  mismatches += 1
+              print(f'{status}\t{field}\t{path_text}\texpected={expected}\tactual={actual}')
+          print(f'MISMATCH_COUNT={mismatches}')
+          PY
