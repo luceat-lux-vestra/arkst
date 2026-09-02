@@ -1,31 +1,39 @@
 # TRADEMARKS — Arkst
 
-This document records trademark-related information for Arkst.
+This document records preliminary naming and trademark-related information for Arkst.
+It is a project due-diligence record, not legal advice or trademark clearance.
 
-## Project Name Status
+## Project name status
 
-- **Working name:** Arkst
-- **Status:** **Proceeding with "Arkst"**
-- **Action required:** None — GitHub handle and domain names are not required for this project
+- **Current name:** Arkst
+- **Previous working name:** Scribium
+- **Decision:** proceed with the Arkst rename before the first public release
+- **Name origin:** `ark`, shared by M**ark**down and Qu**ark**down, plus `st` from Typ**st**
 
-## Due Diligence Results (2026-08-04)
+The previous working name was retired before public release because current public
+services already use the exact name Scribium, creating unnecessary product-identity
+collision risk.
 
-| Channel | Availability | Notes |
-|---------|--------------|-------|
-| crates.io | Likely available | No crate named "arkst" found |
-| npm | Available | No package named "arkst" |
-| GitHub @arkst | Taken | Not required for project |
-| arkst.dev | Taken | Not required for project |
-| arkst.org | Taken | Not required for project |
-| arkst.com | Taken | Not required for project |
-| USPTO trademark | Not searched | Optional — only if future trademark filing needed |
+## Preliminary Arkst due diligence (2026-09-02)
+
+| Channel | Result | Notes |
+|---|---|---|
+| Existing software/products | No material exact-name collision found in preliminary public searches | `ARKST` does appear as an Arkansas State abbreviation in sports/data contexts |
+| crates.io | No exact `arkst` crate found in the checks performed for this decision | Recheck the authoritative registry immediately before first publication; crate names are first-come-first-served |
+| npm | No material exact `arkst` package/product collision found in preliminary searches | npm publication is not part of the current release plan; recheck if that changes |
+| `arkst.com` | Registered | The `.com` domain is not assumed available and is not required for the first release |
+| Other domains / social handles | Not relied upon for the naming decision | Do not claim availability without a fresh authoritative check |
+| Trademark registries | No legal clearance performed | Obtain appropriate legal review if formal trademark protection or commercial risk warrants it |
+
+These results intentionally replace the old Scribium-name investigation rather than
+mechanically rewriting its historical findings as if they had been Arkst findings.
 
 ## Disclaimer
 
 Arkst is an independent project. It is not affiliated with, endorsed by,
 or sponsored by Typst GmbH or the Quarkdown project.
 
-## Prohibited Representations
+## Prohibited representations
 
 The following are prohibited in Arkst packaging, documentation, and marketing:
 
@@ -35,20 +43,9 @@ The following are prohibited in Arkst packaging, documentation, and marketing:
 - Using Typst GmbH or Quarkdown project logos without permission
 - Confusingly similar branding to Typst or Quarkdown
 
-## External Trademarks
+## External trademarks
 
 - **Typst** is a trademark of Typst GmbH
 - **Quarkdown** is a trademark of its respective owners
 - **Rust** is a trademark of the Rust Foundation
 - **Apache** is a trademark of the Apache Software Foundation
-## Project naming decision (2026-09-02)
-
-The project was originally developed under the working name **Scribium**.
-Before the first public release, that name was retired because current
-public services already used the same name and created unnecessary product
-identity collision risk.
-
-The project name is now **Arkst**. The name combines `ark`, shared by
-M**ark**down and Qu**ark**down, with `st` from Typ**st**, reflecting the
-project's document compilation pipeline. This record documents a project
-naming decision, not a legal conclusion or trademark clearance.
