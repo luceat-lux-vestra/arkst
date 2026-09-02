@@ -72,7 +72,7 @@
               "span": {
                 "source_id": 1,
                 "start": 113,
-                "end": 159
+                "end": 156
               }
             }
           }
@@ -80,7 +80,7 @@
         "span": {
           "source_id": 1,
           "start": 113,
-          "end": 159
+          "end": 156
         }
       }
     },
@@ -92,16 +92,16 @@
               "content": "A\nB",
               "span": {
                 "source_id": 1,
-                "start": 161,
-                "end": 183
+                "start": 158,
+                "end": 180
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 161,
-          "end": 183
+          "start": 158,
+          "end": 180
         }
       }
     },
@@ -113,16 +113,16 @@
               "content": "AB",
               "span": {
                 "source_id": 1,
-                "start": 185,
-                "end": 208
+                "start": 182,
+                "end": 205
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 185,
-          "end": 208
+          "start": 182,
+          "end": 205
         }
       }
     },
@@ -134,16 +134,16 @@
               "content": "Hello WORLD",
               "span": {
                 "source_id": 1,
-                "start": 210,
-                "end": 253
+                "start": 207,
+                "end": 250
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 210,
-          "end": 253
+          "start": 207,
+          "end": 250
         }
       }
     },
@@ -155,16 +155,16 @@
               "content": "named content",
               "span": {
                 "source_id": 1,
-                "start": 255,
-                "end": 289
+                "start": 252,
+                "end": 286
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 255,
-          "end": 289
+          "start": 252,
+          "end": 286
         }
       }
     },
@@ -176,16 +176,16 @@
               "content": "block body",
               "span": {
                 "source_id": 1,
-                "start": 291,
-                "end": 316
+                "start": 288,
+                "end": 313
               }
             }
           }
         ],
         "span": {
           "source_id": 1,
-          "start": 291,
-          "end": 316
+          "start": 288,
+          "end": 313
         }
       }
     }

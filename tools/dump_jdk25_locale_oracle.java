@@ -163,7 +163,7 @@ final class DumpJdk25LocaleOracle {
             }
             List<String> candidates = new ArrayList<>();
             if (!nameMatch) {
-                for (Locale candidate : control.getCandidateLocales("arkst", locale)) {
+                for (Locale candidate : control.getCandidateLocales("scribium", locale)) {
                     candidates.add(candidate == Locale.ROOT ? "<root>" : baseIdentity(candidate));
                 }
             }

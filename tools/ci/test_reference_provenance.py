@@ -309,7 +309,7 @@ class ReferenceProvenanceTests(unittest.TestCase):
     def test_wrong_generator_identity(self) -> None:
         self.fixture.mutate(
             "docs/compatibility/quarkdown/reference-jvm.toml",
-            'unicode_generator_source_sha256 = "2277ccc648379577000c6e4395514be0f24fb5dbd1e3062607a916ab8b178e8a"',
+            'unicode_generator_source_sha256 = "1074fa498101d643fa7e7e7b02623f172b3b6c2fdce13d7d8799ed0a36eeac6f"',
             'unicode_generator_source_sha256 = "' + "0" * 64 + '"',
         )
         self.assert_rejected(self.verify_fixture)
@@ -317,7 +317,7 @@ class ReferenceProvenanceTests(unittest.TestCase):
     def test_wrong_helper_identity(self) -> None:
         self.fixture.mutate(
             "docs/compatibility/quarkdown/reference-jvm.toml",
-            'helper_source_sha256 = "e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47"',
+            'helper_source_sha256 = "b0fb84655d5fb1416dac6df356ebe0ee84c450d319dfe2d805e14434e358fbac"',
             'helper_source_sha256 = "' + "0" * 64 + '"',
         )
         self.assert_rejected(self.verify_fixture)
