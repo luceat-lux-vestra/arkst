@@ -220,7 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its project root to the current directory.
 - `build --output <path>` to override the generated output path.
 - **PDF output via external Typst subprocess** — `arkst build --format pdf` compiles
-  supported input documents (`.qd`, `.scrib`, `.md`) directly to PDF using the
+  supported input documents (`.qd`, `.arkst`, `.md`) directly to PDF using the
   configured Typst executable. The `SubprocessBackend` implements the `TypstBackend`
   trait, invoking `typst compile` via `std::process::Command` without shell
   interpolation. Real `typst --version` detection is implemented. Typst diagnostics
@@ -316,7 +316,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly unsupported with actionable error messages.
 - CLI help text updated: `--output` documents the format-dependent default
   (`.typ` for typst, `.pdf` for pdf) and `--format` lists only the supported formats.
-- Supported CLI inputs are now `.qd`, `.scrib`, and `.md`; a `.typ` input is
+- Supported CLI inputs are now `.qd`, `.arkst`, and `.md`; a `.typ` input is
   rejected as an unsupported format until Typst passthrough is implemented.
   Extension matching is ASCII case-insensitive, and files without an
   extension are rejected.

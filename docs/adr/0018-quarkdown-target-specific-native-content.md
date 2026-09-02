@@ -327,8 +327,8 @@ Markdown raw HTML and Quarkdown `.html` remain separate at every layer:
 | Source | Owner and meaning |
 |---|---|
 | `<em>x</em>` or `<!-- comment -->` in `.md` | Rushdown-owned Markdown raw HTML; only the bounded Markdown adapter policy applies. |
-| `.html {<em>x</em>}` in `.qd`/`.scrib` | Quarkdown function call; evaluated String becomes target-specific native HTML only after the future capability gate. |
-| `<em>x</em>` in `.qd`/`.scrib` | Ordinary mixed raw HTML; remains source-backed and fails closed with `E8001`. |
+| `.html {<em>x</em>}` in `.qd`/`.arkst` | Quarkdown function call; evaluated String becomes target-specific native HTML only after the future capability gate. |
+| `<em>x</em>` in `.qd`/`.arkst` | Ordinary mixed raw HTML; remains source-backed and fails closed with `E8001`. |
 
 Adding the `.html` builtin must never broaden the Quarkdown frontend's raw
 HTML recognition or enable ordinary mixed raw HTML. Rushdown remains pinned at
@@ -382,7 +382,7 @@ checks, and silent Typst/PDF omission. It does not broaden Markdown raw HTML.
 
 The current claim remains bounded: closed `Html` semantic evaluation and
 Typst/PDF omission are implemented, while an HTML output backend, `.css`,
-`.htmloptions`, and arbitrary mixed `.qd`/`.scrib` HTML remain unsupported.
+`.htmloptions`, and arbitrary mixed `.qd`/`.arkst` HTML remain unsupported.
 
 ## Explicit non-goals
 
@@ -393,7 +393,7 @@ This ADR does not:
 - add an HTML backend, parser, DOM, CSS, JavaScript, SVG, LaTeX, or Typst
   native-code path;
 - change Rushdown or its pin;
-- enable ordinary mixed raw HTML in `.qd`/`.scrib`;
+- enable ordinary mixed raw HTML in `.qd`/`.arkst`;
 - implement `.css`, `.htmloptions`, or a general permission framework; or
 - define a generic plugin, MIME, or backend escape-hatch system.
 
@@ -407,5 +407,5 @@ and inline IR positions, evaluates `.html` through the regular `String`
 boundary after the `NativeContent` check, reports denied capability as one
 source-backed `E3004`, and omits the payload silently in Typst/PDF. A future
 HTML output backend may consume the evaluated payload. Ordinary mixed raw HTML
-in `.qd`/`.scrib`, `.css`, and generic native/backend payloads remain outside
+in `.qd`/`.arkst`, `.css`, and generic native/backend payloads remain outside
 this decision.

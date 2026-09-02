@@ -107,12 +107,12 @@ fn logical_project_root(requested_entry: &Path) -> PathBuf {
 /// Supported input extensions. Typst passthrough (`.typ`) is not implemented
 /// yet, so it is deliberately excluded and rejected at the CLI boundary.
 /// Extension matching is ASCII case-insensitive (`.QD` is accepted).
-const SUPPORTED_INPUT_EXTENSIONS: [&str; 3] = ["qd", "scrib", "md"];
+const SUPPORTED_INPUT_EXTENSIONS: [&str; 3] = ["qd", "arkst", "md"];
 
 /// Validates that `input` has a supported source extension.
 ///
 /// Files without an extension are rejected, as are extensions outside
-/// `.qd`/`.scrib`/`.md`. Matching is ASCII case-insensitive.
+/// `.qd`/`.arkst`/`.md`. Matching is ASCII case-insensitive.
 fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
     let ext = input
         .extension()
@@ -123,12 +123,12 @@ fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
         Ok(())
     } else if ext.is_empty() {
         anyhow::bail!(
-            "missing input extension '{}' (supported: qd, scrib, md)",
+            "missing input extension '{}' (supported: qd, arkst, md)",
             input.display()
         );
     } else {
         anyhow::bail!(
-            "unsupported input extension '.{}' (supported: qd, scrib, md)",
+            "unsupported input extension '.{}' (supported: qd, arkst, md)",
             ext
         );
     }
@@ -203,7 +203,7 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
             .map(|(_, extension)| {
                 matches!(
                     extension.to_ascii_lowercase().as_str(),
-                    "qd" | "scrib" | "md"
+                    "qd" | "arkst" | "md"
                 )
             })
             .unwrap_or(false);
@@ -1251,7 +1251,7 @@ mod tests {
             "error was: {}",
             error
         );
-        assert!(error.contains("qd, scrib, md"), "error was: {}", error);
+        assert!(error.contains("qd, arkst, md"), "error was: {}", error);
     }
 
     #[test]
@@ -1284,12 +1284,26 @@ mod tests {
             "error was: {}",
             error
         );
-        assert!(error.contains("qd, scrib, md"), "error was: {}", error);
+        assert!(error.contains("qd, arkst, md"), "error was: {}", error);
+    }
+
+    #[test]
+    fn legacy_scrib_extension_is_rejected() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("document.scrib");
+        fs::write(&input, "# Hello\n").unwrap();
+        let error = check(input.to_str().unwrap()).unwrap_err().to_string();
+        assert!(
+            error.contains("unsupported input extension '.scrib'"),
+            "error was: {}",
+            error
+        );
+        assert!(error.contains("qd, arkst, md"), "error was: {}", error);
     }
 
     #[test]
     fn all_supported_extensions_are_accepted() {
-        for ext in ["qd", "scrib", "md"] {
+        for ext in ["qd", "arkst", "md"] {
             let dir = tempdir().unwrap();
             let input = dir.path().join(format!("document.{ext}"));
             fs::write(&input, "# Hello\n").unwrap();

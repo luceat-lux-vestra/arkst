@@ -19,19 +19,23 @@ and how it distinguishes Arkst-native source from passthrough Typst.
 
 ## Considered Options
 
-### Option 1: Single `.scrib` extension
+### Option 1: Single `.arkst` extension
 
 Clean but breaks expectations — users already have `.md` and `.qd` files.
+
+> Historical note: before the Arkst rename, the working-name-specific `.scrib`
+> alias occupied this role. It was removed before the first public release and
+> is not part of the Arkst compatibility contract.
 
 ### Option 2: Multi-extension support with auto-detection (chosen)
 
 - `.qd` — Quarkdown-compatible Arkst source (primary)
-- `.scrib` — alias for `.qd`
+- `.arkst` — Arkst-native alias for `.qd`
 - `.md` — Markdown-only (no Arkst directives; or directives are an opt-in
   front-matter flag)
 - `.typ` — host-level passthrough to the selected official Typst compiler
 
-### Option 3: Only `.scrib`, convert external formats
+### Option 3: Only `.arkst`, convert external formats
 
 Too much friction for adoption.
 
@@ -42,12 +46,12 @@ Support three input paths:
 | Extension | Processing                                      |
 |-----------|--------------------------------------------------|
 | `.qd`     | Arkst parser: Markdown + Quarkdown-compatible |
-| `.scrib`  | Alias for `.qd`                                  |
+| `.arkst`  | Alias for `.qd`                                  |
 | `.md`     | Markdown-only (no Arkst directive processing)      |
 | `.typ`    | Passthrough to Typst compiler                    |
 
 > **Implementation status:** `.typ` passthrough is not implemented yet. The
-> CLI currently accepts `.qd`, `.scrib`, and `.md` and rejects `.typ` inputs
+> CLI currently accepts `.qd`, `.arkst`, and `.md` and rejects `.typ` inputs
 > with a clear "unsupported input format" error. The `.typ` row of this ADR
 > applies once passthrough lands. This is a host input path, not a raw Typst
 > node or generic backend-code escape hatch in Arkst's backend-neutral IR.

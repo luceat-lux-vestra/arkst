@@ -6,7 +6,7 @@ This document exercises the Markdown path that Arkst currently lowers through Ty
 
 Plain text can contain *emphasis*, **strong text**, ~~strikethrough~~, and `inline code`.
 
-A normal link points to the [Arkst repository](https://github.com/luceat-lux-vestra/scribium), and an autolink works too: <https://example.com>.
+A normal link points to the [Arkst repository](https://github.com/luceat-lux-vestra/arkst), and an autolink works too: <https://example.com>.
 
 > Blockquotes preserve nested Markdown structure.
 >

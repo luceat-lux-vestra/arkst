@@ -9,7 +9,7 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/luceat-lux-vestra/scribium.git
+git clone https://github.com/luceat-lux-vestra/arkst.git
 cd arkst
 cargo build
 cargo test

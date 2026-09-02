@@ -525,7 +525,7 @@ classes:
 | Diagnostic codes | Stable external taxonomy, currently represented as strings | F-009: catalog/builders later; do not rename codes in this audit. |
 | Quarkdown v2.5.1 profile/version and fixture levels | Compatibility metadata | Keep as evidence-backed metadata; make level drive assertions in F-001 and profile drive policy in F-006. |
 | Typst syntax fragments and escaping | Legitimate backend implementation detail | Keep in `arkst-typst`; do not move into core IR. |
-| `.md`, `.qd`, `.scrib` extension handling and case-insensitive final extension | Explicit input contract | Keep at the frontend/CLI boundary; do not make arbitrary extensions implicit. |
+| `.md`, `.qd`, `.arkst` extension handling and case-insensitive final extension | Explicit input contract | Keep at the frontend/CLI boundary; do not make arbitrary extensions implicit. |
 | Closed enum conversion tables | Appropriate typed registry | Keep `ClosedEnumSpec`/typed enum values; do not replace with generalized string coercion. |
 | Zero-size/default layout values | Local semantic defaults where documented by the bounded feature | Review only when upstream evidence changes; no blanket constant extraction. |
 

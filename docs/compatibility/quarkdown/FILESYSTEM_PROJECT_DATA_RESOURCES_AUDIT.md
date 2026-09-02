@@ -5,13 +5,13 @@
 - **Arkst audit base:** `1a1fc7b1a978baa23d5eb0bfbef83ec49af5253f`
 - **Quarkdown target:** v2.5.1 at `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Authority:** the machine-checkable [filesystem/project/data/resource manifest](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv)
-- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
-- **Audit issue:** [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
+- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
+- **Audit issue:** [#155](https://github.com/luceat-lux-vestra/arkst/issues/155)
 
 This is an evidence and reconciliation record. It does not implement
 Quarkdown resource features, change the compatibility target, redesign the
 Typst backend, or add filesystem/network/process access. Post-audit production
-ordering is defined by [#156](https://github.com/luceat-lux-vestra/scribium/issues/156).
+ordering is defined by [#156](https://github.com/luceat-lux-vestra/arkst/issues/156).
 
 The manifest is authoritative for the canonical status and ownership of every
 enumerated row. The offline guard derives its row and ownership checks from the
@@ -218,24 +218,24 @@ or network access.
 
 ## Bounded follow-up ownership
 
-- [#188](https://github.com/luceat-lux-vestra/scribium/issues/188): common
+- [#188](https://github.com/luceat-lux-vestra/arkst/issues/188): common
   logical project resolution, nested loading, source identity, subdocument
   resolution, and `.read`/`.json`/`.include` family closure;
-- [#189](https://github.com/luceat-lux-vestra/scribium/issues/189): bounded
+- [#189](https://github.com/luceat-lux-vestra/arkst/issues/189): bounded
   project data-file and file-identity loaders (`.listfiles`, `.filename`,
   `.csv`, `.bibliography`), coordinated with #181/#183 consumers;
-- [#190](https://github.com/luceat-lux-vestra/scribium/issues/190): explicit,
+- [#190](https://github.com/luceat-lux-vestra/arkst/issues/190): explicit,
   deterministic `.env` capability/injection or rejection;
-- [#191](https://github.com/luceat-lux-vestra/scribium/issues/191): deferred
+- [#191](https://github.com/luceat-lux-vestra/arkst/issues/191): deferred
   WASM project/resource binding;
-- [#175](https://github.com/luceat-lux-vestra/scribium/issues/175),
-  [#181](https://github.com/luceat-lux-vestra/scribium/issues/181),
-  [#182](https://github.com/luceat-lux-vestra/scribium/issues/182),
-  [#183](https://github.com/luceat-lux-vestra/scribium/issues/183), and
-  [#187](https://github.com/luceat-lux-vestra/scribium/issues/187) retain their
+- [#175](https://github.com/luceat-lux-vestra/arkst/issues/175),
+  [#181](https://github.com/luceat-lux-vestra/arkst/issues/181),
+  [#182](https://github.com/luceat-lux-vestra/arkst/issues/182),
+  [#183](https://github.com/luceat-lux-vestra/arkst/issues/183), and
+  [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) retain their
   established layout, structural/reference, media, table, and Typst/backend
   ownership boundaries; and
-- [#156](https://github.com/luceat-lux-vestra/scribium/issues/156) is the
+- [#156](https://github.com/luceat-lux-vestra/arkst/issues/156) is the
   completed cross-audit reconciliation record; implementation sequencing now
   follows its canonical dependency graph.
 

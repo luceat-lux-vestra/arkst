@@ -59,7 +59,7 @@ review itself added no implementation; the subsequent current-main slice now
 implements the closed `Html` semantic boundary with production IR, evaluator
 capability checking, source-backed `E3004` denial, and silent Typst/PDF
 omission. The HTML output backend remains future work, while ordinary mixed raw
-HTML in `.qd`/`.scrib` remains `E8001` under the separate Markdown raw-HTML
+HTML in `.qd`/`.arkst` remains `E8001` under the separate Markdown raw-HTML
 policy.
 
 ## Clean-room and substrate record
