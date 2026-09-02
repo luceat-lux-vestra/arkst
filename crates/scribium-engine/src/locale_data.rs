@@ -5,10 +5,15 @@
 // is stored in `data/jdk25_locale_display.bin` after semantic fallback
 // delta compaction and string interning.
 // Reference runtime: Eclipse Temurin 25.0.4.1+1 (Eclipse Adoptium),
+// Reference java.version: 25.0.4.1
+// Reference Unicode version: 16.0.0
 // `java.locale.providers=CLDR`.
 // Reference archive:
 // https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz
 // Reference archive SHA-256: dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e
+// Reference source tag: jdk-25.0.4.1+1_adopt
+// Reference source revision: 520406d871955300957ef01e406ac2acd0f9b75c
+// Reference build source revision: e6ba7dec3d07654074559310376a3ae89da5f4ac
 // Available-locale raw-order manifest: jdk25_available_locale_order.tsv
 // Available-locale raw-order manifest SHA-256: c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e
 // Dump helper SHA-256: 15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e
@@ -30806,4 +30811,4 @@ static LOCALE_TAG_RECORDS: &[LocaleRecord] = &[
 ];
 
 #[allow(dead_code)]
-pub const LOCALE_DISPLAY_GENERATED_SOURCE_BYTES: usize = 814205;
+pub const LOCALE_DISPLAY_GENERATED_SOURCE_BYTES: usize = 814472;

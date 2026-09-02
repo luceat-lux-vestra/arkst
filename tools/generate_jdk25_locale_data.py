@@ -28,48 +28,69 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError as error:  # pragma: no cover - generator requires Python 3.11+
+    raise SystemExit("Python 3.11 or newer is required for the reference manifest") from error
 
-REFERENCE_RELEASE_VERSION = "25.0.4.1+1"
-REFERENCE_RUNTIME_VERSION = "25.0.4.1+1-LTS"
-REFERENCE_VENDOR = "Eclipse Adoptium"
-REFERENCE_VENDOR_VERSION = "Temurin-25.0.4.1+1"
-REFERENCE_RUNTIME_DISPLAY = "Eclipse Temurin 25.0.4.1+1"
-REFERENCE_LOCALE_PROVIDERS = "CLDR"
-REFERENCE_JDK_URL = (
-    "https://github.com/adoptium/temurin25-binaries/releases/download/"
-    "jdk-25.0.4.1%2B1/"
-    "OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz"
-)
-REFERENCE_JDK_SHA256 = "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e"
-REFERENCE_JDK_SIZE = 141329719
-EXPECTED_AVAILABLE_RECORD_COUNT = 1158
-EXPECTED_TAG_RECORD_COUNT = 1157
-EXPECTED_NAME_COLLISION_COUNT = 0
-AVAILABLE_ORDER_MANIFEST = "jdk25_available_locale_order.tsv"
-EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = "c4dd6cd7e83919d7236d3040c1ddc60ca21ff92e179b19a7d7d10fda7f9a815e"
-EXPECTED_SOURCE_SHA256 = "2dc572125ce0e50854fc3ec538acde3358c5b0320e13b501162411a34dc36105"
-EXPECTED_DUMP_SOURCE_SHA256 = "15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e"
-EXPECTED_DISPLAY_RECORD_COUNT = 453459
-EXPECTED_DISPLAY_SOURCE_SHA256 = "96d43b0ff823a4505bdb69ddd80bfd3056867b2c7c0bc27b6a50fc822c116ab3"
-EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = "25ecb0d2dbc767ef1006a112ead0e2271686cf2dfd7d8f870e812dcfefab9131"
-EXPECTED_COMPACT_RECORD_COUNT = 267017
-EXPECTED_COMPACT_PROFILE_COUNT = 320
-EXPECTED_COMPACT_KEY_COUNT = 2525
-EXPECTED_COMPACT_VALUE_COUNT = 178930
-EXPECTED_COMPACT_SHA256 = "d086d29fbb3716624efb0066df9fe09cd6df21438931ed2b0f0ddc17743e68b1"
 
-REFERENCE_JDK_TZ_SOURCE_MEMBER = "java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java"
-REFERENCE_JDK_TZ_SOURCE_SHA256 = "dbddf061210b9086d820c4593c4921698b9d4ef15515fc2ac9a5336c626ce7c2"
-EXPECTED_TZ_SOURCE_ENTRY_COUNT = 681
-EXPECTED_TZ_UNIQUE_ENTRY_COUNT = 622
-EXPECTED_TZ_ID_COUNT = 468
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / "docs/compatibility/quarkdown/reference-jvm.toml"
+
+
+def reference_manifest() -> dict[str, object]:
+    with MANIFEST_PATH.open("rb") as stream:
+        data = tomllib.load(stream)
+    reference = data.get("reference")
+    if not isinstance(reference, dict):
+        raise ValueError(f"{MANIFEST_PATH}: missing [reference] table")
+    return reference
+
+
+REFERENCE = reference_manifest()
+
+
+REFERENCE_RELEASE_VERSION = str(REFERENCE["release_version"])
+REFERENCE_RUNTIME_VERSION = str(REFERENCE["runtime_version"])
+REFERENCE_VENDOR = str(REFERENCE["vendor"])
+REFERENCE_VENDOR_VERSION = str(REFERENCE["implementor_version"])
+REFERENCE_RUNTIME_DISPLAY = str(REFERENCE["runtime_display"])
+REFERENCE_JAVA_VERSION = str(REFERENCE["java_version"])
+REFERENCE_UNICODE_VERSION = str(REFERENCE["unicode_version"])
+REFERENCE_SOURCE_TAG = str(REFERENCE["source_tag"])
+REFERENCE_SOURCE_REVISION = str(REFERENCE["source_revision"])
+REFERENCE_BUILD_SOURCE_REVISION = str(REFERENCE["build_source_revision"])
+REFERENCE_LOCALE_PROVIDERS = str(REFERENCE["locale_provider"])
+REFERENCE_JDK_URL = str(REFERENCE["archive_url"])
+REFERENCE_JDK_SHA256 = str(REFERENCE["archive_sha256"])
+REFERENCE_JDK_SIZE = int(REFERENCE["archive_bytes"])
+EXPECTED_AVAILABLE_RECORD_COUNT = int(REFERENCE["locale_available_record_count"])
+EXPECTED_TAG_RECORD_COUNT = int(REFERENCE["locale_canonical_tag_record_count"])
+EXPECTED_NAME_COLLISION_COUNT = int(REFERENCE["locale_name_collision_count"])
+AVAILABLE_ORDER_MANIFEST = Path(str(REFERENCE["locale_available_order_path"])).name
+EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256 = str(REFERENCE["locale_available_order_manifest_sha256"])
+EXPECTED_SOURCE_SHA256 = str(REFERENCE["locale_logical_source_sha256"])
+EXPECTED_DUMP_SOURCE_SHA256 = str(REFERENCE["locale_dump_helper_source_sha256"])
+EXPECTED_DISPLAY_RECORD_COUNT = int(REFERENCE["locale_logical_display_record_count"])
+EXPECTED_DISPLAY_SOURCE_SHA256 = str(REFERENCE["locale_logical_display_source_sha256"])
+EXPECTED_DISPLAY_DUMP_SOURCE_SHA256 = str(REFERENCE["locale_display_dump_helper_source_sha256"])
+EXPECTED_COMPACT_RECORD_COUNT = int(REFERENCE["locale_compact_record_count"])
+EXPECTED_COMPACT_PROFILE_COUNT = int(REFERENCE["locale_compact_profile_count"])
+EXPECTED_COMPACT_KEY_COUNT = int(REFERENCE["locale_compact_key_count"])
+EXPECTED_COMPACT_VALUE_COUNT = int(REFERENCE["locale_compact_value_count"])
+EXPECTED_COMPACT_SHA256 = str(REFERENCE["locale_compact_snapshot_sha256"])
+
+REFERENCE_JDK_TZ_SOURCE_MEMBER = str(REFERENCE["locale_timezone_source_member"])
+REFERENCE_JDK_TZ_SOURCE_SHA256 = str(REFERENCE["locale_timezone_source_sha256"])
+EXPECTED_TZ_SOURCE_ENTRY_COUNT = int(REFERENCE["locale_timezone_source_rows"])
+EXPECTED_TZ_UNIQUE_ENTRY_COUNT = int(REFERENCE["locale_timezone_unique_source_rows"])
+EXPECTED_TZ_ID_COUNT = int(REFERENCE["locale_accepted_timezone_ids"])
 REFERENCE_CLDR_SOURCE_MEMBER = REFERENCE_JDK_TZ_SOURCE_MEMBER
 REFERENCE_CLDR_SOURCE_SHA256 = REFERENCE_JDK_TZ_SOURCE_SHA256
-DISPLAY_DUMP_HELPER = "dump_jdk25_locale_display_data.java"
-PUBLIC_ORACLE_HELPER = "dump_jdk25_locale_oracle.java"
-EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = "80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02"
-EXPECTED_PUBLIC_ORACLE_RECORD_COUNT = 7440
-EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 = "05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed"
+DISPLAY_DUMP_HELPER = Path(str(REFERENCE["locale_display_dump_helper_path"])).name
+PUBLIC_ORACLE_HELPER = Path(str(REFERENCE["locale_public_oracle_helper_path"])).name
+EXPECTED_PUBLIC_ORACLE_SOURCE_SHA256 = str(REFERENCE["locale_public_oracle_helper_source_sha256"])
+EXPECTED_PUBLIC_ORACLE_RECORD_COUNT = int(REFERENCE["locale_public_oracle_record_count"])
+EXPECTED_PUBLIC_ORACLE_OUTPUT_SHA256 = str(REFERENCE["locale_public_oracle_output_sha256"])
 JDK_EXPORTS = (
     "--add-exports=java.base/sun.util.resources=ALL-UNNAMED",
     "--add-exports=java.base/sun.util.locale.provider=ALL-UNNAMED",
@@ -79,7 +100,7 @@ LocaleRow = tuple[str, str, str, str, str, str, str, str]
 
 # Executable representation budgets. These are checked during every
 # regeneration, and the Rust integrity tests repeat the checked-in limits.
-COMPACT_FORMAT_VERSION = 1
+COMPACT_FORMAT_VERSION = int(REFERENCE["locale_compact_format_version"])
 MAX_GENERATED_RUST_SOURCE_BYTES = 1 * 1024 * 1024
 MAX_GENERATED_RUST_SOURCE_LINES = 100_000
 MAX_COMPACT_SNAPSHOT_BYTES = 8 * 1024 * 1024
@@ -1063,10 +1084,15 @@ def render_rust_source(
         "// is stored in `data/jdk25_locale_display.bin` after semantic fallback",
         "// delta compaction and string interning.",
         f"// Reference runtime: {REFERENCE_RUNTIME_DISPLAY} ({REFERENCE_VENDOR}),",
+        f"// Reference java.version: {REFERENCE_JAVA_VERSION}",
+        f"// Reference Unicode version: {REFERENCE_UNICODE_VERSION}",
         f"// `java.locale.providers={REFERENCE_LOCALE_PROVIDERS}`.",
         "// Reference archive:",
         f"// {REFERENCE_JDK_URL}",
         f"// Reference archive SHA-256: {REFERENCE_JDK_SHA256}",
+        f"// Reference source tag: {REFERENCE_SOURCE_TAG}",
+        f"// Reference source revision: {REFERENCE_SOURCE_REVISION}",
+        f"// Reference build source revision: {REFERENCE_BUILD_SOURCE_REVISION}",
         f"// Available-locale raw-order manifest: {AVAILABLE_ORDER_MANIFEST}",
         f"// Available-locale raw-order manifest SHA-256: {EXPECTED_AVAILABLE_ORDER_MANIFEST_SHA256}",
         f"// Dump helper SHA-256: {EXPECTED_DUMP_SOURCE_SHA256}",

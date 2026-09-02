@@ -40,6 +40,10 @@ jobs:
         run: python3 tools/ci/test_verify_gate_policy.py
       - name: Test upstream metadata-ingestion guards
         run: python3 tools/ci/test_upstream_quarkdown_ingestion.py
+      - name: Verify generated/reference-data provenance contract
+        run: |
+          python3 tools/ci/test_reference_provenance.py
+          python3 tools/verify_reference_provenance.py
       - name: Test deterministic workflow-security policy
         run: |
           python3 tools/ci/test_verify_workflow_security.py

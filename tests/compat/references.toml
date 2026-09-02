@@ -1,22 +1,107 @@
 schema_version = 1
 
+[provenance]
+contract = "scribium.reference-data-integrity"
+contract_version = 1
+source_kind = "immutable-git"
+verifier_path = "tools/verify_reference_provenance.py"
+verifier_source_sha256 = "41b96984e962b297b0dfa283e957d13abfc1bfdb04cd16be910c55f498dc97cb"
+notice_path = "NOTICE"
+notice_required_markers = [
+  "== Markdown compatibility reference data ==",
+  "commonmark/commonmark-spec",
+  "commonmark/cmark",
+  "github/cmark-gfm",
+  "CC-BY-SA-4.0",
+  "BSD-2-Clause",
+]
+runtime_scope = "development-ci-only"
+exact_artifact_globs = [
+  "tests/compat/corpus/*.json",
+  "tests/compat/baselines/*.json",
+]
+
 [commonmark]
+source_kind = "immutable-git"
 repository = "https://github.com/commonmark/commonmark-spec.git"
 version = "0.31.2"
 revision = "9103e341a973013013bb1a80e13567007c5cef6f"
 corpus_path = "spec.txt"
 license = "CC-BY-SA-4.0"
+source_corpus_bytes = 205025
+source_corpus_min_bytes = 205025
+source_corpus_max_bytes = 205025
+source_corpus_sha256 = "257c41ad946f7a1414a499aca402a1aa8fdac3678532266611348c1cf54f4b80"
+license_files = [
+  { path = "LICENSE", bytes = 2792, sha256 = "3e4806ba6f20073e8ce40da5a0c4b59f7f44287965f538e195a4d734d833557b" },
+]
+notice_markers = ["commonmark/commonmark-spec", "CC-BY-SA-4.0"]
+extracted_corpus_path = "tests/compat/corpus/commonmark.json"
+extracted_corpus_bytes = 102952
+extracted_corpus_min_bytes = 102952
+extracted_corpus_max_bytes = 102952
+extracted_corpus_sha256 = "ec8d30143a365274907de72235647f47ac2f4e3152e99e1fcfdbc6fdaf5929f0"
+expected_case_count = 652
+extraction_script_path = "tools/markdown-compat/extract_corpus.py"
+extraction_script_source_sha256 = "3ccc3d62abcbb768fe908f0f0c64d474680c2f792c82c6f2853076d304713173"
+preparation_script_path = "tools/markdown-compat/prepare_references.py"
+preparation_script_source_sha256 = "b8a05ff9a8c7b23d7a7e7f35b7fd50e13ddb559899ae921ccc483b207787562b"
+differential_harness_path = "tools/markdown-compat/src/main.rs"
+differential_harness_source_sha256 = "ee339eb27323ffc34ccd54392a6ba849b7dfd99ae27a0c148b05d6688638d8db"
+semantic_result_id = "markdown-commonmark-differential-v1"
+baseline_path = "tests/compat/baselines/commonmark.json"
+baseline_bytes = 1083
+baseline_sha256 = "1416f9efd24863a44c3b01975cc8cc4a44258873d49d0bfc42ac26b5f5ca3b5f"
+baseline_case_count = 3
+expected_result = { total = 652, pass = 649, known_mismatch = 3, unsupported = 0, harness_error = 0, new_mismatch = 0 }
 
 [cmark]
+source_kind = "immutable-git"
 repository = "https://github.com/commonmark/cmark.git"
 version = "0.31.2"
 revision = "eec0eeba6d31189fd828314576494566d539b1e3"
 corpus_path = "test/spec.txt"
 license = "BSD-2-Clause and component licenses listed by cmark/COPYING"
+source_corpus_bytes = 205025
+source_corpus_min_bytes = 205025
+source_corpus_max_bytes = 205025
+source_corpus_sha256 = "257c41ad946f7a1414a499aca402a1aa8fdac3678532266611348c1cf54f4b80"
+expected_case_count = 652
+license_files = [
+  { path = "COPYING", bytes = 7567, sha256 = "c22e885f33b821bddb24cf007145e5540655b6c0f403e49e6c76a93c28e6d9a9" },
+]
+notice_markers = ["commonmark/cmark", "BSD-2-Clause"]
 
 [cmark_gfm]
+source_kind = "immutable-git"
 repository = "https://github.com/github/cmark-gfm.git"
 version = "0.29.0.gfm.13"
 revision = "587a12bb54d95ac37241377e6ddc93ea0e45439b"
 corpus_path = "test/spec.txt"
 license = "BSD-2-Clause and component licenses listed by cmark-gfm/COPYING"
+source_corpus_bytes = 216680
+source_corpus_min_bytes = 216680
+source_corpus_max_bytes = 216680
+source_corpus_sha256 = "7d8e5814befec287ac116786d81ff14e0adc9b13295b4494649e995408fd871c"
+license_files = [
+  { path = "COPYING", bytes = 7567, sha256 = "c22e885f33b821bddb24cf007145e5540655b6c0f403e49e6c76a93c28e6d9a9" },
+]
+notice_markers = ["github/cmark-gfm", "BSD-2-Clause"]
+extracted_corpus_path = "tests/compat/corpus/gfm.json"
+extracted_corpus_bytes = 102489
+extracted_corpus_min_bytes = 102489
+extracted_corpus_max_bytes = 102489
+extracted_corpus_sha256 = "9b274fea72c155b90ed4b3410e8eecde859ce5e677ce3c76a06a72bd1efc1d57"
+expected_case_count = 670
+extraction_script_path = "tools/markdown-compat/extract_corpus.py"
+extraction_script_source_sha256 = "3ccc3d62abcbb768fe908f0f0c64d474680c2f792c82c6f2853076d304713173"
+preparation_script_path = "tools/markdown-compat/prepare_references.py"
+preparation_script_source_sha256 = "b8a05ff9a8c7b23d7a7e7f35b7fd50e13ddb559899ae921ccc483b207787562b"
+differential_harness_path = "tools/markdown-compat/src/main.rs"
+differential_harness_source_sha256 = "ee339eb27323ffc34ccd54392a6ba849b7dfd99ae27a0c148b05d6688638d8db"
+semantic_result_id = "markdown-gfm-differential-v1"
+baseline_path = "tests/compat/baselines/gfm.json"
+baseline_bytes = 1864
+baseline_sha256 = "9d1bbe4c81b5dd08d4644535de66e4954fa41405dbd6d9c57833d00334df8570"
+baseline_case_count = 6
+expected_result = { total = 670, pass = 664, known_mismatch = 6, unsupported = 0, harness_error = 0, new_mismatch = 0 }

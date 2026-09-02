@@ -3,6 +3,11 @@
 This document records the origin and legal provenance of all code, documentation,
 and assets in the Scribium repository.
 
+Machine-checkable generated/reference-data integrity is defined by
+[`reference-provenance.md`](../compatibility/reference-provenance.md) and
+verified by the tool named by each specialized manifest. The manifests remain
+the source of exact target values; this document records the legal context.
+
 ## Project Origin
 
 - **Repository created:** 2026-08-02
