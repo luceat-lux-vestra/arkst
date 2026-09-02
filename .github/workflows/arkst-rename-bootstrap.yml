@@ -44,7 +44,10 @@ jobs:
               if not raw:
                   continue
               path = Path(raw.decode())
-              if path.as_posix() == ".github/workflows/arkst-rename-bootstrap.yml":
+              # GitHub Actions' GITHUB_TOKEN cannot update workflow files without
+              # workflows permission. Those files are updated through the GitHub
+              # connector after this validated non-workflow rename is pushed.
+              if path.as_posix().startswith(".github/workflows/"):
                   continue
               try:
                   data = path.read_bytes()
@@ -69,7 +72,7 @@ jobs:
               raise SystemExit(
                   "old project identity found in binary files: " + ", ".join(skipped_binary)
               )
-          print(f"updated project identity in {changed} tracked text files")
+          print(f"updated project identity in {changed} tracked non-workflow text files")
           PY
 
           cat >> docs/legal/TRADEMARKS.md <<'EOF'
@@ -87,10 +90,6 @@ jobs:
           naming decision, not a legal conclusion or trademark clearance.
           EOF
 
-          git rm .github/workflows/arkst-rename-bootstrap.yml
-
-          # Renaming workspace package identities can change rustfmt grouping and
-          # line wrapping. Apply canonical formatting as part of the mechanical rename.
           cargo fmt --all
 
       - name: Validate renamed workspace
@@ -115,14 +114,14 @@ jobs:
           python3 tools/ci/verify_distribution_policy.py
           cargo check --workspace --all-targets --locked
 
-      - name: Audit stale product identifiers
+      - name: Audit stale non-workflow product identifiers
         shell: bash
         run: |
           set -euo pipefail
-          matches="$(git grep -n -E 'Scribium|scribium|SCRIBIUM' -- ':!docs/legal/TRADEMARKS.md' || true)"
+          matches="$(git grep -n -E 'Scribium|scribium|SCRIBIUM' -- ':!docs/legal/TRADEMARKS.md' ':!.github/workflows/**' || true)"
           if [ -n "$matches" ]; then
             printf '%s\n' "$matches"
-            echo 'unexpected stale product identifiers remain' >&2
+            echo 'unexpected stale non-workflow product identifiers remain' >&2
             exit 1
           fi
 
@@ -132,9 +131,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Unit-test imports may create local bytecode caches. Never commit them.
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -delete
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add -A -- ':!.github/workflows/**'
           git status --short
           git diff --cached --check
           git commit -m 'chore: rename project to Arkst'
