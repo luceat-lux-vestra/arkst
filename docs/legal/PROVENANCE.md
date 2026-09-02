@@ -108,8 +108,13 @@ implementation material.
 
 ## Trademarks
 
-- **Arkst** is a working name. A naming due diligence search must be
-  completed before the first public release.
+- **Arkst** is the current project name. Preliminary naming due diligence was
+  completed on 2026-09-02 and the decision to proceed is recorded in
+  [`TRADEMARKS.md`](TRADEMARKS.md). Registry availability must still be
+  rechecked immediately before any first publication because registry names
+  are not reserved by that earlier review.
+- **Scribium** is the retired pre-release working name and is retained only in
+  historical records where changing it would falsify the record.
 - This project is not affiliated with, endorsed by, or sponsored by
   Typst GmbH or the Quarkdown project.
 
