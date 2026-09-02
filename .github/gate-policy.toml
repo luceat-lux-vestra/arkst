@@ -133,6 +133,14 @@ always_present = false
 rationale = "Full-graph cargo-deny audit on dependency/security-workflow changes plus a weekly schedule and manual dispatch; non-required because the PR-time license job is the authoritative blocking gate."
 
 [[producer]]
+workflow = ".github/workflows/security.yml"
+job = "report-failure"
+classification = "scheduled_deep"
+contexts = ["report-scheduled-failure"]
+always_present = false
+rationale = "Scheduled/manual failure ownership automation. It is conditionally executed only after the non-required audit fails and never participates in merge authority."
+
+[[producer]]
 workflow = ".github/workflows/pr-labeler.yml"
 job = "label"
 classification = "advisory"

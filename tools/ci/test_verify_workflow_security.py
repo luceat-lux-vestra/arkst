@@ -45,6 +45,36 @@ jobs:
       - run: echo ok
 """
 
+SECURITY_REPORTER = """
+name: Security Audit
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+  report-failure:
+    needs: [audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            core.info('report')
+"""
+
 
 class WorkflowSecurityTests(unittest.TestCase):
     def verify(self, content: str, name: str = "fixture.yml") -> None:
@@ -55,9 +85,9 @@ class WorkflowSecurityTests(unittest.TestCase):
             path.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
             mod.verify_workflow(path, root)
 
-    def reject(self, content: str, message: str) -> None:
+    def reject(self, content: str, message: str, name: str = "fixture.yml") -> None:
         with self.assertRaisesRegex(mod.WorkflowSecurityError, message):
-            self.verify(content)
+            self.verify(content, name=name)
 
     def test_clean_fixture_passes(self) -> None:
         self.verify(BASE)
@@ -97,6 +127,24 @@ class WorkflowSecurityTests(unittest.TestCase):
             "    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n",
         )
         self.reject(bad, "unapproved job check write")
+
+    def test_security_reporter_job_may_write_issues(self) -> None:
+        self.verify(SECURITY_REPORTER, name="security.yml")
+
+    def test_security_audit_job_may_not_write_issues(self) -> None:
+        bad = SECURITY_REPORTER.replace(
+            "  audit:\n    runs-on: ubuntu-latest\n",
+            "  audit:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      issues: write\n",
+        )
+        self.reject(bad, "unapproved job audit write permission", name="security.yml")
+
+    def test_security_workflow_may_not_write_issues_at_top_level(self) -> None:
+        bad = SECURITY_REPORTER.replace(
+            "permissions:\n  contents: read\n",
+            "permissions:\n  contents: read\n  issues: write\n",
+            1,
+        )
+        self.reject(bad, "unapproved workflow-level write permission", name="security.yml")
 
     def test_missing_timeout_is_rejected(self) -> None:
         self.reject(BASE.replace("    timeout-minutes: 5\n", ""), "timeout-minutes")

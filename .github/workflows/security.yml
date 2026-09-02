@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
+    inputs:
+      force_failure:
+        description: "Force audit failure to validate owned-issue reporting"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -41,3 +47,90 @@ jobs:
         with:
           command: check
           arguments: --all-features
+      - name: Force reporter validation failure
+        if: github.event_name == 'workflow_dispatch' && inputs.force_failure
+        run: |
+          echo "Forcing audit failure to validate scheduled-failure reporting."
+          exit 1
+
+  report-failure:
+    name: report-scheduled-failure
+    needs:
+      - audit
+    if: >-
+      ${{ always() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.audit.result == 'failure' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Create or update the owned failure issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = 'ci: scheduled supply-chain audit is failing';
+            const marker = '<!-- scribium-owned:scheduled-supply-chain-failure -->';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runUrl = [
+              context.serverUrl,
+              owner,
+              repo,
+              'actions',
+              'runs',
+              context.runId,
+            ].join('/');
+            const body = [
+              marker,
+              'The scheduled full-graph supply-chain audit failed.',
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'Triage advisories, licenses, bans, and dependency sources according to',
+              '`docs/engineering/SUPPLY_CHAIN.md` and `deny.toml`.',
+            ].join('\n');
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner,
+                repo,
+                state: 'all',
+                labels: 'type:bug,area:ci',
+                per_page: 100,
+              },
+            );
+            const existing = issues.find(
+              (issue) =>
+                !issue.pull_request &&
+                issue.title === title &&
+                (issue.body || '').includes(marker),
+            );
+
+            if (existing) {
+              if (existing.state === 'closed') {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: existing.number,
+                  state: 'open',
+                });
+              }
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['type:bug', 'area:ci', 'priority:normal'],
+              });
+            }
