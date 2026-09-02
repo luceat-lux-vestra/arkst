@@ -102,7 +102,7 @@ jobs:
           cargo test -p arkst-core --locked
           python3 tools/ci/test_verify_distribution_policy.py
           python3 tools/ci/verify_distribution_policy.py
-          if git grep -nF 'https://github.com/luceat-lux-vestra/scribium' -- ':!docs/legal/TRADEMARKS.md'; then
+          if git grep -nF 'https://github.com/luceat-lux-vestra/scribium' -- ':!docs/legal/TRADEMARKS.md' ':!.github/workflows/253-reconcile.yml'; then
             echo 'stale repository URL remains' >&2
             exit 1
           fi
