@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Fail-closed distribution inventory (#233):** The complete Cargo workspace,
-  including both repository tooling packages, now has an explicit
-  non-publishable policy. Cargo metadata verification records that the CLI,
-  GitHub binary releases, and distributed WASM artifacts are not currently
-  intended; existing WASM compile checks remain unchanged.
+- **Arkst GitHub Release CLI contract (#233):** The canonical distribution
+  inventory now approves only the `arkst` binary from `arkst-cli` for GitHub
+  Releases. Every Cargo workspace package remains `publish = false`,
+  crates.io/public `cargo install` remains disabled, and WASM remains
+  compile-only and non-distributed.
+
+- **Arkst rename reconciliation (#253):** The pre-v0.1 working-name-specific
+  `.scrib` CLI alias is replaced by `.arkst`; `.md` and `.qd` remain supported.
+  Current repository, badge, Cargo metadata, clone, security, example, and
+  same-repository evidence links now use the canonical `/arkst` slug. Historical
+  records retain the old working-name facts where rewriting them would falsify
+  their audited state.
 
 - **Temurin 25 reference-JVM migration (#224):** The bounded #172
   `.capitalize` and `.startswith(ignorecase:true)` compatibility data now
