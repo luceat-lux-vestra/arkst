@@ -13,7 +13,6 @@ EXPECTED = [
     "rules:",
     "dangerous-triggers:",
     "ignore:",
-    "- ai-review.yml",
     "- pr-labeler.yml",
 ]
 
@@ -32,7 +31,7 @@ def verify_config(path: Path) -> None:
     if actual != EXPECTED:
         raise ZizmorConfigError(
             "zizmor suppression policy drifted; only dangerous-triggers for "
-            "ai-review.yml and pr-labeler.yml may be ignored"
+            "pr-labeler.yml may be ignored"
         )
 
 
