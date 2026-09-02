@@ -1,0 +1,297 @@
+# Canonical distribution inventory for Scribium.
+#
+# This is deliberately fail-closed: every Cargo workspace package must be
+# listed, and every package is explicitly non-publishable until a reviewed
+# distribution decision changes this policy and the corresponding manifest.
+schema_version = 1
+decision = "no-current-public-distribution"
+review_required = true
+
+[channels.crates_io]
+publishable = false
+cargo_install = false
+distribution_status = "not-intended"
+publication_channel = "crates.io"
+
+[channels.github_release]
+publishable = false
+package = "scribium-cli"
+binary = "scribium"
+distribution_status = "not-intended"
+publication_channel = "none"
+
+[channels.internal_tools]
+publishable = false
+distribution_status = "internal-only"
+publication_channel = "none"
+
+[channels.wasm]
+artifact = "scribium-core + scribium-typst wasm32-unknown-unknown compile"
+cargo_package = "none"
+publishable = false
+distribution_status = "compile-only"
+publication_channel = "none"
+
+[cli]
+package = "scribium-cli"
+binary = "scribium"
+cargo_install = false
+github_release = false
+distribution_status = "not-intended"
+
+[[packages]]
+name = "scribium-cli"
+manifest = "crates/scribium-cli/Cargo.toml"
+version = "0.0.1"
+consumer = "user-facing-cli"
+distribution = "cli"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "binary"
+library_targets = []
+binary_targets = ["scribium"]
+workspace_dependencies = [
+    "scribium-core",
+    "scribium-project",
+    "scribium-typst",
+    "scribium-typst-inprocess",
+    "scribium-typst-subprocess",
+]
+publishable = false
+
+[[packages]]
+name = "scribium-compat"
+manifest = "crates/scribium-compat/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_compat"]
+binary_targets = []
+workspace_dependencies = []
+publishable = false
+
+[[packages]]
+name = "scribium-core"
+manifest = "crates/scribium-core/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_core"]
+binary_targets = []
+workspace_dependencies = [
+    "scribium-compat",
+    "scribium-diagnostics",
+    "scribium-engine",
+    "scribium-ir",
+    "scribium-markdown",
+    "scribium-project",
+    "scribium-source",
+]
+publishable = false
+
+[[packages]]
+name = "scribium-diagnostics"
+manifest = "crates/scribium-diagnostics/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_diagnostics"]
+binary_targets = []
+workspace_dependencies = ["scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-engine"
+manifest = "crates/scribium-engine/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_engine"]
+binary_targets = []
+workspace_dependencies = [
+    "scribium-compat",
+    "scribium-diagnostics",
+    "scribium-ir",
+    "scribium-markdown",
+    "scribium-quarkdown",
+    "scribium-source",
+]
+publishable = false
+
+[[packages]]
+name = "scribium-ir"
+manifest = "crates/scribium-ir/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_ir"]
+binary_targets = []
+workspace_dependencies = ["scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-markdown"
+manifest = "crates/scribium-markdown/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_markdown"]
+binary_targets = []
+workspace_dependencies = ["scribium-quarkdown", "scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-markdown-compat"
+manifest = "tools/markdown-compat/Cargo.toml"
+version = "0.0.1"
+consumer = "repository-tooling"
+distribution = "internal-tooling"
+distribution_status = "internal-only"
+publication_channel = "none"
+artifact_kind = "binary"
+library_targets = []
+binary_targets = ["scribium-markdown-compat"]
+workspace_dependencies = [
+    "scribium-core",
+    "scribium-markdown",
+    "scribium-typst",
+    "scribium-typst-subprocess",
+]
+publishable = false
+
+[[packages]]
+name = "scribium-project"
+manifest = "crates/scribium-project/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_project"]
+binary_targets = []
+workspace_dependencies = ["scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-quarkdown"
+manifest = "crates/scribium-quarkdown/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_quarkdown"]
+binary_targets = []
+workspace_dependencies = ["scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-source"
+manifest = "crates/scribium-source/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_source"]
+binary_targets = []
+workspace_dependencies = []
+publishable = false
+
+[[packages]]
+name = "scribium-test-support"
+manifest = "crates/scribium-test-support/Cargo.toml"
+version = "0.0.1"
+consumer = "test-only"
+distribution = "test-support"
+distribution_status = "internal-only"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_test_support"]
+binary_targets = []
+workspace_dependencies = ["scribium-core", "scribium-typst"]
+publishable = false
+
+[[packages]]
+name = "scribium-typst"
+manifest = "crates/scribium-typst/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_typst"]
+binary_targets = []
+workspace_dependencies = ["scribium-ir", "scribium-source"]
+publishable = false
+
+[[packages]]
+name = "scribium-typst-inprocess"
+manifest = "crates/scribium-typst-inprocess/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_typst_inprocess"]
+binary_targets = []
+workspace_dependencies = [
+    "scribium-core",
+    "scribium-diagnostics",
+    "scribium-project",
+    "scribium-source",
+    "scribium-typst",
+    "scribium-typst-subprocess",
+]
+publishable = false
+
+[[packages]]
+name = "scribium-typst-subprocess"
+manifest = "crates/scribium-typst-subprocess/Cargo.toml"
+version = "0.0.1"
+consumer = "internal-toolchain"
+distribution = "compiler-library"
+distribution_status = "not-intended"
+publication_channel = "none"
+artifact_kind = "library"
+library_targets = ["scribium_typst_subprocess"]
+binary_targets = []
+workspace_dependencies = ["scribium-core", "scribium-project", "scribium-typst"]
+publishable = false
+
+[[packages]]
+name = "scribium-upstream-watch"
+manifest = "tools/upstream-watch/Cargo.toml"
+version = "0.1.0"
+consumer = "repository-tooling"
+distribution = "internal-tooling"
+distribution_status = "internal-only"
+publication_channel = "none"
+artifact_kind = "binary"
+library_targets = []
+binary_targets = ["scribium-upstream-watch"]
+workspace_dependencies = []
+publishable = false

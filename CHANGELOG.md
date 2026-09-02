@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fail-closed distribution inventory (#233):** The complete Cargo workspace,
+  including both repository tooling packages, now has an explicit
+  non-publishable policy. Cargo metadata verification records that the CLI,
+  GitHub binary releases, and distributed WASM artifacts are not currently
+  intended; existing WASM compile checks remain unchanged.
+
 - **Temurin 25 reference-JVM migration (#224):** The bounded #172
   `.capitalize` and `.startswith(ignorecase:true)` compatibility data now
   comes from the exact Eclipse Temurin `25.0.4.1+1` / Unicode 16.0 oracle.
