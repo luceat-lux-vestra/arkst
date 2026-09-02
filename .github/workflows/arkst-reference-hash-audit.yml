@@ -34,7 +34,7 @@ jobs:
           prov = cfg['provenance']
           ref = cfg['reference']
 
-          fields = [
+          jdk_fields = [
               ('verifier_source_sha256', prov['verifier_path']),
               ('helper_source_sha256', 'tools/dump_jdk25_unicode_data.java'),
               ('unicode_generator_source_sha256', ref['unicode_generator_path']),
@@ -44,27 +44,31 @@ jobs:
               ('locale_semantic_verifier_source_sha256', ref['locale_semantic_verifier_path']),
           ]
 
-          verifier_sha = None
-          for field, path_text in fields:
+          actuals = {}
+          for field, path_text in jdk_fields:
               actual = hashlib.sha256((root / path_text).read_bytes()).hexdigest()
+              actuals[field] = actual
               pattern = rf'(?m)^{re.escape(field)} = "[0-9a-f]{{64}}"$'
-              replacement = f'{field} = "{actual}"'
-              jdk_text, count = re.subn(pattern, replacement, jdk_text, count=1)
+              jdk_text, count = re.subn(pattern, f'{field} = "{actual}"', jdk_text, count=1)
               if count != 1:
                   raise SystemExit(f'expected exactly one JDK {field} assignment, got {count}')
-              if field == 'verifier_source_sha256':
-                  verifier_sha = actual
-              print(f'{field}={actual} ({path_text})')
+              print(f'JDK {field}={actual} ({path_text})')
 
-          assert verifier_sha is not None
-          markdown_text, count = re.subn(
-              r'(?m)^verifier_source_sha256 = "[0-9a-f]{64}"$',
-              f'verifier_source_sha256 = "{verifier_sha}"',
-              markdown_text,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f'expected exactly one Markdown verifier_source_sha256 assignment, got {count}')
+          markdown_fields = [
+              ('verifier_source_sha256', 'tools/verify_reference_provenance.py', 1),
+              ('extraction_script_source_sha256', 'tools/markdown-compat/extract_corpus.py', 2),
+              ('preparation_script_source_sha256', 'tools/markdown-compat/prepare_references.py', 2),
+              ('differential_harness_source_sha256', 'tools/markdown-compat/src/main.rs', 2),
+          ]
+          for field, path_text, expected_count in markdown_fields:
+              actual = hashlib.sha256((root / path_text).read_bytes()).hexdigest()
+              pattern = rf'(?m)^{re.escape(field)} = "[0-9a-f]{{64}}"$'
+              markdown_text, count = re.subn(pattern, f'{field} = "{actual}"', markdown_text)
+              if count != expected_count:
+                  raise SystemExit(
+                      f'expected {expected_count} Markdown {field} assignments, got {count}'
+                  )
+              print(f'Markdown {field}={actual} ({path_text}) x{count}')
 
           jdk_path.write_text(jdk_text, encoding='utf-8')
           markdown_path.write_text(markdown_text, encoding='utf-8')
