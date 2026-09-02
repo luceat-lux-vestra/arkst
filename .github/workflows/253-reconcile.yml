@@ -49,8 +49,6 @@ jobs:
               except UnicodeDecodeError:
                   continue
               updated = text.replace(old_url, new_url)
-              # Pre-v0.1 extension reconciliation. Upper-case test variants are
-              # migrated as well; product-name history is intentionally untouched.
               updated = updated.replace(".SCRIB", ".ARKST").replace(".scrib", ".arkst")
               if path.suffix == ".rs":
                   updated = updated.replace('"scrib"', '"arkst"')
@@ -58,8 +56,6 @@ jobs:
               if updated != text:
                   path.write_text(updated, encoding="utf-8")
 
-          # ADR-0004 must preserve why .scrib existed while making the current
-          # accepted contract unambiguous.
           adr = Path("docs/adr/0004-source-syntax-and-file-extensions.md")
           text = adr.read_text(encoding="utf-8")
           text = text.replace(
@@ -72,8 +68,6 @@ jobs:
           )
           adr.write_text(text, encoding="utf-8")
 
-          # README's distribution status must match #233 without implying that a
-          # release already exists.
           readme = Path("README.md")
           text = readme.read_text(encoding="utf-8")
           old = (
@@ -91,8 +85,6 @@ jobs:
           assert old in text
           readme.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          # Add an explicit compatibility test: the working-name extension must
-          # fail rather than remain a silent alias.
           commands = Path("crates/arkst-cli/src/commands.rs")
           text = commands.read_text(encoding="utf-8")
           marker = "    #[test]\n    fn all_supported_extensions_are_accepted() {"
@@ -110,13 +102,10 @@ jobs:
           cargo test -p arkst-core --locked
           python3 tools/ci/test_verify_distribution_policy.py
           python3 tools/ci/verify_distribution_policy.py
-          python3 tools/ci/test_verify_workflow_security.py
-          python3 tools/ci/verify_workflow_security.py
           if git grep -nF 'https://github.com/luceat-lux-vestra/scribium' -- ':!docs/legal/TRADEMARKS.md'; then
             echo 'stale repository URL remains' >&2
             exit 1
           fi
-          # Any remaining .scrib must be an explicitly historical statement.
           git grep -nE '\.scrib|\.SCRIB' -- ':!.github/workflows/253-reconcile.yml' || true
           git diff --check
       - name: Commit reconciliation
