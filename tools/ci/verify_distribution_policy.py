@@ -18,7 +18,7 @@ class DistributionPolicyError(RuntimeError):
 
 
 POLICY_VERSION = 1
-CURRENT_DECISION = "no-current-public-distribution"
+CURRENT_DECISION = "github-release-cli"
 IGNORED_TARGET_KINDS = {"test", "example", "bench", "custom-build"}
 ALLOWED_TARGET_KINDS = {"lib", "bin", *IGNORED_TARGET_KINDS}
 ALLOWED_CONSUMERS = {
@@ -28,7 +28,7 @@ ALLOWED_CONSUMERS = {
     "user-facing-cli",
 }
 ALLOWED_DISTRIBUTIONS = {"compiler-library", "internal-tooling", "test-support", "cli"}
-ALLOWED_STATUSES = {"internal-only", "not-intended"}
+ALLOWED_STATUSES = {"intended", "internal-only", "not-intended"}
 
 
 def _expect_keys(table: Mapping[str, Any], expected: set[str], context: str) -> None:
@@ -293,8 +293,8 @@ def _validate_channels(policy: Mapping[str, Any]) -> None:
         )
 
     github = _expect_table(channels["github_release"], "policy.channels.github_release")
-    if _expect_bool(github["publishable"], "policy.channels.github_release.publishable"):
-        raise DistributionPolicyError("policy.channels.github_release.publishable must be false")
+    if not _expect_bool(github["publishable"], "policy.channels.github_release.publishable"):
+        raise DistributionPolicyError("policy.channels.github_release.publishable must be true")
     if (
         _expect_string(github["package"], "policy.channels.github_release.package")
         != "arkst-cli"
@@ -304,19 +304,19 @@ def _validate_channels(policy: Mapping[str, Any]) -> None:
         raise DistributionPolicyError("policy.channels.github_release.binary must be arkst")
     if _expect_status(
         github["distribution_status"],
-        {"not-intended"},
+        {"intended"},
         "policy.channels.github_release.distribution_status",
-    ) != "not-intended":
-        raise DistributionPolicyError("policy.channels.github_release must be not-intended")
+    ) != "intended":
+        raise DistributionPolicyError("policy.channels.github_release must be intended")
     if (
         _expect_string(
             github["publication_channel"],
             "policy.channels.github_release.publication_channel",
         )
-        != "none"
+        != "github-releases"
     ):
         raise DistributionPolicyError(
-            "policy.channels.github_release.publication_channel must be none"
+            "policy.channels.github_release.publication_channel must be github-releases"
         )
 
     internal = _expect_table(channels["internal_tools"], "policy.channels.internal_tools")
@@ -372,7 +372,7 @@ def _validate_policy_shape(policy: Mapping[str, Any]) -> list[Mapping[str, Any]]
     if _expect_string(policy["decision"], "policy.decision") != CURRENT_DECISION:
         raise DistributionPolicyError(
             f"policy.decision must be {CURRENT_DECISION!r} while this verifier "
-            "enforces no public distribution"
+            "enforces the approved GitHub Release CLI contract"
         )
     if not _expect_bool(policy["review_required"], "policy.review_required"):
         raise DistributionPolicyError("policy.review_required must be true")
@@ -390,9 +390,9 @@ def _validate_policy_shape(policy: Mapping[str, Any]) -> list[Mapping[str, Any]]
         raise DistributionPolicyError("policy.cli.binary must be arkst")
     if _expect_bool(cli["cargo_install"], "policy.cli.cargo_install"):
         raise DistributionPolicyError("policy.cli.cargo_install must be false")
-    if _expect_bool(cli["github_release"], "policy.cli.github_release"):
-        raise DistributionPolicyError("policy.cli.github_release must be false")
-    _expect_status(cli["distribution_status"], {"not-intended"}, "policy.cli.distribution_status")
+    if not _expect_bool(cli["github_release"], "policy.cli.github_release"):
+        raise DistributionPolicyError("policy.cli.github_release must be true")
+    _expect_status(cli["distribution_status"], {"intended"}, "policy.cli.distribution_status")
 
     packages = policy["packages"]
     if not isinstance(packages, list):
@@ -488,8 +488,11 @@ def _validate_package_entry(
     publication_channel = _expect_string(
         entry["publication_channel"], f"{context}.publication_channel"
     )
-    if publication_channel != "none":
-        raise DistributionPolicyError(f"{context}.publication_channel must be none")
+    expected_publication_channel = "github-releases" if distribution == "cli" else "none"
+    if publication_channel != expected_publication_channel:
+        raise DistributionPolicyError(
+            f"{context}.publication_channel must be {expected_publication_channel}"
+        )
     artifact_kind = _expect_string(entry["artifact_kind"], f"{context}.artifact_kind")
     library_targets = _expect_string_list(entry["library_targets"], f"{context}.library_targets")
     binary_targets = _expect_string_list(entry["binary_targets"], f"{context}.binary_targets")
@@ -536,7 +539,7 @@ def _validate_package_entry(
     expected_status = (
         "internal-only"
         if distribution in {"internal-tooling", "test-support"}
-        else "not-intended"
+        else "intended" if distribution == "cli" else "not-intended"
     )
     if distribution_status != expected_status:
         raise DistributionPolicyError(
@@ -599,7 +602,7 @@ def main() -> int:
         print(f"distribution-policy error: {exc}", file=sys.stderr)
         return 1
     print(
-        "distribution policy verified: no-current-public-distribution "
+        "distribution policy verified: github-release-cli "
         f"({len(metadata['packages'])} workspace packages)"
     )
     return 0
