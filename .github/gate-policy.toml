@@ -150,11 +150,3 @@ classification = "advisory"
 contexts = ["label"]
 always_present = false
 rationale = "PR metadata automation is non-authoritative and must never satisfy a merge requirement."
-
-[[producer]]
-workflow = ".github/workflows/ai-review.yml"
-job = "review"
-classification = "advisory"
-contexts = ["advisory-review"]
-always_present = false
-rationale = "AI review is author/draft gated and advisory-only; it is never a required check or approval."
