@@ -2,8 +2,8 @@
 
 ## Review record
 
-- **Issue:** [#149](https://github.com/luceat-lux-vestra/arkst/issues/149)
-- **Parent:** [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
+- **Issue:** [#149](https://github.com/luceat-lux-vestra/scribium/issues/149)
+- **Parent:** [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
 - **Audit base:** `3625fc0c7774632b167e8161ed24dc80f9f9bdc6` (merged #148 audit,
   PR #161)
 - **Tracked target:** Quarkdown v2.5.1
@@ -174,7 +174,7 @@ does not claim complete upstream conversion coverage.
 
 The bounded #167 follow-up is implemented for the audited engine consumers:
 
-1. [**Conversion diagnostics and state commit atomicity**](https://github.com/luceat-lux-vestra/arkst/issues/167) — implemented as the
+1. [**Conversion diagnostics and state commit atomicity**](https://github.com/luceat-lux-vestra/scribium/issues/167) — implemented as the
    shared evaluator diagnostic/checkpoint contract. It preserves typed
    conversion classification, candidate/parameter provenance, deterministic
    nested diagnostic selection, and validate-then-commit/rollback in the

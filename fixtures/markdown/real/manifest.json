@@ -5,7 +5,7 @@
       "id": "01-readme",
       "path": "01-readme.md",
       "expected": "pdf",
-      "markers": ["Project Readme", "arkst-core", "https://github.com/luceat-lux-vestra/arkst"]
+      "markers": ["Project Readme", "arkst-core", "https://github.com/luceat-lux-vestra/scribium"]
     },
     {
       "id": "02-release-notes",

@@ -29,8 +29,8 @@ edition = "2021"
 rust-version = "1.92.0"
 license = "Apache-2.0"
 license-file = "LICENSE"
-homepage = "https://github.com/luceat-lux-vestra/arkst"
-repository = "https://github.com/luceat-lux-vestra/arkst"
+homepage = "https://github.com/luceat-lux-vestra/scribium"
+repository = "https://github.com/luceat-lux-vestra/scribium"
 authors = ["Arkst Authors"]
 
 [workspace.dependencies]

@@ -6,13 +6,13 @@
 - **Quarkdown target:** v2.5.1 at '107ec3a9482f10d6f90d7580f8409b46a719d18e'
 - **Scope:** Quarkdown document-content, media, presentation-component, raw-content, reference, and Quarkdown-specific Markdown-extension primitives
 - **Authority:** the machine-checkable [83-row manifest](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv)
-- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
-- **Audit issue:** [#154](https://github.com/luceat-lux-vestra/arkst/issues/154)
+- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
+- **Audit issue:** [#154](https://github.com/luceat-lux-vestra/scribium/issues/154)
 
 This is an evidence and backlog-reconciliation record. It does not implement
 newly discovered Quarkdown semantics. Production semantic, state, parser,
 resource, IR, and backend changes are **none**; post-audit implementation
-ordering is defined by [#156](https://github.com/luceat-lux-vestra/arkst/issues/156)
+ordering is defined by [#156](https://github.com/luceat-lux-vestra/scribium/issues/156)
 and its dependency graph.
 
 The manifest is authoritative for one canonical #147 status per enumerated
@@ -129,32 +129,32 @@ introduced by this inventory.
 The canonical implementation ownership is intentionally split at the
 producer and shared-index boundaries:
 
-- [#181](https://github.com/luceat-lux-vestra/arkst/issues/181) owns
+- [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) owns
   structural content plus shared caption, identifier, reference, and index
   infrastructure. It is not the producer owner for `.code`, `.math`, or the
   generated/computed table family.
-- [#182](https://github.com/luceat-lux-vestra/arkst/issues/182) owns image,
+- [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) owns image,
   media, named icon/emoji catalog (`.icon`, `.emoji`, `.allemojis`), diagram
-  (`.mermaid`), and chart (`.xychart`) producers; [#155](https://github.com/luceat-lux-vestra/arkst/issues/155)
+  (`.mermaid`), and chart (`.xychart`) producers; [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
   remains the resource/environment owner.
-- [#183](https://github.com/luceat-lux-vestra/arkst/issues/183) owns table
+- [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) owns table
   producers and table computation. It consumes #181 shared caption,
   identifier, reference, and index infrastructure.
-- [#184](https://github.com/luceat-lux-vestra/arkst/issues/184) owns the
+- [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) owns the
   component-local producer family `.text`, `.box`, `.todo`, `.collapse`,
   `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, and
   `.speakernote`, plus the bounded `.keybinding` and `.loremipsum` content
   producer review. The remaining component-local `.container` subcontracts
   (`float`, `fullspan`, `classname`, `style`, and complete body conversion)
   are linked there without transferring document-wide state ownership.
-- [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) owns inline
+- [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) owns inline
   and display math, `.math`, code presentation/captions, `.codespan`, and
   explicit `.pagebreak`/`<<<` breaks. It consumes #181 shared caption,
   identifier, reference, and index infrastructure; `.texmacro` remains #180.
 
 The bounded `.align`, `.center`, `.row`, `.column`, `.grid`, `.landscape`,
 `.whitespace`, and `.br` rows have no remaining #154 implementation gap in
-the evidenced contract. They are not assigned to [#175](https://github.com/luceat-lux-vestra/arkst/issues/175):
+the evidenced contract. They are not assigned to [#175](https://github.com/luceat-lux-vestra/scribium/issues/175):
 #175 remains document-wide only, including `.pageformat.columns` and global
 automatic page-break/numbering policy.
 
@@ -182,10 +182,10 @@ state models:
 - Page/location behavior is split from local content. Explicit .pagebreak is
   #154; automatic page-break policy and page configuration remain #153.
 
-The relevant bounded follow-up groups are [#181](https://github.com/luceat-lux-vestra/arkst/issues/181)
+The relevant bounded follow-up groups are [#181](https://github.com/luceat-lux-vestra/scribium/issues/181)
 for structural content/captions/identifiers/references and
-[#185](https://github.com/luceat-lux-vestra/arkst/issues/185) for math,
-code presentation, and explicit breaks. [#145](https://github.com/luceat-lux-vestra/arkst/issues/145)
+[#185](https://github.com/luceat-lux-vestra/scribium/issues/185) for math,
+code presentation, and explicit breaks. [#145](https://github.com/luceat-lux-vestra/scribium/issues/145)
 and its completed correction remain the source of the global caption-position
 boundary; they are not reopened by this audit.
 
@@ -205,7 +205,7 @@ The current Arkst project abstraction can represent bounded logical
 project references, and existing Markdown image/read/json/include slices use
 that boundary. It does not establish Quarkdown media storage, URL/network
 loading, icon catalogs, Mermaid/chart renderers, packaged-resource parity, or
-subdocument graphs. Those dependencies are assigned to [#155](https://github.com/luceat-lux-vestra/arkst/issues/155)
+subdocument graphs. Those dependencies are assigned to [#155](https://github.com/luceat-lux-vestra/scribium/issues/155)
 where they are resource/environment concerns. No #154 row adds filesystem,
 network, process, or resource access to a platform-neutral crate.
 
@@ -245,13 +245,13 @@ their producer implementation is assigned to #185, with #181 retained only as
 the shared caption/identifier/reference/index dependency.
 .texmacro remains the distinct #153/#180 boundary: raw TeX body, document macro
 map, source-order replacement, and math-renderer consumption belong to
-[#180](https://github.com/luceat-lux-vestra/arkst/issues/180). No .texmacro
+[#180](https://github.com/luceat-lux-vestra/scribium/issues/180). No .texmacro
 implementation is reassigned or added here.
 
 .fragment and .speakernote are #154 slide content producers. Global .slides
 configuration, document type, controls, transitions, and speaker-note options
 remain #153. The content rows remain `UNSUPPORTED` until a bounded slide
-representation and output contract is reviewed in [#184](https://github.com/luceat-lux-vestra/arkst/issues/184),
+representation and output contract is reviewed in [#184](https://github.com/luceat-lux-vestra/scribium/issues/184),
 following the order in [`RECONCILIATION.md`](RECONCILIATION.md).
 
 ## Follow-up reconciliation
@@ -261,17 +261,17 @@ reused where it already describes the boundary:
 
 | Follow-up | Cohesive boundary |
 |---|---|
-| [#181](https://github.com/luceat-lux-vestra/arkst/issues/181) | Structural content plus shared caption/identifier/reference/index infrastructure; no `.code`/`.math` producer implementation |
-| [#182](https://github.com/luceat-lux-vestra/arkst/issues/182) | Image/media sizing, media storage, icons, diagrams, chart/figure resource and renderer contract |
-| [#183](https://github.com/luceat-lux-vestra/arkst/issues/183) | Callable/generated/computed table producers, traversal, conversion, and output; consumes #181 shared infrastructure |
-| [#184](https://github.com/luceat-lux-vestra/arkst/issues/184) | `.text`, `.box`, `.todo`, `.collapse`, `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, `.speakernote`, `.keybinding`, and `.loremipsum`; remaining `.container` subcontracts are linked here |
-| [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) | Inline/display math, `.math`, code presentation/captions, `.codespan`, and explicit breaks; consumes #181 shared infrastructure |
-| [#198](https://github.com/luceat-lux-vestra/arkst/issues/198) | `.match` pattern/callback traversal and inline-content replacement semantics; #181 remains shared infrastructure only |
-| [#199](https://github.com/luceat-lux-vestra/arkst/issues/199) | `.subdocumentgraph` producer and output contract after #188 logical resource resolution; #181 is coordinated only for shared identifiers/indexing |
-| [#155](https://github.com/luceat-lux-vestra/arkst/issues/155) | Resource/environment ownership used by media and content consumers |
-| [#149](https://github.com/luceat-lux-vestra/arkst/issues/149), [#165](https://github.com/luceat-lux-vestra/arkst/issues/165), [#166](https://github.com/luceat-lux-vestra/arkst/issues/166), [#167](https://github.com/luceat-lux-vestra/arkst/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
-| [#160](https://github.com/luceat-lux-vestra/arkst/issues/160) | Implemented bounded `arkst-markdown` frontend slice for source-backed inline Markdown in static content arguments; the #158 nested tight-call representation is retained. Dynamic/content conversion and producer/output semantics remain outside this handoff. |
-| [#180](https://github.com/luceat-lux-vestra/arkst/issues/180) | .texmacro and math-renderer dependency |
+| [#181](https://github.com/luceat-lux-vestra/scribium/issues/181) | Structural content plus shared caption/identifier/reference/index infrastructure; no `.code`/`.math` producer implementation |
+| [#182](https://github.com/luceat-lux-vestra/scribium/issues/182) | Image/media sizing, media storage, icons, diagrams, chart/figure resource and renderer contract |
+| [#183](https://github.com/luceat-lux-vestra/scribium/issues/183) | Callable/generated/computed table producers, traversal, conversion, and output; consumes #181 shared infrastructure |
+| [#184](https://github.com/luceat-lux-vestra/scribium/issues/184) | `.text`, `.box`, `.todo`, `.collapse`, `.textcollapse`, `.clip`, `.float`, `.fullspan`, `.fragment`, `.speakernote`, `.keybinding`, and `.loremipsum`; remaining `.container` subcontracts are linked here |
+| [#185](https://github.com/luceat-lux-vestra/scribium/issues/185) | Inline/display math, `.math`, code presentation/captions, `.codespan`, and explicit breaks; consumes #181 shared infrastructure |
+| [#198](https://github.com/luceat-lux-vestra/scribium/issues/198) | `.match` pattern/callback traversal and inline-content replacement semantics; #181 remains shared infrastructure only |
+| [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | `.subdocumentgraph` producer and output contract after #188 logical resource resolution; #181 is coordinated only for shared identifiers/indexing |
+| [#155](https://github.com/luceat-lux-vestra/scribium/issues/155) | Resource/environment ownership used by media and content consumers |
+| [#149](https://github.com/luceat-lux-vestra/scribium/issues/149), [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
+| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Implemented bounded `arkst-markdown` frontend slice for source-backed inline Markdown in static content arguments; the #158 nested tight-call representation is retained. Dynamic/content conversion and producer/output semantics remain outside this handoff. |
+| [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | .texmacro and math-renderer dependency |
 
 The #154 manifest keeps `.keybinding` as actionable `UNKNOWN` with #184 as
 its bounded review owner, and keeps `.loremipsum` as `UNSUPPORTED` with #184

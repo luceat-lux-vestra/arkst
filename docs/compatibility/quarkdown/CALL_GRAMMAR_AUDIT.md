@@ -2,8 +2,8 @@
 
 ## Review record
 
-- **Audit issue:** [#148](https://github.com/luceat-lux-vestra/arkst/issues/148)
-- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
+- **Audit issue:** [#148](https://github.com/luceat-lux-vestra/scribium/issues/148)
+- **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
 - **Audit branch base:** `247d9458029e52a7bd18cc2026bf806c3e7499f7`
 - **Arkst comparison:** current `origin/main` at the base above
 - **Pinned target:** Quarkdown v2.5.1
@@ -48,8 +48,8 @@ backend claims are recorded separately.
 
 ## Existing #60 revalidation
 
-Issue [#60](https://github.com/luceat-lux-vestra/arkst/issues/60) was
-closed by merged PR [#65](https://github.com/luceat-lux-vestra/arkst/pull/65)
+Issue [#60](https://github.com/luceat-lux-vestra/scribium/issues/60) was
+closed by merged PR [#65](https://github.com/luceat-lux-vestra/scribium/pull/65)
 at merge commit `3061b3cffb72decc26e9590761a47dbb71a1fbf1`. Its final head was
 `3c66288d526d17eca2aa36d1ce8c4f8187dd4c37`, based on
 `e6da6ee2e6da6b7ba144b5b607d6e4338844c947`. The implementation and tests were
@@ -75,13 +75,13 @@ issues are [#159], [#162], and [#164], all native sub-issues of #148:
 
 | Issue | Finding | Owner |
 |---|---|---|
-| [#157](https://github.com/luceat-lux-vestra/arkst/issues/157) | Implemented: the shared call/named-argument identifier scanner, adjacent named delimiter, numeric-reference distinction, pinned call-start boundary, and source-backed frontend spans now match the recorded v2.5.1 lexical evidence. | `arkst-quarkdown` grammar and `arkst-markdown` integration |
-| [#158](https://github.com/luceat-lux-vestra/arkst/issues/158) | Implemented: `arkst-markdown` delegates nested content `{` probes to `arkst_quarkdown::parse_tight_call` against the original source and preserves the complete wrapper, inner/head, name, argument, and surrounding-text spans. | `arkst-markdown` frontend conversion |
-| [#159](https://github.com/luceat-lux-vestra/arkst/issues/159) | Malformed inline call recovery reports `E2003` but drops following source text from the AST. | `arkst-markdown` inline integration |
-| [#160](https://github.com/luceat-lux-vestra/arkst/issues/160) | Implemented: supported Markdown inline nodes in static Quarkdown content arguments are converted through the existing Rushdown frontend lifecycle with original-source spans; supported cases no longer emit `E3010`. | `arkst-markdown` content conversion; broader producer/evaluator/output behavior remains #154/#166-owned |
-| [#162](https://github.com/luceat-lux-vestra/arkst/issues/162) | Escaped call/argument delimiters are not handled with pinned v2.5.1 `unescapedMatch()` and balanced-brace semantics; escaped braces can truncate or unbalance current calls. | `arkst-quarkdown` grammar; `arkst-markdown` integration if affected |
-| [#163](https://github.com/luceat-lux-vestra/arkst/issues/163) | Implemented: the grammar, frontend, and IR retain one source-ordered argument sequence, including positional-after-named transitions, with source-backed spans. The shared #165 engine binder consumes this representation for semantic validation. | `arkst-quarkdown` / `arkst-markdown` representation plus `arkst-engine` binder |
-| [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) | Current separator placement omits continuation before the first argument, whitespace/continuation before `::`, and pinned trailing-continuation consumption without a following argument. | `arkst-quarkdown` grammar; `arkst-markdown` block/inline integration |
+| [#157](https://github.com/luceat-lux-vestra/scribium/issues/157) | Implemented: the shared call/named-argument identifier scanner, adjacent named delimiter, numeric-reference distinction, pinned call-start boundary, and source-backed frontend spans now match the recorded v2.5.1 lexical evidence. | `arkst-quarkdown` grammar and `arkst-markdown` integration |
+| [#158](https://github.com/luceat-lux-vestra/scribium/issues/158) | Implemented: `arkst-markdown` delegates nested content `{` probes to `arkst_quarkdown::parse_tight_call` against the original source and preserves the complete wrapper, inner/head, name, argument, and surrounding-text spans. | `arkst-markdown` frontend conversion |
+| [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) | Malformed inline call recovery reports `E2003` but drops following source text from the AST. | `arkst-markdown` inline integration |
+| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Implemented: supported Markdown inline nodes in static Quarkdown content arguments are converted through the existing Rushdown frontend lifecycle with original-source spans; supported cases no longer emit `E3010`. | `arkst-markdown` content conversion; broader producer/evaluator/output behavior remains #154/#166-owned |
+| [#162](https://github.com/luceat-lux-vestra/scribium/issues/162) | Escaped call/argument delimiters are not handled with pinned v2.5.1 `unescapedMatch()` and balanced-brace semantics; escaped braces can truncate or unbalance current calls. | `arkst-quarkdown` grammar; `arkst-markdown` integration if affected |
+| [#163](https://github.com/luceat-lux-vestra/scribium/issues/163) | Implemented: the grammar, frontend, and IR retain one source-ordered argument sequence, including positional-after-named transitions, with source-backed spans. The shared #165 engine binder consumes this representation for semantic validation. | `arkst-quarkdown` / `arkst-markdown` representation plus `arkst-engine` binder |
+| [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) | Current separator placement omits continuation before the first argument, whitespace/continuation before `::`, and pinned trailing-continuation consumption without a following argument. | `arkst-quarkdown` grammar; `arkst-markdown` block/inline integration |
 
 The original #148 audit contained no production fix. Issue #157 is the bounded
 production reconciliation of its identifier, delimiter, reference, and call
@@ -216,10 +216,10 @@ is the conservative canonical status used for #147.
   conversion remains separately owned. No gap is hidden with expected-failure
   tests or compatibility allowlists in this audit.
 
-[from #147]: https://github.com/luceat-lux-vestra/arkst/issues/147
-[from #148]: https://github.com/luceat-lux-vestra/arkst/issues/148
-[from #149]: https://github.com/luceat-lux-vestra/arkst/issues/149
-[from #150]: https://github.com/luceat-lux-vestra/arkst/issues/150
-[from #154]: https://github.com/luceat-lux-vestra/arkst/issues/154
-[from #162]: https://github.com/luceat-lux-vestra/arkst/issues/162
-[from #163]: https://github.com/luceat-lux-vestra/arkst/issues/163
+[from #147]: https://github.com/luceat-lux-vestra/scribium/issues/147
+[from #148]: https://github.com/luceat-lux-vestra/scribium/issues/148
+[from #149]: https://github.com/luceat-lux-vestra/scribium/issues/149
+[from #150]: https://github.com/luceat-lux-vestra/scribium/issues/150
+[from #154]: https://github.com/luceat-lux-vestra/scribium/issues/154
+[from #162]: https://github.com/luceat-lux-vestra/scribium/issues/162
+[from #163]: https://github.com/luceat-lux-vestra/scribium/issues/163

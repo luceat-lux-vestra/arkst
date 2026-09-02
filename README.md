@@ -1,8 +1,8 @@
 # Arkst
 
-[![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/arkst)
+[![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/scribium)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![CI](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/arkst/actions/workflows/ci.yml)
+[![CI](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml)
 
 **Arkst is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 

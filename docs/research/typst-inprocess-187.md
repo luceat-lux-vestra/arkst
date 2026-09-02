@@ -305,10 +305,10 @@ the resource model to accommodate Typst.
 
 ## Bounded follow-ups
 
-- [#200: explicit native in-process backend selection](https://github.com/luceat-lux-vestra/arkst/issues/200)
+- [#200: explicit native in-process backend selection](https://github.com/luceat-lux-vestra/scribium/issues/200)
   — production-quality opt-in selection, source-map handoff, and policy
   review while retaining subprocess as default/fallback.
-- [#201: cross-platform in-process parity](https://github.com/luceat-lux-vestra/arkst/issues/201)
+- [#201: cross-platform in-process parity](https://github.com/luceat-lux-vestra/scribium/issues/201)
   — Linux/macOS/Windows corpus, resource, diagnostic, and WASM-boundary
   evidence under pinned Typst 0.15.1.
 

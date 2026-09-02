@@ -1,14 +1,14 @@
 # Quarkdown v2.5.1 document metadata and state audit
 
-Status: complete audit artifact for Issue [#152](https://github.com/luceat-lux-vestra/arkst/issues/152). This document is ready for strict review; it is not an implementation or compatibility-baseline promotion.
+Status: complete audit artifact for Issue [#152](https://github.com/luceat-lux-vestra/scribium/issues/152). This document is ready for strict review; it is not an implementation or compatibility-baseline promotion.
 
 ## 1. Target, base, and evidence policy
 
 | Item | Pinned value |
 |---|---|
 | Quarkdown target | [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e) (v2.5.1) |
-| Arkst audit base | [`1bd8cda073be4194ffce8e9e58ef4cfc4d742be1`](https://github.com/luceat-lux-vestra/arkst/tree/1bd8cda073be4194ffce8e9e58ef4cfc4d742be1), the squash merge of audited PR #171 / completed Issue #151 |
-| Parent tracker | [#147](https://github.com/luceat-lux-vestra/arkst/issues/147) |
+| Arkst audit base | [`1bd8cda073be4194ffce8e9e58ef4cfc4d742be1`](https://github.com/luceat-lux-vestra/scribium/tree/1bd8cda073be4194ffce8e9e58ef4cfc4d742be1), the squash merge of audited PR #171 / completed Issue #151 |
+| Parent tracker | [#147](https://github.com/luceat-lux-vestra/scribium/issues/147) |
 | Audit manifest | [`DOCUMENT_STATE_AUDIT_MANIFEST.tsv`](DOCUMENT_STATE_AUDIT_MANIFEST.tsv) |
 
 The audit follows Arkst's clean-room compatibility policy. Pinned upstream
@@ -398,14 +398,14 @@ semantics. The 2 localization rows are canonical #151 handoffs and are also
 
 | Existing slice | Issue / PR / commit | Current evidence and reconciliation |
 |---|---|---|
-| Document-state foundation | [#107](https://github.com/luceat-lux-vestra/arkst/issues/107), [PR #107](https://github.com/luceat-lux-vestra/arkst/pull/107), merge `c77f346` | One evaluator state and serializable IR snapshot are present; this audit confirms the architecture but does not reopen it |
-| `.docauthor` | [#135](https://github.com/luceat-lux-vestra/arkst/issues/135), [PR #136](https://github.com/luceat-lux-vestra/arkst/pull/136), merge `7ef8b48` | Revalidated as append/first-getter semantics with bounded conversion; `PARTIAL` because upstream body/conversion/output boundaries remain open |
-| `.docauthors` | [#137](https://github.com/luceat-lux-vestra/arkst/issues/137), [PR #138](https://github.com/luceat-lux-vestra/arkst/pull/138), merge `2b685f0` | Revalidated as ordered nested dictionary append with mixed-family state sharing; `PARTIAL` |
-| `.dockeywords` | [#139](https://github.com/luceat-lux-vestra/arkst/issues/139), [PR #140](https://github.com/luceat-lux-vestra/arkst/pull/140), merge `8771bd7` | Revalidated as replacement with ordering and duplicate preservation; `PARTIAL` for body/conversion/output boundary |
-| `.theme` | [#141](https://github.com/luceat-lux-vestra/arkst/issues/141), [PR #142](https://github.com/luceat-lux-vestra/arkst/pull/142), merge `bf32038` | Pinned implementation resolves the KDoc ambiguity in favor of whole-state replacement; explicit-empty option survives serde; `PARTIAL` |
-| `.doclang` | [#143](https://github.com/luceat-lux-vestra/arkst/issues/143), [PR #144](https://github.com/luceat-lux-vestra/arkst/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/arkst/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,158-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,157-tag canonical index, including blank-language root/private-use serialization. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
-| `.captionposition` | [#145](https://github.com/luceat-lux-vestra/arkst/issues/145), [PR #146](https://github.com/luceat-lux-vestra/arkst/pull/146), merge `247d945` | Seen and retained as #153 layout ownership; no #152 canonical status assigned |
-| Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/arkst/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
+| Document-state foundation | [#107](https://github.com/luceat-lux-vestra/scribium/issues/107), [PR #107](https://github.com/luceat-lux-vestra/scribium/pull/107), merge `c77f346` | One evaluator state and serializable IR snapshot are present; this audit confirms the architecture but does not reopen it |
+| `.docauthor` | [#135](https://github.com/luceat-lux-vestra/scribium/issues/135), [PR #136](https://github.com/luceat-lux-vestra/scribium/pull/136), merge `7ef8b48` | Revalidated as append/first-getter semantics with bounded conversion; `PARTIAL` because upstream body/conversion/output boundaries remain open |
+| `.docauthors` | [#137](https://github.com/luceat-lux-vestra/scribium/issues/137), [PR #138](https://github.com/luceat-lux-vestra/scribium/pull/138), merge `2b685f0` | Revalidated as ordered nested dictionary append with mixed-family state sharing; `PARTIAL` |
+| `.dockeywords` | [#139](https://github.com/luceat-lux-vestra/scribium/issues/139), [PR #140](https://github.com/luceat-lux-vestra/scribium/pull/140), merge `8771bd7` | Revalidated as replacement with ordering and duplicate preservation; `PARTIAL` for body/conversion/output boundary |
+| `.theme` | [#141](https://github.com/luceat-lux-vestra/scribium/issues/141), [PR #142](https://github.com/luceat-lux-vestra/scribium/pull/142), merge `bf32038` | Pinned implementation resolves the KDoc ambiguity in favor of whole-state replacement; explicit-empty option survives serde; `PARTIAL` |
+| `.doclang` | [#143](https://github.com/luceat-lux-vestra/scribium/issues/143), [PR #144](https://github.com/luceat-lux-vestra/scribium/pull/144), merge `c5d596e`; [#173](https://github.com/luceat-lux-vestra/scribium/issues/173) | #173 preserves name-first/tag-second and localized-name behavior with a checked-in 1,158-record Temurin 25.0.4.1+1 CLDR snapshot plus a 1,157-tag canonical index, including blank-language root/private-use serialization. Source/runtime fingerprints, compact integrity, and the `nn-NO` collision policy are guarded; evaluator/IR/output boundaries remain `PARTIAL` |
+| `.captionposition` | [#145](https://github.com/luceat-lux-vestra/scribium/issues/145), [PR #146](https://github.com/luceat-lux-vestra/scribium/pull/146), merge `247d945` | Seen and retained as #153 layout ownership; no #152 canonical status assigned |
+| Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/scribium/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
 
 Relevant current evidence includes
 [`evaluator.rs`](../../../crates/arkst-engine/src/evaluator.rs),
@@ -422,21 +422,21 @@ Issue #152 witnesses are in
 Actionable gaps were searched against existing issues before creating a new
 one:
 
-- [#165](https://github.com/luceat-lux-vestra/arkst/issues/165) owns generic
+- [#165](https://github.com/luceat-lux-vestra/scribium/issues/165) owns generic
   binder validation and follows the engine prerequisite band in #156;
-- [#166](https://github.com/luceat-lux-vestra/arkst/issues/166) owns the
+- [#166](https://github.com/luceat-lux-vestra/scribium/issues/166) owns the
   bounded lossless dynamic/raw-body representation and target-conversion slice
   in this branch; broader target coverage remains with the owning audits;
-- [#167](https://github.com/luceat-lux-vestra/arkst/issues/167) owns generic
+- [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) owns generic
   conversion diagnostics and commit atomicity and follows the engine
   prerequisite band in #156;
-- new bounded [#173](https://github.com/luceat-lux-vestra/arkst/issues/173)
+- new bounded [#173](https://github.com/luceat-lux-vestra/scribium/issues/173)
   owns deterministic `.doclang` locale closure only; `.localization` and
   `.localize` remain #151-owned and are handed to #156 through that audit; and
 - layout, content/media, and resource/environment rows remain explicitly
-  handed to [#153](https://github.com/luceat-lux-vestra/arkst/issues/153),
-  [#154](https://github.com/luceat-lux-vestra/arkst/issues/154), and
-  [#155](https://github.com/luceat-lux-vestra/arkst/issues/155).
+  handed to [#153](https://github.com/luceat-lux-vestra/scribium/issues/153),
+  [#154](https://github.com/luceat-lux-vestra/scribium/issues/154), and
+  [#155](https://github.com/luceat-lux-vestra/scribium/issues/155).
 
 Implementation follow-ups now follow the dependency-aware order in #156. This
 audit does not alter #172 or begin any #157+ implementation.

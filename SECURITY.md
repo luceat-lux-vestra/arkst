@@ -11,7 +11,7 @@
 This project uses **GitHub private vulnerability reporting**.
 
 Please report security vulnerabilities through the GitHub Security tab
-at `https://github.com/luceat-lux-vestra/arkst/security/advisories/new`.
+at `https://github.com/luceat-lux-vestra/scribium/security/advisories/new`.
 
 Do not report security vulnerabilities via public GitHub issues.
 

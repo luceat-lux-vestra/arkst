@@ -5,7 +5,7 @@ publish = false
 edition = "2021"
 license = "Apache-2.0"
 description = "Quarkdown stable-release adaptation-target observer for Arkst"
-repository = "https://github.com/luceat-lux-vestra/arkst"
+repository = "https://github.com/luceat-lux-vestra/scribium"
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]

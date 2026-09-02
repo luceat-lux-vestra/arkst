@@ -2,8 +2,8 @@
 
 ## Audit identity
 
-- Issue: [#151](https://github.com/luceat-lux-vestra/arkst/issues/151)
-- Parent: [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
+- Issue: [#151](https://github.com/luceat-lux-vestra/scribium/issues/151)
+- Parent: [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
 - Target: Quarkdown v2.5.1
 - Pinned upstream commit:
   [107ec3a9482f10d6f90d7580f8409b46a719d18e](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
@@ -359,7 +359,7 @@ and the Pair declaration in
   constructors with existing tests and are SUPPORTED_SEMANTICS. get is
   UNSUPPORTED: the pinned declaration exists, but the current evaluator
   dictionary native-owner inventory contains construction and has no get
-  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/arkst/issues/194);
+  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/scribium/issues/194);
   this audit records the gap and does not implement it.
 
 ### Library inspection, localization, and logger utilities
@@ -382,9 +382,9 @@ include context/library lookup, localization table mutation/read, and
 host/logging side effects. Arkst has no approved equivalent native owner
 for these names in the current engine. No evaluator, host capability,
 logging, or localization implementation was added. Status: UNSUPPORTED for
-all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/arkst/issues/195)
-owns library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
-owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
+all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/scribium/issues/195)
+owns library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
+owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
 owns logger/diagnostic behavior. Host/resource policy is coordinated through
 #188/#190; these are real production gaps, not evidence-only omissions.
 
@@ -578,10 +578,10 @@ Reconciliation links:
 
 Issue #172 closes the cohesive Unicode string-semantics gap. The four
 remaining #151 unsupported families are real pinned gaps with bounded owners:
-[#194](https://github.com/luceat-lux-vestra/arkst/issues/194) for dictionary
-lookup, [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
-library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
-for localization, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
+[#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for dictionary
+lookup, [#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for
+library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
+for localization, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
 for logger/diagnostic builtins. Implementation order follows the dependency
 bands in #156; no implementation is started here.
 Existing issues are reused:

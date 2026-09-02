@@ -28,11 +28,11 @@ For document metadata, the canonical per-surface #147 classification is now
 rows are `PARTIAL`. `.localization`/`.localize` remain canonical #151-owned
 `UNSUPPORTED` general stdlib rows; the #152 manifest retains them only as
 `NOT_APPLICABLE` ownership handoffs. Their bounded implementation owner is
-[#196](https://github.com/luceat-lux-vestra/arkst/issues/196); `.get` is
-owned by [#194](https://github.com/luceat-lux-vestra/arkst/issues/194),
-library inspection by [#195](https://github.com/luceat-lux-vestra/arkst/issues/195),
+[#196](https://github.com/luceat-lux-vestra/scribium/issues/196); `.get` is
+owned by [#194](https://github.com/luceat-lux-vestra/scribium/issues/194),
+library inspection by [#195](https://github.com/luceat-lux-vestra/scribium/issues/195),
 and `.log`/`.debug`/`.error` by
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197). The broader
+[#197](https://github.com/luceat-lux-vestra/scribium/issues/197). The broader
 classification index below remains a family implementation index; it does not
 override the canonical #151/#152 rows or promote evaluator/IR state to
 end-to-end renderer support.
@@ -95,12 +95,12 @@ environment, #149/#165–#167 binding/conversion/raw-body, #158 nested-call,
 reconciliation; no newly discovered implementation is started by this audit.
 
 The previously unresolved #154 rows now have explicit dispositions: `.match`
-is owned by [#198](https://github.com/luceat-lux-vestra/arkst/issues/198),
+is owned by [#198](https://github.com/luceat-lux-vestra/scribium/issues/198),
 `.loremipsum` and `.keybinding` are bounded under
-[#184](https://github.com/luceat-lux-vestra/arkst/issues/184), and
-`.subdocumentgraph` is blocked by [#188](https://github.com/luceat-lux-vestra/arkst/issues/188)
+[#184](https://github.com/luceat-lux-vestra/scribium/issues/184), and
+`.subdocumentgraph` is blocked by [#188](https://github.com/luceat-lux-vestra/scribium/issues/188)
 with producer/output ownership in
-[#199](https://github.com/luceat-lux-vestra/arkst/issues/199). `.css` and
+[#199](https://github.com/luceat-lux-vestra/scribium/issues/199). `.css` and
 `.cssproperties` remain `UNSUPPORTED` with an explicit product/backend defer;
 closed historical issue #58 is not their current owner.
 
@@ -120,13 +120,13 @@ boundaries, and source provenance. The #157 and #158 lexical/frontend
 production slices are implemented as recorded in the audit below. The
 remaining three bounded production follow-ups are:
 
-- [#159](https://github.com/luceat-lux-vestra/arkst/issues/159) — retain
+- [#159](https://github.com/luceat-lux-vestra/scribium/issues/159) — retain
   source after malformed inline-call recovery; and
-- [#162](https://github.com/luceat-lux-vestra/arkst/issues/162) — align
+- [#162](https://github.com/luceat-lux-vestra/scribium/issues/162) — align
   escaped call and argument delimiter recognition/depth handling with pinned
   `GrammarUtils.kt` and `FunctionCallGrammar.kt`; bounded to
   `arkst-quarkdown` with frontend integration only if required.
-- [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) — align
+- [#164](https://github.com/luceat-lux-vestra/scribium/issues/164) — align
   optional argument-separator placement before the first argument and `::`,
   plus pinned trailing-continuation consumption; bounded to
   `arkst-quarkdown` separator scanning and `arkst-markdown` block/inline
@@ -149,11 +149,11 @@ values, diagnostics, and general atomicity remain `PARTIAL` where the public
 v2.5.1 contract is broader than the current slice. The audit does not infer
 generalized coercion.
 
-The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-vestra/arkst/issues/165)
+The actionable engine-owned follow-ups are [#165](https://github.com/luceat-lux-vestra/scribium/issues/165)
 (central binder validation/parameter metadata),
-[#166](https://github.com/luceat-lux-vestra/arkst/issues/166)
+[#166](https://github.com/luceat-lux-vestra/scribium/issues/166)
 (dynamic/content target conversion), and
-[#167](https://github.com/luceat-lux-vestra/arkst/issues/167)
+[#167](https://github.com/luceat-lux-vestra/scribium/issues/167)
 (conversion diagnostics and validate-then-commit atomicity). They are native
 sub-issues of #149. #163 provides the parser/frontend and IR prerequisite for
 the ordered argument shape; #165 implements the shared engine binding contract
@@ -188,7 +188,7 @@ The audit reuses #148/#158–#164 for grammar/frontend boundaries and
 #149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
 does not create duplicate builtin or test issues. The bounded engine-owned
 `.extend`/`.super` implementation is tracked by
-[#169](https://github.com/luceat-lux-vestra/arkst/issues/169); broader target
+[#169](https://github.com/luceat-lux-vestra/scribium/issues/169); broader target
 and output coverage follows the dependency bands in [#156 reconciliation](RECONCILIATION.md).
 
 ## v2.5.1 stdlib surface classification

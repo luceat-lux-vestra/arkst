@@ -4,7 +4,7 @@ Status: corrective backend-contract work for PR #205. The subprocess and
 in-process adapters intentionally do not provide the same package/network
 capability contract. Exact-head implementation is commit
 `94b9a38e7317ac8608d40573ef04edd53891c152`; its cross-platform CI evidence is
-run [33034946513](https://github.com/luceat-lux-vestra/arkst/actions/runs/33034946513).
+run [33034946513](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513).
 This evidence must not be inferred from an earlier green run.
 The canonical executable oracle is
 
@@ -110,9 +110,9 @@ exact-head evidence is recorded here from run 33034946513 for commit
 
 | Platform | Parity suite | Typst |
 |---|---|---|
-| Linux | [PASS](https://github.com/luceat-lux-vestra/arkst/actions/runs/33034946513/job/98395525597) | 0.15.1 required |
-| macOS | [PASS](https://github.com/luceat-lux-vestra/arkst/actions/runs/33034946513/job/98395525656) | 0.15.1 required |
-| Windows | [PASS](https://github.com/luceat-lux-vestra/arkst/actions/runs/33034946513/job/98395525579) | 0.15.1 required |
+| Linux | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525597) | 0.15.1 required |
+| macOS | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525656) | 0.15.1 required |
+| Windows | [PASS](https://github.com/luceat-lux-vestra/scribium/actions/runs/33034946513/job/98395525579) | 0.15.1 required |
 
 The corpus exercises:
 
