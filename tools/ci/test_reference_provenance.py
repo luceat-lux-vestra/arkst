@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -96,6 +97,15 @@ class ReferenceProvenanceTests(unittest.TestCase):
     def verify_fixture(self) -> None:
         verifier.verify_workspace(root=self.fixture.root)
 
+    def preparation_module(self):  # type: ignore[no-untyped-def]
+        script_path = ROOT / "tools/markdown-compat/prepare_references.py"
+        spec = importlib.util.spec_from_file_location("prepare_references_fixture", script_path)
+        if spec is None or spec.loader is None:
+            raise AssertionError("could not load Markdown preparation script")
+        preparation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preparation)
+        return preparation
+
     def test_baseline_fixture_passes(self) -> None:
         self.verify_fixture()
 
@@ -146,16 +156,61 @@ class ReferenceProvenanceTests(unittest.TestCase):
         self.assert_rejected(self.verify_fixture)
 
     def test_preparation_rejects_escaping_corpus_path(self) -> None:
-        script_path = ROOT / "tools/markdown-compat/prepare_references.py"
-        spec = importlib.util.spec_from_file_location("prepare_references_fixture", script_path)
-        if spec is None or spec.loader is None:
-            raise AssertionError("could not load Markdown preparation script")
-        preparation = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(preparation)
+        preparation = self.preparation_module()
         with self.assertRaises(SystemExit):
             preparation.repository_relative_path("../spec.txt", "commonmark.corpus_path")
         with self.assertRaises(SystemExit):
             preparation.repository_relative_path("/tmp/spec.txt", "commonmark.corpus_path")
+
+    def test_preparation_rejects_insecure_repository_before_clone(self) -> None:
+        self.fixture.mutate(
+            "tests/compat/references.toml",
+            'repository = "https://github.com/commonmark/cmark.git"',
+            'repository = "http://github.com/commonmark/cmark.git"',
+        )
+        preparation = self.preparation_module()
+        output_dir = self.fixture.root / "prepared-insecure"
+        with mock.patch.object(preparation, "run") as run:
+            with self.assertRaises(SystemExit):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "prepare_references.py",
+                        "--config",
+                        str(self.fixture.root / "tests/compat/references.toml"),
+                        "--output-dir",
+                        str(output_dir),
+                    ],
+                ):
+                    preparation.main()
+        run.assert_not_called()
+        self.assertFalse(output_dir.exists())
+
+    def test_preparation_rejects_malformed_revision_before_clone(self) -> None:
+        self.fixture.mutate(
+            "tests/compat/references.toml",
+            'revision = "587a12bb54d95ac37241377e6ddc93ea0e45439b"',
+            'revision = "not-a-full-immutable-commit"',
+        )
+        preparation = self.preparation_module()
+        output_dir = self.fixture.root / "prepared-malformed-revision"
+        with mock.patch.object(preparation, "run") as run:
+            with self.assertRaises(SystemExit):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "prepare_references.py",
+                        "--config",
+                        str(self.fixture.root / "tests/compat/references.toml"),
+                        "--output-dir",
+                        str(output_dir),
+                    ],
+                ):
+                    preparation.main()
+        run.assert_not_called()
+        self.assertFalse(output_dir.exists())
 
     def test_dirty_tracked_markdown_checkout_rejected(self) -> None:
         checkout = self.fixture.root / "dirty-markdown-checkout"

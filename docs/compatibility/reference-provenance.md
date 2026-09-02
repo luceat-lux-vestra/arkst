@@ -29,6 +29,12 @@ is not substituted for the JDK archive proof. When requested, the verifier can
 also resolve the JDK source tag and fetch the exact build-source commit in an
 isolated temporary git repository.
 
+Markdown preparation preflights every configured reference's source kind,
+HTTPS repository, full immutable commit revision, and repository-relative
+corpus path before creating output or invoking clone/checkout commands. An
+invalid later reference therefore causes no external source fetch or build
+input to be used.
+
 ## Contract layers
 
 Each applicable manifest records:
