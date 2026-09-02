@@ -34,7 +34,7 @@ jobs:
           REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'openai/gpt-4.1' }}
         with:
           script: |
-            const marker = '<!-- scribium-ai-review -->';
+            const marker = '<!-- arkst-ai-review -->';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pullNumber = context.payload.pull_request.number;
