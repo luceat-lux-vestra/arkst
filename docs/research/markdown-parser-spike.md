@@ -2,7 +2,7 @@
 
 ## Objective
 
-Evaluate Markdown parser candidates for the Scribium parser baseline.
+Evaluate Markdown parser candidates for the Arkst parser baseline.
 Candidates must support CommonMark/GFM, preserve source spans, and allow
 extension syntax for Quarkdown-compatible directives.
 

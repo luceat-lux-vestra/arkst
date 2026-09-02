@@ -1,4 +1,4 @@
-# Cargo config for Scribium
+# Cargo config for Arkst
 [target.aarch64-apple-darwin]
 rustflags = []
 

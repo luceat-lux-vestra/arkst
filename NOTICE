@@ -1,6 +1,6 @@
-Scribium — Markdown-to-Typst document frontend and toolchain
+Arkst — Markdown-to-Typst document frontend and toolchain
 
-Copyright 2026 The Scribium Authors
+Copyright 2026 The Arkst Authors
 
 This product includes software developed by:
 - The Rust Project Contributors (https://www.rust-lang.org)
@@ -29,10 +29,10 @@ Typst GmbH or the Quarkdown project.
 
 == Reference JVM and generated compatibility data ==
 
-Scribium's development-time compatibility oracle uses the exact Eclipse
+Arkst's development-time compatibility oracle uses the exact Eclipse
 Temurin 25.0.4.1+1 JDK archive recorded in
 docs/compatibility/quarkdown/reference-jvm.toml. The JDK archive is not
-distributed with Scribium and no JVM is required at runtime. The generated
+distributed with Arkst and no JVM is required at runtime. The generated
 Unicode case-mapping values are independently captured from public
 Character/String API results for the pinned oracle and are not a copy of JDK
 implementation source. See the OpenJDK legal information and GPLv2 with
@@ -47,11 +47,11 @@ https://www.unicode.org/copyright.html.
 == Generated JDK/CLDR locale compatibility data ==
 
 The locale compatibility snapshot in
-crates/scribium-engine/data/jdk25_locale_display.bin and the generated locale
-metadata in crates/scribium-engine/src/locale_data.rs contain values observed
+crates/arkst-engine/data/jdk25_locale_display.bin and the generated locale
+metadata in crates/arkst-engine/src/locale_data.rs contain values observed
 from the exact Eclipse Temurin 25.0.4.1+1 CLDR provider, including JDK
 FALLBACK-root values and CLDR/Unicode locale data. The JDK archive is a
-generation-time input and is not distributed with Scribium. These derived
+generation-time input and is not distributed with Arkst. These derived
 values are covered by the applicable OpenJDK GPLv2 with Classpath Exception
 and CLDR/Unicode attribution and notice terms:
 
@@ -59,7 +59,7 @@ and CLDR/Unicode attribution and notice terms:
 - GPLv2 with Classpath Exception: https://openjdk.org/legal/gplv2+ce.html
 - Unicode terms: https://www.unicode.org/copyright.html
 
-The generated values are distinguished from Scribium's independently authored
+The generated values are distinguished from Arkst's independently authored
 Apache-2.0 generator, binary parser, lookup code, tests, and integration; no
 JDK implementation source is bundled.
 

@@ -2,7 +2,7 @@
 
 ## Audit identity
 
-- **Scribium audit base:** '7144683346fd6e39c49ef0923733c856a6a55f42'
+- **Arkst audit base:** '7144683346fd6e39c49ef0923733c856a6a55f42'
 - **Quarkdown target:** v2.5.1 at '107ec3a9482f10d6f90d7580f8409b46a719d18e'
 - **Scope:** Quarkdown document-content, media, presentation-component, raw-content, reference, and Quarkdown-specific Markdown-extension primitives
 - **Authority:** the machine-checkable [83-row manifest](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv)
@@ -81,7 +81,7 @@ The audit keeps six layers distinct:
 3. Quarkdown-specific syntax extensions;
 4. Quarkdown semantic/evaluator behavior, including callable body and option
    conversion;
-5. Scribium's backend-neutral AST/IR representation; and
+5. Arkst's backend-neutral AST/IR representation; and
 6. Typst lowering and rendered-output fidelity.
 
 A Markdown image is not a Quarkdown-sized image. A Markdown fence is not
@@ -201,7 +201,7 @@ were checked for:
 - frontend, evaluator, project, and host ownership; and
 - WASM/platform-neutral constraints.
 
-The current Scribium project abstraction can represent bounded logical
+The current Arkst project abstraction can represent bounded logical
 project references, and existing Markdown image/read/json/include slices use
 that boundary. It does not establish Quarkdown media storage, URL/network
 loading, icon catalogs, Mermaid/chart renderers, packaged-resource parity, or
@@ -221,7 +221,7 @@ output ownership in #199.
 interchangeable:
 
 - .html and .markdown have bounded target-specific semantic/native content
-  behavior already represented in Scribium. Typst/PDF omission is intentional
+  behavior already represented in Arkst. Typst/PDF omission is intentional
   and is not rendered-output compatibility.
 - .htmloptions is a #154 target-specific content/output configuration consumer,
   not #153 document layout state. Its bounded semantic state does not establish
@@ -235,7 +235,7 @@ interchangeable:
 Unsupported raw or structured content is fail-closed. This audit does not
 lower unsupported structures to plain text, generic Markdown, a semantically
 supported-looking function-call node, raw Typst, or backend-specific escape
-code. Scribium's architecture continues to forbid generic RawTypst,
+code. Arkst's architecture continues to forbid generic RawTypst,
 BackendRaw, and equivalent backend-code escape hatches.
 
 ## Math and slide boundaries
@@ -270,7 +270,7 @@ reused where it already describes the boundary:
 | [#199](https://github.com/luceat-lux-vestra/scribium/issues/199) | `.subdocumentgraph` producer and output contract after #188 logical resource resolution; #181 is coordinated only for shared identifiers/indexing |
 | [#155](https://github.com/luceat-lux-vestra/scribium/issues/155) | Resource/environment ownership used by media and content consumers |
 | [#149](https://github.com/luceat-lux-vestra/scribium/issues/149), [#165](https://github.com/luceat-lux-vestra/scribium/issues/165), [#166](https://github.com/luceat-lux-vestra/scribium/issues/166), [#167](https://github.com/luceat-lux-vestra/scribium/issues/167) | Binding, conversion, raw-body, and atomicity prerequisites |
-| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Implemented bounded `scribium-markdown` frontend slice for source-backed inline Markdown in static content arguments; the #158 nested tight-call representation is retained. Dynamic/content conversion and producer/output semantics remain outside this handoff. |
+| [#160](https://github.com/luceat-lux-vestra/scribium/issues/160) | Implemented bounded `arkst-markdown` frontend slice for source-backed inline Markdown in static content arguments; the #158 nested tight-call representation is retained. Dynamic/content conversion and producer/output semantics remain outside this handoff. |
 | [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | .texmacro and math-renderer dependency |
 
 The #154 manifest keeps `.keybinding` as actionable `UNKNOWN` with #184 as
@@ -289,7 +289,7 @@ is started by this audit; implementation ordering is defined by
 ## Validation and guard obligations
 
 The offline guard in
-[content_media_markdown_extensions_audit.rs](../../../crates/scribium-core/tests/content_media_markdown_extensions_audit.rs)
+[content_media_markdown_extensions_audit.rs](../../../crates/arkst-core/tests/content_media_markdown_extensions_audit.rs)
 checks, without network access:
 
 - exact target and audit-base pins;

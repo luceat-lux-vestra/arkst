@@ -1,5 +1,5 @@
 [package]
-name = "scribium-markdown-compat"
+name = "arkst-markdown-compat"
 version = "0.0.1"
 publish = false
 edition.workspace = true
@@ -10,16 +10,16 @@ authors.workspace = true
 description = "Pinned CommonMark/GFM differential and real-document compatibility harness"
 
 [[bin]]
-name = "scribium-markdown-compat"
+name = "arkst-markdown-compat"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 quick-xml.workspace = true
-scribium-core.workspace = true
-scribium-markdown.workspace = true
-scribium-typst.workspace = true
-scribium-typst-subprocess.workspace = true
+arkst-core.workspace = true
+arkst-markdown.workspace = true
+arkst-typst.workspace = true
+arkst-typst-subprocess.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

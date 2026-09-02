@@ -8,9 +8,9 @@ subprocess, producing valid PDF output.
 ## Test
 
 ```bash
-echo '= Hello, Scribium' > /tmp/scribium-spike.typ
-echo 'This is a *paragraph* from the Typst spike.' >> /tmp/scribium-spike.typ
-typst compile /tmp/scribium-spike.typ /tmp/scribium-spike.pdf
+echo '= Hello, Arkst' > /tmp/arkst-spike.typ
+echo 'This is a *paragraph* from the Typst spike.' >> /tmp/arkst-spike.typ
+typst compile /tmp/arkst-spike.typ /tmp/arkst-spike.pdf
 ```
 
 ## Result
@@ -24,7 +24,7 @@ typst compile /tmp/scribium-spike.typ /tmp/scribium-spike.pdf
 ## Conclusion
 
 Subprocess backend is viable for M1. The `TypstBackend` trait abstraction
-in `scribium-typst` isolates the subprocess call details.
+in `arkst-typst` isolates the subprocess call details.
 
 ## Next
 

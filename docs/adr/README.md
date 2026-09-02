@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This directory contains Architecture Decision Records (ADRs) for Scribium.
+This directory contains Architecture Decision Records (ADRs) for Arkst.
 
 ## Statuses
 

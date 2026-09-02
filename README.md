@@ -1,16 +1,16 @@
-# Scribium
+# Arkst
 
 [![Experimental](https://img.shields.io/badge/status-experimental-orange)](https://github.com/luceat-lux-vestra/scribium)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![CI](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml/badge.svg)](https://github.com/luceat-lux-vestra/scribium/actions/workflows/ci.yml)
 
-**Scribium is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
+**Arkst is an independent, Apache-2.0 Quarkdown-compatible compiler and toolchain powered by the official Typst compiler.**
 
-Scribium accepts Markdown and Quarkdown-compatible documents, evaluates supported programmable-document semantics into a backend-neutral IR, lowers that IR to Typst, and can invoke the official Typst compiler to produce PDF.
+Arkst accepts Markdown and Quarkdown-compatible documents, evaluates supported programmable-document semantics into a backend-neutral IR, lowers that IR to Typst, and can invoke the official Typst compiler to produce PDF.
 
 > Quarkdown compatibility is currently partial and evidence-based; the current verified baseline is referenced against Quarkdown v2.5.1. See [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/) for the detailed inventory and evidence.
 
-> Scribium is an independent project. It is not affiliated with, endorsed by, or sponsored by Typst GmbH or the Quarkdown project.
+> Arkst is an independent project. It is not affiliated with, endorsed by, or sponsored by Typst GmbH or the Quarkdown project.
 
 ## What works today
 
@@ -18,16 +18,16 @@ The current verified document path is:
 
 ```text
 Markdown or Quarkdown-compatible source (.md / .qd / .scrib)
-→ pinned Rushdown Markdown substrate + Scribium Quarkdown frontend
+→ pinned Rushdown Markdown substrate + Arkst Quarkdown frontend
 → backend-neutral IR
 → single evaluator
-→ Scribium Typst lowering
+→ Arkst Typst lowering
 → generated Typst
 → official Typst compiler
 → PDF
 ```
 
-For Markdown, Scribium has an end-to-end CommonMark/GFM compatibility harness and real-document PDF smoke coverage:
+For Markdown, Arkst has an end-to-end CommonMark/GFM compatibility harness and real-document PDF smoke coverage:
 
 | Evidence | Current baseline |
 |---|---:|
@@ -37,14 +37,14 @@ For Markdown, Scribium has an end-to-end CommonMark/GFM compatibility harness an
 
 The supported Markdown output path includes paragraphs, headings, blockquotes, ordered and unordered lists, GFM task lists, fenced and indented code blocks, GFM tables with alignment, emphasis, strong, strikethrough, inline code, links, autolinks/linkify, thematic breaks, entities, escapes, and soft/hard line breaks.
 
-Scribium also supports a deliberately bounded, attribute-free inline raw-HTML subset when it maps exactly to existing Markdown semantics: `<em>`, `<strong>`, `<del>`, `<s>`, and `<br>` variants. Other raw HTML is preserved with source provenance but rejected at the document-output boundary with `E8001`; Scribium does not contain a general HTML parser or DOM.
+Arkst also supports a deliberately bounded, attribute-free inline raw-HTML subset when it maps exactly to existing Markdown semantics: `<em>`, `<strong>`, `<del>`, `<s>`, and `<br>` variants. Other raw HTML is preserved with source provenance but rejected at the document-output boundary with `E8001`; Arkst does not contain a general HTML parser or DOM.
 
 Project-relative local images are parsed, retained in the backend-neutral IR,
 and lowered through the explicit Typst source-context/resource boundary.
 Absolute paths, remote/network loading, and a general resource registry remain
 unsupported or deferred.
 
-**HTML, SVG, and PNG output backends are not implemented yet.** PDF output is experimental. The subprocess Typst backend is the default and is included in the default Scribium CLI build; it requires an installed Typst executable. The in-process backend is a native-only build-time opt-in through the `typst-inprocess` Cargo feature and also requires `--backend in-process` at runtime. It is unrelated to browser/WASM rendering. Generating `.typ` does not require Typst to be installed.
+**HTML, SVG, and PNG output backends are not implemented yet.** PDF output is experimental. The subprocess Typst backend is the default and is included in the default Arkst CLI build; it requires an installed Typst executable. The in-process backend is a native-only build-time opt-in through the `typst-inprocess` Cargo feature and also requires `--backend in-process` at runtime. It is unrelated to browser/WASM rendering. Generating `.typ` does not require Typst to be installed.
 
 Detailed Markdown evidence and the accepted mismatch inventory live in [`docs/compatibility/markdown/`](docs/compatibility/markdown/).
 
@@ -54,29 +54,29 @@ From a repository checkout:
 
 ```bash
 # Validate a real Markdown example
-cargo run -p scribium-cli -- check examples/markdown/basic.md
+cargo run -p arkst-cli -- check examples/markdown/basic.md
 
 # Markdown → generated Typst
-cargo run -p scribium-cli -- build examples/markdown/basic.md \
+cargo run -p arkst-cli -- build examples/markdown/basic.md \
   --output target/examples/basic.typ
 
 # Markdown → PDF (requires Typst on PATH)
-cargo run -p scribium-cli -- build examples/markdown/basic.md \
+cargo run -p arkst-cli -- build examples/markdown/basic.md \
   --format pdf --output target/examples/basic.pdf
 
 # Optional native in-process PDF backend (build-time and runtime opt-in;
 # does not use --typst-path)
-cargo run -p scribium-cli --features typst-inprocess -- \
+cargo run -p arkst-cli --features typst-inprocess -- \
   build examples/markdown/basic.md \
   --format pdf --backend in-process --output target/examples/basic.pdf
 
 # Quarkdown-compatible example
-cargo run -p scribium-cli -- check examples/hello/main.qd
-cargo run -p scribium-cli -- build examples/hello/main.qd \
+cargo run -p arkst-cli -- check examples/hello/main.qd
+cargo run -p arkst-cli -- build examples/hello/main.qd \
   --output target/examples/hello.typ
 ```
 
-The default `cargo build`/`cargo install` of `scribium-cli` packages only the
+The default `cargo build`/`cargo install` of `arkst-cli` packages only the
 subprocess backend. To include the native in-process compiler graph, pass
 `--features typst-inprocess` to the Cargo command and still select
 `--backend in-process` when building a PDF.
@@ -101,7 +101,7 @@ For a larger independently authored Markdown corpus, see [`fixtures/markdown/rea
 ```markdown
 # Release notes
 
-Scribium preserves **structured Markdown** through a backend-neutral IR.
+Arkst preserves **structured Markdown** through a backend-neutral IR.
 
 - [x] GFM task lists
 - [x] Tables
@@ -115,12 +115,12 @@ Scribium preserves **structured Markdown** through a backend-neutral IR.
 Build it with:
 
 ```bash
-cargo run -p scribium-cli -- build document.md --format pdf
+cargo run -p arkst-cli -- build document.md --format pdf
 ```
 
 ## Quarkdown-compatible example
 
-Scribium's programmable-document compatibility is growing in bounded, independently verified semantic slices. For example:
+Arkst's programmable-document compatibility is growing in bounded, independently verified semantic slices. For example:
 
 ```quarkdown
 .var {show_extra} {yes}
@@ -167,7 +167,7 @@ Nested objects, arrays, and block strings are not supported. Duplicate keys use 
 | Watch/LSP | Planned |
 | WASM | Deferred |
 
-Scribium has no current public package or release distribution contract. The
+Arkst has no current public package or release distribution contract. The
 workspace package, CLI, binary-release, WASM, and internal-tool decisions are
 recorded and enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engineering/DISTRIBUTION_POLICY.md).
 
@@ -175,17 +175,17 @@ recorded and enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engine
 
 ```text
 ┌────────────────────────────────────────────────────┐
-│                    scribium-cli                     │
+│                    arkst-cli                     │
 │              build | check | inspect               │
 └──────────────────────┬─────────────────────────────┘
                        │
 ┌──────────────────────▼─────────────────────────────┐
-│                   scribium-core                     │
+│                   arkst-core                     │
 │ frontend AST → IR → single evaluator               │
 └──────────────────────┬─────────────────────────────┘
                        │ evaluated backend-neutral IR
 ┌──────────────────────▼─────────────────────────────┐
-│                   scribium-typst                    │
+│                   arkst-typst                    │
 │              pure IR → Typst lowering              │
 └──────────────────────┬─────────────────────────────┘
                        │
@@ -196,7 +196,7 @@ recorded and enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engine
                       PDF
 ```
 
-Rushdown is the pinned Markdown parser substrate. Scribium does not preprocess and reparse Markdown to implement Quarkdown semantics; programmable semantics are preserved structurally through the frontend AST and IR and evaluated once before backend lowering.
+Rushdown is the pinned Markdown parser substrate. Arkst does not preprocess and reparse Markdown to implement Quarkdown semantics; programmable semantics are preserved structurally through the frontend AST and IR and evaluated once before backend lowering.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/adr/`](docs/adr/) for the architectural contracts.
 
@@ -213,6 +213,6 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/adr/`](docs/adr/) 
 
 ## License
 
-Copyright 2026 The Scribium Authors
+Copyright 2026 The Arkst Authors
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. See [`LICENSE`](LICENSE).

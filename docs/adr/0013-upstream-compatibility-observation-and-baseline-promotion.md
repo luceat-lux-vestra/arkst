@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-08
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** M0.5 Upstream Observer Foundation
 - **Supersedes:**
 - **Superseded by:** ADR-0016 for the final upstream evolution model
@@ -18,7 +18,7 @@ promotion.
 
 ## Context
 
-Scribium is a Quarkdown-compatible compiler. As upstream Quarkdown evolves, Scribium must track compatible changes without relying on manual monitoring. The compatibility baseline (currently v2.5.0) defines what Scribium claims to support. New upstream releases must be detected, assessed, and deliberately adopted — never automatically.
+Arkst is a Quarkdown-compatible compiler. As upstream Quarkdown evolves, Arkst must track compatible changes without relying on manual monitoring. The compatibility baseline (currently v2.5.0) defines what Arkst claims to support. New upstream releases must be detected, assessed, and deliberately adopted — never automatically.
 
 ## Decision Drivers
 
@@ -56,7 +56,7 @@ Adopt Option 3. The system comprises:
    - Declares `supported_baseline` (e.g., `v2.5.0`)
    - Does NOT store `latest_observed` — no bot commits
 
-2. **Testable drift detector** (`tools/upstream-watch/scribium-upstream-watch`)
+2. **Testable drift detector** (`tools/upstream-watch/arkst-upstream-watch`)
    - Pure comparison logic: `observed_tag` vs `supported_baseline`
    - Outputs structured JSON with `status: current | drift` and deterministic `issue_key`
    - No network access; receives observed metadata as CLI args
@@ -66,13 +66,13 @@ Adopt Option 3. The system comprises:
    - Daily cron + `workflow_dispatch` with `observed_tag` override and `dry_run`
    - Fetches latest stable release metadata from GitHub API (`tag_name`, `html_url`)
    - Invokes watcher tool, evaluates result
-   - On drift: checks for existing Issue by deterministic marker `<!-- scribium-upstream-drift:quarkdown:vX.Y.Z -->`
+   - On drift: checks for existing Issue by deterministic marker `<!-- arkst-upstream-drift:quarkdown:vX.Y.Z -->`
    - Creates Issue with checklist and clean-room warning if not exists
    - Minimal permissions: `contents: read`, `issues: write`
 
 4. **Conformance corpus foundation** (`fixtures/quarkdown-conformance/`)
    - Independently authored test cases with metadata
-   - Harness in `scribium-test-support` loads and verifies cases
+   - Harness in `arkst-test-support` loads and verifies cases
    - Seed cases for already-implemented features
 
 5. **Documentation**
@@ -125,7 +125,7 @@ Adopt Option 3. The system comprises:
 - `tools/upstream-watch/`
 - `.github/workflows/upstream-quarkdown.yml`
 - `fixtures/quarkdown-conformance/`
-- `crates/scribium-test-support/src/lib.rs` (conformance harness)
+- `crates/arkst-test-support/src/lib.rs` (conformance harness)
 - `docs/ROADMAP.md` (M0.5, M5)
 - `docs/compatibility/quarkdown/README.md` (Baseline vs. Observed section)
 - `docs/legal/CLEAN_ROOM_POLICY.md`

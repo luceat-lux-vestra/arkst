@@ -9,7 +9,7 @@ accept an architecture, supersede ADR-0014, or migrate production code.
 
 Verified: 2026-08-13 (Asia/Seoul)
 
-## A. Scribium live repository state
+## A. Arkst live repository state
 
 The repository was refreshed with `git fetch --all --tags --prune` before this
 gate. The live state was:
@@ -229,7 +229,7 @@ Exact numstat:
 | --- | --- | --- |
 | A. Stable extension surface | `configuration.rs`, `lib.rs` | small in concept, but callback contract would become long-lived public API |
 | B. Frequently changing parser internals | `flow.rs`, `text.rs`, `state.rs`, new construct using `Tokenizer` internals | unavoidable even for the lower bound; precedence and state-machine coupling are semantic, not mechanical |
-| C. Scribium-specific logic | external harness/test | grammar remained outside parser core as intended |
+| C. Arkst-specific logic | external harness/test | grammar remained outside parser core as intended |
 
 The lower bound recognized calls at root and inside lists, nested lists,
 blockquotes, list-to-blockquote, and blockquote-to-list. Code spans, indented
@@ -391,11 +391,11 @@ Repository checks:
 | `cargo fmt --all --check` | pass |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | pass |
 | `cargo test --workspace --all-features` | pass |
-| `cargo test -p scribium-core` | pass, 335 tests |
+| `cargo test -p arkst-core` | pass, 335 tests |
 | `git diff --check` | pass |
-| `cargo run -p scribium-cli -- build examples/hello/main.qd` | existing `E3001`: example condition at bytes 247..356 is not boolean-compatible |
-| `cargo run -p scribium-cli -- build examples/hello/main.qd --format pdf` | same existing `E3001`; PDF compiler not reached |
-| `cargo run -p scribium-cli -- inspect examples/hello/main.qd --emit typst` | exits with the same one-error compilation result |
+| `cargo run -p arkst-cli -- build examples/hello/main.qd` | existing `E3001`: example condition at bytes 247..356 is not boolean-compatible |
+| `cargo run -p arkst-cli -- build examples/hello/main.qd --format pdf` | same existing `E3001`; PDF compiler not reached |
+| `cargo run -p arkst-cli -- inspect examples/hello/main.qd --emit typst` | exits with the same one-error compilation result |
 
 The spike changes no production crate or example; those paths are byte-for-byte
 identical to `origin/main`, so the example validation failure is not introduced
@@ -430,10 +430,10 @@ to recommend it as the production substrate without architecture review.
 
 The remaining architecture questions are:
 
-1. Is Scribium willing to accept or actively sponsor the upstream viability
+1. Is Arkst willing to accept or actively sponsor the upstream viability
    risk of markdown-it-rust, including a plan for the open panic and advisory?
 2. Would markdown-rs upstream accept a public generic extension surface broad
-   enough for body/container and inline context, avoiding a Scribium fork?
+   enough for body/container and inline context, avoiding a Arkst fork?
 3. If neither is acceptable, should a narrowly scoped follow-up inspect one
    additional actively maintained extensible candidate rather than adopt a
    heavy fork or continue the custom CommonMark parser?

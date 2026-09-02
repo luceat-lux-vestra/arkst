@@ -1,7 +1,7 @@
 /*
  * Generation-only oracle helper for the pinned Eclipse Temurin 25 runtime.
  *
- * This is independently authored Scribium tooling. It calls the public JDK
+ * This is independently authored Arkst tooling. It calls the public JDK
  * Character/String APIs; it is not linked into the runtime.
  */
 

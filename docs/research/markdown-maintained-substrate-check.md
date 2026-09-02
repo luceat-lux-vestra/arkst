@@ -105,7 +105,7 @@ The exact upstream checkout passed `cargo test --all-features`: 26 unit tests,
 and 21 doctests. Its CommonMark harness executed the bundled 652-example
 CommonMark 0.31.2 corpus. GFM tests cover tables, task lists, strikethrough,
 and linkification; the upstream README notes a raw-HTML policy difference from
-GFM. This is credible current baseline evidence, not independent Scribium
+GFM. This is credible current baseline evidence, not independent Arkst
 conformance certification.
 
 ### Safety and dependency quality
@@ -122,7 +122,7 @@ are absent from the exact PoC/normal parser graph. They do not prove a runtime
 production vulnerability, but they show that upstream's own broad validation
 graph needs dependency maintenance.
 
-More importantly, the library does not meet Scribium's default safety
+More importantly, the library does not meet Arkst's default safety
 discipline. A source scan found 341 `unsafe { ... }` blocks across 12 `src`
 files, heavily concentrated in the generated scanner but also present in text,
 parser, utility, and renderer code. Public `Segment::new` accepts arbitrary
@@ -271,7 +271,7 @@ sense of a clearly superior production choice.
 The unresolved risks requiring architecture/security review are:
 
 1. whether rushdown's public and internal unsafe invariants can be proved and
-   accepted under Scribium's default prohibition;
+   accepted under Arkst's default prohibition;
 2. whether its maintenance record and API stability become durable enough for
    a compiler substrate;
 3. whether independent CommonMark/GFM and adversarial-input validation confirms

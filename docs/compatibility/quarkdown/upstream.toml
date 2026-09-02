@@ -1,5 +1,5 @@
 # Quarkdown Upstream Manifest
-# This file declares the verified compatibility baseline for Scribium's Quarkdown evidence.
+# This file declares the verified compatibility baseline for Arkst's Quarkdown evidence.
 # It is used by automated tooling to detect upstream drift.
 # 
 # IMPORTANT: `supported_baseline` is the historical serialized field name for

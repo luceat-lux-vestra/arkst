@@ -9,7 +9,7 @@
 
 ## Context
 
-Scribium is extending the evaluator from scalar and structured values toward
+Arkst is extending the evaluator from scalar and structured values toward
 the programmable-document semantics needed by the tracked Quarkdown release.
 The current implementation already contains typed values, callable captures,
 source-backed diagnostics, and invocation-time dynamic conversion. It also
@@ -126,7 +126,7 @@ locale, and theme.
 
 The source records are [`Document.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Document.kt) and [`DocumentInfo.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core/document/DocumentInfo.kt).
 
-## Current Scribium constraints and reconnaissance
+## Current Arkst constraints and reconnaissance
 
 At the baseline, the relevant current types have these meanings:
 
@@ -157,7 +157,7 @@ rewrite the evaluator in this gate.
 
 ## Decision
 
-Scribium adopts a value-first, typed semantic component boundary:
+Arkst adopts a value-first, typed semantic component boundary:
 
 1. The component value foundation provides `IrValue::Component`, carrying an
    `IrComponent` whose layout kind, validated properties, semantic children,

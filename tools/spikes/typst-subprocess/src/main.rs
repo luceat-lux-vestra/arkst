@@ -33,7 +33,7 @@ fn main() {
     // Test Case 2: Text with font
     let text_source = r#"
 #set page(width: 200pt, height: 100pt)
-Hello from Scribium.
+Hello from Arkst.
 "#;
     
     fs::write("/tmp/text.typ", text_source).unwrap();

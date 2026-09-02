@@ -5,7 +5,7 @@
 # declared_152_owned=8
 # declared_cross_owned=33
 # declared_canonical_handoff=2
-# Columns: kind\tcanonical_name\taliases\townership\tstatus\tpinned_provenance\tscribium_evidence\tfollow_up
+# Columns: kind\tcanonical_name\taliases\townership\tstatus\tpinned_provenance\tarkst_evidence\tfollow_up
 owned	doctype	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L107-L121;DocumentType.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L15-L62	evaluator.rs#L2930-L3035;ir/lib.rs#L40-L75;core-tests::document_state_doctype	#165;#167
 owned	docname	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L142-L155	evaluator.rs#L2930-L3035;core-tests::document_state_name;#166 raw-body regression	#167
 owned	docdescription	none	#152	PARTIAL	Document.kt@107ec3a9482f10d6f90d7580f8409b46a719d18e#L176-L186	evaluator.rs#L2930-L3035;core-tests::document_state_description;#166 raw-body regression	#167

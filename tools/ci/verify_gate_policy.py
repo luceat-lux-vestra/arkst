@@ -498,7 +498,7 @@ def cmd_scope(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Verify Scribium merge-gate policy and compatibility scope"
+        description="Verify Arkst merge-gate policy and compatibility scope"
     )
     parser.add_argument("--repository", default=".")
     parser.add_argument("--policy", default=".github/gate-policy.toml")

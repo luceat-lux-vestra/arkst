@@ -2,17 +2,17 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1
 
 ## Context
 
-Scribium must define versioning for the tool itself, its configuration schema,
+Arkst must define versioning for the tool itself, its configuration schema,
 diagnostic codes, and compatibility profiles.
 
 ## Decision Drivers
 
-- SemVer for the Scribium tool
+- SemVer for the Arkst tool
 - Configuration schema version independent of tool version
 - Diagnostic codes are stable within a major version
 - Compatibility profiles have their own versioning
@@ -32,7 +32,7 @@ profile per target.
 ## Decision
 
 - **Tool:** SemVer (`v0.1.0`, `v0.2.0`, `v1.0.0`, etc.)
-- **Config schema:** Integer version in scribium.toml (`config-version = 1`)
+- **Config schema:** Integer version in arkst.toml (`config-version = 1`)
 - **Diagnostic codes:** Stable within a major version. Never reassign codes.
   Deprecated codes do not reappear.
 - **Compatibility profile:** Named after target version (`quarkdown-v2.5`)

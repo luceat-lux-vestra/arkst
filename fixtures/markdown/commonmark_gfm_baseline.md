@@ -1,4 +1,4 @@
-# Scribium Markdown baseline
+# Arkst Markdown baseline
 
 Setext heading
 --------------

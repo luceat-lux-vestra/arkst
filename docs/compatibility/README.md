@@ -1,6 +1,6 @@
 # Compatibility Documentation
 
-Scribium keeps parser capability, language semantics, and backend capability as separate compatibility contracts.
+Arkst keeps parser capability, language semantics, and backend capability as separate compatibility contracts.
 
 ## Cross-cutting policy
 
@@ -23,4 +23,4 @@ Scribium keeps parser capability, language semantics, and backend capability as 
 
 - [Typst backend compatibility](typst/README.md)
 
-Compatibility claims must remain evidence-backed. A parser recognizing a construct is not sufficient evidence that Scribium supports its semantics or can successfully lower it through the selected backend.
+Compatibility claims must remain evidence-backed. A parser recognizing a construct is not sufficient evidence that Arkst supports its semantics or can successfully lower it through the selected backend.

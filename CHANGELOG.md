@@ -103,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source-backed and atomic. `.doclang`, theme resolution, rendering policy, and other
   document metadata remain deferred.
 
-- **Evaluator resource budgets (R10):** `scribium-engine` now applies typed,
+- **Evaluator resource budgets (R10):** `arkst-engine` now applies typed,
   deterministic per-operation materialization and per-compilation evaluator
   depth limits. Closed-range cardinality is checked before conversion,
   reservation, or iteration; recursive/callback frames use scoped accounting;
@@ -198,10 +198,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Milestone**: M1 marked `Completed`, M2 marked `In progress` with variable evaluation as first feature
 
 - Repository bootstrap with Apache-2.0 licensing and provenance policy.
-- Product vision defining Scribium as a Quarkdown-compatible compiler.
+- Product vision defining Arkst as a Quarkdown-compatible compiler.
 - Clean-room Quarkdown compatibility policy and process documentation.
 - Architecture, roadmap, and non-goals documentation.
-- Baseline Rust workspace with scribium-core, scribium-typst, scribium-cli, scribium-test-support.
+- Baseline Rust workspace with arkst-core, arkst-typst, arkst-cli, arkst-test-support.
 - ADR process and initial architecture decisions.
 - GitHub templates for issues and pull requests.
 - CI workflow with fmt, clippy, test, and dependency checks.
@@ -216,29 +216,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI commands: `build`, `check`, `inspect`.
 - Typst backend trait (`TypstBackend`) with `SubprocessBackend` adapter skeleton.
 - Typst lowering skeleton (`lower_to_typst`).
-- `build` accepts a bare file name (`scribium build document.qd`), resolving
+- `build` accepts a bare file name (`arkst build document.qd`), resolving
   its project root to the current directory.
 - `build --output <path>` to override the generated output path.
-- **PDF output via external Typst subprocess** — `scribium build --format pdf` compiles
+- **PDF output via external Typst subprocess** — `arkst build --format pdf` compiles
   supported input documents (`.qd`, `.scrib`, `.md`) directly to PDF using the
   configured Typst executable. The `SubprocessBackend` implements the `TypstBackend`
   trait, invoking `typst compile` via `std::process::Command` without shell
   interpolation. Real `typst --version` detection is implemented. Typst diagnostics
-  are captured and surfaced as actionable Scribium errors. Generated PDFs are
+  are captured and surfaced as actionable Arkst errors. Generated PDFs are
   validated for non-empty output and correct `%PDF-` header.
 - `--typst-path <PATH>` selects the Typst executable used for PDF output (defaults
   to `typst` on `PATH`); a `typst`-only build never spawns a subprocess.
-- Multiple output formats in a single invocation — `scribium build --format typst
+- Multiple output formats in a single invocation — `arkst build --format typst
   --format pdf` produces both `.typ` and `.pdf` from a single lowering pass.
 - Explicit `--output` path support for PDF; collision/overwrite protection and
   atomic write semantics are preserved from the Typst output path.
 - Backend unit tests covering missing executable, non-zero exit, successful
   execution, output reading, `%PDF-` header validation, and version command —
   runnable without a Typst install (fake executable fixtures).
-- Backend integration tests (`crates/scribium-typst/tests/backend_integration.rs`)
+- Backend integration tests (`crates/arkst-typst/tests/backend_integration.rs`)
   exercising the real `typst` executable; they skip with a notice when it is
   absent, and CI installs a pinned Typst version (0.15.1) explicitly and runs
-  them with `SCRIBIUM_REQUIRE_TYPST=1`.
+  them with `ARKST_REQUIRE_TYPST=1`.
 - CLI integration tests for `--format pdf`, `--format typst --format pdf`,
   custom Typst path, missing executable, compilation failure, `%PDF-` validation,
   `--output` with PDF, unsupported format rejection (HTML/SVG/PNG), and input/output
@@ -338,7 +338,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Markdown); duplicate keys use last-wins semantics; user-defined metadata is
   stored in the IR in deterministic order.
 - Added the `same-file` dependency for cross-platform file-identity checks.
-- Windows CI previously failed to compile the `scribium` test binary due to
+- Windows CI previously failed to compile the `arkst` test binary due to
   unused imports on Windows-only configurations; this is resolved.
 - Issue templates: fixed label formatting (`type: bug` → `type:bug`),
   added milestone dropdown to feature requests.

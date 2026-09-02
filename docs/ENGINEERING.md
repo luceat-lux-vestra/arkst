@@ -1,10 +1,10 @@
-# Engineering Standard — Scribium
+# Engineering Standard — Arkst
 
-This document defines the engineering quality contract for Scribium. It is a
+This document defines the engineering quality contract for Arkst. It is a
 project standard for compiler and toolchain implementation, review, testing,
 and maintenance. It is not a formatting guide.
 
-Scribium implementations are reviewed against the standard expected of a
+Arkst implementations are reviewed against the standard expected of a
 mature production compiler/toolchain, even while the project is pre-alpha.
 The current implementation may be incomplete or in migration; incompleteness
 must be represented honestly rather than hidden by a narrow passing test.
@@ -82,19 +82,19 @@ particular, implementation work must preserve:
 - one authoritative Markdown `BlockParser` owned by the Markdown frontend;
 - Markdown frontend → Quarkdown grammar dependency direction;
 - Quarkdown grammar-only responsibility for the Quarkdown grammar crate;
-- the accepted `scribium-source`, `scribium-project`, `scribium-engine`,
-  `scribium-diagnostics`, `scribium-compat`, and `scribium-ir` ownership;
+- the accepted `arkst-source`, `arkst-project`, `arkst-engine`,
+  `arkst-diagnostics`, `arkst-compat`, and `arkst-ir` ownership;
 - one backend-neutral `IrDocument`, without an unapproved HIR/MIR split;
 - separate Typst lowering and concrete compiler execution;
 - no core → Typst dependency;
 - no `RawTypst`, `BackendRaw`, or generic backend-code escape hatch in the
   backend-neutral IR;
-- HTML/xberg isolation behind `scribium-html`;
+- HTML/xberg isolation behind `arkst-html`;
 - Pandoc as an optional development/compatibility oracle only; and
 - host-owned filesystem, network, and process boundaries.
 
-Forbidden convenience changes include adding a `scribium-project` dependency
-to `scribium-typst`, filesystem access inside platform-independent compiler
+Forbidden convenience changes include adding a `arkst-project` dependency
+to `arkst-typst`, filesystem access inside platform-independent compiler
 crates, Markdown implementing Quarkdown semantic evaluation, Typst-specific
 types leaking into the IR, Quarkdown grammar depending on the Markdown AST,
 and introducing a generic plugin framework without an accepted ADR.
@@ -151,7 +151,7 @@ an instruction to hard-code that fixture.
 
 ## Compatibility is correctness
 
-Quarkdown compatibility is part of Scribium's correctness contract, not a
+Quarkdown compatibility is part of Arkst's correctness contract, not a
 best-effort optional feature. The product target is complete compatibility with
 the publicly documented Quarkdown document language and document-observable
 semantics for the tracked stable upstream release. This is independent
@@ -160,7 +160,7 @@ clean-room work; it is not implementation identity.
 For the tracked target:
 
 - a missing public-language feature is explicit compatibility debt;
-- unsupported behavior must not silently masquerade as different Scribium
+- unsupported behavior must not silently masquerade as different Arkst
   semantics;
 - deliberate divergences require visible documentation and rationale; and
 - a current compatibility claim requires conformance evidence.

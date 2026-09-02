@@ -16,13 +16,13 @@ fixture.
 ## Current image support slice
 
 Markdown image syntax is no longer an output-path gap. The pinned Rushdown
-frontend exposes inline and reference images, and Scribium preserves each
+frontend exposes inline and reference images, and Arkst preserves each
 image's nested alt inline tree, logical destination, optional title, and
-source-backed span. `scribium-core` keeps that logical reference in the
+source-backed span. `arkst-core` keeps that logical reference in the
 backend-neutral IR and rejects absolute paths and URI schemes with E8001; it
 does not resolve host paths or fetch remote resources.
 
-For local relative destinations, `scribium-typst` emits `#image("...")` and
+For local relative destinations, `arkst-typst` emits `#image("...")` and
 the native source-context backend resolves the path from the source entry's
 logical directory inside the project-root mirror. The end-to-end tests cover
 `./` and `../` SVG resources, a PNG resource, missing resources, project-root
@@ -44,28 +44,28 @@ The actual run used:
 - GFM corpus/parser `0.29.0.gfm.13`,
   `587a12bb54d95ac37241377e6ddc93ea0e45439b`.
 
-The reference XML and Scribium frontend AST were mapped to the same
+The reference XML and Arkst frontend AST were mapped to the same
 structural canonical tree. For each mismatch, the input, section, reference
-tree, Scribium tree, first structural diff, frontend node kind, and source
+tree, Arkst tree, first structural diff, frontend node kind, and source
 range behavior were inspected. The generated report is the detailed evidence
 record for a run; the lists below make the reviewed exception set and its
 root-cause grouping durable in the repository.
 
 For the selected metadata group, each affected source was checked against the
 original bytes, cmark/cmark-gfm XML value, Rushdown node kind and source-backed
-metadata value, Scribium frontend value, canonical tree, and enclosing source
+metadata value, Arkst frontend value, canonical tree, and enclosing source
 span. Rushdown exposes link destinations/titles and fenced-code info as
-source-backed values; the selected defect was the Scribium adapter retaining
+source-backed values; the selected defect was the Arkst adapter retaining
 that source spelling instead of deriving the semantic metadata value. The
 earlier positioned-empty span batch remains separately recorded below; its
 four `---`-leading cases are an intentional front-matter policy boundary.
 
-`SCRIBIUM_FRONTEND` means the pinned parser already exposes enough information
+`ARKST_FRONTEND` means the pinned parser already exposes enough information
 for a source-backed adapter fix. `RUSHDOWN_BEHAVIOR` means the pinned parser's
 observable construction or public utility behavior is the limiting boundary.
 `CANONICAL_MAPPING` means the production AST should not be changed to satisfy
 an invalid or policy-incompatible comparison. `INTENTIONAL_POLICY` is an
-accepted Scribium output/provenance policy. `UNKNOWN` was not used after the
+accepted Arkst output/provenance policy. `UNKNOWN` was not used after the
 case review.
 
 ## Baseline and selected remediation
@@ -97,19 +97,19 @@ cases; only those four hard-break entries were removed from the baselines.
 
 | Group | Cases (CommonMark / GFM) | Ownership | Priority | Status | Recommended action |
 |---|---:|---|---|---|---|
-| Code-segment semantics | 44 / 44 | `SCRIBIUM_FRONTEND` | P0 | Fixed | Keep segment padding/newline semantics and retain source spans. |
-| Positioned empty/marker-only node spans | 34 / 32 resolved | `SCRIBIUM_FRONTEND` | P1 | RESOLVED | Recover source-backed line/delimiter spans from Rushdown position and metadata; retain UTF-8/CRLF and nested-container checks. |
+| Code-segment semantics | 44 / 44 | `ARKST_FRONTEND` | P0 | Fixed | Keep segment padding/newline semantics and retain source spans. |
+| Positioned empty/marker-only node spans | 34 / 32 resolved | `ARKST_FRONTEND` | P1 | RESOLVED | Recover source-backed line/delimiter spans from Rushdown position and metadata; retain UTF-8/CRLF and nested-container checks. |
 | Leading `---` front-matter policy boundary | 2 / 2 | `INTENTIONAL_POLICY` | P2 | Accepted | Keep the current front-matter detector; it owns the leading document prologue before Markdown parsing. |
-| Empty inline text nodes | 7 / 7 | `SCRIBIUM_FRONTEND` | P2 | Fixed | Do not emit empty `Inline::Text`; structural, nested, UTF-8, LF/CRLF, and provenance regressions are present. |
-| Empty or unclosed fenced nodes | 4 / 4 | `SCRIBIUM_FRONTEND` | P2 | Fixed | Recover the original fenced opening/closing line span from the existing Rushdown CodeBlock node; do not synthesize a missing node. |
-| Link/code metadata escape and entity normalization, including inline-link entity cases | 9 / 9 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Normalize destination, title, and info values through one source-backed policy without reparsing; preserve original spans. |
-| Text entity/reference normalization | 3 / 3 fixed | `SCRIBIUM_FRONTEND` / `CANONICAL_MAPPING` | P1 | Fixed | Adapt numeric zero to U+FFFD at the frontend boundary and preserve entity-produced LF inside one canonical text node. |
-| Code-span delimiter matching | 4 / 4 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Match maximal backtick runs with the opener's exact length while keeping the original span. |
-| Hard-break trailing whitespace | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed | Exclude parser-classified delimiter spaces from semantic text; keep the original text/enclosing source spans. |
+| Empty inline text nodes | 7 / 7 | `ARKST_FRONTEND` | P2 | Fixed | Do not emit empty `Inline::Text`; structural, nested, UTF-8, LF/CRLF, and provenance regressions are present. |
+| Empty or unclosed fenced nodes | 4 / 4 | `ARKST_FRONTEND` | P2 | Fixed | Recover the original fenced opening/closing line span from the existing Rushdown CodeBlock node; do not synthesize a missing node. |
+| Link/code metadata escape and entity normalization, including inline-link entity cases | 9 / 9 | `ARKST_FRONTEND` | P1 | Fixed | Normalize destination, title, and info values through one source-backed policy without reparsing; preserve original spans. |
+| Text entity/reference normalization | 3 / 3 fixed | `ARKST_FRONTEND` / `CANONICAL_MAPPING` | P1 | Fixed | Adapt numeric zero to U+FFFD at the frontend boundary and preserve entity-produced LF inside one canonical text node. |
+| Code-span delimiter matching | 4 / 4 | `ARKST_FRONTEND` | P1 | Fixed | Match maximal backtick runs with the opener's exact length while keeping the original span. |
+| Hard-break trailing whitespace | 2 / 2 | `ARKST_FRONTEND` | P1 | Fixed | Exclude parser-classified delimiter spaces from semantic text; keep the original text/enclosing source spans. |
 | HTML block canonicalization | 1 / 1 | `CANONICAL_MAPPING` | P3 | Accepted | Keep source-backed raw HTML; do not normalize blockquote markers into a production semantic HTML string. |
-| Inline link destination/title entity sub-group | 2 / 2 | `SCRIBIUM_FRONTEND` | P1 | Fixed with metadata group | Included because inline destination/title uses the same source-backed adapter policy; no separate parser or span cause was found. |
+| Inline link destination/title entity sub-group | 2 / 2 | `ARKST_FRONTEND` | P1 | Fixed with metadata group | Included because inline destination/title uses the same source-backed adapter policy; no separate parser or span cause was found. |
 | Autolink profile and linkify | 3 fixed CM / 3 accepted GFM | `CANONICAL_MAPPING` / `RUSHDOWN_BEHAVIOR` | P2 | Split: fixed / accepted | Select the reference profile in the harness; retain invalid-autolink/linkify behavior as a pinned Rushdown boundary. |
-| GFM table alignment and escaped pipe | 2 / 2 fixed | `CANONICAL_MAPPING` / `SCRIBIUM_FRONTEND` | P2 | Fixed | Project body alignment independently from the production AST and consume Rushdown's semantic escaped code-span value. |
+| GFM table alignment and escaped pipe | 2 / 2 fixed | `CANONICAL_MAPPING` / `ARKST_FRONTEND` | P2 | Fixed | Project body alignment independently from the production AST and consume Rushdown's semantic escaped code-span value. |
 
 Priority reflects ordinary-document frequency and semantic damage, not case
 count. Code blocks were selected first because one small adapter correction
@@ -123,9 +123,9 @@ remaining within the same source-provenance boundary.
 
 The following lists are the reviewed case IDs. CommonMark and GFM IDs use the
 same four-digit numbering as the pinned corpus. Within each group, the
-reference/Scribium tree difference is represented by the stated structural
+reference/Arkst tree difference is represented by the stated structural
 signature; the frontend node and span evidence are the corresponding AST
-fields in `crates/scribium-markdown/src/parser.rs`.
+fields in `crates/arkst-markdown/src/parser.rs`.
 
 ### Code-segment semantics — fixed
 
@@ -133,7 +133,7 @@ Frontend evidence: `Block::CodeBlock { source, span, .. }`, with `source`
 derived from Rushdown `Segment::bytes(source)` and `span` derived from the
 original parser ranges. Focused UTF-8, CRLF, nested-list, newline, padding,
 and exact source-range coverage is in
-`crates/scribium-markdown/tests/code_blocks.rs`.
+`crates/arkst-markdown/tests/code_blocks.rs`.
 
 CommonMark:
 
@@ -154,7 +154,7 @@ GFM:
 ### Positioned empty/marker-only node spans — RESOLVED in this batch
 
 Structural signature: reference has a thematic break, empty heading,
-empty blockquote/list item, or empty-label link/image; the canonical Scribium
+empty blockquote/list item, or empty-label link/image; the canonical Arkst
 tree previously omitted the node because `node_span` had only a parser
 position and no child/source segment. Rushdown already exposed the node kind,
 position, container relationship, and (for links/images) destination metadata.
@@ -188,7 +188,7 @@ not unresolved span recovery; they are recorded immediately below.
 ### Leading `---` front-matter policy boundary — deferred
 
 The reference treats `---`-leading examples as thematic breaks or headings,
-while Scribium's document entry point recognizes a leading front-matter block
+while Arkst's document entry point recognizes a leading front-matter block
 before invoking the Markdown frontend. The Rushdown AST therefore never
 contains the reference-visible nodes for these inputs. Changing this would
 alter the accepted front-matter policy and is not a safe span recovery.
@@ -236,7 +236,7 @@ do not absorb sibling source.
 
 ### Metadata escape/entity normalization — fixed frontend batch
 
-Ownership is `SCRIBIUM_FRONTEND`. The pinned Rushdown parser exposes the
+Ownership is `ARKST_FRONTEND`. The pinned Rushdown parser exposes the
 destination, title, and fenced-code info as source-backed values, so the
 source spelling was not a Rushdown behavior limitation. The previous adapter
 used partial punctuation unescaping for inline destinations and otherwise
@@ -295,7 +295,7 @@ Structural signature: escaped `&` was decoded twice, `&#0;` became a NUL
 instead of the replacement character, or a numeric line-feed reference was
 projected as soft-break nodes by the compatibility harness. Escaped references
 are normalized once from the original source; numeric zero is adapted to
-U+FFFD at the Scribium frontend semantic boundary; and entity-produced LF
+U+FFFD at the Arkst frontend semantic boundary; and entity-produced LF
 bytes remain inside one canonical text node. Explicit cmark `<softbreak>` nodes
 continue to map to canonical soft breaks.
 
@@ -308,7 +308,7 @@ covered as evidence, but they are no longer accepted Markdown mismatches.
 
 ### Code-span delimiter matching — fixed frontend adapter
 
-Root cause: the Scribium frontend source-span adapter searched for an opener-
+Root cause: the Arkst frontend source-span adapter searched for an opener-
 length backtick prefix and could accept that prefix from inside a longer
 backtick run as the closing delimiter. That changed inline-code content or
 emitted a wrong sibling boundary. The fix computes the maximal opener run and
@@ -334,12 +334,12 @@ and 24 GFM cases; the other gap groups below are unchanged.
 Root cause: Rushdown marks a hard break with a `HARD_LINE_BREAK` qualifier. For
 some LF inputs with three or more trailing spaces, it leaves a prefix of those
 spaces in the preceding source-backed `Text` index and puts the qualifier on a
-zero-width text node. The Scribium frontend converted that entire index into
+zero-width text node. The Arkst frontend converted that entire index into
 semantic `Inline::Text` content, so delimiter spaces remained visible as text.
 The CRLF and two-space forms confirmed the same boundary through a text node
 whose hard-break span includes the delimiter and newline.
 
-The fix belongs to the Scribium frontend adapter's `convert_inlines` boundary.
+The fix belongs to the Arkst frontend adapter's `convert_inlines` boundary.
 When Rushdown has already classified the node as a hard break, the adapter
 removes only the contiguous ASCII spaces at the end of the affected semantic
 text value and leaves its original `ByteSpan` unchanged. It does not apply a
@@ -360,7 +360,7 @@ multiple breaks, and sibling inline nodes.
 ### HTML block canonicalization — policy/mapping, no production change
 
 Structural signature: the reference XML reports block HTML content normalized
-inside a blockquote (`<div>\nfoo\n`), while Scribium's `Block::RawHtml` keeps
+inside a blockquote (`<div>\nfoo\n`), while Arkst's `Block::RawHtml` keeps
 the exact original source (`<div>\n> foo\n`) for provenance and the existing
 #71 output policy. The mismatch is not permission to strip source bytes or
 expand the supported raw-HTML whitelist.
@@ -450,35 +450,35 @@ original Markdown in the source catalog immediately below each table.
 
 #### Fixed cases
 
-| Corpus case ID | Source | Reference canonical result | Scribium canonical result / first difference | Rushdown observable AST/value | Scribium frontend AST/value and source span | Final ownership | Decision |
+| Corpus case ID | Source | Reference canonical result | Arkst canonical result / first difference | Rushdown observable AST/value | Arkst frontend AST/value and source span | Final ownership | Decision |
 |---|---|---|---|---|---|---|---|
-| `commonmark-0014` / `gfm-0310` | S1 | `D[P[T("... &ouml; ...")]]` | Same canonical tree after fix. Before: escaped `&` was decoded as `ö` (double processing). | One source-backed Text stream includes the bytes `\\&ouml;`; Rushdown does not expose a second entity parse. | Source-backed Text values retain `&ouml;` at original bytes; CM paragraph `0..174`, GFM paragraph `0..174`; child spans remain original source ranges. | `SCRIBIUM_FRONTEND` | Fixed by one-pass source normalization; no decoded output is rescanned. |
-| `commonmark-0138` / `gfm-0108` | S9 | `D[P[C(" "),SB,T("aaa")]]` | Same after fix. Before: an extra zero-length `T("")` node appeared between the code span and break. | CodeSpan `0..7`, zero-width Text boundary at the following delimiter/newline transition, then Text `8..11`. | `P 0..11`; `C 0..7`, `SB 7..8`, `T 8..11`; no empty semantic Text. | `SCRIBIUM_FRONTEND` | Fixed by omitting zero-length parser Text segments without merging or expanding spans. |
-| `commonmark-0145` / `gfm-0115` | S10 | `D[P[C("aa"),SB,T("foo")]]` | Same after fix. Before: extra `T("")` after the code span. | Rushdown exposes code value `aa` and the zero-width boundary separately. | `P 0..14`; `C 0..10`, `SB 10..11`, `T 11..14`. | `SCRIBIUM_FRONTEND` | Fixed; surrounding original spans are unchanged. |
-| `commonmark-0187` / `gfm-0156` | S12 | `D[P[T("Foo"),SB,raw_html("<a href=\"bar\">"),SB,T("baz")]]` | Same after fix. Before: extra `T("")` around inline HTML/break boundaries. | Text and inline RawHtml nodes are source-backed, with a zero-length Text segment at the boundary. | `P 0..22`; `T 0..3`, `SB 3..4`, RawHtml `4..18`, `SB 18..19`, `T 19..22`. | `SCRIBIUM_FRONTEND` | Fixed; nested inline/source spans remain parser-owned. |
-| `commonmark-0432` / `gfm-0441` | S14 | Nested strong/emphasis tree with `T("foo ")`, `T("bar ")`, `T("baz")`, `SB`, `T("bim")`, `T(" bop")`. | Same after fix. Before: a zero-length Text child disturbed the nested emphasis tree. | Rushdown supplies nested Strong/Emphasis/Strong nodes plus a zero-width Text boundary. | `P 0..29`; outer Strong `0..27`, nested source spans `2..6`, `6..22`, `11..16`, and `23..27`; `SB 18..19`. | `SCRIBIUM_FRONTEND` | Fixed by dropping only the empty semantic node. |
-| `commonmark-0505` / `gfm-0513` | S15 | Three links, each destination `/url`, title `title`, separated by soft breaks. | Same after fix. Before: an empty Text child followed each link/title boundary. | Rushdown exposes each link destination/title as source-backed metadata and the zero-width inline boundary. | `P 0..62`; links `0..20`, `21..41`, `42..62`; breaks `20..21`, `41..42`. | `SCRIBIUM_FRONTEND` | Fixed; metadata and original link spans are preserved. |
-| `commonmark-0556` / `gfm-0564` | S16 | `D[P[L("foo"),SB,T("[]")]]` | Same after fix. Before: `T("")` appeared between the reference link and literal brackets. | Rushdown supplies reference-link metadata and the surrounding zero-width Text segments. | `P 0..9`; link `0..4`, `SB 5..7`, bracket Text spans `7..8` and `8..9`. | `SCRIBIUM_FRONTEND` | Fixed without synthesizing or enlarging the link span. |
-| `commonmark-0587` / `gfm-0595` | S17 | `D[P[image("foo"),SB,T("[]")]]` | Same after fix. Before: `T("")` appeared after the reference image. | Rushdown supplies reference-image metadata and the zero-width boundary. | `P 0..10`; image `0..5`, `SB 6..8`, bracket Text spans `8..9` and `9..10`. | `SCRIBIUM_FRONTEND` | Fixed; image and enclosing spans remain original. |
+| `commonmark-0014` / `gfm-0310` | S1 | `D[P[T("... &ouml; ...")]]` | Same canonical tree after fix. Before: escaped `&` was decoded as `ö` (double processing). | One source-backed Text stream includes the bytes `\\&ouml;`; Rushdown does not expose a second entity parse. | Source-backed Text values retain `&ouml;` at original bytes; CM paragraph `0..174`, GFM paragraph `0..174`; child spans remain original source ranges. | `ARKST_FRONTEND` | Fixed by one-pass source normalization; no decoded output is rescanned. |
+| `commonmark-0138` / `gfm-0108` | S9 | `D[P[C(" "),SB,T("aaa")]]` | Same after fix. Before: an extra zero-length `T("")` node appeared between the code span and break. | CodeSpan `0..7`, zero-width Text boundary at the following delimiter/newline transition, then Text `8..11`. | `P 0..11`; `C 0..7`, `SB 7..8`, `T 8..11`; no empty semantic Text. | `ARKST_FRONTEND` | Fixed by omitting zero-length parser Text segments without merging or expanding spans. |
+| `commonmark-0145` / `gfm-0115` | S10 | `D[P[C("aa"),SB,T("foo")]]` | Same after fix. Before: extra `T("")` after the code span. | Rushdown exposes code value `aa` and the zero-width boundary separately. | `P 0..14`; `C 0..10`, `SB 10..11`, `T 11..14`. | `ARKST_FRONTEND` | Fixed; surrounding original spans are unchanged. |
+| `commonmark-0187` / `gfm-0156` | S12 | `D[P[T("Foo"),SB,raw_html("<a href=\"bar\">"),SB,T("baz")]]` | Same after fix. Before: extra `T("")` around inline HTML/break boundaries. | Text and inline RawHtml nodes are source-backed, with a zero-length Text segment at the boundary. | `P 0..22`; `T 0..3`, `SB 3..4`, RawHtml `4..18`, `SB 18..19`, `T 19..22`. | `ARKST_FRONTEND` | Fixed; nested inline/source spans remain parser-owned. |
+| `commonmark-0432` / `gfm-0441` | S14 | Nested strong/emphasis tree with `T("foo ")`, `T("bar ")`, `T("baz")`, `SB`, `T("bim")`, `T(" bop")`. | Same after fix. Before: a zero-length Text child disturbed the nested emphasis tree. | Rushdown supplies nested Strong/Emphasis/Strong nodes plus a zero-width Text boundary. | `P 0..29`; outer Strong `0..27`, nested source spans `2..6`, `6..22`, `11..16`, and `23..27`; `SB 18..19`. | `ARKST_FRONTEND` | Fixed by dropping only the empty semantic node. |
+| `commonmark-0505` / `gfm-0513` | S15 | Three links, each destination `/url`, title `title`, separated by soft breaks. | Same after fix. Before: an empty Text child followed each link/title boundary. | Rushdown exposes each link destination/title as source-backed metadata and the zero-width inline boundary. | `P 0..62`; links `0..20`, `21..41`, `42..62`; breaks `20..21`, `41..42`. | `ARKST_FRONTEND` | Fixed; metadata and original link spans are preserved. |
+| `commonmark-0556` / `gfm-0564` | S16 | `D[P[L("foo"),SB,T("[]")]]` | Same after fix. Before: `T("")` appeared between the reference link and literal brackets. | Rushdown supplies reference-link metadata and the surrounding zero-width Text segments. | `P 0..9`; link `0..4`, `SB 5..7`, bracket Text spans `7..8` and `8..9`. | `ARKST_FRONTEND` | Fixed without synthesizing or enlarging the link span. |
+| `commonmark-0587` / `gfm-0595` | S17 | `D[P[image("foo"),SB,T("[]")]]` | Same after fix. Before: `T("")` appeared after the reference image. | Rushdown supplies reference-image metadata and the zero-width boundary. | `P 0..10`; image `0..5`, `SB 6..8`, bracket Text spans `8..9` and `9..10`. | `ARKST_FRONTEND` | Fixed; image and enclosing spans remain original. |
 | `commonmark-0608` | S18 | `D[P[T("< https://foo.bar >")]]` | Same after fix. Before: the harness used the GFM parser profile and produced a link/text split. | CommonMark parser profile does not linkify this source; GFM profile behavior is separate. | CommonMark frontend `P 0..19`, Text `0..19`. | `CANONICAL_MAPPING` | Fixed by selecting the CommonMark profile in the compatibility frontend. |
 | `commonmark-0611` | S19 | `D[P[T("https://example.com")]]` | Same after fix. Before: GFM linkification produced a Link. | CommonMark parser profile exposes plain Text; only GFM enables linkify. | CommonMark frontend `P 0..19`, Text `0..19`. | `CANONICAL_MAPPING` | Fixed by preserving the reference profile boundary. |
 | `commonmark-0612` | S20 | `D[P[T("foo@bar.example.com")]]` | Same after fix. Before: GFM email linkification produced a Link. | CommonMark parser profile exposes plain Text; GFM linkify is not enabled. | CommonMark frontend `P 0..19`, Text `0..19`. | `CANONICAL_MAPPING` | Fixed by the explicit CommonMark parser profile. |
 | `gfm-0199` | S21 | Header cells center/right; body cells `align=none`. | Same after fix. Before: canonical projection copied header alignment to body cells. | Rushdown AST has header and body cells carrying Center/Right column metadata. | Production table AST remains `TableRow 35..45` with body Center/Right cells; projection maps body alignment to `none` only. | `CANONICAL_MAPPING` | Fixed in the differential projection; production semantics were not changed. |
-| `gfm-0200` | S22 | Inline code value `|`; escaped pipe in strong text also `|`. | Same after fix. Before: code value was `\\|` because the adapter used the raw source slice. | Rushdown public `CodeSpan::str(source)` returns `|`; raw source span is `` `\\|` ``. | Table `0..49`; code span `26..30`, raw source `` `\\|` ``, semantic value `|`. | `SCRIBIUM_FRONTEND` | Fixed by using the pinned public code-span value while retaining the original span. |
+| `gfm-0200` | S22 | Inline code value `|`; escaped pipe in strong text also `|`. | Same after fix. Before: code value was `\\|` because the adapter used the raw source slice. | Rushdown public `CodeSpan::str(source)` returns `|`; raw source span is `` `\\|` ``. | Table `0..49`; code span `26..30`, raw source `` `\\|` ``, semantic value `|`. | `ARKST_FRONTEND` | Fixed by using the pinned public code-span value while retaining the original span. |
 
 #### Final case decisions after review follow-up
 
-| Corpus case ID | Source | Reference canonical result | Scribium canonical result / first structural difference | Rushdown observable AST/value | Scribium frontend AST/value and source span | Final ownership | Decision |
+| Corpus case ID | Source | Reference canonical result | Arkst canonical result / first structural difference | Rushdown observable AST/value | Arkst frontend AST/value and source span | Final ownership | Decision |
 |---|---|---|---|---|---|---|---|
-| `commonmark-0026` / `gfm-0322` | S2 | `D[P[T("# Ӓ Ϡ �")]]` | Same after fix. Before: semantic value ended in U+0000. | Text index covers `&#0;`; pinned utility returns U+0000, which is the observed substrate value. | CM Text `0..25`; GFM Text `0..20` plus `20..25`; both retain original source spans and now expose U+FFFD semantically. | `SCRIBIUM_FRONTEND` | Fixed by mapping numeric-zero utility output to U+FFFD at the existing one-pass source normalization boundary. |
+| `commonmark-0026` / `gfm-0322` | S2 | `D[P[T("# Ӓ Ϡ �")]]` | Same after fix. Before: semantic value ended in U+0000. | Text index covers `&#0;`; pinned utility returns U+0000, which is the observed substrate value. | CM Text `0..25`; GFM Text `0..20` plus `20..25`; both retain original source spans and now expose U+FFFD semantically. | `ARKST_FRONTEND` | Fixed by mapping numeric-zero utility output to U+FFFD at the existing one-pass source normalization boundary. |
 | `commonmark-0039` / `gfm-0335` | S3 | `D[P[T("foo\\n\\nbar")]]` | Same after fix. Before: `xml_text_nodes()` split a text value's entity-produced LF bytes into soft breaks. | One Rushdown Text segment covers `foo&#10;&#10;bar`; no parser soft-break qualifiers are required. | Paragraph/Text source span `0..16`, value `foo\n\nbar`. | `CANONICAL_MAPPING` | Fixed by preserving non-empty `<text>` values as one canonical text node; explicit `<softbreak>` nodes remain soft breaks. |
 | `commonmark-0096` / `gfm-0066` | S4 | Thematic break, H2 `Foo`, H2 `Bar`, paragraph `Baz`. | H2 `Bar`, paragraph `Baz`; leading prologue is consumed before Markdown parsing. | Raw Rushdown would expose thematic break `0`, H2 `Foo` `4`, H2 `Bar` `12`, paragraph `Baz` `20`; document entry policy consumes `0..12`. | Front matter `0..12`; H2 `12..15`; paragraph `20..23`. | `INTENTIONAL_POLICY` | Accepted intentional Markdown-profile deviation; changing it changes document ownership policy. |
 | `commonmark-0098` / `gfm-0068` | S5 | Two thematic breaks. | Empty document after leading front-matter consumption. | Raw Rushdown exposes thematic breaks at `0` and `4`; the document entry policy consumes the leading block. | No Markdown frontend nodes; consumed source remains owned by document policy. | `INTENTIONAL_POLICY` | Accepted intentional Markdown-profile deviation. |
-| `commonmark-0126` / `gfm-0096` | S6 | Empty fenced code block, `info=""`, value empty. | Same after fix: empty CodeBlock with original span `0..4`. Before: `code_block_span()` returned `None` on empty segments. | Rushdown CodeBlock kind Fenced, `pos=0`, `Lines::Segments([])`, and no body segment; opener node is present. | Frontend CodeBlock span `0..4`, empty body, original opening line retained. | `SCRIBIUM_FRONTEND` | Fixed by recovering the fenced opening-line span from the existing parser node. |
-| `commonmark-0130` / `gfm-0100` | S7 | Empty closed fenced code block, value empty. | Same after fix: CodeBlock span `0..8`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, empty segments; source context contains the closing fence. | Frontend CodeBlock span `0..8`, empty body, original opening/closing source retained. | `SCRIBIUM_FRONTEND` | Fixed without synthesizing a parser node or changing the AST ownership. |
-| `commonmark-0144` / `gfm-0114` | S8 | Empty fenced code block, `info=";"`, value empty. | Same after fix: CodeBlock span `0..11`, info `;`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, `info=";"`, empty segments. | Frontend CodeBlock span `0..11`, info `;`, empty body, original source retained. | `SCRIBIUM_FRONTEND` | Fixed by source-backed span recovery at the frontend boundary. |
+| `commonmark-0126` / `gfm-0096` | S6 | Empty fenced code block, `info=""`, value empty. | Same after fix: empty CodeBlock with original span `0..4`. Before: `code_block_span()` returned `None` on empty segments. | Rushdown CodeBlock kind Fenced, `pos=0`, `Lines::Segments([])`, and no body segment; opener node is present. | Frontend CodeBlock span `0..4`, empty body, original opening line retained. | `ARKST_FRONTEND` | Fixed by recovering the fenced opening-line span from the existing parser node. |
+| `commonmark-0130` / `gfm-0100` | S7 | Empty closed fenced code block, value empty. | Same after fix: CodeBlock span `0..8`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, empty segments; source context contains the closing fence. | Frontend CodeBlock span `0..8`, empty body, original opening/closing source retained. | `ARKST_FRONTEND` | Fixed without synthesizing a parser node or changing the AST ownership. |
+| `commonmark-0144` / `gfm-0114` | S8 | Empty fenced code block, `info=";"`, value empty. | Same after fix: CodeBlock span `0..11`, info `;`. Before: empty segments caused node loss. | Fenced CodeBlock `pos=0`, `info=";"`, empty segments. | Frontend CodeBlock span `0..11`, info `;`, empty body, original source retained. | `ARKST_FRONTEND` | Fixed by source-backed span recovery at the frontend boundary. |
 | `commonmark-0174` / `gfm-0143` | S11 | Block raw HTML value `<div>\nfoo\n` inside a blockquote. | Block raw HTML preserves `<div>\n> foo\n`; first difference is canonical quote-marker removal. | Rushdown HtmlBlock kind 6 exposes semantic value without quote markers. | RawHtml value is original source-backed `<div>\n> foo\n`, span `2..14`; enclosing blockquote `0..14`. | `CANONICAL_MAPPING` | Accepted canonical/provenance boundary; production raw HTML is not rewritten to match cmark XML. |
-| `commonmark-0237` / `gfm-0215` | S13 | Blockquote contains an empty code block, then paragraph `foo`, then empty code block. | Same after fix: blockquote CodeBlock `2..6`, paragraph `6..9`, root CodeBlock `10..14`. Before: both fenced nodes were omitted. | Rushdown exposes code nodes at positions `2` and `10`, both empty `Lines::Segments([])`, with the parser-owned container boundary visible through siblings. | Frontend retains both CodeBlocks and their original source spans; sibling paragraph is not absorbed. | `SCRIBIUM_FRONTEND` | Fixed with boundary-aware recovery from existing node position and source context. |
+| `commonmark-0237` / `gfm-0215` | S13 | Blockquote contains an empty code block, then paragraph `foo`, then empty code block. | Same after fix: blockquote CodeBlock `2..6`, paragraph `6..9`, root CodeBlock `10..14`. Before: both fenced nodes were omitted. | Rushdown exposes code nodes at positions `2` and `10`, both empty `Lines::Segments([])`, with the parser-owned container boundary visible through siblings. | Frontend retains both CodeBlocks and their original source spans; sibling paragraph is not absorbed. | `ARKST_FRONTEND` | Fixed with boundary-aware recovery from existing node position and source context. |
 | `gfm-0610` | S23 | Partial autolink for `http://foo.bar/baz` followed by text ` bim>`. | Plain Text split at the same parser boundary; no Link node. | Rushdown GFM emits Text `<http://foo.bar/baz` span `0..19` and Text ` bim>` span `19..24`. | Frontend retains those original spans and values; no linkifier is added. | `RUSHDOWN_BEHAVIOR` | Accepted pinned invalid-autolink behavior. |
 | `gfm-0614` | S24 | Email autolink for `foo+@bar.example.com`. | Plain Text `<foo+@bar.example.com>`; no Link node. | Rushdown GFM emits one source-backed Text value for the escaped-plus form and no Link. | Frontend Text span `0..23`, original source-backed value. | `RUSHDOWN_BEHAVIOR` | Accepted pinned invalid-autolink behavior; no independent email scanner. |
 | `gfm-0623` | S25 | `www.commonmark.org/a.b` is linkified as the complete URL. | Rushdown links only `www.commonmark.org/a`, leaving `.b.` as Text. | Rushdown Link destination is `http://www.commonmark.org/a`; following `.b.` remains Text. | Frontend preserves the parser Link/source span and trailing Text spans. | `RUSHDOWN_BEHAVIOR` | Accepted pinned linkify boundary; no production URL scanner. |
@@ -687,12 +687,12 @@ Visit www.commonmark.org/a.b.
 - The empty inline text fix is production frontend behavior, not a
   compatibility-only hiding rule. It has independently authored LF, CRLF,
   UTF-8, nested-container, adjacent-inline, link, image, escape, and source
-  span regressions in `crates/scribium-markdown/tests/empty_inline_text.rs`.
+  span regressions in `crates/arkst-markdown/tests/empty_inline_text.rs`.
 - Entity/reference normalization is independently evidenced: escaped source
-  spelling and numeric-zero replacement are `SCRIBIUM_FRONTEND` one-pass
+  spelling and numeric-zero replacement are `ARKST_FRONTEND` one-pass
   adaptations, while entity-produced LF is a `CANONICAL_MAPPING` projection
   fix. None of these remains a known mismatch.
-- Empty/unclosed fenced cases are `SCRIBIUM_FRONTEND` fixes: Rushdown already
+- Empty/unclosed fenced cases are `ARKST_FRONTEND` fixes: Rushdown already
   exposes the fenced nodes, positions, info values, and empty segment vectors;
   the adapter now retains their original source spans.
 - Canonical mapping fixes are confined to the compatibility projection. The
@@ -705,9 +705,9 @@ Visit www.commonmark.org/a.b.
 - Rushdown remains pinned at
   `e5eb4e4446541ea0ed53111c1b37e779283ff57c`.
 
-No remaining known mismatch is an actionable Scribium-owned Markdown defect.
+No remaining known mismatch is an actionable Arkst-owned Markdown defect.
 The remaining cases are limited to verified pinned GFM autolink/linkify
-behavior, intentional Scribium document policy, and an accepted
+behavior, intentional Arkst document policy, and an accepted
 canonical/provenance boundary. Markdown remediation is therefore considered
 closed. Future changes to these accepted boundaries require new evidence or
 an intentional parser/profile policy change.

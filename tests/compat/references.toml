@@ -1,11 +1,11 @@
 schema_version = 1
 
 [provenance]
-contract = "scribium.reference-data-integrity"
+contract = "arkst.reference-data-integrity"
 contract_version = 1
 source_kind = "immutable-git"
 verifier_path = "tools/verify_reference_provenance.py"
-verifier_source_sha256 = "58e0cf909ba9677a10a6cffb44487cd56c2506dbc00971ef522d81e7a78c6c7e"
+verifier_source_sha256 = "65721566856454475815b1425cdaafa3a68a6161ca64006b1399e9b370540cec"
 notice_path = "NOTICE"
 notice_required_markers = [
   "== Markdown compatibility reference data ==",
@@ -43,15 +43,15 @@ extracted_corpus_max_bytes = 102952
 extracted_corpus_sha256 = "ec8d30143a365274907de72235647f47ac2f4e3152e99e1fcfdbc6fdaf5929f0"
 expected_case_count = 652
 extraction_script_path = "tools/markdown-compat/extract_corpus.py"
-extraction_script_source_sha256 = "3ccc3d62abcbb768fe908f0f0c64d474680c2f792c82c6f2853076d304713173"
+extraction_script_source_sha256 = "064483c98ad3bfe018cbfc1582704af3a15313a00898f42a58fb8cb6ef926786"
 preparation_script_path = "tools/markdown-compat/prepare_references.py"
 preparation_script_source_sha256 = "cc408a28e28cc76914ccca6fbaebe7bb31da4d4fc955734e67ebabf930dac110"
 differential_harness_path = "tools/markdown-compat/src/main.rs"
-differential_harness_source_sha256 = "ee339eb27323ffc34ccd54392a6ba849b7dfd99ae27a0c148b05d6688638d8db"
+differential_harness_source_sha256 = "1fd3d1979a0b73748c9d7eda5c66228d3084bef6e4d22d08c01727a7710cc91d"
 semantic_result_id = "markdown-commonmark-differential-v1"
 baseline_path = "tests/compat/baselines/commonmark.json"
-baseline_bytes = 1083
-baseline_sha256 = "1416f9efd24863a44c3b01975cc8cc4a44258873d49d0bfc42ac26b5f5ca3b5f"
+baseline_bytes = 1074
+baseline_sha256 = "5934d4de51bedb07dba918df618989a0c4799c24fc5d8f232e92fd52e81c43db"
 baseline_case_count = 3
 expected_result = { total = 652, pass = 649, known_mismatch = 3, unsupported = 0, harness_error = 0, new_mismatch = 0 }
 
@@ -94,14 +94,14 @@ extracted_corpus_max_bytes = 102489
 extracted_corpus_sha256 = "9b274fea72c155b90ed4b3410e8eecde859ce5e677ce3c76a06a72bd1efc1d57"
 expected_case_count = 670
 extraction_script_path = "tools/markdown-compat/extract_corpus.py"
-extraction_script_source_sha256 = "3ccc3d62abcbb768fe908f0f0c64d474680c2f792c82c6f2853076d304713173"
+extraction_script_source_sha256 = "064483c98ad3bfe018cbfc1582704af3a15313a00898f42a58fb8cb6ef926786"
 preparation_script_path = "tools/markdown-compat/prepare_references.py"
 preparation_script_source_sha256 = "cc408a28e28cc76914ccca6fbaebe7bb31da4d4fc955734e67ebabf930dac110"
 differential_harness_path = "tools/markdown-compat/src/main.rs"
-differential_harness_source_sha256 = "ee339eb27323ffc34ccd54392a6ba849b7dfd99ae27a0c148b05d6688638d8db"
+differential_harness_source_sha256 = "1fd3d1979a0b73748c9d7eda5c66228d3084bef6e4d22d08c01727a7710cc91d"
 semantic_result_id = "markdown-gfm-differential-v1"
 baseline_path = "tests/compat/baselines/gfm.json"
-baseline_bytes = 1864
-baseline_sha256 = "9d1bbe4c81b5dd08d4644535de66e4954fa41405dbd6d9c57833d00334df8570"
+baseline_bytes = 1855
+baseline_sha256 = "2bcc3a173b9b4e1232e573beb6f92753c40cd13ba0c5da91b0433e0e9a362db1"
 baseline_case_count = 6
 expected_result = { total = 670, pass = 664, known_mismatch = 6, unsupported = 0, harness_error = 0, new_mismatch = 0 }

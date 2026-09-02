@@ -118,7 +118,7 @@ jobs:
           CMARK_ROOT: ${{ steps.references.outputs.cmark_root }}
           CMARK_GFM_ROOT: ${{ steps.references.outputs.cmark_gfm_root }}
         run: |
-          cargo run --locked -q -p scribium-markdown-compat -- \
+          cargo run --locked -q -p arkst-markdown-compat -- \
             --commonmark-cmark "$CMARK_ROOT/build/src/cmark" \
             --gfm-cmark "$CMARK_GFM_ROOT/build/src/cmark-gfm" \
             --output-dir "$RUNNER_TEMP/markdown-compat-report" \

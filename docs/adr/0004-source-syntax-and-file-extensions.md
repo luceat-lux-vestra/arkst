@@ -2,20 +2,20 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1
 
 ## Context
 
-Scribium must define which input formats and file extensions it accepts,
-and how it distinguishes Scribium-native source from passthrough Typst.
+Arkst must define which input formats and file extensions it accepts,
+and how it distinguishes Arkst-native source from passthrough Typst.
 
 ## Decision Drivers
 
-- Distinguish Scribium source from plain Markdown and Typst
+- Distinguish Arkst source from plain Markdown and Typst
 - Support `.qd` as the primary extension for Quarkdown-compatible documents
-- Allow `.md` for Markdown-only documents (bypassing Scribium directives)
-- Allow `.typ` passthrough (no Scribium processing)
+- Allow `.md` for Markdown-only documents (bypassing Arkst directives)
+- Allow `.typ` passthrough (no Arkst processing)
 
 ## Considered Options
 
@@ -25,9 +25,9 @@ Clean but breaks expectations — users already have `.md` and `.qd` files.
 
 ### Option 2: Multi-extension support with auto-detection (chosen)
 
-- `.qd` — Quarkdown-compatible Scribium source (primary)
+- `.qd` — Quarkdown-compatible Arkst source (primary)
 - `.scrib` — alias for `.qd`
-- `.md` — Markdown-only (no Scribium directives; or directives are an opt-in
+- `.md` — Markdown-only (no Arkst directives; or directives are an opt-in
   front-matter flag)
 - `.typ` — host-level passthrough to the selected official Typst compiler
 
@@ -41,22 +41,22 @@ Support three input paths:
 
 | Extension | Processing                                      |
 |-----------|--------------------------------------------------|
-| `.qd`     | Scribium parser: Markdown + Quarkdown-compatible |
+| `.qd`     | Arkst parser: Markdown + Quarkdown-compatible |
 | `.scrib`  | Alias for `.qd`                                  |
-| `.md`     | Markdown-only (no Scribium directive processing)      |
+| `.md`     | Markdown-only (no Arkst directive processing)      |
 | `.typ`    | Passthrough to Typst compiler                    |
 
 > **Implementation status:** `.typ` passthrough is not implemented yet. The
 > CLI currently accepts `.qd`, `.scrib`, and `.md` and rejects `.typ` inputs
 > with a clear "unsupported input format" error. The `.typ` row of this ADR
 > applies once passthrough lands. This is a host input path, not a raw Typst
-> node or generic backend-code escape hatch in Scribium's backend-neutral IR.
+> node or generic backend-code escape hatch in Arkst's backend-neutral IR.
 
 ## Consequences
 
 ### Positive
 
-- `.qd` files are unambiguous Scribium source
+- `.qd` files are unambiguous Arkst source
 - Existing Markdown files work without changes
 - `.typ` passthrough enables mixed-mode projects
 
@@ -72,4 +72,4 @@ Support three input paths:
 ## References
 
 - `docs/SYNTAX.md`
-- CLI implementation: `crates/scribium-cli/`
+- CLI implementation: `crates/arkst-cli/`

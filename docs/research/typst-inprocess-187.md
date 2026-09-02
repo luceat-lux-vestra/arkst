@@ -3,7 +3,7 @@
 Status: completed spike, decision **GO — optional in-process only**.
 
 Date: 2026-08-26
-Repository: `luceat-lux-vestra/scribium`
+Repository: `luceat-lux-vestra/arkst`
 Branch: `research/typst-inprocess-187`
 Base: `8eb6260aa811dac0bde24d47c40ac0dd3caebed8`
 
@@ -50,7 +50,7 @@ typst, typst-layout, typst-pdf, typst-assets (fonts feature)
 
 `typst-kit` was intentionally not selected. Its convenience environment is
 designed to discover host fonts and package/filesystem capabilities that are
-not part of Scribium's `VirtualProject` policy. Package/network access is
+not part of Arkst's `VirtualProject` policy. Package/network access is
 therefore denied in this spike, rather than silently widening the host
 capability model.
 
@@ -64,12 +64,12 @@ available to the pinned Typst line.
 
 The adapter does not depend on Typst compiler internals, renderer frames,
 `Content`, or layout objects. Typst types are confined to the native
-`scribium-typst-inprocess` crate. The platform-neutral `scribium-typst` crate
+`arkst-typst-inprocess` crate. The platform-neutral `arkst-typst` crate
 continues to lower `IrDocument` to generated Typst source only.
 
 ## Ownership mapping
 
-| Typst `World` capability | Scribium authority/policy | Spike result |
+| Typst `World` capability | Arkst authority/policy | Spike result |
 |---|---|---|
 | `main` and entry source | `VirtualProject.entry()` plus `TypstInput.source` | Generated logical `.typ` entry; entry mismatch rejected |
 | Additional `source`/`file` | `SourceStore` and `AssetStore` | Deterministic immutable maps; project-relative lookup |
@@ -88,7 +88,7 @@ current directory, or add unrestricted filesystem/network access.
 
 ## Implementation and focused evidence
 
-The spike adds `crates/scribium-typst-inprocess`. It implements the existing
+The spike adds `crates/arkst-typst-inprocess`. It implements the existing
 platform-neutral `TypstBackend` contract and performs:
 
 ```text
@@ -101,7 +101,7 @@ VirtualProject + generated Typst source
 
 Focused tests cover:
 
-- actual Scribium compile/lowering into a valid PDF;
+- actual Arkst compile/lowering into a valid PDF;
 - `AssetStore` SVG loading with no host filesystem;
 - project font bytes and case-insensitive font extensions;
 - missing resources and project-boundary traversal;
@@ -117,14 +117,14 @@ Focused tests cover:
 The focused command passed:
 
 ```text
-cargo test --jobs 2 -p scribium-typst-inprocess --all-features -- --nocapture
+cargo test --jobs 2 -p arkst-typst-inprocess --all-features -- --nocapture
 12 integration tests and 2 unit tests passed; 0 failed
 ```
 
 ## Diagnostic comparison
 
 For `#unknown-function()` both adapters classify the document as a compile
-failure. The in-process adapter returns a Scribium `E5001` diagnostic with a
+failure. The in-process adapter returns a Arkst `E5001` diagnostic with a
 logical location such as `/docs/main.typ` and structured severity. Because this
 spike does not yet receive the lowerer's source map, the generated main source
 has no fabricated `SourceSpan`. Existing project `.typ` sources can retain a
@@ -168,7 +168,7 @@ an explicit native source context rather than a `VirtualProject`.
 
 Machine: macOS arm64, 2026-08-26. Profile: Cargo `--release` (`opt-level = 2`,
 workspace profile reported as optimized + debuginfo). The single-document rows
-use the same generated Scribium Typst source containing 100 paragraphs. Eight
+use the same generated Arkst Typst source containing 100 paragraphs. Eight
 runs were performed in one process per adapter; the first run is cold within
 that process and the remaining runs are repeated/warm. The multi-document rows
 use four distinct, same-sized generated documents and two sequential passes.
@@ -195,10 +195,10 @@ fresh `ProjectWorld` per compile; no global cache is claimed.
 The clean-build commands were:
 
 ```text
-CARGO_TARGET_DIR=/tmp/scribium-187-clean-inprocess \
-  cargo build -q --release -p scribium-typst-inprocess --example measure_inprocess
-CARGO_TARGET_DIR=/tmp/scribium-187-clean-subprocess \
-  cargo build -q --release -p scribium-typst-subprocess --example measure_subprocess
+CARGO_TARGET_DIR=/tmp/arkst-187-clean-inprocess \
+  cargo build -q --release -p arkst-typst-inprocess --example measure_inprocess
+CARGO_TARGET_DIR=/tmp/arkst-187-clean-subprocess \
+  cargo build -q --release -p arkst-typst-subprocess --example measure_subprocess
 ```
 
 Incremental build methodology was separate from the clean-build rows: after
@@ -259,12 +259,12 @@ transitive notices remain tracked upstream debt.
 The platform-neutral boundary remains separate and was checked with:
 
 ```text
-cargo check -p scribium-core -p scribium-typst \
+cargo check -p arkst-core -p arkst-typst \
   --target wasm32-unknown-unknown --all-features
 ```
 
 The in-process Typst compiler dependencies are not pulled into
-`scribium-core` or `scribium-typst`, and the WASM check remains scoped to those
+`arkst-core` or `arkst-typst`, and the WASM check remains scoped to those
 lowering/compiler crates. This spike is not evidence for the future browser
 WASM backend (#191).
 
@@ -274,7 +274,7 @@ WASM backend (#191).
 
 The adapter is viable inside the current architecture: `VirtualProject` can
 provide a bounded public `World`, resource ownership remains correct, real
-Scribium-generated source compiles, parity is acceptable under the stated
+Arkst-generated source compiles, parity is acceptable under the stated
 oracle, and diagnostics are at least as structured for the exercised failures.
 
 The subprocess backend remains the default because the current adapter has a
@@ -300,7 +300,7 @@ the resource model to accommodate Typst.
 - No browser/WASM rendering backend was implemented (#191).
 - The subprocess backend was not deleted or changed into a fallback inside this
   issue.
-- No direct Scribium IR to Typst internal layout lowering was introduced.
+- No direct Arkst IR to Typst internal layout lowering was introduced.
 - No global diagnostic-system redesign was attempted.
 
 ## Bounded follow-ups

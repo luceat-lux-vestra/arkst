@@ -5,9 +5,9 @@ use thiserror::Error;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "scribium-upstream-watch",
+    name = "arkst-upstream-watch",
     version,
-    about = "Quarkdown stable-release adaptation-target observer for Scribium"
+    about = "Quarkdown stable-release adaptation-target observer for Arkst"
 )]
 struct Cli {
     #[command(subcommand)]

@@ -2,7 +2,7 @@
 
 ## Current decision
 
-As of the `0cfb420dc8687ed0b61cb7e35318953e8737f7f3` baseline, Scribium has no
+As of the `0cfb420dc8687ed0b61cb7e35318953e8737f7f3` baseline, Arkst has no
 current public distribution contract. The repository is experimental, has no
 release workflow, has no GitHub Releases or tags, and none of the 16 Cargo
 workspace packages has been published under its workspace name on crates.io.
@@ -15,20 +15,20 @@ Its `[[packages]]` entries are the complete crate-by-crate decision. Do not
 maintain a second package inventory in this document.
 
 The inventory covers the 14 `crates/*` packages and the two workspace tools,
-`scribium-markdown-compat` and `scribium-upstream-watch`. The package set is
+`arkst-markdown-compat` and `arkst-upstream-watch`. The package set is
 discovered from Cargo metadata; it is not a hand-maintained 14-package list.
 
 ## Artifact decisions
 
 - Every workspace package is currently non-publishable. Compiler libraries
-  are internal toolchain components, `scribium-test-support` is test-only,
+  are internal toolchain components, `arkst-test-support` is test-only,
   and the two compatibility/release-observer tools are repository tooling.
   Each manifest explicitly sets `publish = false`.
-- `scribium-cli` and its `scribium` binary are useful from a repository
+- `arkst-cli` and its `arkst` binary are useful from a repository
   checkout, but crates.io publication and a public `cargo install` contract
   are not currently intended. GitHub binary releases are also not currently
   intended.
-- The `wasm32-unknown-unknown` check for `scribium-core` and `scribium-typst`
+- The `wasm32-unknown-unknown` check for `arkst-core` and `arkst-typst`
   is a buildability invariant. It is not a distributed WASM artifact, npm
   package, `wasm-bindgen` output, `wasm-pack` package, or browser bundle.
   WASM bindings remain future roadmap work.

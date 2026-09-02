@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1
 
 ## Context
 
-Scribium needs a clear product identity that distinguishes it from Typst,
+Arkst needs a clear product identity that distinguishes it from Typst,
 Quarkdown, and Markdown-to-anything converters. Without explicit boundaries,
 scope creep threatens the initial milestones.
 
@@ -35,7 +35,7 @@ Includes web editor, live preview, package registry. Too broad for initial team.
 
 ## Decision
 
-Scribium is a Quarkdown-compatible compiler and toolchain that independently
+Arkst is a Quarkdown-compatible compiler and toolchain that independently
 reimplements Quarkdown syntax and core execution semantics, connecting them
 to the official Typst compiler.
 
@@ -60,7 +60,7 @@ to the official Typst compiler.
 ## Validation Plan
 
 - M1 vertical slice produces `.qd → PDF`
-- README positions Scribium accurately
+- README positions Arkst accurately
 - Compliance with clean-room policy documented
 
 ## References

@@ -9,11 +9,11 @@
 
 ## Scope
 
-This document defines Scribium's Quarkdown-compatible syntax and semantics.
+This document defines Arkst's Quarkdown-compatible syntax and semantics.
 Each feature records its specification source, compatibility level, and known
 divergences.
 
-Scribium's long-term target is complete compatibility with the publicly
+Arkst's long-term target is complete compatibility with the publicly
 documented Quarkdown document language and document-observable semantics of the
 tracked stable upstream release. The Feature Matrix records current verified
 claims, not a permanent selected language scope: rows marked `Implemented` are
@@ -23,7 +23,7 @@ marked `Planned` or `Not implemented` are explicit compatibility gaps/debt and
 must not be treated as supported.
 
 The current implementation is partial. A feature being documented upstream is
-not evidence that Scribium supports it, while a feature not yet implemented is
+not evidence that Arkst supports it, while a feature not yet implemented is
 not thereby outside the long-term language target. The tracked target and
 verified baseline are distinct; see [Upstream Evolution](#upstream-evolution).
 
@@ -62,7 +62,7 @@ on the Quarkdown wiki. No Quarkdown source code is copied or translated. See
 and canonical layer status.
 
 The remaining public-language surface is tracked in the
-[`GAP_INVENTORY.md`](GAP_INVENTORY.md). It records upstream evidence, Scribium
+[`GAP_INVENTORY.md`](GAP_INVENTORY.md). It records upstream evidence, Arkst
 status, semantic gaps, conformance evidence, and recommended order for
 subsequent bounded slices; it replaces an opaque remaining-M2 list.
 
@@ -151,7 +151,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Iteration                      | typed `Range` / `Collection` / `Pair` / ordered `Dictionary`; block and inline `.foreach` / `.repeat` | Block bodies and native contextual inline callable bodies are semantically supported for typed values, closed inclusive ranges, left-open ranges starting at 1, descending-empty behavior, ordered list adaptation, ordered dictionary entries, explicit/implicit parameters, Pair destructuring, typed collection results, parent visibility, child isolation, owner writeback, atomic failure, and R10 materialization/depth limits | Implemented (evidenced block/inline slice; generalized inline component/callback bodies, right-open/fully-open iterable rejection, and broader patterns deferred) |
 | Collection access              | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat` | Typed access over `Collection`, `Pair`, ordered `Dictionary` entries, finite closed or left-open `Range`, and Markdown list values; one-based access with upstream absence/fallback behavior | Implemented (evidenced slice) |
 | Collection operations          | `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, `.groupvalues` | Shared typed iterable materialization, upstream `asDouble()` aggregation, stable first-occurrence distinctness, reverse order, nested first-seen groups, and stable `by` selector sorting | Implemented (evidenced v2.5.1 slice; table operations remain deferred) |
-| Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Scribium extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
+| Generic callable and transforms | `@lambda ...`, contextual `by:{...}`, `.foreach`, `.map`, `.filter`, `.sorted` | Typed callable values, shared child-scope invocation, recursive results, and shared iterable adaptation; `.foreach` and `.sorted` are native compatibility evidence, while `.map`/`.filter` are Arkst extensions excluded from conformance counts | Implemented (bounded callable/native-transform slice) |
 | Functions/components            | —                                | Complete public component/layout semantics remain partial; bounded typed Stacked, Container, and Landscape consumers are implemented and tracked separately | Partial (bounded) |
 | Include/read                   | `.include {path}`, `.read {path}` with optional `lines` range | Source-relative logical `VirtualProject` resources; included sources retain their own source identity and working directory; active-stack cycle detection; no host filesystem or network access | Partial (bounded subset; #188) |
 | Metadata                       | `.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`, and related document metadata | Canonical Issue #152 classification is eight `PARTIAL` evaluator/IR slices (`.doctype`, `.docname`, `.docdescription`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme`). `.localization`/`.localize` remain #151-owned `UNSUPPORTED` general stdlib functions; renderer, front-matter, and cross-owned layout/content/resource state remain separate | [#152 audit](DOCUMENT_STATE_AUDIT.md) and [#151 manifest](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) |
@@ -165,7 +165,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Partial (bounded source-relative resource slice; #155/#188) |
 | `.markdown`                    | `.markdown {content}` (new in v2.5.0) | Raw `NativeContent` Markdown node retained for a future Markdown output target; this is not a file loader | Implemented (bounded native-content slice) |
-| `.llmstxt`                     | `content: String`, `markdownavailable: Boolean` | Pinned `Html.kt` declares public `@QFunction llmstxt`; target-specific output/configuration remains #155-owned and Scribium keeps the explicit deferred boundary | Intentionally deferred |
+| `.llmstxt`                     | `content: String`, `markdownavailable: Boolean` | Pinned `Html.kt` declares public `@QFunction llmstxt`; target-specific output/configuration remains #155-owned and Arkst keeps the explicit deferred boundary | Intentionally deferred |
 
 The v2.5.1 Markdown deltas are recorded in
 [`V2_5_1_IMPACT.md`](V2_5_1_IMPACT.md). D2 link-parenthesis behavior and D3
@@ -184,7 +184,7 @@ The pinned Quarkdown v2.5.1 document-metadata contract gives `.docauthor` a
 read/write dual behavior. With no argument it returns an empty string when no
 author exists, or the first author name otherwise. A positional `String` or
 named `author:` setter appends one author and returns no document value; it
-does not replace earlier authors. Scribium preserves this order in the shared
+does not replace earlier authors. Arkst preserves this order in the shared
 evaluator-owned `DocumentState` and the final immutable
 `IrDocument.metadata.document_state` snapshot.
 
@@ -196,7 +196,7 @@ the separate `.docauthors` slice. Front-matter
 `IrMetadata.author` is not synchronized with document-state authors, and no
 Typst author rendering policy is introduced here.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::docauthor_*`, the IR
+Evidence is in `crates/arkst-core/src/lib.rs::tests::docauthor_*`, the IR
 serde test, and the independently authored
 `fixtures/quarkdown-conformance/cases/docauthor-family/` case.
 
@@ -211,7 +211,7 @@ ordered author state and returns no document value. The argumentless getter
 returns an ordinary typed dictionary whose values are nested typed
 dictionaries.
 
-Scribium stores each author as a backend-neutral name plus ordered string info
+Arkst stores each author as a backend-neutral name plus ordered string info
 pairs. Dictionary construction preserves the first insertion slot and uses
 the last value for duplicate names or info keys, matching the pinned
 `mutableMapOf`/`dictionaryOf` behavior. Repeated `.docauthor` calls remain
@@ -226,7 +226,7 @@ model as `.docauthor`; `.docname`, `.docdescription`, and `.doctype` retain
 native-first precedence. No author rendering or front-matter merging is
 introduced.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::docauthors_*`, the
+Evidence is in `crates/arkst-core/src/lib.rs::tests::docauthors_*`, the
 ordered author serde tests, and
 `fixtures/quarkdown-conformance/cases/docauthors-family/`.
 
@@ -234,7 +234,7 @@ ordered author serde tests, and
 
 The pinned Quarkdown v2.5.1 contract gives `.dockeywords` an argumentless
 getter returning the current keywords as an iterable and a setter accepting an
-iterable. Scribium supports the documented Markdown list body, an already
+iterable. Arkst supports the documented Markdown list body, an already
 evaluated typed iterable through normal positional binding, and the named
 `keywords:` binding. For a source-backed body, the shared iterable converter
 evaluates one dynamic expression in the current context and prefers its typed
@@ -254,7 +254,7 @@ same model as `.docauthor(s)`; `.docname`, `.docdescription`, and `.doctype`
 retain native-first precedence. No HTML SEO rendering, Typst metadata,
 front-matter merging, or generalized conversion is introduced.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::dockeywords_*`, the IR
+Evidence is in `crates/arkst-core/src/lib.rs::tests::dockeywords_*`, the IR
 serde test, and the independently authored
 `fixtures/quarkdown-conformance/cases/dockeywords-family/` case.
 
@@ -270,7 +270,7 @@ localized getter name.
 
 The upstream `.doclang` input contract is broader than the built-in
 localization table: it accepts a case-insensitive English full name or an IETF
-BCP 47 language tag. Scribium uses a checked-in, immutable pure-Rust snapshot
+BCP 47 language tag. Arkst uses a checked-in, immutable pure-Rust snapshot
 of the observable locale data returned by the pinned Temurin `25.0.4.1+1`
 oracle, with CLDR provider routing and active FALLBACK-root values captured at
 generation time. This avoids OS/JVM locale databases, hidden environment
@@ -288,7 +288,7 @@ its parsed nodes and converts the bounded `.doclang` fallback without executing
 those nodes. Ordinary callable child scopes share the
 locale state. Source-defined `.doclang` shadows the native builtin, while the
 historical `.docname`, `.docdescription`, and `.doctype` native-first behavior
-is unchanged. Scribium introduces no localization tables, `.localize`
+is unchanged. Arkst introduces no localization tables, `.localize`
 implementation, hyphenation, Typst/HTML language output, or locale-aware
 rendering. The standard-library
 registration hook separately loads `/lib/localization.qd` before user calls;
@@ -296,8 +296,8 @@ that pinned resource invokes `.localization name:{std}`, so the stdlib-ready
 initial localization table contains the seeded `std` table. Localization table
 mutation and lookup remain canonical #151-owned behavior, not #152 semantics.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::doclang_*`,
-`crates/scribium-engine/src/locale.rs`, the IR serde test, the pinned
+Evidence is in `crates/arkst-core/src/lib.rs::tests::doclang_*`,
+`crates/arkst-engine/src/locale.rs`, the IR serde test, the pinned
 `Document.kt`/locale/binder/refiner sources recorded in `SPEC_SOURCES.md`, and
 the independently authored
 `fixtures/quarkdown-conformance/cases/doclang-family/` case.
@@ -309,11 +309,11 @@ null, layout: String? = null)` as a setter returning no document value. Both
 regular parameters can bind positionally or by name; `@LikelyNamed` on
 `layout` is metadata and is not a runtime positional restriction. An indented
 body falls back to the final bindable parameter, so it binds `layout` for this
-signature. Scribium retains the lossless source-backed body beside the parsed
+signature. Arkst retains the lossless source-backed body beside the parsed
 body and derives the target-conversion `DynamicValue` as
 `trimIndent().trimEnd()`; nested body calls are not executed as a substitute
 for the raw value. Supplied string components are lowercased and theme
-existence is left to the rendering boundary. Scribium stores the result as an explicit
+existence is left to the rendering boundary. Arkst stores the result as an explicit
 backend-neutral `IrDocumentTheme` in the shared evaluator-owned document state.
 
 Each successful call replaces the complete theme. Therefore a later
@@ -344,7 +344,7 @@ retain native-first precedence. Front matter remains separate and no
 renderer, theme registry, filesystem lookup, or CSS/Typst integration is
 introduced.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::theme_*`, the IR serde
+Evidence is in `crates/arkst-core/src/lib.rs::tests::theme_*`, the IR serde
 tests, the pinned [`RegularArgumentsBinder.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/call/binding/RegularArgumentsBinder.kt), the pinned [`FunctionCallRefiner.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/parser/FunctionCallRefiner.kt), and the independently authored
 `fixtures/quarkdown-conformance/cases/theme-document-state/` case.
 
@@ -372,7 +372,7 @@ Each invocation contributes a partial `CaptionPositionInfo` and merges it into
 the current state. A supplied `default` replaces only the default; supplied
 element-specific values replace their own override; omitted or nullable
 `.none` fields preserve the previous value. An explicit override remains
-distinct from inheriting the effective default. Scribium validates binding,
+distinct from inheriting the effective default. Arkst validates binding,
 evaluates every candidate, uses the post-evaluation shared state as the merge
 base, converts through the existing closed-enum boundary, and commits one
 complete `IrCaptionPositionInfo` snapshot. This preserves successful nested
@@ -386,8 +386,8 @@ chained calls. Successful calls return no document content. The immutable IR
 contains only `IrCaptionPosition` and `IrCaptionPositionInfo`; Typst/HTML
 caption placement, `.figure`, `.table`, and `.code` rendering remain deferred.
 
-Evidence is in `crates/scribium-core/src/lib.rs::tests::captionposition_*`,
-`crates/scribium-engine/src/value_conversion.rs`, the IR serde tests, the
+Evidence is in `crates/arkst-core/src/lib.rs::tests::captionposition_*`,
+`crates/arkst-engine/src/value_conversion.rs`, the IR serde tests, the
 pinned `CaptionPosition.kt`, `CaptionPositionInfo.kt`, `Document.kt`,
 `RegularArgumentsBinder.kt`, Amber merge generator, and the independently
 authored `fixtures/quarkdown-conformance/cases/captionposition-document-state/`
@@ -412,8 +412,8 @@ Container support. The implemented subset is:
 The deferred surface includes `float`, `fullspan`, `classname`, StyleOptions,
 container alignment/text alignment, colors, borders, margin/padding/radius,
 font/text-style properties, and inline Container insertion. Evidence is in
-`crates/scribium-core/tests/quarkdown_container.rs`, the IR/lowering unit
-tests, and `crates/scribium-typst-subprocess/tests/backend_integration.rs`.
+`crates/arkst-core/tests/quarkdown_container.rs`, the IR/lowering unit
+tests, and `crates/arkst-typst-subprocess/tests/backend_integration.rs`.
 
 ### Bounded row/column/grid (Stacked) layout contract
 
@@ -451,7 +451,7 @@ returns the content verbatim, while the v2.5.1 plaintext and GFM visitors
 return empty output. The normal CLI permission default includes
 `native-content`; denial is an evaluator-time missing-permission failure.
 
-Scribium's implementation status is **implemented for the closed `Html` target
+Arkst's implementation status is **implemented for the closed `Html` target
 semantic slice**. The evaluator accepts one regular `content: String` through
 positional, named, inline, and indented-body forms. The ordinary `compile(...)`
 entry point uses `Capabilities::compatibility_default()`, which grants
@@ -470,7 +470,7 @@ The implemented representation is a closed backend-neutral target-specific
 content payload carrying `NativeTarget::Html`, the evaluated String, and its
 `SourceSpan`, with placement-preserving block and inline carriers. A future
 HTML output backend, whose physical crate/name is not frozen here, will emit the
-string verbatim. `scribium-html` continues to normalize Markdown/foreign HTML
+string verbatim. `arkst-html` continues to normalize Markdown/foreign HTML
 only and does not consume this payload. This is not a generic raw backend/MIME
 mechanism.
 Ordinary `<em>x</em>` or `<!-- comment -->` in `.qd`/`.scrib` remains the
@@ -487,7 +487,7 @@ into recursive object/array/scalar values. The reviewed
 [`Ecosystem.kt`](https://github.com/iamgio/quarkdown/blob/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Ecosystem.kt)
 contract evaluates `.include` as a separate source with a working directory
 at that source's parent and supports `share`, `scope`, and `subdocument`
-sandbox modes. Scribium implements this evidenced subset over the
+sandbox modes. Arkst implements this evidenced subset over the
 host-supplied `VirtualProject`.
 
 | Builtin | Arguments / result | Resource semantics | Missing/unsupported behavior | Status |
@@ -541,7 +541,7 @@ Markdown and Quarkdown, and list/blockquote-relative containers.
 The v2.5.1 review distinguishes invocation-time conversion from the upstream
 value class hierarchy. `DynamicValueConverter.convertTo()` is consumed at the
 argument-binding boundary (`RegularArgumentsBinder.kt` and `Lambda.kt`), and
-dispatches to `ValueFactory` conversion methods. Scribium therefore keeps the
+dispatches to `ValueFactory` conversion methods. Arkst therefore keeps the
 conversion policy inside the existing evaluator/value-resolution path instead
 of reproducing the Kotlin class model or introducing a universal conversion
 engine.
@@ -557,7 +557,7 @@ backend-neutral IR.
 
 The implemented boundary is deliberately consumer-driven:
 
-| Target | Status | Existing Scribium consumer | v2.5.1 evidence |
+| Target | Status | Existing Arkst consumer | v2.5.1 evidence |
 |---|---|---|---|
 | `Number` | bounded scalar conversion implemented | arithmetic/numeric arguments and dynamic range endpoints | [`ValueFactory.number`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt), [`Logical.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Logical.kt) |
 | `Boolean` | bounded scalar conversion implemented | conditions, predicates, and boolean argument flags | [`ValueFactory.boolean`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt), [`Optionality.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Optionality.kt), [`Flow.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Flow.kt) |
@@ -680,7 +680,7 @@ The exact implemented policy is:
   consumption rejects it as endless; fully-open Ranges are rejected the same
   way. Strings and unsupported scalar values are not treated as iterables.
 
-Scribium obtains ordered semantic elements through the same evaluator
+Arkst obtains ordered semantic elements through the same evaluator
 adaptation used by `.foreach`, `.sorted`, `.map`, and `.filter`. Results remain
 recursive `IrValue`s, so a
 Dictionary access returns a Pair that can continue through Pair operations or
@@ -689,13 +689,13 @@ atomic and propagate their original diagnostic without a duplicate. The
 compile/evaluator evidence is listed in the conformance table below, including
 UTF-8 and CRLF source-span coverage.
 
-## Generic callable, native transforms, and Scribium extensions
+## Generic callable, native transforms, and Arkst extensions
 
 The v2.5.1 lambda evidence identifies a lambda as a first-class typed value
 with explicit named parameters or implicit `.1`, `.2`, and later positional
 references. Invocation forks a child scope, preserves lexical parent bindings,
 fills omitted optional parameters with `None`, and validates explicit arity.
-Scribium stores the body and source spans in `IrValue::Callable`, snapshots
+Arkst stores the body and source spans in `IrValue::Callable`, snapshots
 captured bindings deterministically, and routes `.foreach`, `.map`, `.filter`,
 `.sorted` selectors, and first-class callback values through one invocation
 path. The same path preserves nearest-scope implicit masking and child-scope
@@ -719,7 +719,7 @@ the callback against each typed element. `.map` returns a typed `Collection` in
 source order. `.filter` requires a semantic Boolean predicate result and
 returns the original typed elements in source order. `.sorted` accepts natural
 keys or a `by` selector and returns a stable ascending typed `Collection`;
-Scribium rejects heterogeneous, `None`, and unsupported keys with diagnostics.
+Arkst rejects heterogeneous, `None`, and unsupported keys with diagnostics.
 There is no descending option or arbitrary comparator language.
 
 The v2.5.1 `Collection.kt` source documents `.sorted(from, by?)` but does not
@@ -727,7 +727,7 @@ define public `.map` or `.filter` functions in the tracked tag. `.foreach`
 does return an ordered collection with one result per input element, so its
 block form has map-equivalent semantics and is included in the native evidence
 slice. Consequently `.sorted` and `.foreach` are evidenced Quarkdown
-v2.5.1-compatible operations, while `.map` and `.filter` remain Scribium
+v2.5.1-compatible operations, while `.map` and `.filter` remain Arkst
 extensions and are excluded from conformance coverage. Unknown upstream
 details remain deferred.
 Pair, Dictionary, Range, and supported Markdown-list transforms reuse the exact
@@ -744,7 +744,7 @@ surface defines `.none`, `.isnone`, `.otherwise`, `.ifpresent`, and `.takeif`.
 one-argument condition for every value, including `None`, requires a Boolean
 result, and returns the original value or semantic `None`.
 
-Scribium implements this bounded semantic slice in the evaluator. `IrValue::None`
+Arkst implements this bounded semantic slice in the evaluator. `IrValue::None`
 is distinct from terminal `NoValue`; direct output retains the existing text
 `None` boundary, while value-context composition retains typed `None`.
 First-class `@lambda` callbacks and headerless indented callback bodies reuse
@@ -828,39 +828,39 @@ Each supported/implemented row is backed by evidence at its stated layer. The
 every public surface is output-equivalent. The table maps the supported
 features to the test(s) that verify them;
 Quarkdown grammar evidence lives in
-`crates/scribium-quarkdown/src/lib.rs`, while frontend integration evidence
-lives in `crates/scribium-markdown/src/parser.rs` and its integration tests. A
+`crates/arkst-quarkdown/src/lib.rs`, while frontend integration evidence
+lives in `crates/arkst-markdown/src/parser.rs` and its integration tests. A
 single test may cover multiple features. This table is the
 implementation-evidence counterpart of the upstream provenance recorded in
 `SPEC_SOURCES.md`; the two are kept separate on purpose.
 
 | Feature                         | Evidence (unit tests) |
 |---------------------------------|------------------------|
-| Dot-prefixed call               | `scribium-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `call_and_named_identifiers_share_the_pinned_scanner`, `parses_normal_call_names_and_spans`, `scribium-markdown/tests/call_grammar_audit.rs::audit_aligns_call_boundaries_across_utf8_crlf_and_modes` |
-| Implicit positional refs        | `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `numeric_identifiers_share_the_argument_grammar`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `scribium-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
-| Positional arguments            | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
-| Named arguments                 | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `call_and_named_identifiers_share_the_pinned_scanner`; `scribium-markdown/tests/call_grammar_audit.rs::audit_aligns_named_argument_identifier_lexing_and_spans`, `audit_requires_adjacent_named_argument_delimiters_and_preserves_source` |
-| Mixed positional/named          | `scribium-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `scribium-markdown/tests/call_grammar_audit.rs::audit_preserves_ordered_mixed_arguments_until_binder_validation`, `audit_aligns_named_argument_identifier_lexing_and_spans` |
-| Escaped call/argument delimiters | `scribium-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
-| Indented body argument          | `scribium-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
-| Nested calls                    | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `scribium-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
-| Inline (mid-paragraph) call     | `scribium-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `scribium-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument` |
-| Tight-call boundaries           | `scribium-quarkdown/src/lib.rs::tight_word_adjacency_and_symbol_boundaries_are_explicit`, `scribium-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `scribium-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
-| Malformed-call diagnostics      | `scribium-quarkdown/src/lib.rs::rejects_malformed_arguments_and_preserves_unmatched_named_candidates`, `scribium-markdown/src/parser.rs::malformed_root_block_reports_argument_span`, `scribium-markdown/src/parser.rs::malformed_inline_call_preserves_full_source_offset` |
-| v2.5.1 link parentheses         | `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_links_accept_balanced_escaped_and_nested_parentheses`, `qd251_unbalanced_plain_destination_stays_literal`, `qd251_trailing_parenthesis_and_surrounding_text_are_not_swallowed`, `qd251_links_preserve_utf8_and_crlf_source_boundaries`, `qd251_link_boundary_is_identical_in_md_qd_and_qd_body_modes`, `qd251_link_correction_empty_destinations_have_complete_spans`, `qd251_link_correction_preserves_angle_and_title_forms`, `qd251_link_correction_preserves_multiline_title_span`, `qd251_link_correction_preserves_autolink_backslashes_and_email_semantics`, `qd251_link_correction_preserves_reference_and_image_destinations`, `qd251_link_correction_preserves_utf8_and_crlf_edge_spans` |
-| v2.5.1 deep four-space lists   | `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_deep_four_space_lists_have_exact_depth_in_md_and_qd`, `qd251_deep_list_preserves_siblings_dedent_and_following_content`, `qd251_nested_paragraph_and_list_content_remain_in_their_items`, `qd251_deep_lists_preserve_utf8_and_crlf_spans`, `qd251_qd_body_uses_dynamic_indent_before_markdown_list_parsing` |
-| M2 blockquotes / strikethrough / task lists / tables | `scribium-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `scribium-engine/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `scribium-engine/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `scribium-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `scribium-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
-| v2.5.1 call syntax slice | `scribium-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `scribium-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `scribium-engine/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`, `scribium-core/src/lib.rs::compile_evaluates_block_and_inline_chain_value_flow`, `compile_evaluates_chain_inside_a_content_argument`, `compile_chain_and_nested_call_are_semantically_equivalent`, `compile_variable_values_keep_types_across_chain_and_nested_forms`, `compile_numeric_variable_reassignment_preserves_numeric_value_context`, `compile_chain_and_ordinary_conditional_are_equally_lazy`, `compile_reports_unimplemented_chain_callees_with_specific_spans`, `compile_reports_chain_failures_in_inline_and_content_paths`; `scribium-engine/src/evaluator.rs::nested_call_and_chain_share_the_same_value_context`, `nested_and_chained_case_transforms_share_dynamic_scalar_adaptation`, `variable_values_remain_semantic_through_nested_and_chained_calls`, `chain_value_flow_is_left_to_right_and_injects_first`, `chain_preserves_explicit_positional_arguments_after_previous_value`, `chain_keeps_named_arguments_named_while_injecting_previous_value`, `false_final_conditional_chain_does_not_evaluate_its_body`, `false_final_inline_conditional_chain_does_not_evaluate_its_body`, `child_scope_inherits_parent_and_isolates_local_bindings`; `scribium-cli/src/commands.rs::unimplemented_chain_callee_fails_before_typst_or_pdf_output`; `scribium-typst/tests/backend_integration.rs::integration_chain_evaluation_reaches_typst_and_pdf`; `fixtures/markdown/quarkdown_v251_syntax.qd` syntax/provenance fixture |
+| Dot-prefixed call               | `arkst-quarkdown/src/lib.rs::empty_and_plain_text_are_not_calls`, `call_and_named_identifiers_share_the_pinned_scanner`, `parses_normal_call_names_and_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_aligns_call_boundaries_across_utf8_crlf_and_modes` |
+| Implicit positional refs        | `arkst-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `numeric_identifiers_share_the_argument_grammar`, `braced_implicit_reference_is_not_classified_as_a_decimal`; `arkst-core/src/lib.rs::compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_parameter_content_keeps_markdown_structure`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_implicit_parameter_missing_and_zero_argument_are_diagnostics`, `compile_implicit_parameter_diagnostic_preserves_utf8_and_crlf_span` |
+| Positional arguments            | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
+| Named arguments                 | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `call_and_named_identifiers_share_the_pinned_scanner`; `arkst-markdown/tests/call_grammar_audit.rs::audit_aligns_named_argument_identifier_lexing_and_spans`, `audit_requires_adjacent_named_argument_delimiters_and_preserves_source` |
+| Mixed positional/named          | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_ordered_mixed_arguments_until_binder_validation`, `audit_aligns_named_argument_identifier_lexing_and_spans` |
+| Escaped call/argument delimiters | `arkst-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
+| Indented body argument          | `arkst-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
+| Nested calls                    | `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
+| Inline (mid-paragraph) call     | `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument` |
+| Tight-call boundaries           | `arkst-quarkdown/src/lib.rs::tight_word_adjacency_and_symbol_boundaries_are_explicit`, `arkst-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
+| Malformed-call diagnostics      | `arkst-quarkdown/src/lib.rs::rejects_malformed_arguments_and_preserves_unmatched_named_candidates`, `arkst-markdown/src/parser.rs::malformed_root_block_reports_argument_span`, `arkst-markdown/src/parser.rs::malformed_inline_call_preserves_full_source_offset` |
+| v2.5.1 link parentheses         | `arkst-markdown/tests/quarkdown_v2_5_1.rs::qd251_links_accept_balanced_escaped_and_nested_parentheses`, `qd251_unbalanced_plain_destination_stays_literal`, `qd251_trailing_parenthesis_and_surrounding_text_are_not_swallowed`, `qd251_links_preserve_utf8_and_crlf_source_boundaries`, `qd251_link_boundary_is_identical_in_md_qd_and_qd_body_modes`, `qd251_link_correction_empty_destinations_have_complete_spans`, `qd251_link_correction_preserves_angle_and_title_forms`, `qd251_link_correction_preserves_multiline_title_span`, `qd251_link_correction_preserves_autolink_backslashes_and_email_semantics`, `qd251_link_correction_preserves_reference_and_image_destinations`, `qd251_link_correction_preserves_utf8_and_crlf_edge_spans` |
+| v2.5.1 deep four-space lists   | `arkst-markdown/tests/quarkdown_v2_5_1.rs::qd251_deep_four_space_lists_have_exact_depth_in_md_and_qd`, `qd251_deep_list_preserves_siblings_dedent_and_following_content`, `qd251_nested_paragraph_and_list_content_remain_in_their_items`, `qd251_deep_lists_preserve_utf8_and_crlf_spans`, `qd251_qd_body_uses_dynamic_indent_before_markdown_list_parsing` |
+| M2 blockquotes / strikethrough / task lists / tables | `arkst-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `arkst-engine/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `arkst-engine/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `arkst-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `arkst-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
+| v2.5.1 call syntax slice | `arkst-quarkdown/src/lib.rs::parses_multiline_nested_arguments_with_original_spans`, `parses_line_continuations_without_fixed_indentation`, `parses_chains_as_source_backed_segments_without_rewriting`, `parses_tight_calls_and_preserves_inner_provenance`, `rejects_malformed_chains_deterministically`; `arkst-markdown/src/parser.rs::qd_multiline_arguments_and_continuations_keep_header_body_boundary`, `qd_inline_continuation_and_tight_calls_preserve_text_and_spans`; `arkst-engine/src/ast_to_ir.rs::preserve_call_chain_segments_and_provenance_in_ir`, `arkst-core/src/lib.rs::compile_evaluates_block_and_inline_chain_value_flow`, `compile_evaluates_chain_inside_a_content_argument`, `compile_chain_and_nested_call_are_semantically_equivalent`, `compile_variable_values_keep_types_across_chain_and_nested_forms`, `compile_numeric_variable_reassignment_preserves_numeric_value_context`, `compile_chain_and_ordinary_conditional_are_equally_lazy`, `compile_reports_unimplemented_chain_callees_with_specific_spans`, `compile_reports_chain_failures_in_inline_and_content_paths`; `arkst-engine/src/evaluator.rs::nested_call_and_chain_share_the_same_value_context`, `nested_and_chained_case_transforms_share_dynamic_scalar_adaptation`, `variable_values_remain_semantic_through_nested_and_chained_calls`, `chain_value_flow_is_left_to_right_and_injects_first`, `chain_preserves_explicit_positional_arguments_after_previous_value`, `chain_keeps_named_arguments_named_while_injecting_previous_value`, `false_final_conditional_chain_does_not_evaluate_its_body`, `false_final_inline_conditional_chain_does_not_evaluate_its_body`, `child_scope_inherits_parent_and_isolates_local_bindings`; `arkst-cli/src/commands.rs::unimplemented_chain_callee_fails_before_typst_or_pdf_output`; `arkst-typst/tests/backend_integration.rs::integration_chain_evaluation_reaches_typst_and_pdf`; `fixtures/markdown/quarkdown_v251_syntax.qd` syntax/provenance fixture |
 | Conditionals                   | `evaluator.rs::if_true_keeps_block_body`, `evaluator.rs::if_false_drops_block_body`, `evaluator.rs::ifnot_true_drops_and_ifnot_false_keeps`, `evaluator.rs::boolean_identifiers_yes_no_true_false_case_insensitive`, `evaluator.rs::missing_condition_reports_e3001_and_drops`, `evaluator.rs::unresolvable_condition_reports_diagnostic`, `evaluator.rs::nested_if_inside_block_body_is_evaluated`, `evaluator.rs::content_value_second_argument_replaces_call`, `evaluator.rs::scalar_second_argument_becomes_text`, `evaluator.rs::inline_if_replaces_call_with_inline_body_or_content`, `evaluator.rs::inline_if_false_drops_call`, `evaluator.rs::inline_call_scalar_second_argument_becomes_text`, `evaluator.rs::non_conditional_calls_are_preserved_with_evaluated_bodies`, `evaluator.rs::named_condition_argument_works`, `evaluator.rs::named_condition_false_drops_body`, `evaluator.rs::named_condition_ifnot_inverts`, `evaluator.rs::named_condition_identifier_yes_no`, `evaluator.rs::named_body_argument_works`, `evaluator.rs::named_body_scalar_argument_works`, `evaluator.rs::block_body_priority_over_named_body`, `evaluator.rs::inline_named_condition_works`, `evaluator.rs::inline_named_body_works`, `evaluator.rs::named_condition_unresolvable_reports_e3001`, `lib.rs::compile_evaluates_if_true`, `lib.rs::compile_evaluates_if_false`, `lib.rs::compile_evaluates_ifnot`, `lib.rs::compile_evaluates_nested_if`, `lib.rs::compile_reports_e3001_for_unresolvable_condition`, `lib.rs::compile_evaluates_named_condition_true`, `lib.rs::compile_evaluates_named_condition_false`, `lib.rs::compile_evaluates_named_condition_yes_no`, `lib.rs::compile_evaluates_named_body`, `lib.rs::compile_evaluates_named_condition_and_body`, `lib.rs::compile_inline_named_condition`, `typst::conditional_evaluation_before_lowering` |
-| String/text operations | `scribium-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `scribium-engine/src/builtins.rs::tests::string_surface_is_registered_and_returns_typed_values`, `string_operations_bind_named_arguments_and_defaults`, `string_case_and_empty_operations_cover_unicode_and_boundaries`, `string_operations_reject_unsupported_values_and_invalid_bindings`, `plaintext_projects_evaluated_inline_structure`, `plaintext_rejects_reparse_and_unsupported_values`, `plaintext_reuses_single_content_argument_binding`; `scribium-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_v251_plaintext_fixture_projects_evaluated_inline_content`, `compile_plaintext_rejects_unsupported_values_atomically`; `scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`, `fixtures/quarkdown-conformance/cases/plaintext-family/input.qd`, and their `expected/ir.json` goldens | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith` preserve typed evaluator results, share positional/named binding and scalar string adaptation, support ordinary/nested/chained forms, and fail closed for unsupported values. `.plaintext` projects already-parsed inline IR after nested evaluation: text, code, emphasis, strong, strikethrough, and link labels recurse; soft breaks emit a newline; hard breaks and images emit nothing; empty content emits an empty string. Unresolved calls and unsupported structured values fail closed with source-backed `E3001`. Dynamic String → InlineMarkdownContent is parsed only at the explicit `.plaintext` target; generic String → Markdown conversion remains deferred. | Implemented (bounded v2.5.1 slice) |
-| Logical/comparison predicates | `scribium-engine/src/builtins.rs::tests::logical_surface_is_registered_and_evaluates_typed_results`, `equality_preserves_types_and_uses_upstream_plain_text_fallback`, `logical_builtins_reject_invalid_values_and_duplicate_bindings`; `scribium-core/src/lib.rs::compile_logical_comparisons_drive_conditionals_and_nested_calls`, `compile_logical_comparisons_work_in_user_functions_and_chains`, `compile_logical_comparison_failure_is_atomic_and_source_backed`, `compile_logical_comparison_execution_is_deterministic_for_utf8_crlf`; `scribium-markdown/tests/quarkdown_v2_5_1.rs::qd251_logical_comparison_expression_remains_structural_and_source_backed`; `scribium-typst/tests/backend_integration.rs::integration_logical_comparison_evaluation_reaches_typst_and_pdf` | `.islower`, `.isgreater`, `.equals`, and `.not` return typed booleans, preserve the value boundary, support lazy conditional use, and fail closed on invalid input | Implemented (bounded v2.5.1 slice) |
-| User-defined functions         | `scribium-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `scribium-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_non_lambda_body_with_colon_is_not_stripped`; `scribium-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
-| Scoped `.let`                | `scribium-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `scribium-engine/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `scribium-engine/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `scribium-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |
-| Iteration                    | `scribium-quarkdown/src/lib.rs::parses_typed_ranges_without_confusing_numbers_or_references`; `scribium-markdown/src/parser.rs::iteration_lambda_headers_are_contextual_and_source_backed`, `iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion`, `implicit_iteration_body_keeps_nested_named_arguments_in_the_body`; `scribium-engine/src/ast_to_ir.rs::range_survives_ast_to_ir_as_a_typed_source_backed_value`, `literal_range_endpoint_conversion_is_checked_at_the_signed_boundary`; `scribium-ir/src/lib.rs::range_and_nested_collection_roundtrip_serde`, `pair_and_dictionary_roundtrip_serde_preserves_recursive_values`; `scribium-engine/src/evaluator.rs::dynamic_range_returns_typed_signed_truncated_endpoints`, `dynamic_range_number_conversion_matches_upstream_edges`, `range_materialization_handles_signed_and_left_open_bounds_once`, `pair_evaluation_is_typed_recursive_and_atomic_on_child_failure`, `dictionary_iteration_reuses_pair_items_and_explicit_destructuring`, `pair_destructuring_rejects_non_pair_items_without_coercion`, `foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`; `scribium-core/src/lib.rs::compile_foreach_closed_range_is_inclusive_and_preserves_numbers`, `compile_dynamic_range_converges_with_literal_and_supports_signed_bounds`, `compile_dynamic_range_supports_nested_bounds_and_typed_interoperability`, `compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed`, `compile_foreach_reads_parent_values_and_functions_with_isolated_children`, `compile_foreach_adapts_only_list_values_and_preserves_nested_collections`, `compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary`, `compile_dictionary_foreach_destructures_ordered_pairs`, `compile_dictionary_duplicate_keys_are_last_write_wins_in_first_slot`, `compile_dictionary_entry_failure_is_atomic_and_stops_before_output`, `compile_dictionary_implicit_scope_keeps_the_pair_typed`, `compile_dictionary_explicit_scope_masks_implicit_positional_references`, `compile_dictionary_destructuring_masks_and_restores_parent_bindings`, `compile_nested_dictionary_destructuring_restores_outer_scope`, `compile_pair_is_a_typed_recursive_value_at_the_output_boundary`, `compile_repeat_is_one_based_and_uses_the_shared_collection_result`, `compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence`, `compile_iteration_accepts_left_open_and_rejects_endless_ranges`, `compile_dynamic_range_rejects_invalid_shapes_and_preserves_atomic_failures`, `compile_dynamic_range_diagnostics_keep_utf8_crlf_and_nested_bound_spans`, `compile_iteration_body_no_value_and_failure_are_single_diagnostics`, `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_inline_foreach_reuses_materialization_budget`, `compile_inline_foreach_preserves_owner_reassignment_and_parameter_shadowing`, `compile_inline_foreach_rhs_sees_outer_owner_with_different_parameter_name`, `compile_inline_foreach_keeps_new_variables_invocation_local`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, `compile_inline_foreach_failure_is_atomic_and_source_backed` | Semantically supported for typed literal/dynamic values, signed endpoint conversion, closed and left-open iterable ranges, descending-empty behavior, ordered list adaptation, ordered dictionary entries, Pair destructuring, block and inline explicit/implicit callable bodies, typed collection results, parent visibility, semantic-owner writeback, source-defined native shadowing, child isolation, materialization/depth limits, and failure atomicity | Implemented (evidenced block/inline slice; endless right-open/fully-open consumption, generalized patterns, and generalized inline component/callback bodies deferred) |
-| Row/column/grid (Stacked layout) | `crates/scribium-core/tests/quarkdown_stacked_layout.rs::row_column_and_grid_defaults_are_distinct_and_typed`, `row_column_and_grid_bind_typed_arguments_and_preserve_children`, `alignments_are_closed_case_insensitive_domains_without_underscore_normalization`, `integer_boundary_is_integral_positive_and_origin_aware`, `duplicate_unknown_missing_and_invalid_arguments_fail_before_body`, `body_is_lazy_and_nested_failures_do_not_publish_outer_components`, `component_values_compose_in_functions_and_custom_row_shadows_native_row`; `scribium-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, `grid_layout_rejects_zero_columns_during_deserialization`; `crates/scribium-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` | Block-only native consumers preserve typed Row, Column, and positive-column Grid components with typed alignments/gaps, structured children, source provenance, validate-before-lazy-body behavior, deterministic serde, and real Typst/PDF lowering | Implemented (bounded Stacked layout slice; complete component/style/layout compatibility remains partial) |
-| Collection and Iterable operations | `scribium-engine/src/evaluator.rs::collection_second_and_third_share_one_based_iterable_access`, `collection_distinct_and_groupvalues_are_stable_and_typed`, `collection_reversed_uses_the_shared_materialized_sequence`, `collection_sumall_and_average_follow_as_double_and_kotlin_average`, `collection_access_reuses_failure_outcomes_and_checks_length_conversion`; `scribium-core/src/lib.rs::compile_collection_api_parity_uses_frontend_lists_and_shared_iterables`, `compile_collection_access_keeps_pair_dictionary_and_range_values_typed`, `compile_collection_access_diagnostics_keep_utf8_and_crlf_source_spans` | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat`, `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, and `.groupvalues` over the shared typed `Collection`, Pair, ordered Dictionary entries, closed/left-open Range, and Markdown-list adaptation path; recursive typed results, stable ordering, aggregation conversion, and atomic failures | Implemented (evidenced v2.5.1 slice) |
-| Generic callable, native transforms, and extensions | `scribium-quarkdown/src/lib.rs::parses_marked_inline_lambdas_without_rewriting_source`, `parses_marked_inline_implicit_lambdas`; `scribium-markdown/src/parser.rs::marked_inline_lambda_is_structural_and_source_backed`, `transform_callback_lambda_uses_contextual_unmarked_form`; `scribium-engine/src/evaluator.rs::collection_transforms_share_typed_iterable_and_callable_paths`, `transforms_support_pair_dictionary_and_nested_typed_values`, `sorted_supports_typed_keys_and_fails_closed_for_unsupported_keys`, `transform_failures_are_atomic_and_predicates_are_boolean_only`, `first_class_callable_captures_definition_values_and_checks_arity`; `scribium-core/src/lib.rs::compile_collection_transforms_through_frontend_and_first_class_lambda_values` | First-class typed callable values, explicit/implicit callback binding, lexical capture, shared invocation and iterable adaptation, typed `.foreach`/`.sorted` results, and retained typed `.map`/`.filter` extensions. `.foreach` and `.sorted` are native evidence; `.map`/`.filter` are excluded from upstream v2.5.1 conformance counts | Implemented (bounded callable/native-transform evidence; extensions retained) |
-| Optional parameter values      | `scribium-ir/src/lib.rs::none_uses_the_stable_externally_tagged_serde_variant`, `scribium-core/src/lib.rs::compile_optional_parameters_support_otherwise_and_preserve_value_types`, `compile_optional_none_is_distinct_from_no_value`, `compile_optional_none_can_be_stored_locally_without_parent_scope_leak`, `compile_optional_none_direct_output_materializes_as_text`, `compile_isnone_returns_a_semantic_boolean_for_optional_values` |
+| String/text operations | `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`; `arkst-engine/src/builtins.rs::tests::string_surface_is_registered_and_returns_typed_values`, `string_operations_bind_named_arguments_and_defaults`, `string_case_and_empty_operations_cover_unicode_and_boundaries`, `string_operations_reject_unsupported_values_and_invalid_bindings`, `plaintext_projects_evaluated_inline_structure`, `plaintext_rejects_reparse_and_unsupported_values`, `plaintext_reuses_single_content_argument_binding`; `arkst-core/src/lib.rs::compile_v251_string_scalar_fixture_preserves_typed_value_flow`, `compile_v251_plaintext_fixture_projects_evaluated_inline_content`, `compile_plaintext_rejects_unsupported_values_atomically`; `arkst-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`; `fixtures/quarkdown-conformance/cases/string-scalar-family/input.qd`, `fixtures/quarkdown-conformance/cases/plaintext-family/input.qd`, and their `expected/ir.json` goldens | `.string`, `.concatenate`, `.uppercase`, `.lowercase`, `.capitalize`, `.isempty`, `.isnotempty`, and `.startswith` preserve typed evaluator results, share positional/named binding and scalar string adaptation, support ordinary/nested/chained forms, and fail closed for unsupported values. `.plaintext` projects already-parsed inline IR after nested evaluation: text, code, emphasis, strong, strikethrough, and link labels recurse; soft breaks emit a newline; hard breaks and images emit nothing; empty content emits an empty string. Unresolved calls and unsupported structured values fail closed with source-backed `E3001`. Dynamic String → InlineMarkdownContent is parsed only at the explicit `.plaintext` target; generic String → Markdown conversion remains deferred. | Implemented (bounded v2.5.1 slice) |
+| Logical/comparison predicates | `arkst-engine/src/builtins.rs::tests::logical_surface_is_registered_and_evaluates_typed_results`, `equality_preserves_types_and_uses_upstream_plain_text_fallback`, `logical_builtins_reject_invalid_values_and_duplicate_bindings`; `arkst-core/src/lib.rs::compile_logical_comparisons_drive_conditionals_and_nested_calls`, `compile_logical_comparisons_work_in_user_functions_and_chains`, `compile_logical_comparison_failure_is_atomic_and_source_backed`, `compile_logical_comparison_execution_is_deterministic_for_utf8_crlf`; `arkst-markdown/tests/quarkdown_v2_5_1.rs::qd251_logical_comparison_expression_remains_structural_and_source_backed`; `arkst-typst/tests/backend_integration.rs::integration_logical_comparison_evaluation_reaches_typst_and_pdf` | `.islower`, `.isgreater`, `.equals`, and `.not` return typed booleans, preserve the value boundary, support lazy conditional use, and fail closed on invalid input | Implemented (bounded v2.5.1 slice) |
+| User-defined functions         | `arkst-quarkdown/src/lib.rs::parses_contextual_lambda_headers_with_exact_spans`, `lambda_header_parser_is_contextual_and_rejects_malformed_headers`; `arkst-markdown/src/parser.rs::function_body_uses_contextual_source_backed_lambda_header`, `ordinary_non_lambda_body_with_colon_is_not_stripped`; `arkst-core/src/lib.rs::compile_user_functions_support_zero_and_required_parameters`, `compile_implicit_lambda_parameters_use_the_shared_callable_path`, `compile_implicit_parameters_preserve_typed_values`, `compile_implicit_lambda_scopes_are_nested_and_reusable`, `compile_user_functions_keep_scalar_values_for_nested_and_chain_calls`, `compile_user_function_rich_and_block_results_keep_markdown_structure`, `compile_user_functions_use_source_order_and_override_builtins`, `compile_user_functions_bind_block_last_and_isolate_child_scope`, `compile_user_function_argument_failures_are_single_and_body_is_not_run`, `compile_user_function_no_value_and_failed_nested_calls_keep_original_diagnostic`, `compile_optional_user_parameters_bind_missing_positional_and_named_values`, `compile_optional_final_parameter_accepts_missing_or_block_content_and_keeps_collision`, `optional_parameter_spans_survive_utf8_and_crlf_frontend_to_ir_conversion` |
+| Scoped `.let`                | `arkst-markdown/src/parser.rs::let_explicit_lambda_header_is_source_backed_and_stripped`, `let_implicit_lambda_body_keeps_implicit_reference`, `let_header_utf8_span_is_exact_for_crlf_source`, `let_nested_container_span_keeps_original_body_ranges`; `arkst-engine/src/ast_to_ir.rs::let_lambda_metadata_survives_ast_to_ir_with_original_spans`, `let_implicit_lambda_metadata_is_absent_in_ir`; `arkst-engine/src/evaluator.rs::let_explicit_parameter_returns_scalar`, `let_implicit_parameter_returns_scalar`, `let_shadows_parent_and_local_variables_do_not_leak`, `nested_let_uses_nearest_implicit_scope`; `arkst-core/src/lib.rs::compile_let_supports_explicit_and_implicit_block_lambdas`, `compile_let_isolates_local_variables_and_functions` |
+| Iteration                    | `arkst-quarkdown/src/lib.rs::parses_typed_ranges_without_confusing_numbers_or_references`; `arkst-markdown/src/parser.rs::iteration_lambda_headers_are_contextual_and_source_backed`, `iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion`, `implicit_iteration_body_keeps_nested_named_arguments_in_the_body`; `arkst-engine/src/ast_to_ir.rs::range_survives_ast_to_ir_as_a_typed_source_backed_value`, `literal_range_endpoint_conversion_is_checked_at_the_signed_boundary`; `arkst-ir/src/lib.rs::range_and_nested_collection_roundtrip_serde`, `pair_and_dictionary_roundtrip_serde_preserves_recursive_values`; `arkst-engine/src/evaluator.rs::dynamic_range_returns_typed_signed_truncated_endpoints`, `dynamic_range_number_conversion_matches_upstream_edges`, `range_materialization_handles_signed_and_left_open_bounds_once`, `pair_evaluation_is_typed_recursive_and_atomic_on_child_failure`, `dictionary_iteration_reuses_pair_items_and_explicit_destructuring`, `pair_destructuring_rejects_non_pair_items_without_coercion`, `foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`; `arkst-core/src/lib.rs::compile_foreach_closed_range_is_inclusive_and_preserves_numbers`, `compile_dynamic_range_converges_with_literal_and_supports_signed_bounds`, `compile_dynamic_range_supports_nested_bounds_and_typed_interoperability`, `compile_foreach_returns_a_typed_collection_that_can_be_stored_and_consumed`, `compile_foreach_reads_parent_values_and_functions_with_isolated_children`, `compile_foreach_adapts_only_list_values_and_preserves_nested_collections`, `compile_foreach_scopes_implicit_parameters_at_the_nearest_boundary`, `compile_dictionary_foreach_destructures_ordered_pairs`, `compile_dictionary_duplicate_keys_are_last_write_wins_in_first_slot`, `compile_dictionary_entry_failure_is_atomic_and_stops_before_output`, `compile_dictionary_implicit_scope_keeps_the_pair_typed`, `compile_dictionary_explicit_scope_masks_implicit_positional_references`, `compile_dictionary_destructuring_masks_and_restores_parent_bindings`, `compile_nested_dictionary_destructuring_restores_outer_scope`, `compile_pair_is_a_typed_recursive_value_at_the_output_boundary`, `compile_repeat_is_one_based_and_uses_the_shared_collection_result`, `compile_repeat_zero_and_descending_ranges_are_empty_per_upstream_evidence`, `compile_iteration_accepts_left_open_and_rejects_endless_ranges`, `compile_dynamic_range_rejects_invalid_shapes_and_preserves_atomic_failures`, `compile_dynamic_range_diagnostics_keep_utf8_crlf_and_nested_bound_spans`, `compile_iteration_body_no_value_and_failure_are_single_diagnostics`, `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_inline_foreach_reuses_materialization_budget`, `compile_inline_foreach_preserves_owner_reassignment_and_parameter_shadowing`, `compile_inline_foreach_rhs_sees_outer_owner_with_different_parameter_name`, `compile_inline_foreach_keeps_new_variables_invocation_local`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, `compile_inline_foreach_failure_is_atomic_and_source_backed` | Semantically supported for typed literal/dynamic values, signed endpoint conversion, closed and left-open iterable ranges, descending-empty behavior, ordered list adaptation, ordered dictionary entries, Pair destructuring, block and inline explicit/implicit callable bodies, typed collection results, parent visibility, semantic-owner writeback, source-defined native shadowing, child isolation, materialization/depth limits, and failure atomicity | Implemented (evidenced block/inline slice; endless right-open/fully-open consumption, generalized patterns, and generalized inline component/callback bodies deferred) |
+| Row/column/grid (Stacked layout) | `crates/arkst-core/tests/quarkdown_stacked_layout.rs::row_column_and_grid_defaults_are_distinct_and_typed`, `row_column_and_grid_bind_typed_arguments_and_preserve_children`, `alignments_are_closed_case_insensitive_domains_without_underscore_normalization`, `integer_boundary_is_integral_positive_and_origin_aware`, `duplicate_unknown_missing_and_invalid_arguments_fail_before_body`, `body_is_lazy_and_nested_failures_do_not_publish_outer_components`, `component_values_compose_in_functions_and_custom_row_shadows_native_row`; `arkst-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, `grid_layout_rejects_zero_columns_during_deserialization`; `crates/arkst-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` | Block-only native consumers preserve typed Row, Column, and positive-column Grid components with typed alignments/gaps, structured children, source provenance, validate-before-lazy-body behavior, deterministic serde, and real Typst/PDF lowering | Implemented (bounded Stacked layout slice; complete component/style/layout compatibility remains partial) |
+| Collection and Iterable operations | `arkst-engine/src/evaluator.rs::collection_second_and_third_share_one_based_iterable_access`, `collection_distinct_and_groupvalues_are_stable_and_typed`, `collection_reversed_uses_the_shared_materialized_sequence`, `collection_sumall_and_average_follow_as_double_and_kotlin_average`, `collection_access_reuses_failure_outcomes_and_checks_length_conversion`; `arkst-core/src/lib.rs::compile_collection_api_parity_uses_frontend_lists_and_shared_iterables`, `compile_collection_access_keeps_pair_dictionary_and_range_values_typed`, `compile_collection_access_diagnostics_keep_utf8_and_crlf_source_spans` | `.size`, `.first`, `.second`, `.third`, `.last`, `.getat`, `.sumall`, `.average`, `.distinct`, `.sorted`, `.reversed`, and `.groupvalues` over the shared typed `Collection`, Pair, ordered Dictionary entries, closed/left-open Range, and Markdown-list adaptation path; recursive typed results, stable ordering, aggregation conversion, and atomic failures | Implemented (evidenced v2.5.1 slice) |
+| Generic callable, native transforms, and extensions | `arkst-quarkdown/src/lib.rs::parses_marked_inline_lambdas_without_rewriting_source`, `parses_marked_inline_implicit_lambdas`; `arkst-markdown/src/parser.rs::marked_inline_lambda_is_structural_and_source_backed`, `transform_callback_lambda_uses_contextual_unmarked_form`; `arkst-engine/src/evaluator.rs::collection_transforms_share_typed_iterable_and_callable_paths`, `transforms_support_pair_dictionary_and_nested_typed_values`, `sorted_supports_typed_keys_and_fails_closed_for_unsupported_keys`, `transform_failures_are_atomic_and_predicates_are_boolean_only`, `first_class_callable_captures_definition_values_and_checks_arity`; `arkst-core/src/lib.rs::compile_collection_transforms_through_frontend_and_first_class_lambda_values` | First-class typed callable values, explicit/implicit callback binding, lexical capture, shared invocation and iterable adaptation, typed `.foreach`/`.sorted` results, and retained typed `.map`/`.filter` extensions. `.foreach` and `.sorted` are native evidence; `.map`/`.filter` are excluded from upstream v2.5.1 conformance counts | Implemented (bounded callable/native-transform evidence; extensions retained) |
+| Optional parameter values      | `arkst-ir/src/lib.rs::none_uses_the_stable_externally_tagged_serde_variant`, `arkst-core/src/lib.rs::compile_optional_parameters_support_otherwise_and_preserve_value_types`, `compile_optional_none_is_distinct_from_no_value`, `compile_optional_none_can_be_stored_locally_without_parent_scope_leak`, `compile_optional_none_direct_output_materializes_as_text`, `compile_isnone_returns_a_semantic_boolean_for_optional_values` |
 | Variables                      | `evaluator.rs::var_scalar_definition_and_reference`, `evaluator.rs::var_boolean_reference_in_conditional`, `evaluator.rs::var_false_boolean_drops_conditional`, `evaluator.rs::var_ifnot_with_variable`, `evaluator.rs::var_explicit_reassignment`, `evaluator.rs::var_variable_name_reassignment`, `evaluator.rs::var_reassignment_produces_no_output`, `evaluator.rs::var_inline_use`, `evaluator.rs::var_block_variable`, `evaluator.rs::var_conditional_declaration_execution_order`, `evaluator.rs::var_unknown_call_preserved`, `evaluator.rs::var_malformed_declaration_reports_e3002`, `evaluator.rs::var_nested_evaluation_in_block_variable`, `evaluator.rs::var_evaluation_immutable_and_deterministic`, `lib.rs::compile_variable_declaration_and_reference`, `lib.rs::compile_variable_boolean_in_conditional`, `lib.rs::compile_variable_false_conditional`, `lib.rs::compile_variable_ifnot`, `lib.rs::compile_variable_explicit_reassignment`, `lib.rs::compile_variable_name_reassignment`, `lib.rs::compile_variable_inline_use`, `lib.rs::compile_variable_block_variable`, `lib.rs::compile_variable_conditional_declaration`, `lib.rs::compile_variable_unknown_preserved`, `lib.rs::compile_variable_malformed_reports_e3002`, `lib.rs::compile_variable_nested_in_block`, `lib.rs::compile_variable_immutable_and_deterministic` |
 
 ### v2.5.1 syntax-gap evidence
@@ -912,7 +912,7 @@ implementation. The canonical #151 classification is now
 from the pinned Eclipse Temurin `25.0.4.1+1` oracle (Unicode 16.0) without
 normalization or locale/global state. The active contract and regeneration
 fingerprints are recorded in [`reference-jvm.md`](reference-jvm.md).
-Independent evidence is in `crates/scribium-core/tests/stdlib_builtin_audit.rs`;
+Independent evidence is in `crates/arkst-core/tests/stdlib_builtin_audit.rs`;
 #172 closes this bounded string-semantics slice. The row remains partially
 compatible overall because `.plaintext` and broader DynamicValue/output
 contracts remain bounded elsewhere.
@@ -929,7 +929,7 @@ This slice is grounded in the public Quarkdown documentation for
 [typing](https://quarkdown.com/wiki/typing/). Those pages document
 `.function`, the `to from:` and `to from?:` parameter headers, positional and named calls,
 block content as the final parameter, source-order redeclaration, and the
-absence of an explicit return statement (reviewed 2026-08-15). Scribium
+absence of an explicit return statement (reviewed 2026-08-15). Arkst
 independently represents
 the header and parameter spans, binds required parameters in a child scope,
 and preserves scalar or structured-content results through the shared value
@@ -940,7 +940,7 @@ defines a headerless lambda's positional parameters as `.1`, `.2`, `.3`, and
 so on, and states that lambdas fork nested scopes. The official
 [v2.5.1 release](https://github.com/iamgio/quarkdown/releases/tag/v2.5.1)
 was also probed as a black box: an out-of-range implicit reference and a
-reference in a zero-argument lambda fail as unresolved references. Scribium
+reference in a zero-argument lambda fail as unresolved references. Arkst
 preserves that observable failure class as a deterministic source-backed
 `E3003`; it never substitutes `None` or evaluator `NoValue`.
 
@@ -973,7 +973,7 @@ iterates closed ranges inclusively, starts a left-open range at `1`, rejects a
 right-open range as endless, and uses the host integer range behavior for
 descending bounds. The public v2.5.1 [`FlowTest.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/test/kotlin/com/quarkdown/stdlib/FlowTest.kt)
 also covers `..4` and rejects `1..`. [`Math.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Math.kt)
-documents dynamic `.range` and floating-point truncation. Scribium follows this
+documents dynamic `.range` and floating-point truncation. Arkst follows this
 policy through one shared iterable adaptation path.
 
 Supported here are typed literal and dynamic Range values, signed dynamic
@@ -991,7 +991,7 @@ source-defined `foreach`/`repeat` bindings retain precedence in direct and
 chained calls. The Collection slice also covers `.second`, `.third`, `.sumall`,
 `.average`, `.distinct`, `.reversed`, and `.groupvalues` through that same
 typed materialization path. `.foreach` and `.sorted` are native v2.5.1
-evidence; the retained `.map`/`.filter` surface is explicitly a Scribium
+evidence; the retained `.map`/`.filter` surface is explicitly a Arkst
 extension and is excluded from conformance claims. Deferred are generalized or
 nested destructuring, arbitrary comparator syntax, descending sorting,
 table-specific collection operations, and generalized inline component or
@@ -1000,10 +1000,10 @@ rejected by the standard finite Iterable path as endless.
 
 - **Unsupported:** Syntax may be parsed and preserved, but normal compilation
   produces an explicit `E8xxx` error diagnostic for the unsupported semantics
-  (see `crates/scribium-compat/src/diagnostics.rs`)
+  (see `crates/arkst-compat/src/diagnostics.rs`)
 - **Error:** Produces an explicit parse diagnostic (`E2xxx`) at the call site
 - **Parsed:** Accepted syntactically; behavior may be undefined or rejected
-- **Semantically supported:** Scribium semantics match documented behavior
+- **Semantically supported:** Arkst semantics match documented behavior
 - **Output-equivalent:** Typst output matches reference for tested inputs
 - **Known divergence:** Deliberate behavioral difference with documented
   rationale
@@ -1015,7 +1015,7 @@ output-boundary evidence at the stated level.
 Function calls are currently **Parsed** except for the evidenced semantic
 surfaces below: `.name`, positional arguments `{arg}`, named arguments
 `name:{arg}`, nested calls, and indented block bodies are parsed into the
-Scribium AST/IR. Multiline braced arguments, line continuations, and tight
+Arkst AST/IR. Multiline braced arguments, line continuations, and tight
 brace-wrapped calls are syntax-supported with source-backed spans. The
 evidenced `.sum`, `.subtract`, `.multiply`, `.divide`, `.rem`, `.pow`, `.abs`,
 `.negate`, `.sqrt`, `.truncate`, `.round`, `.iseven`, `.string`, `.concatenate`, `.uppercase`,
@@ -1065,7 +1065,7 @@ tests exercise `.islower` directly inside `.if`, including the lazy branch
 behavior documented by the [conditional statements](https://quarkdown.com/wiki/conditional-statements/)
 page.
 
-Scribium implements this family as typed evaluator builtins. Numeric ordering
+Arkst implements this family as typed evaluator builtins. Numeric ordering
 uses the upstream float comparison boundary and accepts the reviewed scalar
 numeric text forms; `.equals` preserves typed equality and applies only the
 documented plain-text fallback; `.not` accepts boolean values and boolean
@@ -1112,7 +1112,7 @@ remain `NaN`, and remainder keeps signed floating behavior.
 [`NumberValue.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/NumberValue.kt),
 [`ValueFactory.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/value/factory/ValueFactory.kt),
 and [`DynamicValueConverter.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-core/src/main/kotlin/com/quarkdown/core/function/reflect/DynamicValueConverter.kt)
-establish the invocation-time numeric and normalization boundaries. Scribium
+establish the invocation-time numeric and normalization boundaries. Arkst
 uses the bounded conversion policy for concrete numeric consumers, including
 the same DynamicValue Number conversion for `decimals` before its Int-only
 NumberValue normalization check; it does not introduce a general DynamicValue
@@ -1137,28 +1137,28 @@ integral result becomes an Int, so signed zero becomes `0` and infinities clamp
 to the Kotlin Int range; `.pi` does not pass through that Float helper.
 
 The independent unit and integration evidence is:
-`scribium-engine/src/builtins.rs::tests::decimal_numeric_surface_matches_upstream_boundaries`,
-`scribium-core/src/lib.rs::tests::compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`,
+`arkst-engine/src/builtins.rs::tests::decimal_numeric_surface_matches_upstream_boundaries`,
+`arkst-core/src/lib.rs::tests::compile_v251_numeric_decimal_fixture_preserves_typed_value_flow`,
 `compile_numeric_decimal_forms_share_one_semantic_path`,
 `compile_numeric_decimal_failure_is_atomic_and_source_backed`,
-`scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`,
+`arkst-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`,
 and `fixtures/quarkdown-conformance/cases/numeric-decimal-family/input.qd`.
 Transcendental evaluation is covered by
-`scribium-engine/src/builtins.rs::tests::transcendental_numeric_surface_matches_upstream_boundaries`,
+`arkst-engine/src/builtins.rs::tests::transcendental_numeric_surface_matches_upstream_boundaries`,
 `deterministic_transcendental_math_has_stable_representative_bits`,
-`scribium-core/src/lib.rs::tests::compile_v251_numeric_transcendental_fixture_preserves_typed_value_flow`,
+`arkst-core/src/lib.rs::tests::compile_v251_numeric_transcendental_fixture_preserves_typed_value_flow`,
 `compile_numeric_transcendental_failure_is_atomic_and_source_backed`,
-`scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`,
+`arkst-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels`,
 and `fixtures/quarkdown-conformance/cases/numeric-transcendental-family/input.qd`.
 The arithmetic/unary regression remains covered by the existing numeric tests
-and `numeric-arithmetic-family` fixture. `.map` and `.filter` remain Scribium
+and `numeric-arithmetic-family` fixture. `.map` and `.filter` remain Arkst
 extensions and are not included in the upstream numeric family.
 
 ### String and text evidence
 
 The v2.5.1 public [`Strings.kt`](https://raw.githubusercontent.com/iamgio/quarkdown/v2.5.1/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Strings.kt)
 surface defines scalar `.string`, `.concatenate`, case transforms,
-emptiness predicates, and `.startswith`. Scribium implements the bounded
+emptiness predicates, and `.startswith`. Arkst implements the bounded
 scalar paths through one explicit invocation-boundary adapter for
 strings, identifiers, numbers, booleans, typed ranges, and bounded plain-text
 content. The results remain typed `IrValue::String` or `IrValue::Boolean`, so
@@ -1199,7 +1199,7 @@ recovers as ordinary text.
 ### Existing public-language compatibility debt
 
 Quarkdown has documented features represented in the v2.5.0/v2.5.1 evidence set that
-Scribium has not implemented yet. They are listed in the Feature Matrix as
+Arkst has not implemented yet. They are listed in the Feature Matrix as
 `Planned`, are **not** current compatibility claims, and remain compatibility
 debt against the complete target. Standalone lambda values outside the
 supported first-class/callback forms, layout semantics, unimplemented data
@@ -1228,9 +1228,9 @@ observed_reference_behavior: |
   Dot-prefixed names form function calls; each argument is wrapped in
   curly braces; named arguments use name:{value}; indented lines after
   a block call form its body. The current v2.5.0 documentation describes the
-  same basic dot-prefixed, brace-argument model on which Scribium's existing
+  same basic dot-prefixed, brace-argument model on which Arkst's existing
   parser subset is based.
-scribium_behavior: |
+arkst_behavior: |
   Parses dot calls, positional/named arguments, nested calls, and
   indented bodies into the shared DirectiveCall AST.
 compatibility_level: Parsed
@@ -1246,8 +1246,8 @@ tests (clean-room policy, see `docs/adr/0007-quarkdown-compatibility-scope-and-c
 The call grammar was derived from the public documentation *"Syntax of a
 function call"* (wiki, badged `2.5.0`, accessed 2026-08-08). The current
 v2.5.0 documentation describes the same basic dot-prefixed, brace-argument
-model on which Scribium's currently evidenced parser behavior is based.
-Scribium's previous
+model on which Arkst's currently evidenced parser behavior is based.
+Arkst's previous
 compatibility baseline was 0.9.x, but no claim is made that the upstream
 grammar was verified to be identical across every version in between.
 `SPEC_SOURCES.md` documents the source list, per-source version badges, and
@@ -1264,13 +1264,13 @@ accessed dates.
   contract.
 - Pinned v2.5.1 permits optional argument separators before the first argument
   and before `::`, and consumes a trailing continuation without an argument;
-  current Scribium does not preserve those forms and reports `E2004` in some
+  current Arkst does not preserve those forms and reports `E2004` in some
   paths; see #164.
 - Escaped call/argument delimiters are not fully aligned with pinned
   `GrammarUtils.unescapedMatch()` and balanced-brace behavior; the current
   parser can truncate arguments or report `E2003`, while the escaped call
   introducer remains literal; see #162.
-- Scribium's grammar/frontend and IR preserve positional-after-named in the
+- Arkst's grammar/frontend and IR preserve positional-after-named in the
   source-ordered argument shape without parser `E2001`. The shared engine
   binder rejects that invalid shape with source-backed `E3003`, including the
   offending positional and preceding named spans. #163 owns the representation;
@@ -1286,7 +1286,7 @@ accessed dates.
   boundary. Rows marked **Planned** are *not* implemented and must not be
   claimed; any public Quarkdown behavior absent from the matrix is still a gap
   to investigate against the complete target.
-- **Block variable evaluation timing:** Scribium evaluates block variable
+- **Block variable evaluation timing:** Arkst evaluates block variable
   content at declaration time (source order). The cited Quarkdown public
   documentation does not explicitly specify evaluation timing for stored
   block content. This behavior may be refined if upstream semantics are
@@ -1294,11 +1294,11 @@ accessed dates.
 
 ## Upstream Evolution
 
-Scribium tracks two distinct Quarkdown versions:
+Arkst tracks two distinct Quarkdown versions:
 
 | Concept | Description | Authority |
 |---------|-------------|-----------|
-| **Tracked upstream target** | The latest stable Quarkdown release. It automatically becomes the release Scribium must investigate and adapt toward. | Stable-release observer |
+| **Tracked upstream target** | The latest stable Quarkdown release. It automatically becomes the release Arkst must investigate and adapt toward. | Stable-release observer |
 | **Verified compatibility baseline** | The release for which permitted evidence, independent fixtures, implementation, regression/conformance tests, and known-divergence records are complete. The existing `supported_baseline` manifest field names this value. | Human-reviewed promotion PR |
 
 The observer (`.github/workflows/upstream-quarkdown.yml`) runs daily, obtains

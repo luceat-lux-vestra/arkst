@@ -8,15 +8,15 @@
   "cases": {
     "commonmark-0096": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
+      "reason": "INTENTIONAL_POLICY: the Arkst document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
     },
     "commonmark-0098": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "INTENTIONAL_POLICY: the Scribium document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
+      "reason": "INTENTIONAL_POLICY: the Arkst document entry point consumes leading front matter before Markdown parsing, while the CommonMark reference treats the source as thematic-break/heading structure."
     },
     "commonmark-0174": {
       "classification": "KNOWN_MISMATCH",
-      "reason": "CANONICAL_MAPPING: Scribium preserves the original blockquote-marked raw-HTML source span as required by its policy, while cmark canonicalizes the blockquote content to the HTML value without markers."
+      "reason": "CANONICAL_MAPPING: Arkst preserves the original blockquote-marked raw-HTML source span as required by its policy, while cmark canonicalizes the blockquote content to the HTML value without markers."
     }
   }
 }

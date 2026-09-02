@@ -2,16 +2,16 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-13
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related ADRs:** 0014, 0015, 0016
 - **Upstream issue:** https://github.com/yuin/rushdown/issues/2
 
 ## Decision
 
-Scribium uses Rushdown as its Markdown/CommonMark/GFM parsing substrate. The
-Scribium frontend does not develop or maintain a second CommonMark parser.
-Rushdown is an implementation dependency, not part of Scribium's public
-semantic model. Rushdown types must not escape `scribium-markdown`.
+Arkst uses Rushdown as its Markdown/CommonMark/GFM parsing substrate. The
+Arkst frontend does not develop or maintain a second CommonMark parser.
+Rushdown is an implementation dependency, not part of Arkst's public
+semantic model. Rushdown types must not escape `arkst-markdown`.
 
 The selected upstream baseline is:
 
@@ -38,23 +38,23 @@ maintainer review.
 The physical workspace now contains the three frontend boundary crates:
 
 ```text
-scribium-source
+arkst-source
     ↑
-scribium-quarkdown ← scribium-markdown → Rushdown
+arkst-quarkdown ← arkst-markdown → Rushdown
                                   ↓
-                         Scribium frontend AST
+                         Arkst frontend AST
 ```
 
-`scribium-source` owns platform-neutral `SourceId`, `ByteSpan`, `SourceSpan`,
+`arkst-source` owns platform-neutral `SourceId`, `ByteSpan`, `SourceSpan`,
 and related source primitives. It has no filesystem, process, network, or
 backend dependency.
 
-`scribium-quarkdown` owns Quarkdown call-name and argument grammar only. It
-depends on `scribium-source`, and never depends on Rushdown, Markdown AST
-types, or `scribium-core`.
+`arkst-quarkdown` owns Quarkdown call-name and argument grammar only. It
+depends on `arkst-source`, and never depends on Rushdown, Markdown AST
+types, or `arkst-core`.
 
-`scribium-markdown` owns Rushdown construction, `.md`/`.qd` mode selection,
-Quarkdown block and inline extension rules, conversion to the Scribium
+`arkst-markdown` owns Rushdown construction, `.md`/`.qd` mode selection,
+Quarkdown block and inline extension rules, conversion to the Arkst
 frontend AST, source provenance checks, and the integration policy. The core
 facade invokes this frontend; engine, IR, Typst, and other production crates do
 not depend on Rushdown.
@@ -63,7 +63,7 @@ not depend on Rushdown.
 
 Rushdown is authoritative for CommonMark/GFM block, container, paragraph,
 inline, code-shielding, and source-segmentation behavior. Quarkdown extensions
-are registered only by `scribium-markdown`:
+are registered only by `arkst-markdown`:
 
 - `.md` uses the standard Rushdown parser without Quarkdown extensions;
 - `.qd` uses the same Rushdown lifecycle with Quarkdown block and inline rules;
@@ -82,7 +82,7 @@ same Rushdown block/inline lifecycle, so supported Markdown inline nodes and
 nested Quarkdown calls retain their original spans. This source-range adapter
 does not create a sentinel prefix, copy a fragment, or compensate synthetic
 offsets. Rushdown 0.18.0 still does not expose a public arbitrary-span inline
-entry point; the adapter therefore remains private to `scribium-markdown` and
+entry point; the adapter therefore remains private to `arkst-markdown` and
 does not broaden the public Rushdown API.
 
 ## Safety decision and containment
@@ -100,7 +100,7 @@ API/type invariant that makes invalid states unconstructable. No upstream fix
 or permanent fork is assumed by this decision.
 
 Until an upstream fix exists, the local safety delta is limited to the
-`scribium-markdown` adapter:
+`arkst-markdown` adapter:
 
 - `DIRECT_AFFECTED_ACCESSORS_AVOIDED_AT_ADAPTER_BOUNDARY`: Rushdown
   `Index`/`Segment` values are converted to `ByteSpan` only after bounds and
@@ -121,13 +121,13 @@ is sound, and the accepted upstream issue remains an explicit dependency risk.
 The existing safe-only/Miri reproduction remains in
 `tools/spikes/rushdown-safety-gate/`. Invalid constructor cases are never run
 as an ordinary native executable. The adoption suite is in
-`crates/scribium-markdown/tests/range_invariants.rs` and its valid parser paths
+`crates/arkst-markdown/tests/range_invariants.rs` and its valid parser paths
 are eligible for Miri.
 
 If upstream does not fix the defect, a future patch or fork may contain only
 the proven safety correction, selected parser-path safety corrections, urgent
 security fixes, or required Rust compatibility changes. It may not contain
-Quarkdown syntax, Scribium ASTs, renderer changes, or unrelated refactoring.
+Quarkdown syntax, Arkst ASTs, renderer changes, or unrelated refactoring.
 
 ## Compatibility and known debt
 
@@ -157,11 +157,11 @@ The exact revision was checked with the following evidence:
 - `cargo test --workspace --all-features`, `cargo clippy --workspace
   --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`,
   and `cargo doc --workspace --all-features --no-deps` pass.
-- `cargo check -p scribium-source -p scribium-quarkdown -p
-  scribium-markdown -p scribium-core -p scribium-typst --target
+- `cargo check -p arkst-source -p arkst-quarkdown -p
+  arkst-markdown -p arkst-core -p arkst-typst --target
   wasm32-unknown-unknown` passes.
 - `MIRIFLAGS=-Zmiri-disable-isolation PROPTEST_CASES=4 cargo +nightly miri
-  test -p scribium-markdown` passes. The isolation flag is required by the
+  test -p arkst-markdown` passes. The isolation flag is required by the
   current Miri environment; the initial unadjusted run was blocked by Miri's
   `getcwd` isolation rather than classified as a pass.
 - The historical safe-only spike's valid cases pass under Miri. Its invalid
@@ -181,7 +181,7 @@ The selected feature graph reaches Rushdown scanner/parser text and link paths,
 including `text.rs`, `scanner`, parser core, link/auto-link, and linkify when
 GFM is enabled. Renderer, benchmark, binary, and test-only unsafe sites are
 outside the selected frontend runtime graph. Rushdown does not currently
-forbid unsafe code at crate level. Scribium adds no unsafe code and avoids the
+forbid unsafe code at crate level. Arkst adds no unsafe code and avoids the
 affected raw string accessors at its adapter boundary; issue #2 remains the
 upstream safety debt.
 
@@ -201,7 +201,7 @@ upstream safety debt.
 | silent corruption exposure | Not claimed as excluded; original-source spans are checked at the adapter boundary while the upstream soundness risk remains accepted |
 | selected dependency graph | CLEAN |
 | WASM | PASS |
-| unsafe policy | FAIL upstream policy (`unsafe` is present and not forbidden); local Scribium delta is zero and the known defect is tracked/contained |
+| unsafe policy | FAIL upstream policy (`unsafe` is present and not forbidden); local Arkst delta is zero and the known defect is tracked/contained |
 | maintenance | HIGH_RISK; exact pin, audit, regression, and human review are required |
 | permanent fork required | NO |
 
@@ -234,9 +234,9 @@ layer, authorize a permanent fork, or waive the upstream safety issue.
 
 ## Consequences
 
-- Scribium gains one Markdown lifecycle for CommonMark/GFM and Quarkdown
+- Arkst gains one Markdown lifecycle for CommonMark/GFM and Quarkdown
   integration instead of growing a parallel parser.
-- Rushdown changes are isolated behind `scribium-markdown`.
+- Rushdown changes are isolated behind `arkst-markdown`.
 - The old parser modules remain as migration-era compatibility/test material;
   new Markdown behavior belongs in the Rushdown frontend.
 - Production adoption preserves WASM and filesystem-free lower-level crates.

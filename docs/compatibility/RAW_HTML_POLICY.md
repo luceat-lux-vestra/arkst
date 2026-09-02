@@ -13,7 +13,7 @@ This document separates four concepts that must not be conflated:
 
 **Raw HTML recognition is not equivalent to HTML semantic support.**
 
-Scribium uses the pinned Rushdown parser as its Markdown substrate. Rushdown may recognize a construct as raw HTML and expose it as an opaque source-backed node without giving Scribium a DOM, an element/attribute model, CSS semantics, or a portable meaning for non-HTML targets.
+Arkst uses the pinned Rushdown parser as its Markdown substrate. Rushdown may recognize a construct as raw HTML and expose it as an opaque source-backed node without giving Arkst a DOM, an element/attribute model, CSS semantics, or a portable meaning for non-HTML targets.
 
 ## Reference contracts
 
@@ -31,8 +31,8 @@ GFM inherits the raw-HTML model and additionally defines `tagfilter` behavior fo
 The Markdown compatibility contract is therefore:
 
 - Rushdown owns CommonMark/GFM raw-HTML recognition.
-- Scribium preserves the parser-owned source and spans.
-- Scribium does **not** infer arbitrary HTML semantics merely because Rushdown recognized raw HTML.
+- Arkst preserves the parser-owned source and spans.
+- Arkst does **not** infer arbitrary HTML semantics merely because Rushdown recognized raw HTML.
 - A bounded construct may be lowered only when its document meaning is exactly representable by existing backend-neutral IR without parsing HTML attributes or constructing a DOM.
 
 ### Quarkdown v2.5.1
@@ -48,7 +48,7 @@ Reference:
 The Quarkdown compatibility contract is therefore:
 
 - ordinary mixed raw HTML in `.qd` / `.scrib` is **not** a compatibility feature;
-- Scribium must not promote Markdown raw-HTML recognition into successful Quarkdown semantics;
+- Arkst must not promote Markdown raw-HTML recognition into successful Quarkdown semantics;
 - `.html` is a separate Quarkdown language feature with an implemented closed `Html` semantic slice; it does not enable arbitrary mixed HTML globally;
 - `.html {<em>x</em>}` evaluates a single `String` argument into a closed target-specific semantic representation after the explicit capability check; and
 - the HTML output backend remains future work, while the current Typst/PDF path deliberately omits the evaluated target-specific node. See [ADR-0018](../adr/0018-quarkdown-target-specific-native-content.md).
@@ -66,7 +66,7 @@ discard the call during parsing.
 
 The v2.5.1 CLI grants `native-content` through its default permission set, but
 the capability is checked before node construction and denial raises a typed
-missing-permission error. Scribium's compatibility-default compilation grants
+missing-permission error. Arkst's compatibility-default compilation grants
 `NativeContent`; the host/API may explicitly deny it through
 `compile_with_capabilities`, which emits one source-backed `E3004` before
 target-specific node creation. When `.html` is authorized, that builtin creates
@@ -85,15 +85,15 @@ not a generic native-content or MIME escape hatch.
 
 ### Typst
 
-Typst is Scribium's rendering backend, not the owner of Markdown or Quarkdown raw-HTML parsing. Typst markup does not imply that arbitrary raw HTML embedded in an input document has portable Typst semantics. Typst's HTML-specific facilities belong to its HTML output model and are distinct from Scribium accepting raw HTML as source-language semantics.
+Typst is Arkst's rendering backend, not the owner of Markdown or Quarkdown raw-HTML parsing. Typst markup does not imply that arbitrary raw HTML embedded in an input document has portable Typst semantics. Typst's HTML-specific facilities belong to its HTML output model and are distinct from Arkst accepting raw HTML as source-language semantics.
 
 Reference:
 
 - Typst HTML reference: <https://typst.app/docs/reference/html/>
 
-The Typst boundary must therefore remain downstream of Scribium's semantic decision. The backend must not be used to reinterpret unsupported source-language raw HTML after the evaluator.
+The Typst boundary must therefore remain downstream of Arkst's semantic decision. The backend must not be used to reinterpret unsupported source-language raw HTML after the evaluator.
 
-## Scribium policy by input mode
+## Arkst policy by input mode
 
 | Input mode | Raw HTML recognition | Successful semantic support | Unsupported raw HTML | Explicit HTML escape hatch |
 |---|---|---|---|---|
@@ -105,7 +105,7 @@ The Typst boundary must therefore remain downstream of Scribium's semantic decis
 
 The current evidence-backed Markdown-to-Typst/PDF subset is intentionally small:
 
-| Raw HTML form | Scribium semantic projection |
+| Raw HTML form | Arkst semantic projection |
 |---|---|
 | `<em>...</em>` | `Emphasis` |
 | `<strong>...</strong>` | `Strong` |
@@ -128,7 +128,7 @@ Examples intentionally outside this semantic subset include:
 - arbitrary block HTML such as `<div>...</div>`;
 - declarations, processing instructions, and CDATA as rendered content.
 
-Being outside the subset does not mean Rushdown failed to parse the source. It means Scribium has no justified backend-neutral semantic projection for the current product path.
+Being outside the subset does not mean Rushdown failed to parse the source. It means Arkst has no justified backend-neutral semantic projection for the current product path.
 
 ## HTML comments
 
@@ -164,7 +164,7 @@ CDATA, arbitrary HTML, or generic invisible-HTML handling.
 
 ## Block HTML
 
-Block HTML remains outside the supported Typst/PDF semantic path. Rushdown may expose a complete block as one opaque source-backed node, but Scribium must not:
+Block HTML remains outside the supported Typst/PDF semantic path. Rushdown may expose a complete block as one opaque source-backed node, but Arkst must not:
 
 - parse the block with a second HTML parser;
 - reparse its contents as Markdown;
@@ -217,12 +217,12 @@ The implementation preserves these invariants:
 
 This policy does not authorize:
 
-- a general HTML parser or DOM inside Scribium;
+- a general HTML parser or DOM inside Arkst;
 - arbitrary HTML-to-Typst translation;
 - CSS or JavaScript interpretation;
 - unsafe HTML passthrough as a PDF/Typst workaround;
 - expanding the Markdown subset merely because Typst or a future HTML backend could emit an equivalent element;
-- using Rushdown's HTML renderer as Scribium's Quarkdown evaluator/backend.
+- using Rushdown's HTML renderer as Arkst's Quarkdown evaluator/backend.
 - treating Quarkdown `.html` as permission-free or as a Markdown raw-HTML
   parser mode;
 - making Typst/PDF emit a warning or visible text for an upstream-ignored
@@ -230,7 +230,7 @@ This policy does not authorize:
 - allowing the target-specific mechanism to authorize `.css`,
   JavaScript, SVG, LaTeX, Typst source, arbitrary MIME, or plugin payloads.
 
-Rushdown's renderer can still be useful as a Markdown-only differential oracle, but production Scribium semantics continue through frontend AST -> backend-neutral IR -> single evaluator -> backend lowering.
+Rushdown's renderer can still be useful as a Markdown-only differential oracle, but production Arkst semantics continue through frontend AST -> backend-neutral IR -> single evaluator -> backend lowering.
 
 ## Related compatibility documents
 

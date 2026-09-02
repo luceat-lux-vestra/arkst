@@ -5,11 +5,11 @@
 schema_version = 1
 
 [provenance]
-contract = "scribium.reference-data-integrity"
+contract = "arkst.reference-data-integrity"
 contract_version = 1
 source_kind = "archive-backed"
 verifier_path = "tools/verify_reference_provenance.py"
-verifier_source_sha256 = "58e0cf909ba9677a10a6cffb44487cd56c2506dbc00971ef522d81e7a78c6c7e"
+verifier_source_sha256 = "65721566856454475815b1425cdaafa3a68a6161ca64006b1399e9b370540cec"
 notice_path = "NOTICE"
 notice_required_markers = [
   "== Reference JVM and generated compatibility data ==",
@@ -18,7 +18,7 @@ notice_required_markers = [
 ]
 runtime_scope = "development-ci-only"
 exact_artifact_globs = [
-  "crates/scribium-engine/data/*",
+  "crates/arkst-engine/data/*",
   "tools/jdk25_*",
 ]
 
@@ -70,7 +70,7 @@ java_version_output = [
 ]
 
 # SHA-256 of tools/dump_jdk25_unicode_data.java.
-helper_source_sha256 = "e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47"
+helper_source_sha256 = "b0fb84655d5fb1416dac6df356ebe0ee84c450d319dfe2d805e14434e358fbac"
 oracle_output_sha256 = "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862"
 generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb520dbfb9211ad"
 
@@ -79,7 +79,7 @@ generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb52
 # Unicode case-data record.
 locale_dump_helper_source_sha256 = "15ba28ebc7fcb8c6f149a54473a7745bd041743eb3558f56fc23a99b13a0c45e"
 locale_display_dump_helper_source_sha256 = "25ecb0d2dbc767ef1006a112ead0e2271686cf2dfd7d8f870e812dcfefab9131"
-locale_generator_source_sha256 = "a33e399daedc26eedd09d6de192004568f3cba01f09fd869edd36e01610770e5"
+locale_generator_source_sha256 = "3fb0497ea3cfb290fab6a85619d26c5493d31458695be93d0efb02bcefa166ef"
 locale_public_oracle_helper_source_sha256 = "80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02"
 locale_public_oracle_record_count = 7440
 locale_public_oracle_name_path_count = 2318
@@ -110,16 +110,16 @@ locale_accepted_timezone_ids = 468
 # existing fields above remain the authoritative detailed JDK values.
 unicode_helper_path = "tools/dump_jdk25_unicode_data.java"
 unicode_generator_path = "tools/generate_jdk25_unicode_case.py"
-unicode_generator_source_sha256 = "2277ccc648379577000c6e4395514be0f24fb5dbd1e3062607a916ab8b178e8a"
+unicode_generator_source_sha256 = "1074fa498101d643fa7e7e7b02623f172b3b6c2fdce13d7d8799ed0a36eeac6f"
 unicode_verifier_path = "tools/verify_jdk25_unicode.py"
-unicode_verifier_source_sha256 = "e6cfa45bbc9713ae1c5105313c972470439b2649108b40b41a3bc385d00c83f4"
+unicode_verifier_source_sha256 = "3dab2fcd82bf413998efb2b64d56f7239338db4170658ad16f30517ae64d3a5a"
 unicode_corpus_path = "tools/jdk25_unicode_corpus.tsv"
 unicode_corpus_bytes = 361
 unicode_corpus_min_bytes = 361
 unicode_corpus_max_bytes = 361
 unicode_corpus_record_count = 23
 unicode_corpus_sha256 = "4c8c30aa62cfcca25c0130eb646cab984a3f0b3de47323d4e017f6a5a40164f2"
-unicode_generated_source_path = "crates/scribium-engine/src/unicode_case.rs"
+unicode_generated_source_path = "crates/arkst-engine/src/unicode_case.rs"
 unicode_generated_source_bytes = 148058
 unicode_generated_source_min_bytes = 148058
 unicode_generated_source_max_bytes = 148058
@@ -133,8 +133,8 @@ locale_dump_helper_path = "tools/dump_jdk25_locale_data.java"
 locale_display_dump_helper_path = "tools/dump_jdk25_locale_display_data.java"
 locale_public_oracle_helper_path = "tools/dump_jdk25_locale_oracle.java"
 locale_generator_path = "tools/generate_jdk25_locale_data.py"
-locale_semantic_verifier_path = "crates/scribium-engine/src/locale.rs"
-locale_semantic_verifier_source_sha256 = "8e5832efd4adc0578a187d691864b4f9e4f894f8a7b3e7c667c821b7f02d85d1"
+locale_semantic_verifier_path = "crates/arkst-engine/src/locale.rs"
+locale_semantic_verifier_source_sha256 = "3b4a23a4b4d585adfd785533a62e853fb4948c6d82f34ac51ec91a2025a2337d"
 locale_semantic_verifier_test = "locale::tests::jdk25_locale_oracle_matches_candidate_graph_and_public_resolution"
 locale_semantic_result_id = "jdk25-cldr-locale-candidate-graph-v1"
 locale_timezone_source_member = "java.base/sun/util/cldr/CLDRBaseLocaleDataMetaInfo.java"
@@ -142,13 +142,13 @@ locale_available_order_path = "tools/jdk25_available_locale_order.tsv"
 locale_available_order_bytes = 67555
 locale_available_order_min_bytes = 67555
 locale_available_order_max_bytes = 67555
-locale_generated_rust_path = "crates/scribium-engine/src/locale_data.rs"
+locale_generated_rust_path = "crates/arkst-engine/src/locale_data.rs"
 locale_generated_rust_lines = 30814
 locale_generated_rust_min_bytes = 814472
 locale_generated_rust_max_bytes = 814472
 locale_generated_rust_limit_bytes = 1048576
 locale_artifact_size_policy = "exact"
-locale_compact_snapshot_path = "crates/scribium-engine/data/jdk25_locale_display.bin"
+locale_compact_snapshot_path = "crates/arkst-engine/data/jdk25_locale_display.bin"
 locale_compact_snapshot_min_bytes = 6549860
 locale_compact_snapshot_max_bytes = 6549860
 locale_compact_snapshot_size_policy = "exact"

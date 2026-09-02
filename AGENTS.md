@@ -1,8 +1,8 @@
-# Scribium — Agent Operations Guide
+# Arkst — Agent Operations Guide
 
 ## Project summary
 
-Scribium is an independent Apache-2.0 compiler/toolchain targeting complete
+Arkst is an independent Apache-2.0 compiler/toolchain targeting complete
 compatibility with the publicly documented Quarkdown document language and
 document-observable semantics of the tracked stable upstream release. Current
 verified compatibility is partial and evidence-based. Clean-room independence
@@ -34,7 +34,7 @@ accepted/superseding ADRs, architecture, product/domain specifications,
 engineering standard, roadmap, then current code/tests. `AGENTS.md` is an
 operational summary; it does not override the documents it references.
 
-There is no `SCRIBIUM_MASTER_EXECUTION_BRIEF.md` authority in this repository.
+There is no `ARKST_MASTER_EXECUTION_BRIEF.md` authority in this repository.
 Do not invent or preserve a phantom reference to it. Current physical code may
 be migration state and does not override accepted target architecture.
 
@@ -55,32 +55,32 @@ when crates have not yet been physically extracted. Do not infer target design
 from current file placement.
 
 - One authoritative `BlockParser` belongs to the Markdown frontend.
-- `scribium-markdown -> scribium-quarkdown`; the Quarkdown crate owns grammar
+- `arkst-markdown -> arkst-quarkdown`; the Quarkdown crate owns grammar
   only and does not depend on Markdown AST/parser types.
-- `scribium-project` owns the in-memory project model; host code owns native
+- `arkst-project` owns the in-memory project model; host code owns native
   filesystem/configuration/process composition.
-- `scribium-engine` owns semantic analysis/evaluation/normalization.
-- `scribium-compat` owns compatibility policy; current core compatibility
+- `arkst-engine` owns semantic analysis/evaluation/normalization.
+- `arkst-compat` owns compatibility policy; current core compatibility
   modules are migration state, not a new ownership decision.
-- `scribium-ir` owns one backend-neutral `IrDocument`; do not introduce HIR,
+- `arkst-ir` owns one backend-neutral `IrDocument`; do not introduce HIR,
   MIR, Typst-oriented IR, or backend-specific raw escape variants.
-- `scribium-typst` owns pure IR→Typst lowering and the platform-neutral
+- `arkst-typst` owns pure IR→Typst lowering and the platform-neutral
   backend contract; concrete execution belongs to the selected host adapter.
 - No core→Typst dependency, `RawTypst`, `BackendRaw`, or generic backend-code
   escape hatch.
-- `scribium-html` isolates HTML normalization and xberg; Pandoc is an optional
+- `arkst-html` isolates HTML normalization and xberg; Pandoc is an optional
   development/compatibility oracle only.
 - Platform-neutral compiler crates remain filesystem-, process-, and
   network-free and WASM-capable. Security capabilities require accepted host
   architecture.
-- Rushdown is Scribium's Markdown parsing substrate. Do not implement
+- Rushdown is Arkst's Markdown parsing substrate. Do not implement
   CommonMark/GFM parsing from scratch unless a later accepted architecture
   decision explicitly requires it.
 - Do not add Markdown or Quarkdown parser implementations back to
-  `scribium-core`.
-- Quarkdown extensions belong in `scribium-markdown` and
-  `scribium-quarkdown`, never in a Rushdown fork. Rushdown types must not
-  escape `scribium-markdown`.
+  `arkst-core`.
+- Quarkdown extensions belong in `arkst-markdown` and
+  `arkst-quarkdown`, never in a Rushdown fork. Rushdown types must not
+  escape `arkst-markdown`.
 - Any Rushdown version change requires parser, provenance, WASM, CommonMark/
   GFM, and safety validation; exact revisions are reviewed rather than
   automatically upgraded.
@@ -185,10 +185,10 @@ they are not a mandatory local baseline for every task:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cargo test -p scribium-core
-cargo run -p scribium-cli -- build examples/hello/main.qd
-cargo run -p scribium-cli -- build examples/hello/main.qd --format pdf
-cargo run -p scribium-cli -- inspect examples/hello/main.qd --emit typst
+cargo test -p arkst-core
+cargo run -p arkst-cli -- build examples/hello/main.qd
+cargo run -p arkst-cli -- build examples/hello/main.qd --format pdf
+cargo run -p arkst-cli -- inspect examples/hello/main.qd --emit typst
 ```
 
 Run relevant targeted checks proportional to risk and report checks that could

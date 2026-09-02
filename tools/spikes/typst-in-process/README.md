@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This spike investigates the feasibility of using the `typst` crate as an in-process backend for Scribium, instead of the current subprocess-based approach.
+This spike investigates the feasibility of using the `typst` crate as an in-process backend for Arkst, instead of the current subprocess-based approach.
 
 ## Used Typst Version
 

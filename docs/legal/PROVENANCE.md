@@ -1,7 +1,7 @@
-# PROVENANCE — Scribium
+# PROVENANCE — Arkst
 
 This document records the origin and legal provenance of all code, documentation,
-and assets in the Scribium repository.
+and assets in the Arkst repository.
 
 Machine-checkable generated/reference-data integrity is defined by
 [`reference-provenance.md`](../compatibility/reference-provenance.md) and
@@ -40,14 +40,14 @@ The active JVM compatibility contract is the exact Eclipse Temurin
 `25.0.4.1+1` release described in
 [`docs/compatibility/quarkdown/reference-jvm.toml`](../compatibility/quarkdown/reference-jvm.toml).
 Its Linux x64 archive is a pinned, generation-time input and is not bundled
-with Scribium or required by the runtime. The archive URL, byte size,
+with Arkst or required by the runtime. The archive URL, byte size,
 SHA-256, source/build revisions, Java output, helper hash, and generated
 artifact hash are recorded in that manifest.
 
-`crates/scribium-engine/src/unicode_case.rs` contains independently generated
+`crates/arkst-engine/src/unicode_case.rs` contains independently generated
 case-mapping values observed through the public Temurin/OpenJDK `Character`
 and `String` APIs. `tools/dump_jdk25_unicode_data.java`, the corpus, and the
-Python generator are independently authored Scribium tooling; no OpenJDK or
+Python generator are independently authored Arkst tooling; no OpenJDK or
 Quarkdown source or tests were copied. The generated values are compatibility
 data, not a redistribution of the JDK implementation. The helper's exact
 source hash and transient oracle hash are checked during regeneration.
@@ -58,13 +58,13 @@ and [GPLv2 with Classpath Exception](https://openjdk.org/legal/gplv2+ce.html).
 The Unicode 16.0-derived case-data provenance and applicable Unicode notice
 are covered by the [Unicode copyright and terms](https://www.unicode.org/copyright.html).
 These upstream notices apply to the generation sources/data provenance; the
-Scribium generator and runtime integration remain Apache-2.0 independently
+Arkst generator and runtime integration remain Apache-2.0 independently
 authored code.
 
 ## Reference locale snapshot
 
-`crates/scribium-engine/data/jdk25_locale_display.bin` and the locale records
-in `crates/scribium-engine/src/locale_data.rs` are generated compatibility
+`crates/arkst-engine/data/jdk25_locale_display.bin` and the locale records
+in `crates/arkst-engine/src/locale_data.rs` are generated compatibility
 data, not copied JDK implementation code. Their source is the exact Eclipse
 Temurin `25.0.4.1+1` Linux x64 archive pinned in
 [`reference-jvm.toml`](../compatibility/quarkdown/reference-jvm.toml):
@@ -101,14 +101,14 @@ exhaustively reconstructs every logical oracle row and `--check` compares both
 generated artifacts byte-for-byte.
 
 The JDK/CLDR-derived values remain subject to the OpenJDK GPLv2 with Classpath
-Exception and upstream CLDR/Unicode notice terms described above. Scribium's
+Exception and upstream CLDR/Unicode notice terms described above. Arkst's
 generator, compact-format parser, lookup algorithm, tests, and integration
 are independently authored Apache-2.0 code and are not redistributed OpenJDK
 implementation material.
 
 ## Trademarks
 
-- **Scribium** is a working name. A naming due diligence search must be
+- **Arkst** is a working name. A naming due diligence search must be
   completed before the first public release.
 - This project is not affiliated with, endorsed by, or sponsored by
   Typst GmbH or the Quarkdown project.

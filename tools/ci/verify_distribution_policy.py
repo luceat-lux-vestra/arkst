@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Scribium's fail-closed Cargo distribution policy."""
+"""Verify Arkst's fail-closed Cargo distribution policy."""
 
 from __future__ import annotations
 
@@ -297,11 +297,11 @@ def _validate_channels(policy: Mapping[str, Any]) -> None:
         raise DistributionPolicyError("policy.channels.github_release.publishable must be false")
     if (
         _expect_string(github["package"], "policy.channels.github_release.package")
-        != "scribium-cli"
+        != "arkst-cli"
     ):
-        raise DistributionPolicyError("policy.channels.github_release.package must be scribium-cli")
-    if _expect_string(github["binary"], "policy.channels.github_release.binary") != "scribium":
-        raise DistributionPolicyError("policy.channels.github_release.binary must be scribium")
+        raise DistributionPolicyError("policy.channels.github_release.package must be arkst-cli")
+    if _expect_string(github["binary"], "policy.channels.github_release.binary") != "arkst":
+        raise DistributionPolicyError("policy.channels.github_release.binary must be arkst")
     if _expect_status(
         github["distribution_status"],
         {"not-intended"},
@@ -384,10 +384,10 @@ def _validate_policy_shape(policy: Mapping[str, Any]) -> list[Mapping[str, Any]]
         {"package", "binary", "cargo_install", "github_release", "distribution_status"},
         "policy.cli",
     )
-    if _expect_string(cli["package"], "policy.cli.package") != "scribium-cli":
-        raise DistributionPolicyError("policy.cli.package must be scribium-cli")
-    if _expect_string(cli["binary"], "policy.cli.binary") != "scribium":
-        raise DistributionPolicyError("policy.cli.binary must be scribium")
+    if _expect_string(cli["package"], "policy.cli.package") != "arkst-cli":
+        raise DistributionPolicyError("policy.cli.package must be arkst-cli")
+    if _expect_string(cli["binary"], "policy.cli.binary") != "arkst":
+        raise DistributionPolicyError("policy.cli.binary must be arkst")
     if _expect_bool(cli["cargo_install"], "policy.cli.cargo_install"):
         raise DistributionPolicyError("policy.cli.cargo_install must be false")
     if _expect_bool(cli["github_release"], "policy.cli.github_release"):
@@ -546,8 +546,8 @@ def _validate_package_entry(
         raise DistributionPolicyError(f"{context}.consumer must be repository-tooling")
     if distribution == "test-support" and consumer != "test-only":
         raise DistributionPolicyError(f"{context}.consumer must be test-only")
-    if distribution == "cli" and (consumer != "user-facing-cli" or binary_targets != ["scribium"]):
-        raise DistributionPolicyError("policy cli package must identify the scribium binary")
+    if distribution == "cli" and (consumer != "user-facing-cli" or binary_targets != ["arkst"]):
+        raise DistributionPolicyError("policy cli package must identify the arkst binary")
 
 
 def verify_policy(root: Path, policy_path: Path, metadata: Mapping[str, Any]) -> None:
@@ -572,9 +572,9 @@ def verify_policy(root: Path, policy_path: Path, metadata: Mapping[str, Any]) ->
         name = entry["name"]
         _validate_package_entry(root, entry, package_map[name], metadata_names)
 
-    cli = next(entry for entry in entries if entry["name"] == "scribium-cli")
-    if cli["binary_targets"] != ["scribium"]:
-        raise DistributionPolicyError("policy cli package must expose exactly the scribium binary")
+    cli = next(entry for entry in entries if entry["name"] == "arkst-cli")
+    if cli["binary_targets"] != ["arkst"]:
+        raise DistributionPolicyError("policy cli package must expose exactly the arkst binary")
     if not any(entry["distribution"] == "internal-tooling" for entry in entries):
         raise DistributionPolicyError("policy must classify repository tooling explicitly")
 

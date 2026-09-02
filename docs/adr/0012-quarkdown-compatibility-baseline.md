@@ -2,7 +2,7 @@
 
 - **Status:** Superseded
 - **Date:** 2026-08-08
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #25
 - **Superseded by:** ADR-0016
 
@@ -32,7 +32,7 @@ further syntax and functionality, including:
 
 The current v2.5.0 documentation (public wiki, accessed 2026-08-08)
 describes the same basic dot-prefixed call + brace-argument model on which
-Scribium's existing parser subset is based. Scribium's earlier compatibility
+Arkst's existing parser subset is based. Arkst's earlier compatibility
 baseline was 0.9.x; no claim is made that the upstream grammar was verified
 to be identical in every release in between. Keeping an ancient version as
 the reference baseline nonetheless makes the reference for future
@@ -47,9 +47,9 @@ levels) remains governed by ADR-0007.
 
 Adopt the following compatibility policy:
 
-1. The reference baseline for Scribium's Quarkdown compatibility is
+1. The reference baseline for Arkst's Quarkdown compatibility is
    **Quarkdown v2.5.0**.
-2. Scribium's compatibility contract is the **documented subset**: only the
+2. Arkst's compatibility contract is the **documented subset**: only the
    features explicitly listed in the compatibility matrix
    (`docs/compatibility/quarkdown/README.md`) and verified by conformance
    tests are part of the contract.
@@ -106,7 +106,7 @@ from claiming "everything".
 
 ### Negative
 
-- Readers may misunderstand the reference as "Scribium supports all of
+- Readers may misunderstand the reference as "Arkst supports all of
   Quarkdown v2.5.0". The compatibility document must therefore emphasize the
   documented-subset model and the "not claimed" caveat for any feature not
   listed in the matrix.

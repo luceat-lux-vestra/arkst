@@ -1,8 +1,8 @@
 # Merge-gate policy
 
-Scribium's canonical PR gate inventory is `.github/gate-policy.toml`. The policy is executable: `tools/ci/verify_gate_policy.py` compares every PR-time workflow job against the inventory, expands matrix job names into exact status contexts, rejects suppression of required producers, and can compare the accepted required-context set with the live `Protect main` ruleset.
+Arkst's canonical PR gate inventory is `.github/gate-policy.toml`. The policy is executable: `tools/ci/verify_gate_policy.py` compares every PR-time workflow job against the inventory, expands matrix job names into exact status contexts, rejects suppression of required producers, and can compare the accepted required-context set with the live `Protect main` ruleset.
 
-The verifier runs inside the already-required `fmt` context. Scribium therefore does not add a second required status context merely to check the first set of contexts; a renamed, removed, newly unclassified, path-filtered, or job-conditioned required producer makes `fmt` fail.
+The verifier runs inside the already-required `fmt` context. Arkst therefore does not add a second required status context merely to check the first set of contexts; a renamed, removed, newly unclassified, path-filtered, or job-conditioned required producer makes `fmt` fail.
 
 ## Required contexts
 
@@ -33,7 +33,7 @@ The required `compatibility` context always exists. Its expensive campaign uses 
 
 Paths are classified as `run` or `skip`. `run` is evaluated first so compatibility documentation and workflow paths can override broader documentation or `.github` skip classes. Any changed path that matches neither class fails the required `compatibility` job. New path classes therefore require an explicit policy decision instead of silently receiving a green no-op.
 
-The `run` classes deliberately include all crates, tools, compatibility tests/corpora, fixtures, examples, compatibility documentation, and the policy/workflows that govern compatibility. This includes the JDK25 locale/unicode generators, oracle/reference data, `scribium-engine` locale semantics, and related #172/#173 assets.
+The `run` classes deliberately include all crates, tools, compatibility tests/corpora, fixtures, examples, compatibility documentation, and the policy/workflows that govern compatibility. This includes the JDK25 locale/unicode generators, oracle/reference data, `arkst-engine` locale semantics, and related #172/#173 assets.
 
 ## Live ruleset evidence
 

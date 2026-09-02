@@ -7,12 +7,12 @@ Status: complete audit artifact for Issue [#152](https://github.com/luceat-lux-v
 | Item | Pinned value |
 |---|---|
 | Quarkdown target | [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e) (v2.5.1) |
-| Scribium audit base | [`1bd8cda073be4194ffce8e9e58ef4cfc4d742be1`](https://github.com/luceat-lux-vestra/scribium/tree/1bd8cda073be4194ffce8e9e58ef4cfc4d742be1), the squash merge of audited PR #171 / completed Issue #151 |
+| Arkst audit base | [`1bd8cda073be4194ffce8e9e58ef4cfc4d742be1`](https://github.com/luceat-lux-vestra/scribium/tree/1bd8cda073be4194ffce8e9e58ef4cfc4d742be1), the squash merge of audited PR #171 / completed Issue #151 |
 | Parent tracker | [#147](https://github.com/luceat-lux-vestra/scribium/issues/147) |
 | Audit manifest | [`DOCUMENT_STATE_AUDIT_MANIFEST.tsv`](DOCUMENT_STATE_AUDIT_MANIFEST.tsv) |
 
-The audit follows Scribium's clean-room compatibility policy. Pinned upstream
-source, public documentation, independent fixtures, and current Scribium
+The audit follows Arkst's clean-room compatibility policy. Pinned upstream
+source, public documentation, independent fixtures, and current Arkst
 behavior are evidence; none is silently substituted for another. Upstream
 source was inspected at the full target SHA. Upstream tests were used as
 behavioral evidence only and were not copied or translated.
@@ -24,7 +24,7 @@ The canonical #147 status vocabulary is used exactly:
 ## 2. Inventory methodology
 
 The pinned source sweep started at public exposure mechanisms rather than at
-Scribium's existing builtin table:
+Arkst's existing builtin table:
 
 1. `@QFunction`, `@Name`, `@LikelyNamed`, `@LikelyBody`, `@Body`, and
    `@Injected` declarations in the stdlib;
@@ -36,17 +36,17 @@ Scribium's existing builtin table:
 5. default context creation, scope/subdocument context sharing, argument
    binding, body fallback, and function-call failure paths;
 6. the #151 162-name manifest as a cross-check only; and
-7. current Scribium evaluator, IR, serde tests, fixtures, renderer, and
+7. current Arkst evaluator, IR, serde tests, fixtures, renderer, and
    front-matter conversion.
 
 The resulting manifest contains 43 discovered public names: 8 owned by #152,
 33 retained as explicit handoffs to #153, #154, or #155, and 2 retained as
-canonical #151 ownership handoffs. A name is not omitted because Scribium does
+canonical #151 ownership handoffs. A name is not omitted because Arkst does
 not implement it. The manifest is an offline completeness artifact and is checked by
-[`document_state_audit.rs`](../../../crates/scribium-core/tests/document_state_audit.rs).
+[`document_state_audit.rs`](../../../crates/arkst-core/tests/document_state_audit.rs).
 
 The sweep found no upstream front-matter parser or front-matter metadata API
-at the pinned source. The current Scribium front-matter channel is therefore
+at the pinned source. The current Arkst front-matter channel is therefore
 recorded as a separate boundary, not inferred to be Quarkdown `DocumentInfo`.
 
 ## 3. Ownership boundary
@@ -70,7 +70,7 @@ The sweep saw `numbering`, `nonumbering`, `font`, `paragraphstyle`,
 `lastheading`, `autopagebreak`, `noautopagebreak`, `marker`, `navigation`,
 `tableofcontents`, and `slides`. These are document configuration or layout
 state, not #152 metadata semantics. `captionposition` has an existing bounded
-Scribium slice, but remains cross-owned and is not assigned a #152 status.
+Arkst slice, but remains cross-owned and is not assigned a #152 status.
 
 ### #154: content/media and target-facing output
 
@@ -96,7 +96,7 @@ are intentionally not audited by #152. The downstream handoff rows use
 The following signatures are the public shape at the pinned source. Binding
 and conversion details are linked to the canonical [#149 value-model audit](VALUE_MODEL_AUDIT.md); they are not redefined here.
 
-| Surface | Pinned signature and identity | Initial state | Mutation/return contract | Scribium boundary | Status |
+| Surface | Pinned signature and identity | Initial state | Mutation/return contract | Arkst boundary | Status |
 |---|---|---|---|---|---|
 | `.doctype` | `doctype(type: DocumentType? = null)`; no alias | `PLAIN`; getter returns lowercase enum name | Getter returns text. Setter replaces the type and returns `VoidValue`; upstream enum validation occurs before assignment | Typed evaluator state and IR snapshot; body fallback and renderer effects are not equivalent | `PARTIAL` |
 | `.docname` | `docname(name: String? = null)`; no alias | Absent name is observable as `""` | Getter returns name or empty text. Setter rejects blank text, replaces the name, and returns `VoidValue` | Current state uses `String` with empty absence; source-backed body fallback reaches the shared String target boundary without evaluating parsed body nodes | `PARTIAL` |
@@ -120,7 +120,7 @@ Pinned `DocumentInfo` starts with `type=PLAIN` and nullable `name` and
 respective fields and have no output value. `.docname` additionally rejects
 blank text.
 
-Scribium's `DocumentState` has one evaluator-owned state object with `String`
+Arkst's `DocumentState` has one evaluator-owned state object with `String`
 name/description, a typed document type, and a final immutable snapshot into
 `IrDocumentState`. The absence distinction for name/description is intentionally
 represented by the documented empty getter contract rather than an IR option.
@@ -132,7 +132,7 @@ remain partial.
 
 “Document title” is not a separate pinned `DocumentInfo` field. The upstream
 `.htmloptions(title=...)` value controls an HTML `<title>` and is cross-owned
-by #154. Scribium front matter `title` is likewise a separate metadata/output
+by #154. Arkst front matter `title` is likewise a separate metadata/output
 channel; it must not be used as proof of `.docname` equivalence.
 
 ### Author family
@@ -144,10 +144,10 @@ string map. Repeated singular calls preserve duplicate author records. A
 dictionary cannot preserve duplicate keys, and the upstream dictionary builder
 replaces a repeated key in its original ordered slot.
 
-Scribium's evaluator has matching append behavior for valid bounded values,
+Arkst's evaluator has matching append behavior for valid bounded values,
 ordered author/info storage, a typed IR snapshot, and mixed singular/plural
 state sharing. It validates all candidates before committing and restores the
-pre-call state on failure. That is current Scribium behavior and test
+pre-call state on failure. That is current Arkst behavior and test
 evidence, not a claim that upstream has the same transaction boundary for
 nested evaluation. The remaining conversion/body gap is tracked under #149
 follow-ups #165, #166, and #167.
@@ -160,7 +160,7 @@ whole list; the pinned implementation does not deduplicate. Repeated calls
 therefore discard the old list, while duplicate values within the new list
 remain observable.
 
-Scribium's bounded implementation preserves these replacement, ordering, and
+Arkst's bounded implementation preserves these replacement, ordering, and
 duplicate semantics in `IrDocumentState.keywords`. It validates the complete
 candidate list before one state commit. #166 now routes a source-backed body
 through the shared iterable target conversion without reconstructing it from
@@ -197,7 +197,7 @@ missing table/locale/key entries fail as well. This cross-reference proves the
 resource-seeded initial state without reopening #151's canonical semantic
 classification.
 
-Scribium deliberately uses a deterministic checked-in locale snapshot rather
+Arkst deliberately uses a deterministic checked-in locale snapshot rather
 than an OS/JVM dependency. Issue #173 generates the snapshot from
 `java.util.Locale.getAvailableLocales()` and the pinned `JVMLocale` getters
 under Eclipse Temurin `25.0.4.1+1` with `java.locale.providers=CLDR`.
@@ -222,7 +222,7 @@ private-use subtags remain part of the result.
 The complete logical display oracle has 453,459 JDK25 CLDR/FALLBACK-root
 records. Semantic fallback-delta compaction retains 267,017 genuine
 overrides in the checked-in
-`crates/scribium-engine/data/jdk25_locale_display.bin` snapshot (format 1):
+`crates/arkst-engine/data/jdk25_locale_display.bin` snapshot (format 1):
 320 profiles, 2,525 keys, 178,930 interned values, 3,682,380 raw string-pool
 bytes, 2,140,296 numeric-index bytes, and 6,549,860 total bytes. The generated
 Rust metadata is bounded below 1 MiB and performs static binary-search lookup;
@@ -254,7 +254,7 @@ every call. An empty call is consequently an explicit empty theme, not a
 getter and not absence. Theme existence is checked later by rendering code in
 upstream, outside this state contract.
 
-Scribium records `Option<IrDocumentTheme>` so “never set” and “set to empty”
+Arkst records `Option<IrDocumentTheme>` so “never set” and “set to empty”
 survive the IR boundary. Supplied strings are lowercased and each successful
 call replaces the whole theme. #166 supplies the source-backed raw-body
 fallback to the bounded theme String target; theme registry/output
@@ -262,14 +262,14 @@ consumption remain outside the bounded implementation.
 
 ## 6. Initial/default state
 
-| State item | Pinned upstream initial value | Scribium `DocumentState` / IR value | Evidence limit |
+| State item | Pinned upstream initial value | Arkst `DocumentState` / IR value | Evidence limit |
 |---|---|---|---|
 | type | `PLAIN` | `IrDocumentType::Plain` | State semantics only; layout/rendering is #153 |
 | name | nullable; getter `""` | `String::new()`; getter `""` | Absence is not preserved as an option because the observable getter collapses it |
 | description | nullable; getter `""` | `String::new()`; getter `""` | Same collapsed getter contract |
 | authors | empty list | empty `Vec` | Ordered records and nested info survive IR |
 | keywords | empty list | empty `Vec` | Ordered duplicates are retained |
-| locale | null; getter `""` | `None`; getter `""` | Locale universe is bounded in Scribium |
+| locale | null; getter `""` | `None`; getter `""` | Locale universe is bounded in Arkst |
 | theme | null; no getter | `None`; first empty setter becomes `Some(empty)` | Option distinction is serialized |
 | localization tables after stdlib registration | seeded `std` table loaded from `/lib/localization.qd`; not empty | no corresponding state | #151-owned cross-reference; status is `NOT_APPLICABLE` in the #152 manifest |
 
@@ -281,18 +281,18 @@ effects:
 | Family | Mutation | Validation point | Partial mutation evidence | Return |
 |---|---|---|---|---|
 | type/name/description | replace | enum/name conversion; blank name rejected | Pinned setters assign only after their local validation; no generic transaction around a larger document evaluation is evidenced | Getter text or `VoidValue` setter |
-| singular authors | append | author string conversion | Current Scribium validates before append; pinned helper directly assigns the copied `DocumentInfo` | First name or `VoidValue` |
-| plural authors | append converted map entries | locale-independent nested map/string validation | Current Scribium validates all entries before one append; repeated dictionary keys are already collapsed by dictionary construction | Ordered dictionary or `VoidValue` |
-| keywords | replace | iterable element conversion | Current Scribium builds the replacement list before assignment; duplicates/order preserved | Ordered strings or `VoidValue` |
-| locale | replace | name/tag lookup | Pinned assignment follows a successful lookup; current Scribium restores old state if a later nested evaluation fails | Localized name or `VoidValue` |
-| theme | replace full object | nullable scalar conversion; upstream render-time existence check | Current Scribium commits one whole object and restores on failure | `VoidValue`; no getter |
+| singular authors | append | author string conversion | Current Arkst validates before append; pinned helper directly assigns the copied `DocumentInfo` | First name or `VoidValue` |
+| plural authors | append converted map entries | locale-independent nested map/string validation | Current Arkst validates all entries before one append; repeated dictionary keys are already collapsed by dictionary construction | Ordered dictionary or `VoidValue` |
+| keywords | replace | iterable element conversion | Current Arkst builds the replacement list before assignment; duplicates/order preserved | Ordered strings or `VoidValue` |
+| locale | replace | name/tag lookup | Pinned assignment follows a successful lookup; current Arkst restores old state if a later nested evaluation fails | Localized name or `VoidValue` |
+| theme | replace full object | nullable scalar conversion; upstream render-time existence check | Current Arkst commits one whole object and restores on failure | `VoidValue`; no getter |
 | localization table (#151) | create or merge; stdlib starts with the seeded `std` table | table locale/value conversion and duplicate-name rule | Upstream duplicate-table check and table build precede table assignment; no cross-call transaction is evidenced | `VoidValue` |
 | localize (#151) | none | locale/table/key lookup | No mutation | Localized string |
 
 The pinned `FunctionCall.execute` validates, binds, and invokes without an
 observable `DocumentInfo` snapshot/restore wrapper. Consequently, the audit
 does not claim upstream atomic rollback when a nested document-state call has
-already mutated state and a later expression fails. Current Scribium has
+already mutated state and a later expression fails. Current Arkst has
 explicit state snapshots and tests for rollback, which is a stronger local
 invariant; equivalence of that nested failure boundary remains limited by
 upstream evidence and is covered by #167's generic atomicity work.
@@ -306,35 +306,35 @@ The generic callable, lazy-body, scope, and lookup rules remain canonical in
 - upstream `ScopeContext` shares the parent `documentInfo`, while a
   `SubdocumentContext` starts from the parent value and keeps assignments local;
   localization tables are shared by the subdocument context;
-- current Scribium callables share exactly one evaluator-owned `DocumentState`
+- current Arkst callables share exactly one evaluator-owned `DocumentState`
   through the documented explicit state exception; nested writes are visible
   after return and to sibling calls, and the final IR snapshot observes the
   post-evaluation state on success;
-- current Scribium's document-specific dispatch preserves native-first
+- current Arkst's document-specific dispatch preserves native-first
   behavior for `.docname`, `.docdescription`, and `.doctype`, while
   source-defined `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, and
   `.theme` may shadow the native handler when a source definition exists; and
 - the upstream declarations do not add a separate document-state precedence
   rule. Any general source/native lookup conclusion is therefore owned by #150;
-  this document records only the current Scribium consequence and does not
+  this document records only the current Arkst consequence and does not
   duplicate or broaden #150's model.
 
 Nested argument evaluation is especially important: upstream regular-body
 fallback can evaluate or re-lex content according to the target type. #166
 retains the lossless source-backed body form for the bounded affected setters
 and selects conversion before parsed-body evaluation. The current nested
-rollback witness is therefore evidence of Scribium's bounded state guarantee,
+rollback witness is therefore evidence of Arkst's bounded state guarantee,
 not evidence of complete upstream equivalence.
 
-## 9. Current Scribium architecture mapping
+## 9. Current Arkst architecture mapping
 
 The implementation retains the accepted architecture:
 
-- `scribium-engine` owns one evaluator `DocumentState` and performs state
+- `arkst-engine` owns one evaluator `DocumentState` and performs state
   mutation;
-- `scribium-ir` owns one backend-neutral immutable `IrDocumentState` inside
+- `arkst-ir` owns one backend-neutral immutable `IrDocumentState` inside
   `IrDocument`; and
-- `scribium-typst` does not consume these metadata fields as rendered document
+- `arkst-typst` does not consume these metadata fields as rendered document
   policy. State semantics and renderer support are consequently separate.
 
 No second state subsystem, generic metadata framework, Typst-specific state
@@ -353,7 +353,7 @@ round-trips, old state with omitted fields, ordered author/info records,
 duplicate keywords, `None` locale, and the distinction between absent theme and
 explicit empty theme.
 
-Localization tables are not persisted because no Scribium implementation owns
+Localization tables are not persisted because no Arkst implementation owns
 them. The audit does not add a speculative field or generic serialization
 framework. Any future localization representation is a #151/#156
 reconciliation concern rather than a hidden #152 document-only change.
@@ -366,7 +366,7 @@ the eight state setters can be `PARTIAL` at the evaluator/IR boundary without
 being promoted to `SUPPORTED_END_TO_END`. Conversely, renderer output is not
 used to excuse incorrect getter, setter, ordering, or rollback semantics.
 
-Scribium front matter is parsed into `IrMetadata` defaults and overrides for
+Arkst front matter is parsed into `IrMetadata` defaults and overrides for
 title/author/date/custom fields. It is not merged into evaluator
 `DocumentState`, and no pinned upstream front-matter API was found in the
 sweep. The audit therefore makes no precedence or merge claim between front
@@ -408,14 +408,14 @@ semantics. The 2 localization rows are canonical #151 handoffs and are also
 | Previous inventory | [PR #171](https://github.com/luceat-lux-vestra/scribium/pull/171), merge base `1bd8cda` | The 162-name manifest is a cross-check seed; this independent source sweep adds the localization/state distinction and does not inherit its semantics blindly |
 
 Relevant current evidence includes
-[`evaluator.rs`](../../../crates/scribium-engine/src/evaluator.rs),
-[`locale.rs`](../../../crates/scribium-engine/src/locale.rs),
-[`locale_data.rs`](../../../crates/scribium-engine/src/locale_data.rs),
+[`evaluator.rs`](../../../crates/arkst-engine/src/evaluator.rs),
+[`locale.rs`](../../../crates/arkst-engine/src/locale.rs),
+[`locale_data.rs`](../../../crates/arkst-engine/src/locale_data.rs),
 [`generate_jdk25_locale_data.py`](../../../tools/generate_jdk25_locale_data.py),
-[`scribium-ir`](../../../crates/scribium-ir/src/lib.rs), the core document-state
+[`arkst-ir`](../../../crates/arkst-ir/src/lib.rs), the core document-state
 tests, and the independent author/keyword/locale/theme fixtures. The focused
 Issue #152 witnesses are in
-[`document_state_audit.rs`](../../../crates/scribium-core/tests/document_state_audit.rs).
+[`document_state_audit.rs`](../../../crates/arkst-core/tests/document_state_audit.rs).
 
 ## 14. Residual gaps, follow-ups, and completion statistics
 

@@ -1,8 +1,8 @@
 # Quarkdown Conformance Corpus
 
-This directory contains independently authored conformance cases for Scribium's
+This directory contains independently authored conformance cases for Arkst's
 Quarkdown compatibility implementation. The corpus is an executable compatibility
-claim: `scribium-test-support` loads every case from the workspace test suite and
+claim: `arkst-test-support` loads every case from the workspace test suite and
 enforces the declared `compatibility_level`.
 
 The corpus is intentionally bounded. Its 18 cases provide independent parser,
@@ -67,7 +67,7 @@ must equal `id`, and metadata IDs must be unique across the corpus.
 | `Semantically supported` | No parser, evaluation, or lowering diagnostic; exact `IrDocument` equality against independently authored `expected/ir.json`. | `ir.json` |
 | `Output-equivalent` | The semantic contract plus exact pure Typst lowering equality. No Typst subprocess runs. | `ir.json`, `typst.typ` |
 | `Unsupported` | Exact diagnostic projection (code, severity, primary span, secondary spans), including a deliberate non-parser error. | `diagnostics.json` |
-| `Known divergence` | A non-empty `known_divergence` explanation and exact Scribium behavior assertion. It is not a verification bypass. | `ir.json` |
+| `Known divergence` | A non-empty `known_divergence` explanation and exact Arkst behavior assertion. It is not a verification bypass. | `ir.json` |
 
 Semantic IR goldens preserve node kinds, inline structure, and source spans. They
 must not be replaced with flattened text, and there is no automatic golden-update
@@ -95,11 +95,11 @@ the brittle message text:
 3. Write `input.qd` with an independently authored Quarkdown input
 4. **Do not** copy inputs from Quarkdown test suites or documentation examples
 5. Add the required expected artifact for the declared level
-6. Run `cargo test -p scribium-test-support` to verify the case executes
+6. Run `cargo test -p arkst-test-support` to verify the case executes
 
 ## Clean-Room Policy
 
-All test inputs in this corpus are **independently authored** by Scribium contributors
+All test inputs in this corpus are **independently authored** by Arkst contributors
 based on public specification documentation only. No inputs are copied from:
 - Quarkdown source code
 - Quarkdown test fixtures

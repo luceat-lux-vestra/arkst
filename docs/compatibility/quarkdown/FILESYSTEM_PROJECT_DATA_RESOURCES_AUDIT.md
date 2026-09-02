@@ -2,7 +2,7 @@
 
 ## Audit identity and scope
 
-- **Scribium audit base:** `1a1fc7b1a978baa23d5eb0bfbef83ec49af5253f`
+- **Arkst audit base:** `1a1fc7b1a978baa23d5eb0bfbef83ec49af5253f`
 - **Quarkdown target:** v2.5.1 at `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - **Authority:** the machine-checkable [filesystem/project/data/resource manifest](FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv)
 - **Parent tracker:** [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
@@ -92,7 +92,7 @@ paths are therefore source/context-relative in upstream; project/global
 permission determines whether a resolved host path is readable. Remote media
 is a separate URL/media path and is gated by network permission.
 
-Scribium's current model is one in-memory logical resource model:
+Arkst's current model is one in-memory logical resource model:
 
 1. The host CLI establishes an explicit project root and builds a
    `VirtualProject` containing sorted source and asset stores.
@@ -122,7 +122,7 @@ evaluator support.
 
 The audit distinguishes the following bases and identities:
 
-| Concept | Current Scribium meaning |
+| Concept | Current Arkst meaning |
 |---|---|
 | Resource root / project root | The logical root of `VirtualProject`; no host path is exposed to core. |
 | Source root | The parent of the calling source's canonical logical path. |
@@ -148,9 +148,9 @@ symlink escape. The project provider returns typed boundary/not-found/invalid
 reference errors, while the subprocess adapter rejects canonical/symlink paths
 outside its explicit project root.
 
-The audit does not claim that upstream and Scribium have identical path
+The audit does not claim that upstream and Arkst have identical path
 contracts: upstream can resolve absolute/global paths under permission rules,
-and upstream host path behavior has platform-specific details. Scribium's
+and upstream host path behavior has platform-specific details. Arkst's
 fail-closed logical policy is an intentional architecture boundary, so rows
 requiring full v2.5.1 absolute/global semantics remain partial or unsupported.
 Directory traversal, metadata sorting, filename identity, data-format errors,
@@ -166,10 +166,10 @@ host; they remain bounded follow-up work.
   but only after the evaluator boundary and with an explicit project root. This
   is backend execution state, not language resource identity.
 - `.env` is an upstream process-environment surface and is currently
-  unsupported in Scribium. It is assigned to #190 so future behavior must use
+  unsupported in Arkst. It is assigned to #190 so future behavior must use
   explicit capability/injection or deterministic denial.
 - Remote image/media and font URLs are real upstream network surfaces. The
-  current Scribium policy rejects URI references and does not fetch them. The
+  current Arkst policy rejects URI references and does not fetch them. The
   resource boundary is recorded here and media/layout implementation remains
   with #182/#175.
 - No public current-date/current-time QFunction was found in the pinned
@@ -239,7 +239,7 @@ or network access.
   completed cross-audit reconciliation record; implementation sequencing now
   follows its canonical dependency graph.
 
-The [offline guard](../../../crates/scribium-core/tests/filesystem_project_data_resources_audit.rs)
+The [offline guard](../../../crates/arkst-core/tests/filesystem_project_data_resources_audit.rs)
 rejects unpinned provenance, missing schema/evidence, contradictory support
 claims, unowned actionable gaps, omitted network/WASM/boundary fields, and
 placeholder evidence without cloning or fetching Quarkdown.

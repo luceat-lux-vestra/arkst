@@ -15,9 +15,9 @@ collector acquired a second state machine that replays list, quote, fence, and
 leaf rules while the real parser still owns those rules elsewhere.
 
 The physical migration should move the Markdown frontend to the target
-`scribium-markdown` crate, with block parsing behind one authoritative
+`arkst-markdown` crate, with block parsing behind one authoritative
 `BlockParser` state. Quarkdown-specific grammar belongs in the target
-`scribium-quarkdown` crate, which `scribium-markdown` may call. Blockquote
+`arkst-quarkdown` crate, which `arkst-markdown` may call. Blockquote
 remains out of the foundation implementation; it is a later container
 migration using the same state machinery. PR #46 defines this ownership but
 does not physically create or move either crate.
@@ -25,7 +25,7 @@ does not physically create or move either crate.
 ## Current pipeline
 
 The current core entry point calls `syntax::markdown::parse_with_diagnostics`,
-then `ast_to_ir`, then the evaluator (`crates/scribium-core/src/lib.rs:39-87`).
+then `ast_to_ir`, then the evaluator (`crates/arkst-core/src/lib.rs:39-87`).
 The Markdown module has one large parser file:
 
 ```text
@@ -100,8 +100,8 @@ scanner/classifier as the first lexical unit.
 
 ### Frontend crate ownership
 
-The target frontend split is `scribium-markdown` for the Markdown frontend and
-`scribium-quarkdown` for Quarkdown-specific grammar. The Markdown crate owns
+The target frontend split is `arkst-markdown` for the Markdown frontend and
+`arkst-quarkdown` for Quarkdown-specific grammar. The Markdown crate owns
 line scanning, `LineView`, `BlockParser`, container lifecycle, Markdown
 recognizers, inline parsing, front-matter framing, block-layer recovery, and
 the frontend AST. The Quarkdown crate owns call and argument grammar only; it
@@ -110,7 +110,7 @@ the post-merge physical migration.
 
 ### Lexer/tokenizer terminology
 
-Choose Option B: the physical-line scanner and classifier are Scribium's
+Choose Option B: the physical-line scanner and classifier are Arkst's
 Markdown frontend lexical layer. Do not add a token stream merely to satisfy
 the current architecture diagram. The accepted architecture document replaces
 the nonexistent generic lexer box with `physical-line scanner/classifier`,
@@ -118,8 +118,8 @@ then `BlockParser`.
 
 ### Markdown/Quarkdown boundary
 
-`scribium-markdown` owns line consumption, containers, leaves, interruption,
-continuation, spans, and recovery. `scribium-quarkdown` owns only dot-call
+`arkst-markdown` owns line consumption, containers, leaves, interruption,
+continuation, spans, and recovery. `arkst-quarkdown` owns only dot-call
 names, arguments, scalar/content classification, and grammar errors. The
 first-party frontend integration uses enum/function dispatch
 (`BlockStart`), not a public plugin trait.
@@ -127,15 +127,15 @@ first-party frontend integration uses enum/function dispatch
 ## Target dependency direction
 
 ```text
-scribium-markdown
+arkst-markdown
         |
         v
-scribium-quarkdown
+arkst-quarkdown
 ```
 
-`scribium-markdown` depends on `scribium-quarkdown`, may invoke it for block or
+`arkst-markdown` depends on `arkst-quarkdown`, may invoke it for block or
 inline calls, and normalizes the result into its frontend AST.
-`scribium-quarkdown` must never depend on Markdown parser or AST types. Any
+`arkst-quarkdown` must never depend on Markdown parser or AST types. Any
 shared source/span dependency is a lower-level owner whose final crate
 boundary is resolved separately.
 
@@ -146,7 +146,7 @@ belong only to `BlockParser`.
 ## Target module structure
 
 ```text
-crates/scribium-markdown/src/
+crates/arkst-markdown/src/
 ├── lib.rs
 ├── ast.rs
 ├── block/

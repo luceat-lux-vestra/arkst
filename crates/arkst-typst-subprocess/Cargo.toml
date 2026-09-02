@@ -1,0 +1,19 @@
+[package]
+name = "arkst-typst-subprocess"
+version = "0.0.1"
+publish = false
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Native Typst CLI subprocess adapter for Arkst"
+
+[dependencies]
+arkst-project.workspace = true
+arkst-typst.workspace = true
+tempfile.workspace = true
+typst-syntax.workspace = true
+
+[dev-dependencies]
+arkst-core.workspace = true

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-19
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #24
 - **Related ADRs:** 0005, 0008, 0015
 
@@ -11,16 +11,16 @@
 The native Typst subprocess backend originally wrote generated source to an
 unrelated temporary `input.typ`. That preserved output isolation, but made a
 future relative resource reference depend on the implementation's temporary
-directory rather than on the Scribium source document.
+directory rather than on the Arkst source document.
 
-Scribium already has a logical, filesystem-free `VirtualProject`. Native
+Arkst already has a logical, filesystem-free `VirtualProject`. Native
 execution additionally needs a bounded physical read capability while keeping
 generated source and output isolated from the source tree.
 
 ## Decision
 
 `TypstInput.entry_path` means the normalized, project-root-relative logical path
-of the Scribium source entry. For example, when the explicit project root is
+of the Arkst source entry. For example, when the explicit project root is
 `/work/docs` and the entry is `/work/docs/manual/chapter1/main.qd`, the backend
 entry path is `manual/chapter1/main.qd`.
 
@@ -53,7 +53,7 @@ For a context-backed compile, the backend:
      <temporary-mirror>/<logical-entry>.typ <temporary-build>/output.pdf
    ```
 
-Relative resource paths are interpreted in Scribium source/project context,
+Relative resource paths are interpreted in Arkst source/project context,
 not relative to an implementation-specific temporary build directory. The
 mirror is a read-context snapshot; the original project tree remains
 untouched. The PDF is read from the separate temporary output location and the
@@ -117,7 +117,7 @@ an in-process Typst backend remain separate work.
 ## Follow-up work
 
 - Add resource-aware Markdown and Quarkdown features on this contract.
-- Revisit CLI project-root discovery when `scribium.toml` configuration is
+- Revisit CLI project-root discovery when `arkst.toml` configuration is
   implemented.
 - Reassess staging cost and a more capable native resource adapter only with a
   separate architecture and security review.
@@ -131,8 +131,8 @@ image resolution, project-boundary rejection, symlink handling, and temporary
 Typst mirror separation are covered by the backend integration tests.
 
 Quarkdown `.read`, `.json`, and `.include` use a separate semantic resource
-path: `scribium-engine` owns the engine-neutral `ResourceProvider` interface,
-while `scribium-core` owns the adapter from `VirtualProject` to that interface.
+path: `arkst-engine` owns the engine-neutral `ResourceProvider` interface,
+while `arkst-core` owns the adapter from `VirtualProject` to that interface.
 Those built-ins therefore remain filesystem-free at the compiler boundary and
 do not depend on the Typst subprocess mirror. Their source-relative resolution,
 project-boundary rejection, and nested source identity are covered by core and

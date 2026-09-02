@@ -9,13 +9,13 @@ This evidence must not be inferred from an earlier green run.
 The canonical executable oracle is
 
 ~~~
-SCRIBIUM_REQUIRE_TYPST=1 \
-  cargo test -p scribium-typst-inprocess \
+ARKST_REQUIRE_TYPST=1 \
+  cargo test -p arkst-typst-inprocess \
   --test backend_parity --all-features -- --nocapture
 ~~~
 
 The suite requires Typst 0.15.1. It constructs each logical fixture as a
-VirtualProject, runs the real Scribium compile and lower_to_typst path,
+VirtualProject, runs the real Arkst compile and lower_to_typst path,
 and then observes both SubprocessBackend and InProcessBackend. The
 subprocess observation receives a temporary native read-context populated from
 that same virtual project; the temporary copy is adapter plumbing and is not a
@@ -69,7 +69,7 @@ same fixture corpus; they are not inferred from the local run.
 | multi-page | PASS | PASS | valid PDF, page count >= 2 and equal | none observed |
 | image-resource | PASS | PASS | project-relative asset, valid PDF | none observed |
 | repeated-resource | PASS | PASS | repeated project asset, valid PDF | none observed |
-| project-font | PASS | PASS | project-supplied font policy, valid PDF | no Scribium font semantic yet |
+| project-font | PASS | PASS | project-supplied font policy, valid PDF | no Arkst font semantic yet |
 | missing-resource | FAIL | FAIL | resource failure, logical missing path | error wording may differ |
 | traversal | FAIL | FAIL | project boundary denial | error wording may differ |
 | static-package-preflight-preview | REJECTED | DENIED | static validation versus World capability boundary | intentional architectural divergence; not package/network parity |
@@ -91,20 +91,20 @@ mappings to different source identities, so primary remains None.
 
 The fixture source markers are checked after lowering so the corpus does not
 silently become a handwritten Typst-only suite. The font fixture has a
-test-owned Typst text rule after real lowering because the current Scribium
+test-owned Typst text rule after real lowering because the current Arkst
 semantic model has no font-selection construct; the font bytes themselves
 remain a project-owned VirtualProject asset and no system font is required.
 
 The runtime-generated-package case is deliberately not part of the two-backend
 security oracle. An InProcessBackend-only integration fixture verifies that a
-runtime-generated package request is denied by the Scribium-owned World. No
+runtime-generated package request is denied by the Arkst-owned World. No
 subprocess fixture executes such a request to exercise a package or network
 resolver.
 
 ## Cross-platform and security evidence
 
 The CI workflow installs Typst 0.15.1 on each native matrix job and runs the
-parity target as a named step with SCRIBIUM_REQUIRE_TYPST=1. The code-bearing
+parity target as a named step with ARKST_REQUIRE_TYPST=1. The code-bearing
 exact-head evidence is recorded here from run 33034946513 for commit
 `94b9a38e7317ac8608d40573ef04edd53891c152`:
 
@@ -156,9 +156,9 @@ divergence, not a parity assertion:
 | Backend | Contract |
 |---|---|
 | SubprocessBackend | default, compatibility-oriented CLI backend; explicit project-root staging and best-effort static preflight; no hard package/network isolation guarantee |
-| InProcessBackend | optional explicit backend; Scribium-owned `World`/`VirtualProject` resource authority; package and network capability fail-closed |
+| InProcessBackend | optional explicit backend; Arkst-owned `World`/`VirtualProject` resource authority; package and network capability fail-closed |
 
-The in-process adapter returns structured Scribium diagnostics and can retain
+The in-process adapter returns structured Arkst diagnostics and can retain
 an original SourceSpan when the lowering map is reliable. The subprocess
 adapter keeps its sanitized compiler text and does not expose an equivalent
 structured span in this parity harness. Success/document behavior, resource
@@ -168,7 +168,7 @@ not.
 
 The default backend remains SubprocessBackend, and this evidence does not
 claim browser rendering or a WASM in-process backend. The platform-neutral
-WASM check remains limited to scribium-core and scribium-typst.
+WASM check remains limited to arkst-core and arkst-typst.
 
 This work does not implement #188 package/resource expansion, #190
 environment capability, #191 browser/WASM rendering, or #203 dependency

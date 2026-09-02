@@ -350,7 +350,7 @@ def run_reference_display_java(
             f"expected {EXPECTED_DISPLAY_DUMP_SOURCE_SHA256}, got {helper_sha256}"
         )
     javac = java.with_name("javac")
-    with tempfile.TemporaryDirectory(prefix="scribium-jdk25-locale-display-") as output:
+    with tempfile.TemporaryDirectory(prefix="arkst-jdk25-locale-display-") as output:
         compiled = subprocess.run(
             [str(javac), *JDK_EXPORTS, "-d", output, str(helper)],
             check=False,
@@ -1385,12 +1385,12 @@ def main() -> None:
         "--archive", type=Path, required=True, help="the exact pinned JDK archive containing --java"
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("crates/scribium-engine/src/locale_data.rs")
+        "--output", type=Path, default=Path("crates/arkst-engine/src/locale_data.rs")
     )
     parser.add_argument(
         "--binary-output",
         type=Path,
-        default=Path("crates/scribium-engine/data/jdk25_locale_display.bin"),
+        default=Path("crates/arkst-engine/data/jdk25_locale_display.bin"),
     )
     parser.add_argument(
         "--available-order-output",

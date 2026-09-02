@@ -1,4 +1,4 @@
-# Roadmap — Scribium
+# Roadmap — Arkst
 
 Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 
@@ -19,7 +19,7 @@ Status markers: `Not started` | `In progress` | `Completed` | `Deferred`
 | WASM build in CI               | Completed    |
 | VirtualProject abstraction     | Completed    |
 
-**Architecture constraint:** `scribium-core` + `scribium-typst` (lowering)
+**Architecture constraint:** `arkst-core` + `arkst-typst` (lowering)
 MUST compile for `wasm32-unknown-unknown`. CI verifies this from M0.
 Core uses `VirtualProject` for all I/O — no filesystem access.
 
@@ -67,7 +67,7 @@ partial compatibility claims and a growing evidence-backed baseline.
 | Item                                | Status       |
 |-------------------------------------|--------------|
 | Document-scope variable evaluation  | Completed    |
-| Generic callables, native iterable operations, and collection transforms | Completed (evidenced slice; `.map`/`.filter` retained as Scribium extensions) |
+| Generic callables, native iterable operations, and collection transforms | Completed (evidenced slice; `.map`/`.filter` retained as Arkst extensions) |
 | Logical/comparison predicates (`.islower`, `.isgreater`, `.equals`, `.not`) | Completed (bounded v2.5.1 slice) |
 | Conditional expressions using logical/comparison results | Completed (bounded evidence) |
 | Scalar arithmetic beyond `.sum`/`.multiply` | Completed (bounded v2.5.1 arithmetic/unary, transcendental, and decimal post-processing slices; `.range` remains separately evidenced) |
@@ -103,7 +103,7 @@ The M2 completion audit is independently reviewable from the repository:
 - [Quarkdown capability matrix and v2.5.1 gap inventory](compatibility/quarkdown/README.md)
 - [executable independently authored Quarkdown conformance corpus](../fixtures/quarkdown-conformance/README.md)
 - [raw HTML policy](compatibility/RAW_HTML_POLICY.md) and [resource-context contract](adr/0019-typst-source-and-resource-context.md)
-- [real Typst/PDF backend integration coverage](../crates/scribium-typst-subprocess/tests/backend_integration.rs)
+- [real Typst/PDF backend integration coverage](../crates/arkst-typst-subprocess/tests/backend_integration.rs)
 
 This closure means the bounded M2 baseline is implemented and evidenced. It
 does not claim complete v2.5.1 compatibility; deferred and partial families
@@ -152,10 +152,10 @@ because a feature is documented upstream.
 
 ## M6 — Library API, LSP, WASM Bindings
 
-**Objective:** Embedding, editor integration, `scribium-wasm` bindings crate.
+**Objective:** Embedding, editor integration, `arkst-wasm` bindings crate.
 
 WASM compilation is an M0 architecture constraint (core + lowering).
-M6 delivers the `scribium-wasm` bindings crate and WASM CI coverage.
+M6 delivers the `arkst-wasm` bindings crate and WASM CI coverage.
 
 ## M7 — Hardening
 
@@ -165,7 +165,7 @@ M6 delivers the `scribium-wasm` bindings crate and WASM CI coverage.
 
 ## Explicitly Deferred Work
 
-- Browser-side Typst compilation (scribium-typst-web, gate behind feasibility)
+- Browser-side Typst compilation (arkst-typst-web, gate behind feasibility)
 - LSP server (deferred to M6, core API must stabilize first)
 - Package registry (not planned)
 - Web editor / SaaS (not planned)

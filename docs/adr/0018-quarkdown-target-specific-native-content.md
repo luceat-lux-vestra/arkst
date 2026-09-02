@@ -5,7 +5,7 @@
   existing evaluator → IR → Typst/PDF path; no HTML output backend
 - **Implementation diagnostic:** `E3004` for denied `NativeContent`
 - **Date:** 2026-08-19
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related ADRs:** 0003, 0015, 0016, 0017
 - **Upstream baseline:** Quarkdown `v2.5.1`
 - **Resolved upstream tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
@@ -23,7 +23,7 @@ lets the selected target decide whether that node is rendered. The upstream
 contract is therefore target-specific document semantics, not source-level
 HTML recognition and not an instruction to translate HTML into Typst.
 
-At the decision point, Scribium had a Rushdown-backed Markdown frontend, a
+At the decision point, Arkst had a Rushdown-backed Markdown frontend, a
 backend-neutral IR, an evaluator, and a Typst/PDF backend. It had no HTML
 renderer or compile/evaluation permission context. The parser could preserve
 the syntax as a Quarkdown directive call, but the evaluator had no `.html`
@@ -125,7 +125,7 @@ between surrounding inline nodes
 [`Paragraph.kt`](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-core/src/main/kotlin/com/quarkdown/core/ast/base/block/Paragraph.kt#L12-L29)).
 
 Conclusion: upstream does not require separate upstream Html classes for
-inline and block placement. Scribium must nevertheless preserve placement in
+inline and block placement. Arkst must nevertheless preserve placement in
 its own IR carriers so `text + target-specific node + text` ordering cannot be
 lost. A block-only native-content node is incorrect.
 
@@ -200,7 +200,7 @@ TargetSpecificContent {
 ```
 
 This is a representation direction, not a request to add the type in this
-PR. The target discriminator must be a closed Scribium-owned enum. For this
+PR. The target discriminator must be a closed Arkst-owned enum. For this
 slice it has exactly one supported variant: `Html`. Adding another variant
 requires its own public-evidence and architecture review; the type must not
 accept arbitrary MIME strings, backend source, CSS, JavaScript, SVG, LaTeX,
@@ -251,10 +251,10 @@ unconditional evaluator no-op.
 
 ## Permission ownership
 
-Scribium currently has no public compile/evaluation capability set. That is an
+Arkst currently has no public compile/evaluation capability set. That is an
 implementation prerequisite for `.html`; the current pipeline must not grant
 an implicit unsafe escape hatch. The compatibility default is nevertheless
-defined: normal/default Quarkdown-compatible Scribium compilation starts with
+defined: normal/default Quarkdown-compatible Arkst compilation starts with
 `NativeContent` granted, matching Quarkdown v2.5.1's `Permission.DEFAULT_SET`.
 The host/API may explicitly deny `NativeContent`. The next implementation slice
 must introduce a narrowly scoped evaluator capability equivalent to
@@ -266,14 +266,14 @@ The initial capability must be closed and scoped to the native-content contract
 under review. Granting `NativeContent` must not authorize `.css`,
 `.htmloptions`, Markdown raw HTML, JavaScript, CSS interpretation, filesystem
 access, network access, or arbitrary backend injection. A denied capability
-produces a structured Scribium diagnostic before semantic node creation. No
+produces a structured Arkst diagnostic before semantic node creation. No
 broad permission framework is introduced by this ADR.
 
 ## Backend lowering ownership
 
-`scribium-html` continues to own only Markdown/foreign-HTML interoperability and
+`arkst-html` continues to own only Markdown/foreign-HTML interoperability and
 semantic normalization. Quarkdown `.html` does not pass through
-`scribium-html` and that crate does not consume `TargetSpecificContent`.
+`arkst-html` and that crate does not consume `TargetSpecificContent`.
 
 A future HTML output backend, with its physical crate/name deliberately not
 frozen by this ADR, consumes only
@@ -283,14 +283,14 @@ host trust boundary. It does not need a generic HTML parser or DOM for
 `.html`; the payload is already the evaluated opaque String required by
 upstream.
 
-`scribium-typst` owns the Typst decision for the same backend-neutral node. It
+`arkst-typst` owns the Typst decision for the same backend-neutral node. It
 must not translate HTML to Typst, escape it as visible text, pass it to Typst
 raw/code syntax, or reparse it. The node is intentionally omitted from Typst
 output.
 
 ## Typst/PDF unsupported-target behavior
 
-Scribium chooses the v2.5.1-compatible silent-ignore behavior:
+Arkst chooses the v2.5.1-compatible silent-ignore behavior:
 
 ```text
 evaluate .html
@@ -300,7 +300,7 @@ evaluate .html
 ```
 
 This is Option A from the compatibility review. A warning would add an
-observable Scribium divergence where v2.5.1 explicitly permits other targets
+observable Arkst divergence where v2.5.1 explicitly permits other targets
 to ignore the content; a hard error would be a larger divergence. Permission
 denial remains an error because upstream checks permission in the function
 before target rendering. The semantic node should survive until backend

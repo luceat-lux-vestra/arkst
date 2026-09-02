@@ -1,18 +1,18 @@
 //! Differential Markdown compatibility harness.
 //!
 //! This binary is intentionally a test/oracle tool. It invokes a pinned
-//! cmark-gfm executable, converts its XML tree and Scribium's frontend AST to
+//! cmark-gfm executable, converts its XML tree and Arkst's frontend AST to
 //! the same small semantic model, and records the comparison without using
 //! HTML strings as an oracle.
 
 use anyhow::{bail, Context, Result};
+use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
+use arkst_markdown::ast::{Block, Document, Inline, ListItem, TableAlignment, TableRow};
+use arkst_markdown::{parse_with_markdown_profile, MarkdownProfile};
+use arkst_typst::{TypstBackend, TypstInput};
+use arkst_typst_subprocess::SubprocessBackend;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use scribium_core::{compile, CompileOptions, VirtualProjectBuilder};
-use scribium_markdown::ast::{Block, Document, Inline, ListItem, TableAlignment, TableRow};
-use scribium_markdown::{parse_with_markdown_profile, MarkdownProfile};
-use scribium_typst::{TypstBackend, TypstInput};
-use scribium_typst_subprocess::SubprocessBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -281,7 +281,7 @@ struct CaseReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     reference: Option<CanonicalNode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    scribium: Option<CanonicalNode>,
+    arkst: Option<CanonicalNode>,
     result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     baseline_classification: Option<String>,
@@ -593,8 +593,8 @@ fn run_suite(
         let baseline_case = baseline.cases.get(&case.id);
         let comparison = compare_case(&case, cmark, gfm_extensions);
         let report = match comparison {
-            Ok((reference_tree, scribium_tree, unsupported)) => {
-                let equal = reference_tree == scribium_tree;
+            Ok((reference_tree, arkst_tree, unsupported)) => {
+                let equal = reference_tree == arkst_tree;
                 let current = if !equal && unsupported {
                     "UNSUPPORTED"
                 } else if !equal {
@@ -612,7 +612,7 @@ fn run_suite(
                 let diff = if equal {
                     None
                 } else {
-                    Some(compact_diff(&reference_tree, &scribium_tree))
+                    Some(compact_diff(&reference_tree, &arkst_tree))
                 };
                 let gate_error = match gate.status {
                     BaselineGateStatus::Accepted => None,
@@ -641,7 +641,7 @@ fn run_suite(
                     section: case.section.clone(),
                     markdown: case.markdown.clone(),
                     reference: Some(reference_tree),
-                    scribium: Some(scribium_tree),
+                    arkst: Some(arkst_tree),
                     result: current.as_str().to_string(),
                     baseline_classification: baseline_case
                         .map(|entry| entry.classification.clone()),
@@ -658,7 +658,7 @@ fn run_suite(
                 section: case.section.clone(),
                 markdown: case.markdown.clone(),
                 reference: None,
-                scribium: None,
+                arkst: None,
                 result: "HARNESS_ERROR".to_string(),
                 baseline_classification: baseline_case.map(|entry| entry.classification.clone()),
                 baseline_reason: baseline_case.map(|entry| entry.reason.clone()),
@@ -723,9 +723,9 @@ fn compare_case(case: &CorpusCase, cmark: &Path, gfm_extensions: bool) -> Result
         MarkdownProfile::CommonMark
     };
     let parsed = parse_with_markdown_profile(&case.markdown, profile);
-    let scribium = canonicalize_document(&parsed.document);
-    let unsupported = !parsed.diagnostics.is_empty() || contains_unsupported(&scribium);
-    Ok((reference, scribium, unsupported))
+    let arkst = canonicalize_document(&parsed.document);
+    let unsupported = !parsed.diagnostics.is_empty() || contains_unsupported(&arkst);
+    Ok((reference, arkst, unsupported))
 }
 
 fn run_cmark(path: &Path, source: &str, gfm_extensions: bool) -> Result<String> {
@@ -1045,8 +1045,8 @@ fn canonical_list_item(item: &ListItem) -> CanonicalNode {
         node.attrs.insert(
             "task".to_string(),
             match task {
-                scribium_markdown::ast::TaskStatus::Active => "active",
-                scribium_markdown::ast::TaskStatus::Completed => "completed",
+                arkst_markdown::ast::TaskStatus::Active => "active",
+                arkst_markdown::ast::TaskStatus::Completed => "completed",
             }
             .to_string(),
         );
@@ -1168,7 +1168,7 @@ fn first_json_diff(
                     }
                     (left, right) => {
                         return Some(format!(
-                            "{child_path}: reference={} scribium={}",
+                            "{child_path}: reference={} arkst={}",
                             short_json(left),
                             short_json(right)
                         ));
@@ -1180,7 +1180,7 @@ fn first_json_diff(
         (serde_json::Value::Array(left), serde_json::Value::Array(right)) => {
             if left.len() != right.len() {
                 return Some(format!(
-                    "{path}.length: reference={} scribium={}",
+                    "{path}.length: reference={} arkst={}",
                     left.len(),
                     right.len()
                 ));
@@ -1193,7 +1193,7 @@ fn first_json_diff(
             None
         }
         (left, right) if left != right => Some(format!(
-            "{path}: reference={} scribium={}",
+            "{path}: reference={} arkst={}",
             short_json(Some(left)),
             short_json(Some(right))
         )),
@@ -1382,7 +1382,7 @@ fn run_real_documents(args: &Args) -> Result<RealReport> {
             continue;
         }
 
-        let typst = scribium_typst::lowering::lower_to_typst_code(&result.ir);
+        let typst = arkst_typst::lowering::lower_to_typst_code(&result.ir);
         let missing_markers: Vec<String> = spec
             .markers
             .iter()

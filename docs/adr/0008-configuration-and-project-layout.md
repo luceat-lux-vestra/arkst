@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1
 
 ## Context
 
-Scribium needs a project-level configuration system. The config must support
+Arkst needs a project-level configuration system. The config must support
 multi-entry projects, output target selection, resource limits, and compatibility
 profiles.
 
@@ -26,16 +26,16 @@ Unworkable for multi-entry projects. Each run would need repeated flags.
 
 ### Option 2: Package.json-style field in Cargo.toml (rejected)
 
-Scribium is not a Rust project dependency. Coupling to Cargo.toml is misleading.
+Arkst is not a Rust project dependency. Coupling to Cargo.toml is misleading.
 
-### Option 3: `scribium.toml` project file (chosen)
+### Option 3: `arkst.toml` project file (chosen)
 
-Top-level `scribium.toml` with optional project-level config. CLI flags
+Top-level `arkst.toml` with optional project-level config. CLI flags
 override file values. Config discovery walks up from entry file's directory.
 
 ## Decision
 
-Use `scribium.toml` for project-level configuration. Config discovery: start
+Use `arkst.toml` for project-level configuration. Config discovery: start
 at entry file directory, walk up to filesystem root or git root. CLI flags
 take precedence over file values.
 
@@ -60,4 +60,4 @@ take precedence over file values.
 ## References
 
 - `docs/ARCHITECTURE.md` (config model section)
-- `crates/scribium-cli/src/config.rs`
+- `crates/arkst-cli/src/config.rs`

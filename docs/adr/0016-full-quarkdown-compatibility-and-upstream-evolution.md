@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-12
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related ADRs:** 0007, 0012, 0013, 0014, 0015
 - **Supersedes:** The compatibility-target and upstream-adoption portions of ADR-0007, ADR-0012, and ADR-0013
 
 ## Context
 
-Scribium is an independent Quarkdown-compatible compiler and toolchain. Earlier
+Arkst is an independent Quarkdown-compatible compiler and toolchain. Earlier
 ADRs selected a documented feature subset and a fixed upstream baseline as the
 product contract. That policy is no longer the intended product goal. It made
 unimplemented public language behavior look permanently out of scope and made
@@ -31,7 +31,7 @@ migrate the IR, split Typst crates, or otherwise change physical architecture.
 
 ## Decision 1: complete documented Quarkdown compatibility is the target
 
-Scribium aims for complete compatibility with the publicly documented
+Arkst aims for complete compatibility with the publicly documented
 Quarkdown document language and document-observable semantics of the tracked
 stable upstream release. This target includes publicly specified:
 
@@ -40,7 +40,7 @@ stable upstream release. This target includes publicly specified:
 - functions, lambdas, and components;
 - conditionals and iteration;
 - built-ins and standard-library document behavior;
-- include, read, and data operations subject to Scribium's accepted
+- include, read, and data operations subject to Arkst's accepted
   security/project model;
 - Markdown extensions introduced by Quarkdown; and
 - other publicly documented language constructs and observable evaluation
@@ -50,7 +50,7 @@ There is no permanent selected-subset product goal. A documented public
 language feature that is not implemented is compatibility debt and planned
 work. It is not automatically outside the contract forever.
 
-This target does not require implementation identity. Scribium need not
+This target does not require implementation identity. Arkst need not
 reproduce Quarkdown's internal implementation, private APIs, undocumented
 bugs, internal data structures, private plugin ABI, or compiler architecture.
 The target is the public document language and observable document semantics.
@@ -66,7 +66,7 @@ The following concepts are authoritative:
 
 | Concept | Meaning |
 |---------|---------|
-| **Tracked upstream target** | The latest stable Quarkdown release. It automatically becomes the release Scribium must investigate and adapt toward. |
+| **Tracked upstream target** | The latest stable Quarkdown release. It automatically becomes the release Arkst must investigate and adapt toward. |
 | **Verified compatibility baseline** | The release for which permitted evidence was reviewed, independent conformance fixtures exist, required implementation work is complete, tests pass, and known divergences are documented. |
 | **Current compatibility claim** | Only behavior supported by conformance evidence at a stated compatibility level in the matrix. |
 
@@ -99,7 +99,7 @@ implementation constraint. These are compatible goals.
 Compatibility work may rely on public documentation, public release notes,
 public API/reference documentation where applicable, independently authored
 fixtures, and permitted black-box behavior observation. It must not make
-Quarkdown implementation source code a dependency of the process. Scribium
+Quarkdown implementation source code a dependency of the process. Arkst
 contributors and automation must not copy or translate upstream implementation
 code, upstream tests, or upstream fixtures.
 
@@ -159,11 +159,11 @@ authority boundary.
 
 ## Decision 5: Typst is a backend compatibility target, not a language to reimplement
 
-Scribium does not reimplement Typst grammar. Under ADR-0015, the target flow is:
+Arkst does not reimplement Typst grammar. Under ADR-0015, the target flow is:
 
 ```text
 normalized backend-neutral IrDocument
-    -> scribium-typst
+    -> arkst-typst
     -> generated Typst source
     -> concrete Typst compiler adapter
     -> official Typst compiler
@@ -176,7 +176,7 @@ contract, including:
 
 - emitted Typst syntax and changed/deprecated constructs;
 - Typst CLI behavior used by the subprocess adapter;
-- output capabilities relevant to Scribium;
+- output capabilities relevant to Arkst;
 - future in-process compiler/backend API changes; and
 - diagnostic and source-map implications.
 
@@ -192,9 +192,9 @@ new stable Typst release
         -> failure: lowering/adapter impact classification -> adaptation PR
 ```
 
-This policy does not create a Scribium Typst parser. If native `.typ`
+This policy does not create a Arkst Typst parser. If native `.typ`
 passthrough is implemented in the future, the selected official Typst compiler
-normally owns syntax evolution; Scribium does not add a generic raw-backend
+normally owns syntax evolution; Arkst does not add a generic raw-backend
 escape hatch to backend-neutral IR. The future watcher and machine-readable
 baseline are separate implementation work documented in
 `docs/compatibility/typst/README.md`.
@@ -205,13 +205,13 @@ Markdown/CommonMark remains a specification-driven frontend. It does not need
 Quarkdown-style release adaptation machinery unless its selected specification
 or baseline changes. This ADR does not add a Markdown watcher.
 
-HTML interoperability remains isolated behind `scribium-html`; the
+HTML interoperability remains isolated behind `arkst-html`; the
 `html-to-markdown-rs`/xberg dependency is hidden behind that accepted boundary
 and is maintained as a normal dependency. HTML dependency maintenance is not
 Quarkdown-language compatibility work.
 
 Pandoc remains an optional development/compatibility oracle only. It is not a
-Scribium runtime dependency, language authority, or production subprocess.
+Arkst runtime dependency, language authority, or production subprocess.
 
 ## Decision 7: authority and migration boundary
 

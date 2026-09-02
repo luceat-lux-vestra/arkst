@@ -1,4 +1,4 @@
-# Contributing to Scribium
+# Contributing to Arkst
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@
 
 ```bash
 git clone https://github.com/luceat-lux-vestra/scribium.git
-cd scribium
+cd arkst
 cargo build
 cargo test
 ```

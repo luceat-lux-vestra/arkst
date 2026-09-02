@@ -1,0 +1,35 @@
+[package]
+name = "arkst-cli"
+version = "0.0.1"
+publish = false
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Arkst CLI — build, check, inspect, and watch commands"
+
+[features]
+default = []
+typst-inprocess = ["dep:arkst-typst-inprocess"]
+
+[[bin]]
+name = "arkst"
+path = "src/main.rs"
+
+[dependencies]
+arkst-core.workspace = true
+arkst-project.workspace = true
+arkst-typst.workspace = true
+arkst-typst-inprocess = { workspace = true, optional = true }
+arkst-typst-subprocess.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+same-file.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3.8"

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-26
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #187, #200, #201, #12, #188, #190, #191
 - **Supersedes:** the in-process decision and re-evaluation timing in
   ADR-0011; refines the future-in-process portion of ADR-0005
@@ -23,22 +23,22 @@ The complete evidence is in
 
 ## Decision
 
-Scribium accepts a **native, optional in-process Typst adapter** in a
-dedicated `scribium-typst-inprocess` crate. The adapter may be used as an
+Arkst accepts a **native, optional in-process Typst adapter** in a
+dedicated `arkst-typst-inprocess` crate. The adapter may be used as an
 explicitly selected backend after the production follow-up is reviewed, but
 the subprocess backend remains the default and supported baseline.
 
 For `InProcessBackend` specifically, the adapter must:
 
-- consume the existing `TypstBackend` contract after `scribium-typst` has
+- consume the existing `TypstBackend` contract after `arkst-typst` has
   generated Typst source;
 - map Typst's public `World` interface from an existing `VirtualProject`;
 - keep source, asset, font, path, and project-boundary policy owned by
-  Scribium's virtual project model;
+  Arkst's virtual project model;
 - fail closed for unavailable package/network capabilities at the
-  Scribium-owned `World` boundary;
+  Arkst-owned `World` boundary;
 - keep Typst compiler types inside the native adapter crate;
-- remain separate from the platform-neutral `scribium-typst` lowering and its
+- remain separate from the platform-neutral `arkst-typst` lowering and its
   `wasm32-unknown-unknown` boundary; and
 - retain the subprocess backend as the default/fallback path.
 
@@ -48,7 +48,7 @@ not approval for browser/WASM rendering.
 ## Evidence and changed assumptions since #12
 
 The current public Typst 0.15.1 compile and PDF APIs were sufficient to build a
-`ProjectWorld` over `VirtualProject`. Real generated Scribium source compiled
+`ProjectWorld` over `VirtualProject`. Real generated Arkst source compiled
 to valid PDFs. Images, project fonts, missing resources, traversal,
 in-process package capability denial, fail-closed date behavior, repeated
 reads, and structured failure diagnostics were exercised. A subprocess parity
@@ -87,7 +87,7 @@ remain macOS arm64 measurements.
 ### Positive
 
 - Native embedders can avoid a process boundary after an explicit opt-in.
-- In-process failures can become structured Scribium diagnostics without
+- In-process failures can become structured Arkst diagnostics without
   exposing Typst types across semantic boundaries.
 - `VirtualProject` remains the resource and capability authority for the
   in-process World; subprocess source staging remains a separate native
@@ -113,7 +113,7 @@ remain macOS arm64 measurements.
 - This ADR does not implement a CLI default switch or remove subprocess.
 - It does not add package/network capability, document environment state, or
   browser/WASM rendering.
-- It does not authorize direct Scribium IR lowering into Typst `Content`,
+- It does not authorize direct Arkst IR lowering into Typst `Content`,
   frames, layouts, or renderer internals.
 
 ## Follow-up and migration policy
@@ -129,15 +129,15 @@ authorize automatic migration or auto-removal.
 
 The production follow-up keeps the decision above unchanged. The trusted
 native CLI now accepts `--backend subprocess|in-process`, with subprocess as
-the default. `scribium-cli` keeps `scribium-typst-inprocess` behind the empty-by-
+the default. `arkst-cli` keeps `arkst-typst-inprocess` behind the empty-by-
 default Cargo feature `typst-inprocess`; an in-process CLI build therefore
 requires both that feature and explicit runtime selection. Without the feature,
 `--backend in-process` fails deterministically with rebuild guidance and never
 falls back to subprocess. With the feature, explicit in-process selection
 invokes `InProcessBackend` directly and returns its typed adapter error without
 fallback. The selection enum lives
-at the native host boundary; neither `scribium-core` nor the platform-neutral
-`scribium-typst` lowering crate selects a native backend.
+at the native host boundary; neither `arkst-core` nor the platform-neutral
+`arkst-typst` lowering crate selects a native backend.
 
 The in-process adapter now accepts the lowering-owned source map through its
 adapter API. It maps a complete generated Typst diagnostic range to a unique,
@@ -159,7 +159,7 @@ as the in-process adapter. That contract was unsound and is corrected here;
 the earlier decision history remains unchanged.
 
 `SubprocessBackend` invokes the Typst CLI, which owns its runtime package
-resolver. Scribium cannot prove through syntax analysis alone that every
+resolver. Arkst cannot prove through syntax analysis alone that every
 runtime execution path avoids that resolver or its network capability. Typst
 supports runtime evaluation and dynamic module/value access, so extending a
 deny-list for each discovered spelling would duplicate interpreter and
@@ -176,7 +176,7 @@ particular, `eval` is not denied by identifier, alias, or field-access
 blacklists.
 
 `InProcessBackend` owns the hard package/resource capability boundary because
-Scribium owns the Typst `World`. Its `VirtualProject`-only resource authority
+Arkst owns the Typst `World`. Its `VirtualProject`-only resource authority
 denies package roots, host filesystem access, and network/package resolution
 fail-closed, including when a request is produced at runtime. This capability
 difference is an intentional architectural divergence, not a parity oracle

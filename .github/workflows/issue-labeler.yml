@@ -75,16 +75,16 @@ jobs:
               else if (/^(research|audit|spike)(\([^)]*\))?:/.test(title)) explicitType = 'type:research';
 
               const areas = new Set();
-              if (/scribium-core|\(core\)/.test(title) || /crates\/scribium-core\//.test(body)) areas.add('area:core');
-              if (/\(engine\)|\bevaluator\b|\bbinder\b/.test(title) || /crates\/scribium-engine\/|semantic engine/.test(body)) areas.add('area:engine');
-              if (/\(markdown\)|\(quarkdown\)|\(parser\)|\bparser\b|\bgrammar\b/.test(title) || /crates\/scribium-markdown\/|crates\/scribium-quarkdown\/|parser\/frontend/.test(body)) areas.add('area:parser');
-              if (/\(ir\)|\bir\b/.test(title) || /crates\/scribium-ir\/|intermediate representation/.test(body)) areas.add('area:ir');
-              if (/diagnostic/.test(title) || /crates\/scribium-diagnostics\/|source span/.test(body)) areas.add('area:diagnostics');
-              if (/\(typst\)|\btypst\b/.test(title) || /crates\/scribium-typst|subprocess backend|in-process backend/.test(body)) areas.add('area:typst');
-              if (/\(cli\)|\bcli\b/.test(title) || /crates\/scribium-cli\/|command-line/.test(body)) areas.add('area:cli');
-              if (/\(project\)|\bproject\b|\bresource\b/.test(title) || /crates\/scribium-project\/|crates\/scribium-source\/|virtualproject|assetstore/.test(body)) areas.add('area:project');
+              if (/arkst-core|\(core\)/.test(title) || /crates\/arkst-core\//.test(body)) areas.add('area:core');
+              if (/\(engine\)|\bevaluator\b|\bbinder\b/.test(title) || /crates\/arkst-engine\/|semantic engine/.test(body)) areas.add('area:engine');
+              if (/\(markdown\)|\(quarkdown\)|\(parser\)|\bparser\b|\bgrammar\b/.test(title) || /crates\/arkst-markdown\/|crates\/arkst-quarkdown\/|parser\/frontend/.test(body)) areas.add('area:parser');
+              if (/\(ir\)|\bir\b/.test(title) || /crates\/arkst-ir\/|intermediate representation/.test(body)) areas.add('area:ir');
+              if (/diagnostic/.test(title) || /crates\/arkst-diagnostics\/|source span/.test(body)) areas.add('area:diagnostics');
+              if (/\(typst\)|\btypst\b/.test(title) || /crates\/arkst-typst|subprocess backend|in-process backend/.test(body)) areas.add('area:typst');
+              if (/\(cli\)|\bcli\b/.test(title) || /crates\/arkst-cli\/|command-line/.test(body)) areas.add('area:cli');
+              if (/\(project\)|\bproject\b|\bresource\b/.test(title) || /crates\/arkst-project\/|crates\/arkst-source\/|virtualproject|assetstore/.test(body)) areas.add('area:project');
               if (/^compat|\[upstream\]|compatibility|conformance|quarkdown/.test(title) || /docs\/compatibility\/|fixtures\/quarkdown-conformance\//.test(body)) areas.add('area:compatibility');
-              if (/\btest\b|fixture/.test(title) || /crates\/scribium-test-support\//.test(body)) areas.add('area:test');
+              if (/\btest\b|fixture/.test(title) || /crates\/arkst-test-support\//.test(body)) areas.add('area:test');
               if (/license|notice|legal/.test(title)) areas.add('area:legal');
               if (/^docs[:(]|documentation/.test(title) || /### documentation location/.test(body)) areas.add('area:docs');
               if (/^ci[:(]|github|workflow|dependabot|ruleset/.test(title) || /\.github\//.test(body)) areas.add('area:ci');
