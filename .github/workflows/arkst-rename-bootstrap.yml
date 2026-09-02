@@ -1,0 +1,148 @@
+name: Arkst rename bootstrap
+
+on:
+  push:
+    branches: [chore/rename-arkst]
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rename project identity to Arkst
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Rename the product-owned crate directories first so Cargo paths and
+          # source imports can be updated coherently in the same commit.
+          for dir in crates/scribium-*; do
+            [ -d "$dir" ] || continue
+            git mv "$dir" "${dir/crates\/scribium-/crates\/arkst-}"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          replacements = (
+              (b"SCRIBIUM", b"ARKST"),
+              (b"Scribium", b"Arkst"),
+              (b"scribium", b"arkst"),
+          )
+
+          changed = 0
+          skipped_binary = []
+          for raw in tracked:
+              if not raw:
+                  continue
+              path = Path(raw.decode())
+              if path.as_posix() == ".github/workflows/arkst-rename-bootstrap.yml":
+                  continue
+              try:
+                  data = path.read_bytes()
+              except FileNotFoundError:
+                  # git mv changed the tracked path; find the renamed equivalent.
+                  renamed = Path(path.as_posix().replace("crates/scribium-", "crates/arkst-"))
+                  if not renamed.exists():
+                      continue
+                  path = renamed
+                  data = path.read_bytes()
+              if b"\0" in data:
+                  if any(old in data for old, _ in replacements):
+                      skipped_binary.append(path.as_posix())
+                  continue
+              new = data
+              for old, replacement in replacements:
+                  new = new.replace(old, replacement)
+              if new != data:
+                  path.write_bytes(new)
+                  changed += 1
+
+          if skipped_binary:
+              raise SystemExit(
+                  "old project identity found in binary files: " + ", ".join(skipped_binary)
+              )
+          print(f"updated project identity in {changed} tracked text files")
+          PY
+
+          # Record why the old working name remains visible in historical context.
+          cat >> docs/legal/TRADEMARKS.md <<'EOF'
+
+          ## Project naming decision (2026-09-02)
+
+          The project was originally developed under the working name **Scribium**.
+          Before the first public release, that name was retired because current
+          public services already used the same name and created unnecessary product
+          identity collision risk.
+
+          The project name is now **Arkst**. The name combines `ark`, shared by
+          M**ark**down and Qu**ark**down, with `st` from Typ**st**, reflecting the
+          project's document compilation pipeline. This record documents a project
+          naming decision, not a legal conclusion or trademark clearance.
+          EOF
+
+          # The bootstrap workflow is intentionally one-shot and must not survive
+          # into the reviewable product rename diff.
+          git rm .github/workflows/arkst-rename-bootstrap.yml
+
+          # Cargo.lock contains workspace package identities. Regenerate it so the
+          # lockfile, manifests and metadata agree rather than relying on text edits.
+          cargo generate-lockfile
+
+      - name: Validate renamed workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 --no-deps --locked --offline >/tmp/arkst-metadata.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/arkst-metadata.json').read_text())
+          names = sorted(package['name'] for package in data['packages'])
+          stale = [name for name in names if name.startswith('scribium')]
+          if stale:
+              raise SystemExit(f"stale workspace package names: {stale}")
+          if 'arkst-cli' not in names:
+              raise SystemExit('arkst-cli missing from workspace metadata')
+          print('workspace packages:', ', '.join(names))
+          PY
+          cargo fmt --all -- --check
+          python3 tools/ci/test_verify_distribution_policy.py
+          python3 tools/ci/verify_distribution_policy.py
+          cargo check --workspace --all-targets --locked
+
+      - name: Audit stale product identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the explicit historical naming record may retain the old product name.
+          matches="$(git grep -n -E 'Scribium|scribium|SCRIBIUM' -- ':!docs/legal/TRADEMARKS.md' || true)"
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches"
+            echo 'unexpected stale product identifiers remain' >&2
+            exit 1
+          fi
+
+      - name: Commit rename
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git diff --cached --check
+          git commit -m 'chore: rename project to Arkst'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:chore/rename-arkst
