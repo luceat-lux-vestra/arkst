@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Sync repository-owned source fingerprints
+      - name: Sync repository-owned reference fingerprints
         shell: bash
         run: |
           python3 - <<'PY'
@@ -26,15 +26,36 @@ jobs:
 
           root = Path('.')
           jdk_path = root / 'docs/compatibility/quarkdown/reference-jvm.toml'
-          markdown_path = root / 'tests/compat/references.toml'
+          md_path = root / 'tests/compat/references.toml'
           jdk_text = jdk_path.read_text(encoding='utf-8')
-          markdown_text = markdown_path.read_text(encoding='utf-8')
-          with jdk_path.open('rb') as stream:
-              cfg = tomllib.load(stream)
-          prov = cfg['provenance']
-          ref = cfg['reference']
+          md_text = md_path.read_text(encoding='utf-8')
+          with jdk_path.open('rb') as f:
+              cfg = tomllib.load(f)
+          prov, ref = cfg['provenance'], cfg['reference']
 
-          jdk_fields = [
+          def sha(path):
+              return hashlib.sha256((root / path).read_bytes()).hexdigest()
+
+          def replace_global(text, field, value, count):
+              pattern = rf'(?m)^{re.escape(field)} = .*$'
+              replacement = f'{field} = {value}'
+              text, actual = re.subn(pattern, replacement, text)
+              if actual != count:
+                  raise SystemExit(f'{field}: expected {count} assignments, got {actual}')
+              return text
+
+          def replace_table(text, table, field, value):
+              start = text.index(f'[{table}]')
+              next_table = text.find('\n[', start + 1)
+              end = len(text) if next_table == -1 else next_table
+              block = text[start:end]
+              pattern = rf'(?m)^{re.escape(field)} = .*$'
+              block, count = re.subn(pattern, f'{field} = {value}', block, count=1)
+              if count != 1:
+                  raise SystemExit(f'{table}.{field}: expected one assignment, got {count}')
+              return text[:start] + block + text[end:]
+
+          jdk_sources = [
               ('verifier_source_sha256', prov['verifier_path']),
               ('helper_source_sha256', 'tools/dump_jdk25_unicode_data.java'),
               ('unicode_generator_source_sha256', ref['unicode_generator_path']),
@@ -43,43 +64,45 @@ jobs:
               ('locale_public_oracle_helper_source_sha256', ref['locale_public_oracle_helper_path']),
               ('locale_semantic_verifier_source_sha256', ref['locale_semantic_verifier_path']),
           ]
+          for field, path in jdk_sources:
+              value = sha(path)
+              jdk_text = replace_global(jdk_text, field, f'"{value}"', 1)
+              print(f'JDK {field}={value}')
 
-          actuals = {}
-          for field, path_text in jdk_fields:
-              actual = hashlib.sha256((root / path_text).read_bytes()).hexdigest()
-              actuals[field] = actual
-              pattern = rf'(?m)^{re.escape(field)} = "[0-9a-f]{{64}}"$'
-              jdk_text, count = re.subn(pattern, f'{field} = "{actual}"', jdk_text, count=1)
-              if count != 1:
-                  raise SystemExit(f'expected exactly one JDK {field} assignment, got {count}')
-              print(f'JDK {field}={actual} ({path_text})')
-
-          markdown_fields = [
+          md_sources = [
               ('verifier_source_sha256', 'tools/verify_reference_provenance.py', 1),
               ('extraction_script_source_sha256', 'tools/markdown-compat/extract_corpus.py', 2),
               ('preparation_script_source_sha256', 'tools/markdown-compat/prepare_references.py', 2),
               ('differential_harness_source_sha256', 'tools/markdown-compat/src/main.rs', 2),
           ]
-          for field, path_text, expected_count in markdown_fields:
-              actual = hashlib.sha256((root / path_text).read_bytes()).hexdigest()
-              pattern = rf'(?m)^{re.escape(field)} = "[0-9a-f]{{64}}"$'
-              markdown_text, count = re.subn(pattern, f'{field} = "{actual}"', markdown_text)
-              if count != expected_count:
-                  raise SystemExit(
-                      f'expected {expected_count} Markdown {field} assignments, got {count}'
-                  )
-              print(f'Markdown {field}={actual} ({path_text}) x{count}')
+          for field, path, count in md_sources:
+              value = sha(path)
+              md_text = replace_global(md_text, field, f'"{value}"', count)
+              print(f'Markdown {field}={value}')
+
+          for table in ('commonmark', 'cmark_gfm'):
+              with md_path.open('rb') as f:
+                  original = tomllib.load(f)
+              baseline_path = original[table]['baseline_path']
+              data = (root / baseline_path).read_bytes()
+              md_text = replace_table(md_text, table, 'baseline_bytes', str(len(data)))
+              md_text = replace_table(
+                  md_text,
+                  table,
+                  'baseline_sha256',
+                  f'"{hashlib.sha256(data).hexdigest()}"',
+              )
+              print(f'{table} baseline bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}')
 
           jdk_path.write_text(jdk_text, encoding='utf-8')
-          markdown_path.write_text(markdown_text, encoding='utf-8')
+          md_path.write_text(md_text, encoding='utf-8')
           PY
 
-      - name: Verify reference contracts with synchronized fingerprints
+      - name: Verify synchronized contracts
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
-          git diff -- docs/compatibility/quarkdown/reference-jvm.toml tests/compat/references.toml
           python3 tools/verify_reference_provenance.py
 
       - name: Commit synchronized fingerprints when needed
@@ -89,11 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet -- docs/compatibility/quarkdown/reference-jvm.toml tests/compat/references.toml; then
-            echo "reference source fingerprints already synchronized"
+            echo "reference fingerprints already synchronized"
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add docs/compatibility/quarkdown/reference-jvm.toml tests/compat/references.toml
-          git commit -m 'test: rebind reference source fingerprints after Arkst rename'
+          git commit -m 'test: rebind reference fingerprints after Arkst rename'
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:chore/rename-arkst
