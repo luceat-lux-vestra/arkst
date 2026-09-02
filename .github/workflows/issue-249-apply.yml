@@ -1,0 +1,161 @@
+name: Apply issue 249 release integration
+
+on:
+  push:
+    branches:
+      - release/249-github-release-pipeline
+    paths:
+      - .github/workflows/issue-249-apply.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-249-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: release/249-github-release-pipeline
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+
+      - name: Integrate release contract into canonical policy and CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          policy = Path('.github/distribution-policy.toml')
+          text = policy.read_text()
+          old = '''publication_channel = "github-releases"\n\n[channels.internal_tools]'''
+          new = '''publication_channel = "github-releases"\nrelease_version = "0.1.0"\ntargets = [\n    "aarch64-apple-darwin",\n    "x86_64-pc-windows-msvc",\n    "x86_64-unknown-linux-gnu",\n]\n\n[channels.internal_tools]'''
+          assert text.count(old) == 1
+          policy.write_text(text.replace(old, new, 1))
+
+          verifier = Path('tools/ci/verify_distribution_policy.py')
+          text = verifier.read_text()
+          old = 'CURRENT_DECISION = "github-release-cli"\n'
+          new = '''CURRENT_DECISION = "github-release-cli"\nCURRENT_RELEASE_VERSION = "0.1.0"\nCURRENT_RELEASE_TARGETS = [\n    "aarch64-apple-darwin",\n    "x86_64-pc-windows-msvc",\n    "x86_64-unknown-linux-gnu",\n]\n'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          old = '''            "distribution_status",\n            "publication_channel",\n        },\n        "internal_tools": {'''
+          new = '''            "distribution_status",\n            "publication_channel",\n            "release_version",\n            "targets",\n        },\n        "internal_tools": {'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          old = '''        raise DistributionPolicyError(\n            "policy.channels.github_release.publication_channel must be github-releases"\n        )\n\n    internal = _expect_table'''
+          new = '''        raise DistributionPolicyError(\n            "policy.channels.github_release.publication_channel must be github-releases"\n        )\n    if (\n        _expect_string(\n            github["release_version"],\n            "policy.channels.github_release.release_version",\n        )\n        != CURRENT_RELEASE_VERSION\n    ):\n        raise DistributionPolicyError(\n            f"policy.channels.github_release.release_version must be {CURRENT_RELEASE_VERSION}"\n        )\n    targets = _expect_string_list(\n        github["targets"],\n        "policy.channels.github_release.targets",\n    )\n    if targets != CURRENT_RELEASE_TARGETS:\n        raise DistributionPolicyError(\n            f"policy.channels.github_release.targets must be {CURRENT_RELEASE_TARGETS!r}"\n        )\n\n    internal = _expect_table'''
+          assert text.count(old) == 1
+          verifier.write_text(text.replace(old, new, 1))
+
+          tests = Path('tools/ci/test_verify_distribution_policy.py')
+          text = tests.read_text()
+          anchor = '''    def test_disabling_github_release_contract_is_rejected(self) -> None:\n'''
+          insert = '''    def test_github_release_version_and_targets_are_pinned(self) -> None:\n        policy = mod.load_policy(POLICY)\n        github = policy["channels"]["github_release"]\n        self.assertEqual(github["release_version"], "0.1.0")\n        self.assertEqual(github["targets"], mod.CURRENT_RELEASE_TARGETS)\n\n    def test_unexpected_github_release_target_is_rejected(self) -> None:\n        policy_text = POLICY.read_text(encoding="utf-8").replace(\n            '    "x86_64-unknown-linux-gnu",\\n]',\n            '    "x86_64-unknown-linux-gnu",\\n    "riscv64gc-unknown-linux-gnu",\\n]',\n            1,\n        )\n        self.reject(r"github_release.targets", policy_text=policy_text)\n\n    def test_github_release_version_drift_is_rejected(self) -> None:\n        policy_text = POLICY.read_text(encoding="utf-8").replace(\n            'release_version = "0.1.0"',\n            'release_version = "0.2.0"',\n            1,\n        )\n        self.reject(r"release_version must be 0.1.0", policy_text=policy_text)\n\n'''
+          assert text.count(anchor) == 1
+          tests.write_text(text.replace(anchor, insert + anchor, 1))
+
+          contract = Path('tools/ci/verify_release_contract.py')
+          text = contract.read_text()
+          old = '''TARGETS = {\n    "x86_64-unknown-linux-gnu": {\n        "runner": "ubuntu-24.04",\n        "binary": "arkst",\n        "format": "tar.gz",\n    },\n    "aarch64-apple-darwin": {\n        "runner": "macos-26",\n        "binary": "arkst",\n        "format": "tar.gz",\n    },\n    "x86_64-pc-windows-msvc": {\n        "runner": "windows-2025",\n        "binary": "arkst.exe",\n        "format": "zip",\n    },\n}\n'''
+          new = '''TARGETS = {\n    "aarch64-apple-darwin": {\n        "runner": "macos-26",\n        "binary": "arkst",\n        "format": "tar.gz",\n    },\n    "x86_64-pc-windows-msvc": {\n        "runner": "windows-2025",\n        "binary": "arkst.exe",\n        "format": "zip",\n    },\n    "x86_64-unknown-linux-gnu": {\n        "runner": "ubuntu-24.04",\n        "binary": "arkst",\n        "format": "tar.gz",\n    },\n}\n'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          old = '''    _require(github.get("publication_channel") == "github-releases", "GitHub Release publication channel must be github-releases")\n    _require(wasm.get("publishable") is False, "WASM distribution must remain disabled")'''
+          new = '''    _require(github.get("publication_channel") == "github-releases", "GitHub Release publication channel must be github-releases")\n    release_version = github.get("release_version")\n    _require(release_version == "0.1.0", "first GitHub Release version must be 0.1.0")\n    _require(wasm.get("publishable") is False, "WASM distribution must remain disabled")'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          old = '''    if tag is not None:\n        _require(SEMVER_TAG.fullmatch(tag) is not None, f"release tag must be SemVer-shaped vX.Y.Z, got {tag!r}")\n        _require(tag == f"v{version}", f"release tag {tag!r} does not match arkst-cli version {version!r}")\n'''
+          new = '''    if tag is not None:\n        _require(SEMVER_TAG.fullmatch(tag) is not None, f"release tag must be SemVer-shaped vX.Y.Z, got {tag!r}")\n        _require(version == release_version, f"arkst-cli version {version!r} is not the approved first release version {release_version!r}")\n        _require(tag == f"v{release_version}", f"release tag {tag!r} does not match approved release version {release_version!r}")\n'''
+          assert text.count(old) == 1
+          contract.write_text(text.replace(old, new, 1))
+
+          contract_tests = Path('tools/ci/test_verify_release_contract.py')
+          text = contract_tests.read_text()
+          old = '''    def test_current_contract_passes(self) -> None:\n        plan = mod.validate_contract(self.policy, self.metadata, f"v{self.version}")\n        self.assertEqual(plan["version"], self.version)\n'''
+          new = '''    def test_current_contract_passes_without_release_tag(self) -> None:\n        plan = mod.validate_contract(self.policy, self.metadata)\n        self.assertEqual(plan["version"], self.version)\n'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          old = '''    def test_wrong_tag_is_rejected(self) -> None:\n        with self.assertRaisesRegex(mod.ReleaseContractError, "does not match arkst-cli version"):\n            mod.validate_contract(self.policy, self.metadata, "v9.9.9")\n'''
+          new = '''    def test_tag_is_rejected_until_workspace_is_bumped_to_first_release_version(self) -> None:\n        with self.assertRaisesRegex(mod.ReleaseContractError, "not the approved first release version"):\n            mod.validate_contract(self.policy, self.metadata, "v0.1.0")\n\n    def test_wrong_tag_is_rejected_after_release_version_check(self) -> None:\n        metadata = copy.deepcopy(self.metadata)\n        package = next(item for item in metadata["packages"] if item["name"] == "arkst-cli")\n        package["version"] = "0.1.0"\n        policy = copy.deepcopy(self.policy)\n        next(item for item in policy["packages"] if item["name"] == "arkst-cli")["version"] = "0.1.0"\n        with self.assertRaisesRegex(mod.ReleaseContractError, "does not match approved release version"):\n            mod.validate_contract(policy, metadata, "v0.1.1")\n'''
+          assert text.count(old) == 1
+          contract_tests.write_text(text.replace(old, new, 1))
+
+          security = Path('tools/ci/verify_workflow_security.py')
+          text = security.read_text()
+          old = '''ALLOWED_JOB_WRITE_PERMISSIONS = {\n    (".github/workflows/security.yml", "report-failure"): {"issues"},\n}\n'''
+          new = '''ALLOWED_JOB_WRITE_PERMISSIONS = {\n    (".github/workflows/security.yml", "report-failure"): {"issues"},\n    (".github/workflows/release.yml", "publish"): {"contents"},\n}\n'''
+          assert text.count(old) == 1
+          security.write_text(text.replace(old, new, 1))
+
+          security_tests = Path('tools/ci/test_verify_workflow_security.py')
+          text = security_tests.read_text()
+          anchor = '''\n\nclass WorkflowSecurityTests(unittest.TestCase):\n'''
+          fixture = '''\n\nRELEASE = """\nname: Release\non:\n  push:\n    tags:\n      - "v*"\npermissions:\n  contents: read\nconcurrency:\n  group: release-${{ github.ref }}\n  cancel-in-progress: false\njobs:\n  plan:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: echo plan\n  publish:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    permissions:\n      contents: write\n    steps:\n      - run: echo publish\n"""\n'''
+          assert text.count(anchor) == 1
+          text = text.replace(anchor, fixture + anchor, 1)
+          anchor = '''    def test_security_reporter_job_may_write_issues(self) -> None:\n'''
+          insert = '''    def test_release_publish_job_may_write_contents(self) -> None:\n        self.verify(RELEASE, name="release.yml")\n\n    def test_release_plan_job_may_not_write_contents(self) -> None:\n        bad = RELEASE.replace(\n            "  plan:\\n    runs-on: ubuntu-24.04\\n",\n            "  plan:\\n    runs-on: ubuntu-24.04\\n    permissions:\\n      contents: write\\n",\n        )\n        self.reject(bad, "unapproved job plan write permission", name="release.yml")\n\n    def test_release_workflow_may_not_write_contents_at_top_level(self) -> None:\n        bad = RELEASE.replace("permissions:\\n  contents: read", "permissions:\\n  contents: write", 1)\n        self.reject(bad, "unapproved workflow-level write permission", name="release.yml")\n\n'''
+          assert text.count(anchor) == 1
+          security_tests.write_text(text.replace(anchor, insert + anchor, 1))
+
+          ci = Path('.github/workflows/ci.yml')
+          text = ci.read_text()
+          old = '''      - name: Verify fail-closed distribution policy\n        run: |\n          python3 tools/ci/test_verify_distribution_policy.py\n          python3 tools/ci/verify_distribution_policy.py\n'''
+          new = '''      - name: Verify fail-closed distribution and release policy\n        run: |\n          python3 tools/ci/test_verify_distribution_policy.py\n          python3 tools/ci/verify_distribution_policy.py\n          python3 tools/ci/test_verify_release_contract.py\n          python3 tools/ci/verify_release_contract.py\n          python3 tools/ci/test_package_release_asset.py\n          python3 tools/ci/test_verify_release_ruleset.py\n'''
+          assert text.count(old) == 1
+          ci.write_text(text.replace(old, new, 1))
+
+          docs = Path('docs/engineering/DISTRIBUTION_POLICY.md')
+          text = docs.read_text()
+          old = '''- `arkst-cli` / binary `arkst` is the sole currently intended public artifact.\n  Its approved channel is GitHub Releases.\n'''
+          new = '''- `arkst-cli` / binary `arkst` is the sole currently intended public artifact.\n  Its approved channel is GitHub Releases, with the first approved release version\n  pinned to `0.1.0`. The release workflow must refuse a tag until the workspace\n  CLI version and canonical inventory are deliberately bumped to that version.\n- The initial native artifact targets are `aarch64-apple-darwin`,\n  `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`. The canonical\n  target inventory lives in `.github/distribution-policy.toml`; runner/archive\n  mapping is fail-closed in the release contract verifier.\n'''
+          assert text.count(old) == 1
+          docs.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Validate release contract integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/ci/test_verify_distribution_policy.py
+          python3 tools/ci/verify_distribution_policy.py
+          python3 tools/ci/test_verify_release_contract.py
+          python3 tools/ci/verify_release_contract.py
+          python3 tools/ci/test_package_release_asset.py
+          python3 tools/ci/test_verify_release_ruleset.py
+          python3 tools/ci/test_verify_workflow_security.py
+          python3 tools/ci/test_verify_workflow_shape.py
+          python3 tools/ci/verify_workflow_shape.py
+          cargo fmt --all -- --check
+          git diff --check
+
+      - name: Commit issue 249 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "luceat-lux-vestra"
+          git config user.email "heathkimdev@gmail.com"
+          git add \
+            .github/distribution-policy.toml \
+            .github/workflows/ci.yml \
+            docs/engineering/DISTRIBUTION_POLICY.md \
+            tools/ci/verify_distribution_policy.py \
+            tools/ci/test_verify_distribution_policy.py \
+            tools/ci/verify_release_contract.py \
+            tools/ci/test_verify_release_contract.py \
+            tools/ci/verify_workflow_security.py \
+            tools/ci/test_verify_workflow_security.py
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+          git commit -m "release: bind GitHub Release pipeline to canonical policy"
+          git push origin HEAD:release/249-github-release-pipeline
