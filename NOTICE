@@ -62,3 +62,22 @@ and CLDR/Unicode attribution and notice terms:
 The generated values are distinguished from Scribium's independently authored
 Apache-2.0 generator, binary parser, lookup code, tests, and integration; no
 JDK implementation source is bundled.
+
+== Markdown compatibility reference data ==
+
+The checked-in CommonMark compatibility corpus is extracted from
+https://github.com/commonmark/commonmark-spec at the immutable revision
+recorded in tests/compat/references.toml. Its source license is CC-BY-SA-4.0;
+the pinned source LICENSE file is retained and verified by the provenance
+checker.
+
+The checked-in CommonMark parser corpus uses
+https://github.com/commonmark/cmark at the immutable revision recorded in
+tests/compat/references.toml. The source is BSD-2-Clause licensed with the
+component notices retained in its pinned COPYING file, which is verified by
+the provenance checker.
+
+The checked-in GFM parser corpus uses https://github.com/github/cmark-gfm at
+the immutable revision recorded in tests/compat/references.toml. The source
+is BSD-2-Clause licensed with the component notices retained in its pinned
+COPYING file, which is verified by the provenance checker.

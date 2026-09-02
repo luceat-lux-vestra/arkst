@@ -8,6 +8,10 @@ that can vary with the JVM. A future reference-JVM change requires a separate
 compatibility migration.
 
 The machine-readable pin is [`reference-jvm.toml`](reference-jvm.toml). The
+repository-wide generated/reference-data rules are defined by the
+[integrity contract](../reference-provenance.md) and enforced by its
+deterministic verifier. This JDK-specific manifest remains the authoritative
+source for the detailed archive, runtime, oracle, and locale values. The
 canonical generation asset is the Linux x64 JDK archive:
 
 - release/tag: `jdk-25.0.4.1+1`
@@ -111,8 +115,8 @@ The transient public Java differential emits 7,440 rows (5,122 tag-path and
 `05b090ea11486c5f0487a40e6fd499f11e282e5e3490ede1688166c336c9faed`; its
 helper source SHA-256 is
 `80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02`.
-The locale generator source SHA-256 is
-`65cc75da3de62d1a9eeda9d5e043c805112c4dbc7de81f72c4fba76937298fce`.
+The locale generator source SHA-256 is recorded in the machine-readable
+manifest.
 The name-first table preserves a pinned raw-array capture of
 `Locale.getAvailableLocales()` in
 `tools/jdk25_available_locale_order.tsv` (SHA-256
@@ -123,9 +127,9 @@ fields while retaining JDK `toLanguageTag()` serialization (`und`, or
 `x-private` for private-use-only tags). The direct oracle includes `""`, `und`,
 `x-private`, `en_US`, whitespace, and `en--US`; their JDK results are retained
 without an oracle-side unresolved rewrite or blank-language filtering. The
-generated Rust metadata is 814,205 bytes with
+generated Rust metadata is 814,472 bytes with
 SHA-256
-`2d649ef01791bae54fe7be2904689123b57dfc817185a026aaabfe005d78e578` and
+`c16d5d8c8bc96ec129bcfe222ae7acbf5ff91812108cde042477ef0b7b46ca34` and
 remains below the 1 MiB source budget.
 The generator exhaustively reconstructs every logical display row, validates
 the binary index, and checks both generated artifacts byte-for-byte. JDK25's

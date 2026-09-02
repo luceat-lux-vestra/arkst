@@ -9,6 +9,7 @@ Scribium keeps parser capability, language semantics, and backend capability as 
 ## Markdown
 
 - [Markdown/CommonMark+GFM baseline audit](markdown/README.md)
+- [Generated/reference-data integrity contract](reference-provenance.md)
 - [Known Markdown compatibility gaps](markdown/gaps.md)
 
 ## Quarkdown

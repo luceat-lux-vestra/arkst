@@ -162,7 +162,10 @@ fails CI.
 All reference inputs are pinned by version and full commit in
 [`tests/compat/references.toml`](../../../tests/compat/references.toml). The
 preparation script checks out the exact commits and the CI job verifies the
-checked-in corpus byte-for-byte against the pinned sources.
+checked-in corpus byte-for-byte against the pinned sources. The shared
+[generated/reference-data integrity contract](../reference-provenance.md)
+also verifies source corpus/license identities, extraction and harness
+identities, exact artifact bounds, and independent result classifications.
 
 | Role | Version | Revision | Source and license |
 |---|---|---|---|

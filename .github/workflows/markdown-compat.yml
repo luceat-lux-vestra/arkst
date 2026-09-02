@@ -104,6 +104,14 @@ jobs:
           cmp tests/compat/corpus/commonmark.json "$RUNNER_TEMP/commonmark.json"
           cmp tests/compat/corpus/gfm.json "$RUNNER_TEMP/gfm.json"
 
+      - name: Verify Markdown provenance contract and regenerated artifacts
+        if: steps.scope.outputs.relevant == 'true'
+        run: |
+          python3 tools/verify_reference_provenance.py \
+            --markdown-paths "$RUNNER_TEMP/markdown-compat-references/paths.json" \
+            --commonmark-extracted "$RUNNER_TEMP/commonmark.json" \
+            --gfm-extracted "$RUNNER_TEMP/gfm.json"
+
       - name: Run differential corpus and PDF smoke harness
         if: steps.scope.outputs.relevant == 'true'
         env:
@@ -115,6 +123,12 @@ jobs:
             --gfm-cmark "$CMARK_GFM_ROOT/build/src/cmark-gfm" \
             --output-dir "$RUNNER_TEMP/markdown-compat-report" \
             --typst typst
+
+      - name: Verify independent Markdown result identity
+        if: steps.scope.outputs.relevant == 'true'
+        run: |
+          python3 tools/verify_reference_provenance.py \
+            --markdown-report "$RUNNER_TEMP/markdown-compat-report/compatibility-report.json"
 
       - name: Upload Markdown compatibility artifacts
         if: always() && steps.scope.outputs.relevant == 'true'
