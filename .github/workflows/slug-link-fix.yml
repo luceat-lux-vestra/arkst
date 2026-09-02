@@ -1,0 +1,57 @@
+name: Arkst repository URL transition fix
+
+on:
+  push:
+    branches:
+      - chore/rename-arkst
+    paths:
+      - .github/workflows/slug-link-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chore/rename-arkst
+          fetch-depth: 0
+      - name: Preserve live repository URLs until slug migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          old = "https://github.com/luceat-lux-vestra/arkst"
+          new = "https://github.com/luceat-lux-vestra/scribium"
+          changed = []
+          for p in Path('.').rglob('*'):
+              if not p.is_file() or '.git' in p.parts or p.parts[:2] == ('.github', 'workflows'):
+                  continue
+              try:
+                  text = p.read_text()
+              except UnicodeDecodeError:
+                  continue
+              if old in text:
+                  p.write_text(text.replace(old, new))
+                  changed.append(str(p))
+          if not changed:
+              raise SystemExit('no non-workflow Arkst repository URLs found')
+          print('\n'.join(changed))
+          PY
+          git diff --check
+
+      - name: Commit URL transition fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "luceat-lux-vestra"
+          git config user.email "heathkimdev@gmail.com"
+          git add -- . ':(exclude).github/workflows/*'
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+          git commit -m "fix: preserve live repository URLs during Arkst rename"
+          git push origin HEAD:chore/rename-arkst
