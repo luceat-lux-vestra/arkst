@@ -72,7 +72,7 @@ jobs:
         with:
           script: |
             const title = 'ci: scheduled supply-chain audit is failing';
-            const marker = '<!-- scribium-owned:scheduled-supply-chain-failure -->';
+            const marker = '<!-- arkst-owned:scheduled-supply-chain-failure -->';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const runUrl = [
