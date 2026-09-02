@@ -1695,7 +1695,17 @@ fn convert_inline(
                         message: error.message,
                         span: offset_span(error.span, base).unwrap_or(span),
                     });
-                    return None;
+                    // The extension parser consumed this complete source
+                    // segment when the call was malformed. Keep that exact
+                    // segment visible in the AST instead of dropping it
+                    // after recording the grammar diagnostic. Recovery uses
+                    // the original bytes directly: normal text
+                    // normalization would change the source-backed meaning
+                    // of malformed input.
+                    return Some(Inline::Text {
+                        content: source.get(call_span.start..call_span.end)?.to_string(),
+                        span: offset_span(call_span, base)?,
+                    });
                 }
             };
             let call_name = call.name.clone();
@@ -3302,11 +3312,13 @@ mod tests {
     fn malformed_inline_call_preserves_full_source_offset() {
         let source = "prefix .foo {unterminated";
         let output = parse_with_diagnostics(source);
-        let diagnostic = output
+        let diagnostics: Vec<_> = output
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "E2003")
-            .expect("expected malformed inline call diagnostic");
+            .filter(|diagnostic| diagnostic.code == "E2003")
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "expected one E2003: {output:?}");
+        let diagnostic = diagnostics[0];
         let expected_start = source.find('{').unwrap();
         assert_eq!(diagnostic.span, ByteSpan::new(expected_start, source.len()));
         assert!(diagnostic.span.start <= diagnostic.span.end);
@@ -3317,6 +3329,155 @@ mod tests {
             source.get(diagnostic.span.start..diagnostic.span.end),
             Some("{unterminated")
         );
+
+        let Block::Paragraph { content, span } = &output.document.nodes[0] else {
+            panic!(
+                "expected malformed inline paragraph, got {:?}",
+                output.document.nodes
+            )
+        };
+        assert_eq!(&source[span.start..span.end], source);
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, span }
+                if content == "prefix "
+                    && &source[span.start..span.end] == "prefix "
+        )));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, span }
+                if content == ".foo {unterminated"
+                    && &source[span.start..span.end] == ".foo {unterminated"
+        )));
+        let text_source: String = content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text { content, span } => {
+                    assert_eq!(content, &source[span.start..span.end]);
+                    Some(content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text_source, source);
+    }
+
+    #[test]
+    fn malformed_inline_recovery_preserves_utf8_crlf_and_following_source() {
+        let source = "앞 .foo {한글\r\nunrelated suffix";
+        assert!(source.as_bytes().windows(2).any(|pair| pair == b"\r\n"));
+        let output = parse_with_diagnostics(source);
+        let diagnostics: Vec<_> = output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E2003")
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "expected one E2003: {output:?}");
+        let diagnostic = diagnostics[0];
+        let diagnostic_start = source.find('{').expect("opening brace");
+        assert_eq!(
+            diagnostic.span,
+            ByteSpan::new(diagnostic_start, source.len())
+        );
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            "{한글\r\nunrelated suffix"
+        );
+        assert!(source.is_char_boundary(diagnostic.span.start));
+        assert!(source.is_char_boundary(diagnostic.span.end));
+
+        let Block::Paragraph { content, span } = &output.document.nodes[0] else {
+            panic!(
+                "expected malformed inline paragraph, got {:?}",
+                output.document.nodes
+            )
+        };
+        assert_eq!(&source[span.start..span.end], source);
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, span }
+                if content == ".foo {한글\r\n"
+                    && &source[span.start..span.end] == ".foo {한글\r\n"
+                    && source.is_char_boundary(span.start)
+                    && source.is_char_boundary(span.end)
+        )));
+        let following_start = source.find("unrelated").expect("following source");
+        let following_text: String = content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text { content, span } if span.start >= following_start => {
+                    Some(content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(following_text, "unrelated suffix");
+        let text_source: String = content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text { content, span } => {
+                    assert_eq!(content, &source[span.start..span.end]);
+                    Some(content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text_source, source);
+
+        let markdown = parse_with_mode(source, Mode::Markdown);
+        assert!(markdown.diagnostics.is_empty(), "{markdown:?}");
+        let Block::Paragraph {
+            content: markdown_content,
+            span: markdown_span,
+        } = &markdown.document.nodes[0]
+        else {
+            panic!(
+                "expected Markdown paragraph, got {:?}",
+                markdown.document.nodes
+            )
+        };
+        assert_eq!(&source[markdown_span.start..markdown_span.end], source);
+        assert!(markdown_content
+            .iter()
+            .all(|inline| !matches!(inline, Inline::DirectiveCall { .. })));
+        let markdown_source: String = markdown_content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Text { content, span } => {
+                    assert_eq!(content, &source[span.start..span.end]);
+                    Some(content.as_str())
+                }
+                Inline::SoftBreak { span } | Inline::HardBreak { span } => {
+                    Some(&source[span.start..span.end])
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(markdown_source, source);
+    }
+
+    #[test]
+    fn valid_inline_call_still_preserves_trailing_text() {
+        let source = "prefix .foo {ok} suffix";
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!(
+                "expected valid inline paragraph, got {:?}",
+                output.document.nodes
+            )
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::DirectiveCall { span, .. }
+                if &source[span.start..span.end] == ".foo {ok}"
+        )));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, span }
+                if content == " suffix"
+                    && &source[span.start..span.end] == " suffix"
+        )));
     }
 
     #[test]

@@ -116,12 +116,13 @@ adjacency, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
-boundaries, and source provenance. The #157 and #158 lexical/frontend
-production slices are implemented as recorded in the audit below. The
-remaining three bounded production follow-ups are:
+boundaries, and source provenance. The #157, #158, and #159 lexical/frontend
+production slices are implemented as recorded in the audit below. #159 is
+bounded to preserving the consumed malformed inline source segment after
+recording the existing `E2003`; its UTF-8 and real-CRLF tests are
+parser/frontend evidence only, not a semantic or output compatibility claim.
+The remaining two bounded production follow-ups are:
 
-- [#159](https://github.com/luceat-lux-vestra/arkst/issues/159) — retain
-  source after malformed inline-call recovery; and
 - [#162](https://github.com/luceat-lux-vestra/arkst/issues/162) — align
   escaped call and argument delimiter recognition/depth handling with pinned
   `GrammarUtils.kt` and `FunctionCallGrammar.kt`; bounded to

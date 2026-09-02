@@ -211,9 +211,10 @@ Call syntax has the following properties:
 - Inline calls appear inside a paragraph: `.strong {bold}` in surrounding
   text. A call that has trailing text after it on the same line is treated
   as an inline call, not a block-level call.
-- Malformed inline calls retain their diagnostic span, but recovery must also
-  retain following source text; the current suffix-loss gap is tracked by
-  #159.
+- Malformed inline calls retain their `E2003` diagnostic span and the consumed
+  original source segment, including following source text. This bounded
+  parser/frontend recovery is evidenced by #159; escaped-delimiter and
+  separator gaps remain #162/#164.
 
 ### Block-level calls with indented body (Implemented)
 
