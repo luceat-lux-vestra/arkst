@@ -22,8 +22,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Rename the product-owned crate directories first so Cargo paths and
-          # source imports can be updated coherently in the same commit.
           for dir in crates/scribium-*; do
             [ -d "$dir" ] || continue
             git mv "$dir" "${dir/crates\/scribium-/crates\/arkst-}"
@@ -51,7 +49,6 @@ jobs:
               try:
                   data = path.read_bytes()
               except FileNotFoundError:
-                  # git mv changed the tracked path; find the renamed equivalent.
                   renamed = Path(path.as_posix().replace("crates/scribium-", "crates/arkst-"))
                   if not renamed.exists():
                       continue
@@ -75,7 +72,6 @@ jobs:
           print(f"updated project identity in {changed} tracked text files")
           PY
 
-          # Record why the old working name remains visible in historical context.
           cat >> docs/legal/TRADEMARKS.md <<'EOF'
 
           ## Project naming decision (2026-09-02)
@@ -91,13 +87,11 @@ jobs:
           naming decision, not a legal conclusion or trademark clearance.
           EOF
 
-          # The bootstrap workflow is intentionally one-shot and must not survive
-          # into the reviewable product rename diff.
           git rm .github/workflows/arkst-rename-bootstrap.yml
 
-          # Cargo.lock contains workspace package identities. Regenerate it so the
-          # lockfile, manifests and metadata agree rather than relying on text edits.
-          cargo generate-lockfile
+          # Renaming workspace package identities can change rustfmt grouping and
+          # line wrapping. Apply canonical formatting as part of the mechanical rename.
+          cargo fmt --all
 
       - name: Validate renamed workspace
         shell: bash
@@ -125,7 +119,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Only the explicit historical naming record may retain the old product name.
           matches="$(git grep -n -E 'Scribium|scribium|SCRIBIUM' -- ':!docs/legal/TRADEMARKS.md' || true)"
           if [ -n "$matches" ]; then
             printf '%s\n' "$matches"
