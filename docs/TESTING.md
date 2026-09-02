@@ -1,4 +1,4 @@
-# Testing — Scribium
+# Testing — Arkst
 
 ## Test Pyramid
 
@@ -31,10 +31,10 @@ Target areas:
 
 Snapshot targets:
 
-- AST output (`scribium inspect --emit ast`)
-- Semantic tree (`scribium inspect --emit semantic`)
-- IR output (`scribium inspect --emit ir`)
-- Generated Typst (`scribium inspect --emit typst`)
+- AST output (`arkst inspect --emit ast`)
+- Semantic tree (`arkst inspect --emit semantic`)
+- IR output (`arkst inspect --emit ir`)
+- Generated Typst (`arkst inspect --emit typst`)
 - Diagnostics (error snapshots)
 - CLI help text
 
@@ -71,9 +71,9 @@ Golden tests verify:
 
 CLI integration tests:
 
-- `scribium build input.qd` → output PDF exists
-- `scribium check input.qd` → exit code reflects validity
-- `scribium inspect input.qd --emit typst` → Typst output
+- `arkst build input.qd` → output PDF exists
+- `arkst check input.qd` → exit code reflects validity
+- `arkst inspect input.qd --emit typst` → Typst output
 - Invalid input → appropriate exit code + diagnostic
 - Missing Typst backend → clear error
 - Config discovery from parent dirs
@@ -85,23 +85,23 @@ CLI integration tests:
 ## Typst Integration Tests
 
 Backend tests that invoke a **real** `typst` executable live in
-`crates/scribium-typst-subprocess/tests/backend_integration.rs`, separate from
-the subprocess unit tests in `crates/scribium-typst-subprocess/src/lib.rs`
+`crates/arkst-typst-subprocess/tests/backend_integration.rs`, separate from
+the subprocess unit tests in `crates/arkst-typst-subprocess/src/lib.rs`
 (which use fake executable fixtures and never
 require a Typst install, so the ordinary Rust suite is environment-independent).
 
-The integration tests locate an executable via (in order) `SCRIBIUM_TYPST_PATH`,
+The integration tests locate an executable via (in order) `ARKST_TYPST_PATH`,
 `typst` on `PATH`, or the Homebrew default `/opt/homebrew/bin/typst`. When none
-is found they **skip with a notice**; set `SCRIBIUM_REQUIRE_TYPST=1` to turn a
+is found they **skip with a notice**; set `ARKST_REQUIRE_TYPST=1` to turn a
 missing executable into a hard failure. CI installs a pinned Typst version
 explicitly (see `.github/workflows/ci.yml`) and runs the suite with
-`SCRIBIUM_REQUIRE_TYPST=1` on the Ubuntu/macOS/Windows matrix, so the variants
+`ARKST_REQUIRE_TYPST=1` on the Ubuntu/macOS/Windows matrix, so the variants
 that produce and validate a real `%PDF-` PDF always run in CI without relying
 on the runner image.
 
 The native in-process adapter is covered by
-`crates/scribium-typst-inprocess/tests/backend_integration.rs`. Its focused
-suite validates generated Scribium Typst, multi-page PDFs, VirtualProject
+`crates/arkst-typst-inprocess/tests/backend_integration.rs`. Its focused
+suite validates generated Arkst Typst, multi-page PDFs, VirtualProject
 images and fonts, repeated loads, missing/traversal failures, in-process
 package-capability denial (including a runtime-generated request), invalid
 entry paths, deterministic diagnostics, and source-map handoff. CLI selection
@@ -112,18 +112,18 @@ tracked by issue #201.
 Issue #201's fixture-level semantic oracle is an independent test target:
 
 ~~~
-SCRIBIUM_REQUIRE_TYPST=1 \
-  cargo test -p scribium-typst-inprocess \
+ARKST_REQUIRE_TYPST=1 \
+  cargo test -p arkst-typst-inprocess \
   --test backend_parity --all-features -- --nocapture
 ~~~
 
-The target requires Typst 0.15.1, runs the generated Scribium source through
+The target requires Typst 0.15.1, runs the generated Arkst source through
 both native adapters, compares success/document behavior and normalized
 failure semantics, and checks logical diagnostics, source-map availability,
 resource/font policy, project-boundary behavior, and host-path leakage. Static
 package preflight cases are an intentional architectural divergence: the
 subprocess case records best-effort validation while the in-process case
-records hard denial at the Scribium-owned World boundary; this is not a
+records hard denial at the Arkst-owned World boundary; this is not a
 package/network isolation parity assertion. Runtime-generated package access
 is tested only against InProcessBackend and is never executed by the
 subprocess parity target. The target does not compare PDF bytes. The CI native
@@ -162,7 +162,7 @@ but not yet implemented is compatibility debt, not evidence of support and not
 a permanent exclusion.
 
 Compatibility levels are executable policies enforced by
-`scribium_test_support::ConformanceCase::verify()` for every corpus case:
+`arkst_test_support::ConformanceCase::verify()` for every corpus case:
 
 - `Unsupported` — compares `expected/diagnostics.json` by diagnostic code,
   severity, primary span, and secondary spans, and requires a deliberate
@@ -174,7 +174,7 @@ Compatibility levels are executable policies enforced by
 - `Output-equivalent` — adds exact pure Typst lowering equality against
   `expected/typst.typ`; it does not invoke a Typst subprocess.
 - `Known divergence` — requires a non-empty `known_divergence` explanation and
-  an explicit expected IR assertion for Scribium's deliberate behavior.
+  an explicit expected IR assertion for Arkst's deliberate behavior.
 
 Fixture loading fails closed for unknown levels, directory/metadata ID mismatch,
 duplicate metadata IDs, and missing level-specific artifacts. The generic
@@ -195,7 +195,7 @@ structure and source spans; no automatic golden-update mode is provided.
 | license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge |
 | compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
 | msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge |
-| wasm | `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown --all-features` | Merge |
+| wasm | `cargo check -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM

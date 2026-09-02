@@ -1,11 +1,11 @@
 [package]
-name = "scribium-upstream-watch"
+name = "arkst-upstream-watch"
 version = "0.1.0"
 publish = false
 edition = "2021"
 license = "Apache-2.0"
-description = "Quarkdown stable-release adaptation-target observer for Scribium"
-repository = "https://github.com/luceat-lux-vestra/scribium"
+description = "Quarkdown stable-release adaptation-target observer for Arkst"
+repository = "https://github.com/luceat-lux-vestra/arkst"
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
@@ -20,5 +20,5 @@ anyhow = "1"
 tempfile = "3"
 
 [[bin]]
-name = "scribium-upstream-watch"
+name = "arkst-upstream-watch"
 path = "src/main.rs"

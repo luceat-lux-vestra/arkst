@@ -1,8 +1,8 @@
-# Threat Model — Scribium
+# Threat Model — Arkst
 
 ## Scope
 
-This document covers security threats to Scribium and its users when
+This document covers security threats to Arkst and its users when
 processing untrusted document input. It does not cover Typst compiler
 vulnerabilities (report to Typst GmbH).
 

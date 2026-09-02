@@ -1,12 +1,12 @@
 name: Bug Report
-description: Report a bug to help us improve Scribium
+description: Report a bug to help us improve Arkst
 labels: ["type:bug"]
 body:
   - type: input
     id: version
     attributes:
-      label: Scribium version
-      description: Output of `scribium --version`
+      label: Arkst version
+      description: Output of `arkst --version`
       placeholder: "0.1.0-dev"
   - type: input
     id: os

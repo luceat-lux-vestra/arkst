@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-04
-- **Owners:** Scribium Authors
+- **Owners:** Arkst Authors
 - **Related issues:** #12
 
 ## Context
 
-Scribium currently uses a subprocess-based Typst backend (`typst compile` CLI). The question is whether we can link the `typst` Rust crate directly as a library for in-process compilation, which would provide:
+Arkst currently uses a subprocess-based Typst backend (`typst compile` CLI). The question is whether we can link the `typst` Rust crate directly as a library for in-process compilation, which would provide:
 
 - Potential for faster compilation (no process spawn overhead)
 - Better error handling (structured Rust errors vs subprocess stdout/stderr)
@@ -30,13 +30,13 @@ Scribium currently uses a subprocess-based Typst backend (`typst compile` CLI). 
 
 ## Decision Drivers
 
-- **License:** `typst` crate is Apache-2.0 — compatible with Scribium's Apache-2.0
+- **License:** `typst` crate is Apache-2.0 — compatible with Arkst's Apache-2.0
 - **API Stability:** Typst 0.15.1 is 0.x — no stability guarantees
 - **Public API:** Typst provides a public `typst::compile` function and a public `World` trait
 - **World Trait:** The `World` trait requires implementing 7 required methods with complex types (`LazyHash`, `FileId`, `SourceDiagnostic`, etc.)
 - **WASM Compilation:** `typst` crate + dependencies compile to `wasm32-unknown-unknown` (cargo check passes)
 - **Compile Time:** Adding `typst` crate increases clean build time (measurement below)
-- **MSRV:** typst 0.15.1 requires Rust 1.92; Scribium did not previously declare an explicit MSRV
+- **MSRV:** typst 0.15.1 requires Rust 1.92; Arkst did not previously declare an explicit MSRV
 
 ## Investigation Results
 
@@ -49,7 +49,7 @@ Scribium currently uses a subprocess-based Typst backend (`typst compile` CLI). 
 | World implementation complexity | ⚠️ High — requires source loading, file loading, font discovery, font caching, package resolution, virtual filesystem, asset loading, caching, diagnostics |
 | In-process compile test | ✅ Spike successful — 3 test cases pass |
 | WASM cargo check | ✅ `typst` + deps compile to `wasm32-unknown-unknown` (cargo check passes) |
-| MSRV impact | Scribium did not previously declare an explicit MSRV; typst 0.15.1 requires Rust 1.92 |
+| MSRV impact | Arkst did not previously declare an explicit MSRV; typst 0.15.1 requires Rust 1.92 |
 | Clean build time increase | Baseline 2.1s vs in-process 18.5s (5 iterations, mean) |
 | Process spawn overhead | Not isolated; subprocess cold start 52ms vs in-process 1.3ms for simple rect fixture |
 
@@ -74,7 +74,7 @@ Plus associated types and auxiliary types (`LazyHash`, `FileId`, `SourceDiagnost
 
 ### World Implementation Complexity
 
-Implementing `World` for Scribium requires:
+Implementing `World` for Arkst requires:
 - Source and file loading
 - Font discovery and font book construction
 - Font caching
@@ -85,7 +85,7 @@ Implementing `World` for Scribium requires:
 - Repeated-load caching
 - Structured diagnostics integration
 
-Typst-specific types (`LazyHash`, `FileId`, `SourceDiagnostic`, `EcoVec`, `Duration`, `Datetime`, `FontBook`, `Library`, `Font`, `Bytes`, `Source`, `FileError`) must not leak into Scribium's public semantic layer.
+Typst-specific types (`LazyHash`, `FileId`, `SourceDiagnostic`, `EcoVec`, `Duration`, `Datetime`, `FontBook`, `Library`, `Font`, `Bytes`, `Source`, `FileError`) must not leak into Arkst's public semantic layer.
 
 ### WASM Compilation
 
@@ -123,7 +123,7 @@ A minimal Rust crate depending on `typst = "0.15.1"` passes `cargo check --targe
 
 **WASM cargo check:** ✅ Passes for `wasm32-unknown-unknown`
 
-**MSRV:** The isolated Typst 0.15.1 spike was executed with Rust 1.92.0. This investigation does not establish or change Scribium's project-wide MSRV.
+**MSRV:** The isolated Typst 0.15.1 spike was executed with Rust 1.92.0. This investigation does not establish or change Arkst's project-wide MSRV.
 
 ## Decision
 
@@ -157,7 +157,7 @@ Rationale:
 At M6 kickoff (or when any re-evaluation trigger occurs):
 
 1. Re-evaluate against the then-current Typst release
-2. Prototype minimal `World` implementation for Scribium
+2. Prototype minimal `World` implementation for Arkst
 3. Benchmark in-process vs subprocess (with methodology documented above)
 4. Assess WASM bundle size with `wasm-opt`
 5. Measure clean build time and binary size delta

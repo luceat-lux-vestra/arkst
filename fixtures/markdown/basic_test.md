@@ -1,4 +1,4 @@
-# Hello, Scribium
+# Hello, Arkst
 
 This is a paragraph with **bold** and *italic* text.
 

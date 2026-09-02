@@ -1,4 +1,4 @@
-# Syntax — Scribium
+# Syntax — Arkst
 
 > This document is a specification skeleton. Features not yet implemented are
 > marked `Planned`. See `docs/compatibility/quarkdown/` for Quarkdown-specific
@@ -14,7 +14,7 @@
 
 ## Markdown Baseline (Partial)
 
-Scribium targets a CommonMark/GFM-compatible subset. The M1 parser implements
+Arkst targets a CommonMark/GFM-compatible subset. The M1 parser implements
 the subset below; the exact baseline will be determined by parser spike
 results (ADR 0006).
 
@@ -155,7 +155,7 @@ Call syntax has the following properties:
   at the call prefix and leaves the candidate as source remainder; malformed
   braced values that do match the `name:{` boundary retain their structured
   diagnostic path.
-- Positional and named arguments may be mixed. Scribium's grammar/frontend
+- Positional and named arguments may be mixed. Arkst's grammar/frontend
   preserves the complete source-ordered argument sequence, including an
   unnamed argument after a named argument, and does not report parser `E2001`
   for that shape. The engine retains that sequence alongside the legacy
@@ -166,7 +166,7 @@ Call syntax has the following properties:
   frontend/IR representation is the bounded #163 prerequisite; shared
   semantic binding is the #165 engine contract.
 - An escaped call introducer is literal, and escaped `{`/`}` delimiters do not
-  change call-argument depth in pinned v2.5.1. Scribium currently records the
+  change call-argument depth in pinned v2.5.1. Arkst currently records the
   introducer boundary but counts escaped argument braces while scanning; the
   resulting UTF-8/CRLF truncation and malformed behavior are tracked by #162.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
@@ -178,7 +178,7 @@ Call syntax has the following properties:
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
-- Current Scribium consumes a backslash continuation only after an argument
+- Current Arkst consumes a backslash continuation only after an argument
   has already been parsed; `.foo \\` followed by a first argument stops at
   `.foo`, and a trailing continuation reports `E2004`. Pinned v2.5.1 places an
   optional separator before every argument and separately consumes a trailing
@@ -186,7 +186,7 @@ Call syntax has the following properties:
   CRLF acceptance is recorded separately rather than treated as raw-CRLF
   upstream conformance. Separator placement is tracked by #164.
 - `::` parses and structurally preserves a direct call chain (`.a {x}::b {y}`),
-  but current Scribium requires `::` immediately at the current call end;
+  but current Arkst requires `::` immediately at the current call end;
   whitespace or a line continuation before `::` is the #164 separator gap.
   The direct form includes each segment and argument source span. The
   evaluator executes
@@ -328,11 +328,11 @@ Malformed `.var` declarations (missing name or value) produce `E3002`.
 Invalid variable names (not matching the declaration-name grammar) produce
 `E3002`.
 
-> **Note on block variable evaluation timing:** Scribium currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
+> **Note on block variable evaluation timing:** Arkst currently evaluates block variable content at declaration time (source order). The cited Quarkdown public documentation does not explicitly specify evaluation timing for stored block content. This behavior may be refined if upstream semantics are clarified.
 
 ## User-defined functions and lambda parameters (Implemented slice)
 
-Scribium evaluates the documented `.function` declaration form for
+Arkst evaluates the documented `.function` declaration form for
 headerless implicit-parameter and explicit-parameter functions. A declaration
 is source-order state and produces no document output:
 
@@ -420,7 +420,7 @@ is stable ascending natural/selector ordering for homogeneous Number, String,
 or Boolean keys; unsupported, heterogeneous, `None`, and invalid key values
 produce diagnostics. Descending options and arbitrary comparator syntax are
 not part of this slice. `.foreach` and `.sorted` are the Quarkdown v2.5.1
-evidenced operations. The retained `.map` and `.filter` calls are Scribium
+evidenced operations. The retained `.map` and `.filter` calls are Arkst
 extensions, not upstream v2.5.1 functions, and are excluded from compatibility
 coverage counts.
 
@@ -716,7 +716,7 @@ recursively to nested Collections, while rich list-item content remains typed
 content. Pair, Dictionary, and generalized destructuring remain bounded to the
 evidenced forms. Native `.foreach`, `.sorted`, and the Collection operations
 listed above use the shared typed iterable path. `.map` and `.filter` use that
-same path as Scribium extensions; they are not asserted as Quarkdown v2.5.1
+same path as Arkst extensions; they are not asserted as Quarkdown v2.5.1
 functions. Dynamic
 `.range` is a typed constructor with optional `from`/`to` bounds; its numeric
 bounds are evaluated normally and truncated to signed integer endpoints using
@@ -724,8 +724,8 @@ the verified upstream Number-to-Int behavior.
 
 ### Include / Read (Partial; bounded VirtualProject subset)
 
-`.include`, `.read`, and `.json` are evaluated by `scribium-engine` through its
-engine-neutral `ResourceProvider` interface. `scribium-core` owns the adapter
+`.include`, `.read`, and `.json` are evaluated by `arkst-engine` through its
+engine-neutral `ResourceProvider` interface. `arkst-core` owns the adapter
 that backs that interface with `VirtualProject`; the engine does not own or
 depend directly on the project model. Paths are logical and source-relative;
 normalization rejects traversal outside the project boundary, and nested
@@ -745,7 +745,7 @@ and [`docs/adr/0019-typst-source-and-resource-context.md`](adr/0019-typst-source
 ### Native Typst passthrough
 
 Native `.typ` passthrough, if implemented, is a host-level input capability
-that sends a `.typ` document to the selected official Typst compiler. Scribium
+that sends a `.typ` document to the selected official Typst compiler. Arkst
 does not embed raw Typst source in backend-neutral IR and does not define a
 generic backend escape block. The current CLI rejects `.typ` input until the
 separate passthrough capability is implemented.
@@ -759,12 +759,12 @@ until their separate compatibility and host-boundary contracts are reviewed.
 
 ## Reserved Syntax
 
-The following prefixes are reserved for future Scribium syntax:
+The following prefixes are reserved for future Arkst syntax:
 
 - `.` — Quarkdown-compatible function calls (dot-prefixed)
 - `$` — math (delegated to Typst or pass-through)
 - `#` — Typst syntax is generated by the Typst lowering boundary; it is not a
-  Scribium raw-backend escape syntax
+  Arkst raw-backend escape syntax
 - Front matter delimiter `---`
 
 ## Front Matter (Implemented)
@@ -801,6 +801,6 @@ Full YAML support is a separate, future milestone.
 
 ## Versioning
 
-- Syntax version: tied to Scribium release version
+- Syntax version: tied to Arkst release version
 - Breaking syntax changes require a major version bump
 - Old syntax may be supported via compatibility profile

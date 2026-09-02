@@ -1,22 +1,22 @@
 # Typst Backend Compatibility
 
-Scribium does not reimplement the Typst language. The accepted backend path is:
+Arkst does not reimplement the Typst language. The accepted backend path is:
 
 ```text
 backend-neutral IrDocument
-    -> scribium-typst
+    -> arkst-typst
     -> generated Typst source
     -> concrete Typst compiler adapter
     -> official Typst compiler
 ```
 
-Typst compatibility therefore means that Scribium's generated source and
+Typst compatibility therefore means that Arkst's generated source and
 backend adapter remain usable with the selected official Typst compiler. It
-does not mean that Scribium owns a Typst parser or reproduces Typst's internal
+does not mean that Arkst owns a Typst parser or reproduces Typst's internal
 implementation.
 
 Source-language raw HTML is a separate compatibility concern. Typst HTML
-facilities do not authorize Scribium to reinterpret arbitrary Markdown or
+facilities do not authorize Arkst to reinterpret arbitrary Markdown or
 Quarkdown raw HTML at the backend boundary; see the
 [raw HTML compatibility policy](../RAW_HTML_POLICY.md).
 
@@ -30,7 +30,7 @@ changes.
 
 Issue #200 promotes the optional native in-process adapter demonstrated by
 #187 over `VirtualProject` and Typst 0.15.1's public `World`/compile/PDF APIs.
-It is not the default backend: `scribium-cli` includes it only when built with
+It is not the default backend: `arkst-cli` includes it only when built with
 the `typst-inprocess` Cargo feature, and it is then selected explicitly with
 the native CLI's `--backend in-process`. It is not part of the WASM lowering
 boundary and is not a browser renderer. It uses `VirtualProject`-only
@@ -42,7 +42,7 @@ the bounded evidence and promotion gates.
 
 ## Source/project context contract
 
-The native subprocess adapter preserves the Scribium source context without
+The native subprocess adapter preserves the Arkst source context without
 writing generated files into the source tree. `TypstInput.entry_path` is a
 normalized, project-root-relative logical path such as `docs/main.qd`.
 `TypstSourceContext.project_root` is an explicit physical read boundary; it is
@@ -75,7 +75,7 @@ directory an implicit resource root.
 ## Target and verified version
 
 - **Tracked backend target:** the latest stable Typst release automatically
-  becomes the release Scribium must investigate and validate against.
+  becomes the release Arkst must investigate and validate against.
 - **Verified backend baseline:** the last Typst release for which the generated
   corpus and concrete adapter have passed the required checks.
 
@@ -87,10 +87,10 @@ promotion.
 
 Tracking must cover at least:
 
-- Typst syntax emitted by `scribium-typst`;
+- Typst syntax emitted by `arkst-typst`;
 - changed or deprecated constructs used by lowering;
 - compiler CLI behavior used by the subprocess adapter;
-- output capabilities relevant to Scribium;
+- output capabilities relevant to Arkst;
 - compiler/backend APIs used by the optional in-process adapter; and
 - diagnostic and source-map implications where relevant.
 
@@ -109,9 +109,9 @@ new stable Typst release
 The future watcher should add a machine-readable verified baseline, stable
 release detection, generated-source corpus execution, deduplicated failure
 reporting, and eventually adaptation-PR preparation. It must not create a
-Scribium Typst parser merely to follow Typst syntax. Native `.typ` passthrough,
+Arkst Typst parser merely to follow Typst syntax. Native `.typ` passthrough,
 if implemented under its own accepted host policy, should normally be handled
-by the selected official compiler rather than reproduced by Scribium.
+by the selected official compiler rather than reproduced by Arkst.
 
 This document records the target process only. A Typst watcher subsystem is
 future implementation work and is not part of this policy PR.

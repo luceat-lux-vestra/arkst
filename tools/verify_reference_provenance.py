@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Scribium's generated/reference-data integrity contract.
+"""Verify Arkst's generated/reference-data integrity contract.
 
 The two specialized manifests remain the source of target-specific values:
 the JDK manifest describes an archive-backed oracle and the Markdown manifest
@@ -23,7 +23,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACT = "scribium.reference-data-integrity"
+CONTRACT = "arkst.reference-data-integrity"
 CONTRACT_VERSION = 1
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -812,7 +812,7 @@ def verify_jdk_git_sources(root: Path, reference: dict[str, Any]) -> None:
         f"refs/tags/{reference['source_tag']}^{{}}",
     )
     check_peeled_tag_proof(tag_output, reference)
-    with tempfile.TemporaryDirectory(prefix="scribium-jdk-source-proof-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="arkst-jdk-source-proof-") as temporary:
         probe = Path(temporary)
         git_output(probe, "init", "--quiet")
         git_output(probe, "remote", "add", "origin", reference["build_source_repository"])
@@ -867,11 +867,11 @@ def run_jdk_dynamic(
         if oracle is None:
             raise VerificationError("JDK semantic verification requires --locale-oracle")
         environment = os.environ.copy()
-        environment["SCRIBIUM_JDK25_LOCALE_ORACLE"] = str(oracle)
+        environment["ARKST_JDK25_LOCALE_ORACLE"] = str(oracle)
         test_name = reference["locale_semantic_verifier_test"]
         run_checked(
             root,
-            ["cargo", "test", "-p", "scribium-engine", "--locked", test_name, "--", "--exact"],
+            ["cargo", "test", "-p", "arkst-engine", "--locked", test_name, "--", "--exact"],
             environment=environment,
         )
 

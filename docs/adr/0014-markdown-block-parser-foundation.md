@@ -1,14 +1,14 @@
 # ADR-0014: Markdown Block Parser Foundation
 
-> **Superseded in part by ADR-0017.** ADR-0017 retains the `scribium-markdown`
-> and `scribium-quarkdown` ownership and dependency direction recorded here,
-> but replaces the Scribium-owned CommonMark/block/inline parser decision with
+> **Superseded in part by ADR-0017.** ADR-0017 retains the `arkst-markdown`
+> and `arkst-quarkdown` ownership and dependency direction recorded here,
+> but replaces the Arkst-owned CommonMark/block/inline parser decision with
 > a Rushdown-backed frontend and adapter boundary. The historical rationale and
 > rejected PR record below are preserved.
 
 - **Status:** Accepted
 - **Date:** 2026-08-11
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related ADRs:** 0002, 0006, 0007, 0012, 0015
 - **Related work:** closed PR #45; `refactor/markdown-parser-foundation`
 
@@ -17,8 +17,8 @@ parser design.
 
 ## Context
 
-Scribium's Markdown implementation is a custom, span-preserving subset parser,
-currently housed in `scribium-core`. It represents physical lines and
+Arkst's Markdown implementation is a custom, span-preserving subset parser,
+currently housed in `arkst-core`. It represents physical lines and
 recursively reparses transformed line slices for list items and Quarkdown
 bodies. Block-start checks are repeated between the main dispatcher and
 paragraph termination.
@@ -32,15 +32,15 @@ foundation before blockquote is implemented again.
 
 ## Decision 1: dedicated frontend crate ownership
 
-The long-term parser implementation is not owned by `scribium-core`. After
+The long-term parser implementation is not owned by `arkst-core`. After
 this architecture is accepted, frontend extraction targets two first-party
-crates. The current implementation may remain physically under `scribium-core`
+crates. The current implementation may remain physically under `arkst-core`
 during that migration; that transitional location does not change the target
 ownership.
 
-### `scribium-markdown`
+### `arkst-markdown`
 
-`scribium-markdown` will own the Scribium Markdown frontend:
+`arkst-markdown` will own the Arkst Markdown frontend:
 
 - physical-line scanning and classification;
 - `LineView`;
@@ -52,13 +52,13 @@ ownership.
 - parser recovery at the Markdown/block layer; and
 - the frontend AST produced by this parser.
 
-The frontend AST may contain Scribium or Quarkdown extension nodes, including
-directive and function-call nodes. `scribium-markdown` does not implement
+The frontend AST may contain Arkst or Quarkdown extension nodes, including
+directive and function-call nodes. `arkst-markdown` does not implement
 Quarkdown argument grammar itself.
 
-### `scribium-quarkdown`
+### `arkst-quarkdown`
 
-`scribium-quarkdown` will own only Quarkdown-specific grammar:
+`arkst-quarkdown` will own only Quarkdown-specific grammar:
 
 - dot-prefixed function/call name grammar;
 - call-boundary recognition;
@@ -78,22 +78,22 @@ Markdown AST construction, or `BlockParser` state.
 The dependency direction is architectural and must not be reversed:
 
 ```text
-scribium-markdown
+arkst-markdown
         |
         v
-scribium-quarkdown
+arkst-quarkdown
 ```
 
-`scribium-markdown` depends on `scribium-quarkdown`. `scribium-quarkdown` must
-never depend on `scribium-markdown`.
+`arkst-markdown` depends on `arkst-quarkdown`. `arkst-quarkdown` must
+never depend on `arkst-markdown`.
 
-`scribium-markdown` may invoke the Quarkdown grammar when recognizing block or
+`arkst-markdown` may invoke the Quarkdown grammar when recognizing block or
 inline calls and then normalize the result into the frontend AST.
-`scribium-quarkdown` must not depend on Markdown parser or Markdown AST types.
+`arkst-quarkdown` must not depend on Markdown parser or Markdown AST types.
 
-If the frontend split requires shared source/span types, `scribium-markdown`
-depends on `scribium-source`; `scribium-quarkdown` may do so when its grammar
-result requires those low-level types. `scribium-source` is the lower-level
+If the frontend split requires shared source/span types, `arkst-markdown`
+depends on `arkst-source`; `arkst-quarkdown` may do so when its grammar
+result requires those low-level types. `arkst-source` is the lower-level
 owner of source identity and source-location primitives. ADR-0015 records the
 broader source, project, and core crate ownership details; it does not design
 the future segment-aware inline-input API.
@@ -101,7 +101,7 @@ the future segment-aware inline-input API.
 ## Decision 2: physical-line scanning is the lexer layer
 
 Choose Option B from the design review: the physical-line scanner and
-classifier are `scribium-markdown`'s lexical layer. `SourceLine` already
+classifier are `arkst-markdown`'s lexical layer. `SourceLine` already
 provides the needed raw slice, content slice, indentation, line terminator,
 and absolute byte offsets. A generic token stream would add no value for the
 current block grammar and would not solve container ownership.
@@ -110,8 +110,8 @@ current block grammar and would not solve container ownership.
 
 ```text
 Source abstraction
-  → scribium-markdown physical-line scanner/classifier
-  → scribium-markdown BlockParser (Markdown baseline + Quarkdown extension dispatch)
+  → arkst-markdown physical-line scanner/classifier
+  → arkst-markdown BlockParser (Markdown baseline + Quarkdown extension dispatch)
   → frontend AST
 ```
 
@@ -122,7 +122,7 @@ Source abstraction
 ## Decision 3: one authoritative `BlockParser` state
 
 All physical lines are processed by one state owner:
-`scribium-markdown::BlockParser`. Feature recognizers are pure candidate
+`arkst-markdown::BlockParser`. Feature recognizers are pure candidate
 classifiers; they do not own a cursor, container stack,
 paragraph state, body collector, or diagnostic sink.
 
@@ -211,7 +211,7 @@ container, collect following lines, or invoke `BlockParser` recursively.
 
 ## Markdown and Quarkdown boundary
 
-`scribium-quarkdown` recognizes and parses Quarkdown grammar. `scribium-markdown`
+`arkst-quarkdown` recognizes and parses Quarkdown grammar. `arkst-markdown`
 decides how that grammar participates in a Markdown document.
 
 For example, Quarkdown grammar can recognize `.foo {bar}` and return parsed
@@ -223,7 +223,7 @@ Standalone-call recognition is a `BlockStart::QuarkdownCall` candidate. The
 `BlockParser` owns whether the call is a block or inline and owns the indented
 body as an `ExtensionBody` container. Inline parsing may call the Quarkdown
 grammar parser for inline calls, but Quarkdown grammar does not own block
-state. This remains a first-party Scribium frontend integration, not a plugin
+state. This remains a first-party Arkst frontend integration, not a plugin
 API or generic extension framework.
 
 Front matter remains a document-start framing operation. It uses the same
@@ -245,10 +245,10 @@ translation with one reusable source-mapping boundary.
 
 ## Module boundary
 
-The target `scribium-markdown` frontend layout is:
+The target `arkst-markdown` frontend layout is:
 
 ```text
-crates/scribium-markdown/src/
+crates/arkst-markdown/src/
 ├── lib.rs
 ├── ast.rs
 ├── block/
@@ -326,7 +326,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo doc --workspace --all-features --no-deps
-cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown
+cargo check -p arkst-core -p arkst-typst --target wasm32-unknown-unknown
 cargo deny check
 ```
 

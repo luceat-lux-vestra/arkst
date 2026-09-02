@@ -1,9 +1,9 @@
 # Reference JVM contract
 
-Scribium deterministically reproduces the JVM-observable semantics required by
+Arkst deterministically reproduces the JVM-observable semantics required by
 pinned Quarkdown v2.5.1 using Eclipse Temurin `25.0.4.1+1` as its reference
 JVM, without requiring a JVM at runtime. Quarkdown is not asserted to require
-JDK 25; this is Scribium's explicit compatibility oracle choice for behavior
+JDK 25; this is Arkst's explicit compatibility oracle choice for behavior
 that can vary with the JVM. A future reference-JVM change requires a separate
 compatibility migration.
 

@@ -1,12 +1,12 @@
 # Programmable Document Semantics
 
 This document records the architecture-gate investigation for Quarkdown
-v2.5.1 and Scribium issue #61. It is a compatibility record, not a feature
+v2.5.1 and Arkst issue #61. It is a compatibility record, not a feature
 implementation plan that changes the current supported surface.
 
 - Tracked upstream: Quarkdown v2.5.1
 - Resolved upstream tag: [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium comparison baseline: `3829d847f1b45871b2315d729a1f432cf390e6da`
+- Arkst comparison baseline: `3829d847f1b45871b2315d729a1f432cf390e6da`
 - Decision: [ADR-0020](../../adr/0020-programmable-document-semantic-model.md)
 
 The value-origin, invocation-binding, conversion, and state-commit audit is
@@ -92,7 +92,7 @@ the target parameter is callable. An indented body remains a distinct lazy
 block-body argument; neither form is reparsed or evaluated as an ordinary
 eager content argument.
 
-Scribium keeps that distinction at the frontend boundary with a narrow
+Arkst keeps that distinction at the frontend boundary with a narrow
 source-backed `Value::InlineBody` → `IrValue::InlineBody` carrier. Source-
 defined functions receive its ordinary structured content; only a resolved
 native `.foreach`/`.repeat` target adapts its parameter metadata and body to
@@ -107,7 +107,7 @@ callback bodies.
 Quarkdown does not expose one universal language type called “component”. The
 observable categories are native scalar values, native node values, structured
 Markdown/content values, mutating void functions, custom dynamic results, and
-layout node values. Scribium now provides the typed
+layout node values. Arkst now provides the typed
 `IrValue::Component` carrier and materializes it into a typed `IrNode` only at
 the document output boundary. `IrValue::Content` remains structured content;
 `IrCallable` remains the language/evaluator carrier; surviving
@@ -124,7 +124,7 @@ never Typst names or Typst source.
 `Document.kt` uses read/write dual APIs. No argument reads the current
 `DocumentInfo` field; an argument validates, mutates `MutableContext.documentInfo`,
 and returns void. Scope contexts delegate ordinary document state to their
-parent, while a subdocument has an isolated copy. Scribium represents the first
+parent, while a subdocument has an isolated copy. Arkst represents the first
 slice as evaluator-owned working document state shared by ordinary callable
 child scopes, plus a final immutable `IrDocument.metadata.document_state`
 snapshot. Typst lowering consumes the snapshot and does not replay calls.
@@ -163,7 +163,7 @@ replaces the locale and returns no document value. `.none` follows the pinned
 nullable `String? = null` path and therefore uses the getter rather than
 clearing state. The IR carries only plain `{ tag, localized_name }` data.
 
-Because upstream delegates lookup to `java.util.Locale`, Scribium does not
+Because upstream delegates lookup to `java.util.Locale`, Arkst does not
 use a JVM, OS, environment, or native locale database at runtime. Issue #173
 checks in the complete evidenced available-locale snapshot from the exact
 reference contract: Eclipse Temurin `25.0.4.1+1` with
@@ -207,7 +207,7 @@ python3 tools/generate_jdk25_locale_data.py \
 
 The upstream `.doclang` input is general case-insensitive English full-name or
 IETF BCP 47 tag lookup, not an API restricted to built-in localization
-locales. Scribium preserves the JVM/Kotlin character-wise ignore-case
+locales. Arkst preserves the JVM/Kotlin character-wise ignore-case
 comparison, name-first precedence, canonical language/script/region/variant
 tags, observed deprecated aliases, and valid unavailable tags such as
 `xx-YY`. Valid blank-language root and private-use-only results are retained:
@@ -385,7 +385,7 @@ layout component. Its public signature is `.whitespace width?: Size?
 height?: Size?`; the two parameters accept positional or named binding in
 `width`, then `height` order, with no body.
 
-Scribium implements this bounded contract as a backend-neutral
+Arkst implements this bounded contract as a backend-neutral
 `IrInline::Whitespace` semantic value:
 
 - with neither dimension supplied, it represents one non-breaking whitespace
@@ -413,7 +413,7 @@ named arguments, no block body, and no lambda body, and returns the inline
 `LineBreak` node wrapped as a value. The pinned v2.5.1 `Text.kt` and the
 current upstream `main` implementation are unchanged for this function.
 
-Scribium resolves native `.br` calls only after the existing source-defined
+Arkst resolves native `.br` calls only after the existing source-defined
 callable lookup, preserving user-function precedence. After signature
 validation, it returns one `IrValue::Content` carrier containing a paragraph
 with the existing backend-neutral `IrInline::HardBreak { span }`, where the
@@ -425,7 +425,7 @@ contents. Invalid positional, named, multiple-argument, block-body, and
 lambda-body forms publish no hard-break output. The existing Typst
 `IrInline::HardBreak` lowering is the only backend path involved.
 
-The v2.5.1 `NodeUtils.toPlainText()` projection omits `LineBreak`; Scribium's
+The v2.5.1 `NodeUtils.toPlainText()` projection omits `LineBreak`; Arkst's
 existing `IrInline::HardBreak` plaintext projection is therefore reused
 without a `.br`-specific `.plaintext` branch. This bounded slice does not
 implement or imply generalized inline components, `.text`, `.codespan`,
@@ -433,7 +433,7 @@ implement or imply generalized inline components, `.text`, `.codespan`,
 
 ## Compatibility matrix
 
-| Feature | Quarkdown v2.5.1 behavior | Scribium current behavior | Architecture decision | Implementation status | Deferred work |
+| Feature | Quarkdown v2.5.1 behavior | Arkst current behavior | Architecture decision | Implementation status | Deferred work |
 |---|---|---|---|---|---|
 | Custom functions | `.function` defines a callable with a signature, lexical definition context, caller propagation, dynamic result, and separate output conversion | Bounded user functions with immutable definition capture, a lookup-only caller overlay, typed values, semantic-owner writeback for existing caller-visible variables, and isolated invocation child maps | Keep `IrCallable` as evaluator value; compose definition and caller layers without replacing capture or treating parameters as owners | Partial, caller overlay and scoped writeback implemented | Broader stdlib/component call surface and mutable context/library parity |
 | Lambda explicit parameters | Parameters bind by signature and shadow outer implicit parameters | Explicit lambda parameters and shadowing are supported in the bounded evaluator slice | Parameter installation is last in child scope | Bounded implemented | Broader upstream scope fixtures |
@@ -528,9 +528,9 @@ work merges its first-write records into the enclosing invocation without
 restoring a live overlay at child commit. No extension IR, backend type,
 environment clone, or second evaluator is introduced. Independent
 regressions are in
-`crates/scribium-core/tests/quarkdown_function_extension.rs`, with contextual
+`crates/arkst-core/tests/quarkdown_function_extension.rs`, with contextual
 body/condition metadata covered in
-`crates/scribium-markdown/src/parser.rs`.
+`crates/arkst-markdown/src/parser.rs`.
 
 This slice does not claim specialized layout/resource/document-state/native
 targets, generic conversion, complete upstream partial-effect behavior, or
@@ -582,14 +582,14 @@ The currently evidenced foundations are:
 
 | #61 acceptance criterion | Concrete current evidence |
 |---|---|
-| Target behavior is classified against public Quarkdown behavior | `README.md` Feature Matrix, `GAP_INVENTORY.md`, pinned v2.5.1 sources, and `crates/scribium-test-support/src/lib.rs::ConformanceCase::verify` compatibility-level checks |
-| Evaluator contracts are documented | `ADR-0020`, this document's Normative evaluator rules, `crates/scribium-engine/src/evaluator.rs`, and `CallOutcome::{Value, NoValue, Failed, Unresolved}` |
-| Scoping and evaluation order are tested | `crates/scribium-core/src/lib.rs::compile_captured_callable_uses_definition_fallback_and_caller_shadowing`, `compile_invocation_parameters_shadow_caller_and_definition_bindings`, `compile_callable_var_updates_owner_without_overwriting_shadowing_parameter`, `crates/scribium-core/tests/quarkdown_function_extension.rs`, and `crates/scribium-engine/src/evaluator.rs::foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local` |
-| Nested and inline/block contexts are covered | `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, and `crates/scribium-markdown/src/parser.rs::iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion` |
-| Diagnostics reference original Scribium spans | `compile_inline_foreach_failure_is_atomic_and_source_backed`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`, extension UTF-8/CRLF and nested-diagnostic tests in `crates/scribium-core/tests/quarkdown_function_extension.rs`, stacked invalid-argument/body tests in `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, and source-span assertions in the frontend/AST-to-IR tests |
-| AST → evaluator → IR behavior is deterministic | `crates/scribium-core/src/lib.rs::source_ids_are_independent_of_builder_insertion_order`, `compile_result_is_independent_of_source_insertion_order`, `crates/scribium-engine/src/evaluator.rs::evaluation_is_immutable_and_deterministic`, and `crates/scribium-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels` |
+| Target behavior is classified against public Quarkdown behavior | `README.md` Feature Matrix, `GAP_INVENTORY.md`, pinned v2.5.1 sources, and `crates/arkst-test-support/src/lib.rs::ConformanceCase::verify` compatibility-level checks |
+| Evaluator contracts are documented | `ADR-0020`, this document's Normative evaluator rules, `crates/arkst-engine/src/evaluator.rs`, and `CallOutcome::{Value, NoValue, Failed, Unresolved}` |
+| Scoping and evaluation order are tested | `crates/arkst-core/src/lib.rs::compile_captured_callable_uses_definition_fallback_and_caller_shadowing`, `compile_invocation_parameters_shadow_caller_and_definition_bindings`, `compile_callable_var_updates_owner_without_overwriting_shadowing_parameter`, `crates/arkst-core/tests/quarkdown_function_extension.rs`, and `crates/arkst-engine/src/evaluator.rs::foreach_reassignment_updates_existing_caller_variable_but_new_locals_stay_local` |
+| Nested and inline/block contexts are covered | `compile_inline_foreach_and_repeat_use_the_shared_callable_path`, `compile_inline_foreach_preserves_pair_destructuring`, `compile_source_defined_foreach_and_repeat_shadow_native_direct_and_chain`, and `crates/arkst-markdown/src/parser.rs::iteration_inline_body_preserves_contextual_metadata_without_eager_lambda_coercion` |
+| Diagnostics reference original Arkst spans | `compile_inline_foreach_failure_is_atomic_and_source_backed`, `failed_callable_reassignment_is_atomic_and_keeps_the_inner_span`, extension UTF-8/CRLF and nested-diagnostic tests in `crates/arkst-core/tests/quarkdown_function_extension.rs`, stacked invalid-argument/body tests in `crates/arkst-core/tests/quarkdown_stacked_layout.rs`, and source-span assertions in the frontend/AST-to-IR tests |
+| AST → evaluator → IR behavior is deterministic | `crates/arkst-core/src/lib.rs::source_ids_are_independent_of_builder_insertion_order`, `compile_result_is_independent_of_source_insertion_order`, `crates/arkst-engine/src/evaluator.rs::evaluation_is_immutable_and_deterministic`, and `crates/arkst-test-support/src/lib.rs::tests::quarkdown_conformance_corpus_obeys_declared_levels` |
 | Compatibility docs distinguish supported semantics from parsed-only syntax | README compatibility levels and Feature Matrix, `GAP_INVENTORY.md` classification rows, and semantic IR/Typst/diagnostic golden requirements in `fixtures/quarkdown-conformance/README.md` |
-| Implemented component slices cross the backend boundary | `crates/scribium-core/tests/quarkdown_stacked_layout.rs`, `crates/scribium-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, and `crates/scribium-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` |
+| Implemented component slices cross the backend boundary | `crates/arkst-core/tests/quarkdown_stacked_layout.rs`, `crates/arkst-ir/src/lib.rs::stacked_components_roundtrip_deterministically_for_row_column_and_grid`, and `crates/arkst-typst-subprocess/tests/backend_integration.rs::integration_stacked_layouts_lower_to_valid_typst_and_pdf` |
 
 Closing #61 records completion of the targeted evaluator and
 programmable-document foundation. It does **not** claim complete Quarkdown
@@ -641,7 +641,7 @@ structured `CallBody` and feeds the source-backed text through the shared
 conversion boundary, so the setter does not evaluate parsed body nodes as a
 substitute. Caption rendering and broader target coverage remain open.
 
-Scribium maps that contract to the existing evaluator-owned `DocumentState` and
+Arkst maps that contract to the existing evaluator-owned `DocumentState` and
 immutable `IrDocument.metadata.document_state` snapshot. The representation is
 closed and backend-neutral: `IrCaptionPosition` has only `Top` and `Bottom`,
 and `IrCaptionPositionInfo` retains the explicit-versus-inherited distinction

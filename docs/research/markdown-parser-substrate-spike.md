@@ -218,7 +218,7 @@ did not produce a custom node. Ordinary text, link text, image alt text, and
 text between raw HTML tags did invoke the deliberately naive rule. The rule
 could read `InlineState::link_level`, which was nonzero in both link and image
 text. This proves that the public API exposes the information needed to narrow
-those contexts, but the downstream rule must actually enforce Scribium's
+those contexts, but the downstream rule must actually enforce Arkst's
 policy. It does not prove that markdown-it-rust has all Quarkdown container or
 body semantics already implemented. A custom block rule must consume and
 model its body using the exposed block state.
@@ -252,7 +252,7 @@ container lifecycle.
 | Required interaction | Observation |
 | --- | --- |
 | Code span/fence before Quarkdown | Standard parsers shield code spans and fences. The markdown-it PoC confirms the custom inline rule does not run inside a code span or fenced block; escaped and entity spellings are also consumed before the literal-dot rule. |
-| Quarkdown vs emphasis/link | markdown-it can order a custom rule and exposes `InlineState::link_level`. The naive PoC rule ran in ordinary, link, image-alt, and HTML-surrounded text, demonstrating both configurability and the need for an explicit Scribium policy. The other candidates have no public pre-interpretation hook. |
+| Quarkdown vs emphasis/link | markdown-it can order a custom rule and exposes `InlineState::link_level`. The naive PoC rule ran in ordinary, link, image-alt, and HTML-surrounded text, demonstrating both configurability and the need for an explicit Arkst policy. The other candidates have no public pre-interpretation hook. |
 | List/blockquote nesting | Standard container parsing is internal and correct for Markdown. A downstream markdown-it block rule ran from root, list-item, and blockquote states and received exact source maps. `BlockState` also exposes line, indentation, level, and list state, but no dedicated Quarkdown body callback. |
 | Lazy continuation and indented body | The substrate can parse the Markdown context, but a Quarkdown body recognizer must participate before the ordinary paragraph/lazy-continuation decision or a fork must add that decision point. |
 | Physical source span | markdown-rs, pulldown-cmark, and markdown-it-rust expose byte offsets; comrak exposes byte-oriented line/columns only. Original source must remain available outside normalized node payloads. |
@@ -274,13 +274,13 @@ Raw HTML is exposed by all candidates in their native representation:
 
 The PoC observed raw HTML in all four where the corresponding feature/plugin
 was enabled. Comrak’s `render.unsafe` is a rendering policy, not a parser
-extension mechanism. Scribium’s existing HTML boundary can therefore make the
+extension mechanism. Arkst’s existing HTML boundary can therefore make the
 policy decision without routing HTML through Markdown strings.
 
 Front matter is configurable in markdown-rs, comrak, and pulldown-cmark. The
 PoC observed YAML/front-matter nodes or metadata events in those candidates.
 The default markdown-it-rust CommonMark setup does not produce a front-matter
-node; its parser can be framed by Scribium before parsing. Continuing to own
+node; its parser can be framed by Arkst before parsing. Continuing to own
 front-matter framing is compatible with all candidates and avoids making it a
 Quarkdown extension concern.
 
@@ -320,7 +320,7 @@ The candidates differ in implementation policy:
   byte-accounting state machine. Its public parse APIs return `Result` for
   MDAST parsing.
 * comrak contains unsafe code in generated scanner code. This is dependency
-  implementation detail, not Scribium-owned unsafe, but it expands the audit
+  implementation detail, not Arkst-owned unsafe, but it expands the audit
   surface. Parsing is exposed as a direct tree API rather than a structured
   parse-error result for ordinary syntax.
 * pulldown-cmark forbids unsafe in the normal non-SIMD build; its opt-in SIMD
@@ -333,7 +333,7 @@ The candidates differ in implementation policy:
 
 None of these observations alone rejects a candidate. The selected adapter
 must still convert parser failures/recovery and source positions into
-Scribium’s typed diagnostics without panics, hidden mutable state, or invented
+Arkst’s typed diagnostics without panics, hidden mutable state, or invented
 spans.
 
 ## Maintenance, ownership, and performance observations
@@ -350,7 +350,7 @@ The obvious ownership models are:
 * markdown-rs: owned MDAST tree, allocations through `alloc`, position-rich,
   no-std-friendly; no public parser plugin surface;
 * comrak: arena allocation and borrowed node lifetime, useful for a tree
-  adapter but awkward if Scribium requires owned, independently-lived frontend
+  adapter but awkward if Arkst requires owned, independently-lived frontend
   nodes;
 * pulldown-cmark: streaming/event-oriented output with low structural
   ownership, useful for a standards oracle or direct event adapter but limiting
@@ -455,11 +455,11 @@ evidence if a substrate-based architecture is later accepted.
 
 ### Keep
 
-* `scribium-markdown` remains the Markdown frontend/document-context owner and
-  owns adaptation into Scribium’s frontend AST/IR boundary.
-* `scribium-quarkdown` remains grammar-focused and must not depend on the
+* `arkst-markdown` remains the Markdown frontend/document-context owner and
+  owns adaptation into Arkst’s frontend AST/IR boundary.
+* `arkst-quarkdown` remains grammar-focused and must not depend on the
   external Markdown AST/parser implementation.
-* Dependency direction remains `scribium-markdown -> scribium-quarkdown`.
+* Dependency direction remains `arkst-markdown -> arkst-quarkdown`.
 * Original source identity, exact source spans, and source segments remain
   required; normalized parser payloads cannot replace raw source provenance.
 * No synthetic recursive Markdown reparsing or transformed-Markdown workaround.
@@ -473,11 +473,11 @@ evidence if a substrate-based architecture is later accepted.
 The following ADR-0014 implementation decisions would be candidates for
 explicit supersession or narrowing, not silent reinterpretation:
 
-* Scribium-owned physical-line scanner;
-* Scribium-owned `LineView`;
-* Scribium-owned authoritative Markdown `BlockParser`;
-* Scribium-owned standard Markdown block recognizers;
-* Scribium-owned standard Markdown inline parser;
+* Arkst-owned physical-line scanner;
+* Arkst-owned `LineView`;
+* Arkst-owned authoritative Markdown `BlockParser`;
+* Arkst-owned standard Markdown block recognizers;
+* Arkst-owned standard Markdown inline parser;
 * custom continuation, interruption, fence, and standard container machinery
   that the selected substrate already owns correctly.
 
@@ -488,12 +488,12 @@ compatibility policy, source identity, or backend/IR layers.
 ### Unresolved and requiring new wording
 
 * Exact production crate boundary and whether the adapter is inside
-  `scribium-markdown` or split into a separate platform-neutral layer.
+  `arkst-markdown` or split into a separate platform-neutral layer.
 * The frontend AST/source-segment mapping from the selected parser’s node or
   event model.
 * Quarkdown block-body ownership, especially lazy continuation and nested
   list/blockquote cases.
-* Whether front matter remains framed by Scribium or is delegated for each
+* Whether front matter remains framed by Arkst or is delegated for each
   selected substrate.
 * Raw HTML policy at the existing HTML interoperability boundary.
 * The fork-versus-upstream-extension decision and its maintenance authority.

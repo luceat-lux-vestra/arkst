@@ -38,7 +38,7 @@ class UpstreamIngestionTests(unittest.TestCase):
     def test_quote_bearing_marker_is_data_not_program_text(self) -> None:
         tag = "v2.6.0'probe"
         validator.validate_tag(tag)
-        marker = f"<!-- scribium-upstream-drift:quarkdown:{tag} -->"
+        marker = f"<!-- arkst-upstream-drift:quarkdown:{tag} -->"
         payload = [
             {"number": 17, "body": "unrelated"},
             {"number": 42, "body": f"prefix {marker} suffix"},
@@ -55,7 +55,7 @@ class UpstreamIngestionTests(unittest.TestCase):
         self.assertEqual(completed.stdout.strip(), "42")
 
     def test_bound_filter_does_not_match_nearby_marker(self) -> None:
-        marker = "<!-- scribium-upstream-drift:quarkdown:v2.6.0'probe -->"
+        marker = "<!-- arkst-upstream-drift:quarkdown:v2.6.0'probe -->"
         payload = [{"number": 42, "body": marker + "-different"}]
         completed = subprocess.run(
             ["jq", "-sr", "--arg", "marker", marker + "!", "-f", str(FILTER)],

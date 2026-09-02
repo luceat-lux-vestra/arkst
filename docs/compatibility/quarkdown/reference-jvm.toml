@@ -5,7 +5,7 @@
 schema_version = 1
 
 [provenance]
-contract = "scribium.reference-data-integrity"
+contract = "arkst.reference-data-integrity"
 contract_version = 1
 source_kind = "archive-backed"
 verifier_path = "tools/verify_reference_provenance.py"
@@ -18,7 +18,7 @@ notice_required_markers = [
 ]
 runtime_scope = "development-ci-only"
 exact_artifact_globs = [
-  "crates/scribium-engine/data/*",
+  "crates/arkst-engine/data/*",
   "tools/jdk25_*",
 ]
 
@@ -119,7 +119,7 @@ unicode_corpus_min_bytes = 361
 unicode_corpus_max_bytes = 361
 unicode_corpus_record_count = 23
 unicode_corpus_sha256 = "4c8c30aa62cfcca25c0130eb646cab984a3f0b3de47323d4e017f6a5a40164f2"
-unicode_generated_source_path = "crates/scribium-engine/src/unicode_case.rs"
+unicode_generated_source_path = "crates/arkst-engine/src/unicode_case.rs"
 unicode_generated_source_bytes = 148058
 unicode_generated_source_min_bytes = 148058
 unicode_generated_source_max_bytes = 148058
@@ -133,7 +133,7 @@ locale_dump_helper_path = "tools/dump_jdk25_locale_data.java"
 locale_display_dump_helper_path = "tools/dump_jdk25_locale_display_data.java"
 locale_public_oracle_helper_path = "tools/dump_jdk25_locale_oracle.java"
 locale_generator_path = "tools/generate_jdk25_locale_data.py"
-locale_semantic_verifier_path = "crates/scribium-engine/src/locale.rs"
+locale_semantic_verifier_path = "crates/arkst-engine/src/locale.rs"
 locale_semantic_verifier_source_sha256 = "8e5832efd4adc0578a187d691864b4f9e4f894f8a7b3e7c667c821b7f02d85d1"
 locale_semantic_verifier_test = "locale::tests::jdk25_locale_oracle_matches_candidate_graph_and_public_resolution"
 locale_semantic_result_id = "jdk25-cldr-locale-candidate-graph-v1"
@@ -142,13 +142,13 @@ locale_available_order_path = "tools/jdk25_available_locale_order.tsv"
 locale_available_order_bytes = 67555
 locale_available_order_min_bytes = 67555
 locale_available_order_max_bytes = 67555
-locale_generated_rust_path = "crates/scribium-engine/src/locale_data.rs"
+locale_generated_rust_path = "crates/arkst-engine/src/locale_data.rs"
 locale_generated_rust_lines = 30814
 locale_generated_rust_min_bytes = 814472
 locale_generated_rust_max_bytes = 814472
 locale_generated_rust_limit_bytes = 1048576
 locale_artifact_size_policy = "exact"
-locale_compact_snapshot_path = "crates/scribium-engine/data/jdk25_locale_display.bin"
+locale_compact_snapshot_path = "crates/arkst-engine/data/jdk25_locale_display.bin"
 locale_compact_snapshot_min_bytes = 6549860
 locale_compact_snapshot_max_bytes = 6549860
 locale_compact_snapshot_size_policy = "exact"

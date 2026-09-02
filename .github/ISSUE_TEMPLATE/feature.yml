@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an idea for Scribium
+description: Suggest an idea for Arkst
 labels: ["type:feature"]
 body:
   - type: dropdown

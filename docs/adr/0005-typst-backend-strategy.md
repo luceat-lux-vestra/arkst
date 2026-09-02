@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1, #6, #7
 
 ## Context
 
-Scribium must invoke the Typst compiler. Two approaches exist: subprocess
+Arkst must invoke the Typst compiler. Two approaches exist: subprocess
 (CLI wrapper) or in-process embedding (library linking).
 
 ## Decision Drivers
@@ -40,8 +40,8 @@ before v0.1. Both backends do not need to be permanently maintained.
 
 ADR-0015 refines physical crate ownership without changing this backend
 strategy. Pure Typst lowering and the platform-neutral backend contract belong
-to `scribium-typst`; `SubprocessBackend` belongs to
-`scribium-typst-subprocess`. Future in-process and browser work remains
+to `arkst-typst`; `SubprocessBackend` belongs to
+`arkst-typst-subprocess`. Future in-process and browser work remains
 governed by ADR-0005 and ADR-0011.
 
 ## Consequences
@@ -68,21 +68,21 @@ governed by ADR-0005 and ADR-0011.
 
 ### Frontend-only WASM (guaranteed)
 
-The Scribium frontend (parse → evaluate → lower to Typst source) compiles
+The Arkst frontend (parse → evaluate → lower to Typst source) compiles
 to WASM and runs in the browser. The generated `.typ` source is returned to
 the host for external compilation.
 
 ```
-.qd → Scribium WASM → generated .typ → server/native Typst → PDF
+.qd → Arkst WASM → generated .typ → server/native Typst → PDF
 ```
 
-This is the guaranteed path and requires only `scribium-core` + `scribium-typst`
+This is the guaranteed path and requires only `arkst-core` + `arkst-typst`
 (lowering) on `wasm32-unknown-unknown`.
 
 ### Full browser compile (separate goal)
 
 ```
-.qd → Scribium WASM → Typst WASM backend → PDF/SVG/HTML
+.qd → Arkst WASM → Typst WASM backend → PDF/SVG/HTML
 ```
 
 Technically feasible (Typst is also Rust) but requires:
@@ -92,7 +92,7 @@ Technically feasible (Typst is also Rust) but requires:
 - Asset loading (images, etc.)
 - Memory budget and bundle size management
 
-This is gated behind a separate `scribium-typst-web` crate and M7+ feasibility
+This is gated behind a separate `arkst-typst-web` crate and M7+ feasibility
 verification. It does not block WASM frontend delivery.
 
 ### Backend Trait Adaptation
@@ -101,13 +101,13 @@ verification. It does not block WASM frontend delivery.
 
 | Implementation | Crate | Target |
 |---|---|---|
-| `SubprocessBackend` | `scribium-typst-subprocess` | CLI |
+| `SubprocessBackend` | `arkst-typst-subprocess` | CLI |
 | `InProcessBackend` | TBD: future dedicated adapter, per ADR-0011 re-evaluation | CLI, server |
-| `WebBackend` | `scribium-typst-web` (M7+) | Browser WASM |
+| `WebBackend` | `arkst-typst-web` (M7+) | Browser WASM |
 
-The trait itself stays in `scribium-typst` for all targets.
+The trait itself stays in `arkst-typst` for all targets.
 
 ## References
 
-- `crates/scribium-typst/src/backend.rs`
+- `crates/arkst-typst/src/backend.rs`
 - Spike results in `docs/research/typst-backend-spike.md`

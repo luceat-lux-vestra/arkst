@@ -1,0 +1,27 @@
+[package]
+name = "arkst-core"
+version = "0.0.1"
+publish = false
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Core Arkst library: compiler orchestration and compatibility facades"
+
+[dependencies]
+arkst-compat.workspace = true
+arkst-diagnostics.workspace = true
+arkst-engine.workspace = true
+arkst-ir.workspace = true
+arkst-markdown.workspace = true
+arkst-project.workspace = true
+arkst-source.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+libm.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

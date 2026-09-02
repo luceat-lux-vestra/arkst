@@ -28,7 +28,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - generator requires Py
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "docs/compatibility/quarkdown/reference-jvm.toml"
 HELPER_PATH = ROOT / "tools/dump_jdk25_unicode_data.java"
-DEFAULT_OUTPUT = ROOT / "crates/scribium-engine/src/unicode_case.rs"
+DEFAULT_OUTPUT = ROOT / "crates/arkst-engine/src/unicode_case.rs"
 MAX_CODE_POINT = 0x10FFFF
 MAX_CODE_UNIT = 0xFFFF
 MAX_GENERATED_SOURCE_BYTES = 1024 * 1024
@@ -382,7 +382,7 @@ fn lookup_full(character: char, table: &[(u32, [u32; 3])]) -> Option<[u32; 3]> {
 
 
 def build_oracle(java: Path, javac: Path) -> tuple[str, str]:
-    with tempfile.TemporaryDirectory(prefix="scribium-jdk25-unicode-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="arkst-jdk25-unicode-") as temporary:
         classes = Path(temporary)
         subprocess.run(
             [str(javac), "-d", str(classes), str(HELPER_PATH)],

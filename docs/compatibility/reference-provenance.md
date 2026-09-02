@@ -1,6 +1,6 @@
 # Generated/reference-data integrity contract
 
-Scribium's authoritative generated and retained compatibility data is governed
+Arkst's authoritative generated and retained compatibility data is governed
 by the machine-readable manifests and verifier listed below. The manifests
 remain the only source of target values; this document defines their shared
 contract and applicability rules.
@@ -9,7 +9,7 @@ contract and applicability rules.
 - Markdown/CommonMark/cmark/cmark-gfm data: [`references.toml`](../../tests/compat/references.toml)
 - deterministic verifier: [`verify_reference_provenance.py`](../../tools/verify_reference_provenance.py)
 
-Both manifests identify `scribium.reference-data-integrity` contract version
+Both manifests identify `arkst.reference-data-integrity` contract version
 `1`. The verifier fails closed on missing fields, malformed identities, source
 or artifact drift, unexpected size changes, missing legal attribution, and
 independent-result mismatches. It checks exact artifact bytes and SHA-256
@@ -66,7 +66,7 @@ explicit regeneration and review; the verifier never promotes a new baseline.
 ## Runtime boundary
 
 All data preparation, archive access, git checkout, corpus extraction, and
-semantic oracle execution are development/CI-only. Production Scribium uses
+semantic oracle execution are development/CI-only. Production Arkst uses
 the checked-in Rust data and remains free of JVM, reference-repository,
 generation-time filesystem, host-locale, and generation-time network
 dependencies. The provenance verifier does not become a compiler runtime

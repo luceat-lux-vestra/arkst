@@ -3,34 +3,34 @@
 Audit date: 2026-08-19
 
 This document records the end-to-end Markdown baseline at the pinned
-Rushdown revision. It distinguishes parser capability from Scribium output
+Rushdown revision. It distinguishes parser capability from Arkst output
 capability; a feature being parsed by Rushdown is not by itself an
-end-to-end Scribium compatibility claim.
+end-to-end Arkst compatibility claim.
 
 ## Substrate and evidence
 
 - Rushdown version: `0.18.0`
 - Rushdown revision: `e5eb4e4446541ea0ed53111c1b37e779283ff57c`
-- Dependency features used by Scribium: `std`, `html-entities`
+- Dependency features used by Arkst: `std`, `html-entities`
 - The pinned dependency, its public node model, parser extensions, and its
   CommonMark/GFM tests were inspected without modifying Rushdown.
 - Representative PDF fixture:
   [`fixtures/markdown/commonmark_gfm_baseline.md`](../../../fixtures/markdown/commonmark_gfm_baseline.md)
 - PDF integration coverage:
-  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
+  `crates/arkst-typst-subprocess/tests/backend_integration.rs`
 - Frontend and source-span coverage:
-  `crates/scribium-markdown/src/parser.rs` and
-  `crates/scribium-markdown/tests/range_invariants.rs`
+  `crates/arkst-markdown/src/parser.rs` and
+  `crates/arkst-markdown/tests/range_invariants.rs`
 - Raw HTML audit and adapter coverage:
-  `crates/scribium-markdown/tests/raw_html.rs`
+  `crates/arkst-markdown/tests/raw_html.rs`
 - Raw HTML semantic/diagnostic coverage:
-  `crates/scribium-engine/src/ast_to_ir.rs`,
-  `crates/scribium-core/src/lib.rs`,
-  `crates/scribium-cli/src/commands.rs`, and
-  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
+  `crates/arkst-engine/src/ast_to_ir.rs`,
+  `crates/arkst-core/src/lib.rs`,
+  `crates/arkst-cli/src/commands.rs`, and
+  `crates/arkst-typst-subprocess/tests/backend_integration.rs`
 - UTF-8/CRLF semantic break coverage:
-  `crates/scribium-core/src/lib.rs` and
-  `crates/scribium-typst-subprocess/tests/backend_integration.rs`
+  `crates/arkst-core/src/lib.rs` and
+  `crates/arkst-typst-subprocess/tests/backend_integration.rs`
 
 The existing `KNOWN_UPSTREAM_SOUNDNESS_RISK_ACCEPTED` decision is unchanged.
 Rushdown remains the Markdown parser substrate; this audit introduces no
@@ -42,7 +42,7 @@ fork, patch, upgrade, or source reconstruction path.
 `No` means the current layer has a deliberate, source-backed gap rather than
 silently flattening the syntax into another Markdown node.
 
-| Feature | Rushdown parses? | Scribium frontend AST? | IR? | Typst lowering? | PDF E2E? | Status / gap |
+| Feature | Rushdown parses? | Arkst frontend AST? | IR? | Typst lowering? | PDF E2E? | Status / gap |
 |---|---:|---:|---:|---:|---:|---|
 | Paragraphs | Yes | Yes | Yes | Yes | Yes | Representative fixture coverage. |
 | ATX headings | Yes | Yes | Yes | Yes | Yes | Heading level preserved. |
@@ -77,7 +77,7 @@ silently flattening the syntax into another Markdown node.
 The following observations are from Rushdown `0.18.0` at
 `e5eb4e4446541ea0ed53111c1b37e779283ff57c`, not from CommonMark prose alone.
 The adapter tests in
-`crates/scribium-markdown/tests/raw_html.rs` are the independent regression
+`crates/arkst-markdown/tests/raw_html.rs` are the independent regression
 evidence for this table.
 
 The classification codes are: **A**, structurally exposed enough for the
@@ -97,7 +97,7 @@ parser-dependent or ambiguous and therefore unsupported.
 | HTML containing Markdown-looking text | Inline text and Markdown nodes remain whatever Rushdown exposed; block HTML remains one opaque block and its body is not Markdown-parsed. | D when equivalence depends on unavailable HTML boundaries; B for opaque blocks. | No synthetic Markdown or HTML-to-Markdown reparsing is performed. |
 | Markdown surrounding HTML | Ordinary Markdown siblings remain separate from inline `RawHtml`; block HTML is separated by Rushdown block boundaries. | A for the whitelist; B/D otherwise. | Supported inline semantics do not consume surrounding Markdown. |
 | UTF-8, LF, and CRLF | Source-backed segments retain byte offsets in the original source; CRLF remains part of the source ranges where Rushdown includes it. | A for provenance; semantic classification still depends on the construct. | AST and diagnostics retain original byte spans. |
-| Malformed or incomplete forms | The inline scanner declines incomplete tags/comments/PI/declarations/CDATA, so they are not `RawHtml`; block recognition is also context- and terminator-dependent. | C or D. | Scribium does not reinterpret parser-rejected input as HTML. |
+| Malformed or incomplete forms | The inline scanner declines incomplete tags/comments/PI/declarations/CDATA, so they are not `RawHtml`; block recognition is also context- and terminator-dependent. | C or D. | Arkst does not reinterpret parser-rejected input as HTML. |
 
 The audit therefore has three policy outcomes:
 
@@ -131,8 +131,8 @@ path.
 The target product path demonstrated here is:
 
 ```text
-Rushdown -> Scribium Markdown AST -> scribium-core IR/evaluator
-         -> scribium-typst -> Typst -> valid PDF
+Rushdown -> Arkst Markdown AST -> arkst-core IR/evaluator
+         -> arkst-typst -> Typst -> valid PDF
 ```
 
 ## Differential compatibility harness
@@ -142,10 +142,10 @@ harness. It is a measurement and regression layer, not a second production
 parser and not a claim of complete CommonMark or GFM support.
 
 For each corpus example, the harness runs the pinned reference parser in XML
-mode and maps that XML to a small canonical document tree. Scribium parses the
+mode and maps that XML to a small canonical document tree. Arkst parses the
 same source through its normal Markdown frontend and maps the frontend AST to
 the same canonical tree. The comparison is structural: it does not compare
-reference HTML strings with Scribium Typst strings. Source provenance is a
+reference HTML strings with Arkst Typst strings. Source provenance is a
 separate test layer and is not inferred from cmark source positions.
 
 The canonical model covers document structure, headings, paragraphs, inline
@@ -174,7 +174,7 @@ identities, exact artifact bounds, and independent result classifications.
 | GFM specification/parser corpus | `0.29.0.gfm.13` | `587a12bb54d95ac37241377e6ddc93ea0e45439b` | [github/cmark-gfm](https://github.com/github/cmark-gfm), BSD-2-Clause and component licenses in `COPYING` |
 
 The cmark and cmark-gfm repositories are test-oracle inputs only. They are
-not Scribium production dependencies, and their source and tests are not
+not Arkst production dependencies, and their source and tests are not
 copied into the implementation.
 
 ### Current corpus baseline
@@ -206,7 +206,7 @@ reviewed. The mismatch count is therefore a snapshot of measured gaps, not a
 completeness score.
 
 The first root-cause remediation batch corrected Rushdown code-segment
-serialization at the Scribium frontend boundary. It preserves segment padding
+serialization at the Arkst frontend boundary. It preserves segment padding
 and forced newlines instead of joining source slices with synthetic separators;
 the change resolves 44 CommonMark and 44 GFM cases without changing the
 Rushdown pin or the evaluator/IR/backend pipeline.
@@ -230,7 +230,7 @@ The complete root-cause analysis, case-level ownership classification, and
 final accepted groups are in
 [`gaps.md`](gaps.md). Remaining differences cover the leading front-matter
 policy boundary, HTML canonicalization, and pinned GFM autolink/linkify
-behavior. The final audit found no actionable Scribium-owned Markdown defect.
+behavior. The final audit found no actionable Arkst-owned Markdown defect.
 Quarkdown `.let` evaluator semantics are tracked separately under Issue #61;
 this Markdown audit does not assess programmable-document behavior.
 

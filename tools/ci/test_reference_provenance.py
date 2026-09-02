@@ -36,10 +36,10 @@ class ProvenanceFixture:
         "tools/markdown-compat/src/main.rs",
         "tools/jdk25_unicode_corpus.tsv",
         "tools/jdk25_available_locale_order.tsv",
-        "crates/scribium-engine/src/unicode_case.rs",
-        "crates/scribium-engine/src/locale.rs",
-        "crates/scribium-engine/src/locale_data.rs",
-        "crates/scribium-engine/data/jdk25_locale_display.bin",
+        "crates/arkst-engine/src/unicode_case.rs",
+        "crates/arkst-engine/src/locale.rs",
+        "crates/arkst-engine/src/locale_data.rs",
+        "crates/arkst-engine/data/jdk25_locale_display.bin",
         "tests/compat/corpus/commonmark.json",
         "tests/compat/corpus/gfm.json",
         "tests/compat/baselines/commonmark.json",
@@ -47,7 +47,7 @@ class ProvenanceFixture:
     )
 
     def __init__(self) -> None:
-        self.directory = tempfile.TemporaryDirectory(prefix="scribium-provenance-fixture-")
+        self.directory = tempfile.TemporaryDirectory(prefix="arkst-provenance-fixture-")
         self.root = Path(self.directory.name)
         for relative in self.FILES:
             destination = self.root / relative
@@ -323,28 +323,28 @@ class ReferenceProvenanceTests(unittest.TestCase):
         self.assert_rejected(self.verify_fixture)
 
     def test_missing_generated_artifact(self) -> None:
-        (self.fixture.root / "crates/scribium-engine/data/jdk25_locale_display.bin").unlink()
+        (self.fixture.root / "crates/arkst-engine/data/jdk25_locale_display.bin").unlink()
         self.assert_rejected(self.verify_fixture)
 
     def test_unexpected_extra_generated_artifact(self) -> None:
-        extra = self.fixture.root / "crates/scribium-engine/data/unexpected.bin"
+        extra = self.fixture.root / "crates/arkst-engine/data/unexpected.bin"
         extra.write_bytes(b"unexpected")
         self.assert_rejected(self.verify_fixture)
 
     def test_truncated_generated_artifact(self) -> None:
-        source = (ROOT / "crates/scribium-engine/data/jdk25_locale_display.bin").read_bytes()
-        self.fixture.replace_file("crates/scribium-engine/data/jdk25_locale_display.bin", source[:128])
+        source = (ROOT / "crates/arkst-engine/data/jdk25_locale_display.bin").read_bytes()
+        self.fixture.replace_file("crates/arkst-engine/data/jdk25_locale_display.bin", source[:128])
         self.assert_rejected(self.verify_fixture)
 
     def test_expanded_generated_artifact(self) -> None:
-        source = (ROOT / "crates/scribium-engine/data/jdk25_locale_display.bin").read_bytes()
-        self.fixture.replace_file("crates/scribium-engine/data/jdk25_locale_display.bin", source + b"extra")
+        source = (ROOT / "crates/arkst-engine/data/jdk25_locale_display.bin").read_bytes()
+        self.fixture.replace_file("crates/arkst-engine/data/jdk25_locale_display.bin", source + b"extra")
         self.assert_rejected(self.verify_fixture)
 
     def test_output_digest_mismatch(self) -> None:
-        source = bytearray((ROOT / "crates/scribium-engine/src/locale_data.rs").read_bytes())
+        source = bytearray((ROOT / "crates/arkst-engine/src/locale_data.rs").read_bytes())
         source[-2] = ord(" ") if source[-2] != ord(" ") else ord("\n")
-        self.fixture.replace_file("crates/scribium-engine/src/locale_data.rs", bytes(source))
+        self.fixture.replace_file("crates/arkst-engine/src/locale_data.rs", bytes(source))
         self.assert_rejected(self.verify_fixture)
 
     def test_corpus_digest_mismatch(self) -> None:

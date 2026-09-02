@@ -1,4 +1,4 @@
-# PRODUCT — Scribium
+# PRODUCT — Arkst
 
 ## Problem Statement
 
@@ -11,7 +11,7 @@ requires learning a new syntax and migrating existing Markdown documents.
 Quarkdown-style functional Markdown extensions are compelling for developers
 but are tied to specific implementations and licenses.
 
-Scribium bridges these gaps with an independent, permissively licensed
+Arkst bridges these gaps with an independent, permissively licensed
 implementation that combines Markdown familiarity with programmable documents
 and Typst-quality output.
 
@@ -55,7 +55,7 @@ and Typst-quality output.
 
 ## Quarkdown compatibility target
 
-Scribium aims for complete compatibility with the publicly documented
+Arkst aims for complete compatibility with the publicly documented
 Quarkdown document language and document-observable semantics of the tracked
 stable upstream release. This includes documented syntax, calls and argument
 forms, variables and scopes, functions/lambdas/components, conditionals,
@@ -63,7 +63,7 @@ iteration, built-ins and standard-library document behavior, include/read/data
 operations subject to the accepted security/project model, Quarkdown Markdown
 extensions, and other public language constructs.
 
-This is a clean-room target, not implementation identity. Scribium does not
+This is a clean-room target, not implementation identity. Arkst does not
 need to reproduce Quarkdown internals, private APIs, undocumented bugs, data
 structures, or private plugin ABI. Public-language gaps are compatibility debt,
 not permanent product exclusions. The compatibility matrix records only
@@ -76,8 +76,8 @@ regression verification, and documented divergences. ADR-0016 defines the
 evolution policy.
 
 Typst is tracked separately as a generated-source and compiler-adapter
-compatibility contract; Scribium does not reimplement Typst grammar. Markdown
-remains specification-driven, HTML remains isolated behind `scribium-html`, and
+compatibility contract; Arkst does not reimplement Typst grammar. Markdown
+remains specification-driven, HTML remains isolated behind `arkst-html`, and
 Pandoc remains an optional development/compatibility oracle.
 
 ## User Journeys
@@ -85,16 +85,16 @@ Pandoc remains an optional development/compatibility oracle.
 ### New Document
 
 ```
-scribium new my-report
+arkst new my-report
 → creates project structure with template
 → edit source files
-→ scribium build → PDF
+→ arkst build → PDF
 ```
 
 ### Iterative Writing
 
 ```
-scribium watch docs/
+arkst watch docs/
 → edit source in editor
 → auto-rebuild on save
 → PDF updates in viewer
@@ -103,7 +103,7 @@ scribium watch docs/
 ### CI/CD Pipeline
 
 ```
-scribium check src/ --format json
+arkst check src/ --format json
 → structured diagnostics
 → fail on error
 ```
@@ -137,7 +137,7 @@ scribium check src/ --format json
 
 ## Success Metrics
 
-- Clean checkout → `scribium build example.qd` → PDF works
+- Clean checkout → `arkst build example.qd` → PDF works
 - Typst compilation errors show original source location
 - Generated Typst is deterministic and inspectable
 - CI passes on Linux, macOS, Windows

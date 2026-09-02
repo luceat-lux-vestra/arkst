@@ -1,7 +1,7 @@
 schema_version = 1
 
 [provenance]
-contract = "scribium.reference-data-integrity"
+contract = "arkst.reference-data-integrity"
 contract_version = 1
 source_kind = "immutable-git"
 verifier_path = "tools/verify_reference_provenance.py"

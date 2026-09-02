@@ -1,4 +1,4 @@
-# Scribium Clippy configuration
+# Arkst Clippy configuration
 # https://doc.rust-lang.org/clippy/configuration.html
 
 msrv = "1.92.0"

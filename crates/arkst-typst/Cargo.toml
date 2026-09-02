@@ -1,0 +1,15 @@
+[package]
+name = "arkst-typst"
+version = "0.0.1"
+publish = false
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Arkst's platform-neutral IR-to-Typst lowering"
+
+[dependencies]
+arkst-ir.workspace = true
+arkst-source.workspace = true
+thiserror.workspace = true

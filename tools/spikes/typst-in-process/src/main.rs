@@ -1,7 +1,7 @@
 //! In-process Typst compilation spike
 //!
 //! This crate investigates the feasibility of using the Typst crate
-//! as an in-process backend for Scribium.
+//! as an in-process backend for Arkst.
 //!
 //! It is an investigation spike, NOT production code.
 //! It is excluded from the main workspace.
@@ -158,7 +158,7 @@ fn main() {
     println!("=== Test Case 2: Text with font ===");
     let text_source = r#"
 #set page(width: 200pt, height: 100pt)
-Hello from Scribium.
+Hello from Arkst.
 "#;
 
     let start = Instant::now();

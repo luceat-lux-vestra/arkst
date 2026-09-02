@@ -91,24 +91,24 @@ class DistributionPolicyTests(unittest.TestCase):
 
     def test_accidental_publish_enable_is_rejected_by_cargo_metadata(self) -> None:
         metadata = self.metadata()
-        self.package(metadata, "scribium-core")["publish"] = None
-        self.reject(r"scribium-core: Cargo metadata publish=None", metadata=metadata)
+        self.package(metadata, "arkst-core")["publish"] = None
+        self.reject(r"arkst-core: Cargo metadata publish=None", metadata=metadata)
 
     def test_new_workspace_package_drift_is_rejected(self) -> None:
         metadata = self.metadata()
         new_package = copy.deepcopy(metadata["packages"][0])
-        new_package["name"] = "scribium-unlisted"
-        new_package["id"] = "path+file:///workspace/scribium-unlisted#0.0.1"
+        new_package["name"] = "arkst-unlisted"
+        new_package["id"] = "path+file:///workspace/arkst-unlisted#0.0.1"
         metadata["packages"].append(new_package)
         metadata["workspace_members"].append(new_package["id"])
-        self.reject(r"missing from policy: scribium-unlisted", metadata=metadata)
+        self.reject(r"missing from policy: arkst-unlisted", metadata=metadata)
 
     def test_stale_inventory_entry_is_rejected(self) -> None:
         policy_text = POLICY.read_text(encoding="utf-8")
-        _, _, source_block = self.package_block(policy_text, "scribium-upstream-watch")
+        _, _, source_block = self.package_block(policy_text, "arkst-upstream-watch")
         stale_block = source_block.replace(
-            'name = "scribium-upstream-watch"',
-            'name = "scribium-z-stale"',
+            'name = "arkst-upstream-watch"',
+            'name = "arkst-z-stale"',
             1,
         ).replace(
             'manifest = "tools/upstream-watch/Cargo.toml"',
@@ -116,40 +116,40 @@ class DistributionPolicyTests(unittest.TestCase):
             1,
         )
         self.reject(
-            r"stale policy entries: scribium-z-stale",
+            r"stale policy entries: arkst-z-stale",
             policy_text=policy_text + "\n" + stale_block,
         )
 
     def test_policy_publishable_true_is_rejected_under_current_decision(self) -> None:
         policy_text = self.set_package_field(
             POLICY.read_text(encoding="utf-8"),
-            "scribium-cli",
+            "arkst-cli",
             "publishable",
             "true",
         )
-        self.reject(r"scribium-cli.publishable must be false", policy_text=policy_text)
+        self.reject(r"arkst-cli.publishable must be false", policy_text=policy_text)
 
     def test_internal_tool_publish_enable_is_rejected(self) -> None:
         metadata = self.metadata()
-        self.package(metadata, "scribium-markdown-compat")["publish"] = None
+        self.package(metadata, "arkst-markdown-compat")["publish"] = None
         self.reject(
-            r"scribium-markdown-compat: Cargo metadata publish=None",
+            r"arkst-markdown-compat: Cargo metadata publish=None",
             metadata=metadata,
         )
 
     def test_internal_tool_omission_is_rejected(self) -> None:
         policy_text = self.remove_package(
-            POLICY.read_text(encoding="utf-8"), "scribium-upstream-watch"
+            POLICY.read_text(encoding="utf-8"), "arkst-upstream-watch"
         )
         self.reject(
-            r"missing from policy: scribium-upstream-watch",
+            r"missing from policy: arkst-upstream-watch",
             policy_text=policy_text,
         )
 
     def test_internal_tool_reclassification_is_rejected(self) -> None:
         policy_text = self.set_package_field(
             POLICY.read_text(encoding="utf-8"),
-            "scribium-upstream-watch",
+            "arkst-upstream-watch",
             "distribution",
             '"compiler-library"',
         )
@@ -161,20 +161,20 @@ class DistributionPolicyTests(unittest.TestCase):
     def test_manifest_path_disagreement_is_rejected(self) -> None:
         policy_text = self.set_package_field(
             POLICY.read_text(encoding="utf-8"),
-            "scribium-cli",
+            "arkst-cli",
             "manifest",
-            '"crates/scribium-core/Cargo.toml"',
+            '"crates/arkst-core/Cargo.toml"',
         )
-        self.reject(r"scribium-cli.manifest disagrees", policy_text=policy_text)
+        self.reject(r"arkst-cli.manifest disagrees", policy_text=policy_text)
 
     def test_binary_classification_disagreement_is_rejected(self) -> None:
         policy_text = self.set_package_field(
             POLICY.read_text(encoding="utf-8"),
-            "scribium-cli",
+            "arkst-cli",
             "binary_targets",
             '["wrong-binary"]',
         )
-        self.reject(r"scribium-cli.binary_targets disagrees", policy_text=policy_text)
+        self.reject(r"arkst-cli.binary_targets disagrees", policy_text=policy_text)
 
     def test_unknown_wasm_classification_is_rejected(self) -> None:
         policy_text = POLICY.read_text(encoding="utf-8").replace(

@@ -3,7 +3,7 @@
 
 The upstream specifications use a deliberately small example format. This
 script stores only the source, section, and example number; expected HTML is
-not used as Scribium's oracle. The checked-in JSON is regenerated in CI from
+not used as Arkst's oracle. The checked-in JSON is regenerated in CI from
 the pinned upstream revision and compared byte-for-byte.
 """
 

@@ -1,4 +1,4 @@
-# Scribium Codebase Health Audit
+# Arkst Codebase Health Audit
 
 **Date:** 2026-08-21
 **Audited base:** `0d3c4b78e2dddf8b49a9a7d09515c00aa37e15ef`
@@ -24,9 +24,9 @@ semantic growth:
    dispatch surface.
 
 The accepted ADR-0015 architecture remains coherent. The current physical
-workspace has not yet applied most of it: `scribium-core` still owns the
+workspace has not yet applied most of it: `arkst-core` still owns the
 project model, IR, diagnostics, AST-to-IR conversion, compatibility modules,
-and evaluator, while `scribium-typst` also contains the native subprocess
+and evaluator, while `arkst-typst` also contains the native subprocess
 adapter. This was explicitly deferred migration state in the ADRs, not an
 unreviewed design change. At the current size and change rate, however,
 bounded physical migration should begin before the next set of cross-cutting
@@ -61,14 +61,14 @@ themselves. On this base:
 
 | File | Total lines | Bytes | Approximate production boundary | Audit conclusion |
 |---|---:|---:|---:|---|
-| `crates/scribium-core/src/evaluator.rs` | 12,676 | 449,125 | 8,292 | God-module finding: dispatch, scope, evaluation, materialization, and diagnostics change together. |
-| `crates/scribium-core/src/lib.rs` | 3,428 | 141,266 | 195 | Mostly test volume; the production facade is small and cohesive. |
-| `crates/scribium-core/src/ast_to_ir.rs` | 2,378 | 89,462 | 1,055 | Migration ownership issue; not a size-only split recommendation. |
-| `crates/scribium-core/src/builtins.rs` | 2,200 | 76,753 | 56 | Production surface is a small registry/dispatcher; its test volume should not drive extraction. |
-| `crates/scribium-core/src/value_conversion.rs` | 2,398 | 72,330 | 1,759 | Central and cohesive conversion boundary, with one correctness finding below. |
-| `crates/scribium-markdown/src/parser.rs` | 3,843 | 138,686 | 2,441 | Large but coherent authoritative Rushdown frontend adapter. |
-| `crates/scribium-typst/src/lowering.rs` | 3,001 | 113,943 | 1,184 | Cohesive backend lowering plus dense tests; do not split by LOC. |
-| `crates/scribium-cli/src/commands.rs` | 2,520 | 93,338 | 873 | Native host boundary; the responsibilities are appropriate for the current CLI. |
+| `crates/arkst-core/src/evaluator.rs` | 12,676 | 449,125 | 8,292 | God-module finding: dispatch, scope, evaluation, materialization, and diagnostics change together. |
+| `crates/arkst-core/src/lib.rs` | 3,428 | 141,266 | 195 | Mostly test volume; the production facade is small and cohesive. |
+| `crates/arkst-core/src/ast_to_ir.rs` | 2,378 | 89,462 | 1,055 | Migration ownership issue; not a size-only split recommendation. |
+| `crates/arkst-core/src/builtins.rs` | 2,200 | 76,753 | 56 | Production surface is a small registry/dispatcher; its test volume should not drive extraction. |
+| `crates/arkst-core/src/value_conversion.rs` | 2,398 | 72,330 | 1,759 | Central and cohesive conversion boundary, with one correctness finding below. |
+| `crates/arkst-markdown/src/parser.rs` | 3,843 | 138,686 | 2,441 | Large but coherent authoritative Rushdown frontend adapter. |
+| `crates/arkst-typst/src/lowering.rs` | 3,001 | 113,943 | 1,184 | Cohesive backend lowering plus dense tests; do not split by LOC. |
+| `crates/arkst-cli/src/commands.rs` | 2,520 | 93,338 | 873 | Native host boundary; the responsibilities are appropriate for the current CLI. |
 
 The evaluator growth pattern is architectural evidence, not just file size:
 the last semantic commits repeatedly changed the same evaluator/builtin paths
@@ -83,19 +83,19 @@ That makes dispatch and ownership the immediate concern.
 
 **Evidence**
 
-- `crates/scribium-test-support/src/lib.rs:42-52` loads a free-form
+- `crates/arkst-test-support/src/lib.rs:42-52` loads a free-form
   `compatibility_level` string into every conformance case.
-- `crates/scribium-test-support/src/lib.rs:114-131` implements
+- `crates/arkst-test-support/src/lib.rs:114-131` implements
   `verify_parses()` by filtering only `E2xxx` parser diagnostics. It does not
   branch on `self.meta.compatibility_level`, and it permits evaluation
   diagnostics even for a case marked above `Parsed`.
-- `crates/scribium-test-support/src/lib.rs:135-142` runs every case through that
+- `crates/arkst-test-support/src/lib.rs:135-142` runs every case through that
   parser-only helper and contains the literal
   `TODO: Add more detailed verification based on compatibility_level`.
 - The eight currently semantically labelled cases in
   `fixtures/quarkdown-conformance/cases/*/case.toml` use
   `compatibility_level = "Semantically supported"`.
-- The semantic tests that do exist at `crates/scribium-test-support/src/lib.rs:207-261`
+- The semantic tests that do exist at `crates/arkst-test-support/src/lib.rs:207-261`
   assert no diagnostics and a non-empty IR, but do not assert the observable
   semantic result, normalized IR shape, generated Typst, or a backend artifact;
   not every semantic fixture has a corresponding helper test.
@@ -122,7 +122,7 @@ Make the all-case runner a real CI test or executable check, and reject unknown
 compatibility levels. Keep known divergences explicit rather than weakening the
 policy for them.
 
-**Scope:** `scribium-test-support`, conformance fixtures, CI, and compatibility
+**Scope:** `arkst-test-support`, conformance fixtures, CI, and compatibility
 documentation. No compiler production code is required for the first fix.
 **Blocks feature work?:** **Yes.** This should precede #61 and any additional
 semantic slice that would otherwise add more claims to a weak corpus gate.
@@ -134,17 +134,17 @@ maintainability
 
 **Evidence**
 
-- `crates/scribium-core/src/evaluator.rs:1331-1770` is a long ordered chain of
+- `crates/arkst-core/src/evaluator.rs:1331-1770` is a long ordered chain of
   name predicates and bespoke handlers. It includes state/resource builtins,
   variables, user functions, components, ranges, collections, and the scalar
   builtin fallback in one dispatch function.
 - The same file has separate predicates at
-  `crates/scribium-core/src/evaluator.rs:5633-5659` for `row`/`column`/`grid`,
+  `crates/arkst-core/src/evaluator.rs:5633-5659` for `row`/`column`/`grid`,
   `center`, `align`, `container`, `landscape`, `br`, and `whitespace`, with
   additional predicate families later in the file.
 - Scalar native names are registered in a second list at
-  `crates/scribium-core/src/builtins.rs:16-54` and routed through another
-  `match` at `crates/scribium-core/src/builtins.rs:81-117`.
+  `crates/arkst-core/src/builtins.rs:16-54` and routed through another
+  `match` at `crates/arkst-core/src/builtins.rs:81-117`.
 - Component and special builtin binding is separately reimplemented in
   `evaluator.rs`, for example `bind_whitespace_arguments` at
   `5661-5730`, `bind_container_arguments` at `5746-5800`,
@@ -188,27 +188,27 @@ before another series of native component or builtin additions, including #61.
 
 **Evidence**
 
-- The workspace in `Cargo.toml:1-18` contains `scribium-core`, source,
+- The workspace in `Cargo.toml:1-18` contains `arkst-core`, source,
   Quarkdown, Markdown, Typst, CLI, and test-support, but no physical
-  `scribium-project`, `scribium-engine`, `scribium-ir`,
-  `scribium-diagnostics`, `scribium-compat`, `scribium-html`, or
-  `scribium-typst-subprocess` crates.
-- `crates/scribium-core/Cargo.toml:9-19` describes and depends on the core as
+  `arkst-project`, `arkst-engine`, `arkst-ir`,
+  `arkst-diagnostics`, `arkst-compat`, `arkst-html`, or
+  `arkst-typst-subprocess` crates.
+- `crates/arkst-core/Cargo.toml:9-19` describes and depends on the core as
   composition, semantics, evaluation, IR, source maps, Markdown, Quarkdown,
   and source. The physical modules include `virtual_project`, `ir`,
   `diagnostics`, `compatibility`, `ast_to_ir`, `value_conversion`, and the
   evaluator.
-- `crates/scribium-typst/Cargo.toml:9-17` depends directly on
-  `scribium-core`. Its `lib.rs:3-8` says the crate owns lowering, the backend
+- `crates/arkst-typst/Cargo.toml:9-17` depends directly on
+  `arkst-core`. Its `lib.rs:3-8` says the crate owns lowering, the backend
   trait, subprocess adapter, diagnostics, and source maps.
-- `crates/scribium-typst/src/backend.rs:1-7` imports `std::fs`, native paths,
+- `crates/arkst-typst/src/backend.rs:1-7` imports `std::fs`, native paths,
   and `std::process::Command`; `SubprocessBackend` at `87-125` creates a
   temporary directory and begins mirroring the project before invoking Typst.
 - The target architecture explicitly assigns project/engine/IR/diagnostics
   ownership in `docs/ARCHITECTURE.md:222-243`, forbids native I/O in
   platform-independent crates at `245-265`, and separates pure lowering from
   subprocess execution at `744-875`. ADR-0015 gives the dependency direction
-  at `412-451`, forbids `scribium-typst -> scribium-core` at `480-497`, and
+  at `412-451`, forbids `arkst-typst -> arkst-core` at `480-497`, and
   records bounded migration as the accepted next step at `813-829`.
 
 **Impact**
@@ -255,10 +255,10 @@ generic native-content escape hatch. The closed `TargetSpecificContent`
 
 The following records the historical pre-extraction audit evidence:
 
-- `crates/scribium-core/src/ir.rs:269-270` exposes
+- `crates/arkst-core/src/ir.rs:269-270` exposes
   `IrNode::RawTypst { source: String, span: SourceSpan }` with the comment
   “inserted verbatim into the output”.
-- `crates/scribium-typst/src/lowering.rs:213-224` emits that string directly,
+- `crates/arkst-typst/src/lowering.rs:213-224` emits that string directly,
   temporarily enabling verbatim output and recording a source map.
 - The target contract forbids this path in
   `docs/ARCHITECTURE.md:617-625` and `857-870`, and ADR-0016 explicitly
@@ -292,7 +292,7 @@ slice if that slice remains backend-neutral.
 
 **Evidence**
 
-- `crates/scribium-core/src/evaluator.rs:4484-4544` converts every closed
+- `crates/arkst-core/src/evaluator.rs:4484-4544` converts every closed
   range to a `Vec<IrValue>`. It checks integer arithmetic, `usize` conversion,
   and allocation failure, but it has no configured maximum element count or
   evaluation budget before reserving.
@@ -330,10 +330,10 @@ conditionally blocks #61 if that slice exercises unbounded iteration.
 
 **Evidence**
 
-- `crates/scribium-core/src/lib.rs:113-121` passes `CompileOptions` into
+- `crates/arkst-core/src/lib.rs:113-121` passes `CompileOptions` into
   `compile_with_capabilities` but names the parameter `_options` and never
   reads it.
-- `crates/scribium-core/src/lib.rs:183-187` exposes
+- `crates/arkst-core/src/lib.rs:183-187` exposes
   `pub compatibility_profile: Option<String>` as part of the public compile
   options.
 - ADR-0015 assigns compatibility-policy selection to `CompileOptions` at
@@ -369,9 +369,9 @@ not a blocker for default-only behavior once the limitation is documented.
 
 **Evidence**
 
-- `crates/scribium-core/src/ir.rs:89-96` defines `IrColor::alpha` as the
+- `crates/arkst-core/src/ir.rs:89-96` defines `IrColor::alpha` as the
   backend-neutral upstream `0.0..=1.0` fraction.
-- `crates/scribium-core/src/value_conversion.rs:607-617` validates the fourth
+- `crates/arkst-core/src/value_conversion.rs:607-617` validates the fourth
   digit of a 4-digit hex color but returns `alpha: 1.0`.
 - `value_conversion.rs:625-635` validates the final byte of an 8-digit hex
   color but also returns `alpha: 1.0`.
@@ -408,7 +408,7 @@ unrelated #61 scalar semantics.
 **Evidence**
 
 - `EvaluationContext::child()` at
-  `crates/scribium-core/src/evaluator.rs:585-622` clones the entire context
+  `crates/arkst-core/src/evaluator.rs:585-622` clones the entire context
   into a boxed parent, clones the `VirtualProject`, and clones active-source
   state while sharing only document state through `Rc<RefCell<_>>`.
 - `capture_snapshot()` and `collect_bindings()` at
@@ -420,7 +420,7 @@ unrelated #61 scalar semantics.
   reconstructs the definition context, caller overlay, and child context per
   invocation.
 - Source contents and asset bytes use `Arc` in
-  `crates/scribium-core/src/source/source_store.rs:22-46` and
+  `crates/arkst-core/src/source/source_store.rs:22-46` and
   `source/asset_store.rs:19-25`, which limits some byte duplication, but the
   maps, values, function bindings, and IR bodies are still copied.
 
@@ -450,15 +450,15 @@ collection/callable expansion and alongside resource-budget work.
 
 **Evidence**
 
-- `crates/scribium-core/src/diagnostics.rs:5-14` represents `Diagnostic.code`
+- `crates/arkst-core/src/diagnostics.rs:5-14` represents `Diagnostic.code`
   as an unconstrained `String`.
 - `evaluator.rs:7673-7839` contains repeated builders for iteration,
   component, center, align, landscape, br, and whitespace diagnostics. They
   repeat literal `E3001`/`E3003` construction and generally initialize
   `secondary: Vec::new()`.
-- `crates/scribium-core/src/ast_to_ir.rs:960-1014` independently constructs
+- `crates/arkst-core/src/ast_to_ir.rs:960-1014` independently constructs
   `E8001` and `E3003`; parser codes are separately declared as string literals
-  in `crates/scribium-markdown/src/parser.rs:405-417` and related paths.
+  in `crates/arkst-markdown/src/parser.rs:405-417` and related paths.
 - ADR-0020's conversion contract requires argument-span diagnostics with a
   parameter-name secondary span, but the repeated feature builders provide no
   shared catalog/builder that enforces this shape. Existing tests do verify many
@@ -492,24 +492,24 @@ state. The current physical mismatch is captured in F-003 rather than treated
 as a reason to invent new crates. The following ownership conclusions are
 supported by the code and accepted documents:
 
-- `scribium-markdown` owns the single authoritative Rushdown-backed block
-  parser. Its public output is Scribium-owned `Document`/AST data; Rushdown
+- `arkst-markdown` owns the single authoritative Rushdown-backed block
+  parser. Its public output is Arkst-owned `Document`/AST data; Rushdown
   types are private imports at `parser.rs:4-20`. No Rushdown type leaks through
   `ParseOutput` at `parser.rs:35-46`.
-- Quarkdown grammar remains in `scribium-quarkdown`; the Markdown parser calls
+- Quarkdown grammar remains in `arkst-quarkdown`; the Markdown parser calls
   its narrow grammar helpers rather than embedding a second full grammar.
 - `ast_to_ir.rs` currently combines AST conversion, metadata normalization, and
   narrow raw-HTML pairing/compatibility classification. That is a physical
   migration concern for engine/HTML ownership, not evidence that a second
   parser should be built.
-- `scribium-core/src/lib.rs:108-180` is a small orchestration facade in
+- `arkst-core/src/lib.rs:108-180` is a small orchestration facade in
   production code, even though its test module makes the file large. It should
   not be split solely because the file is 141 KB.
-- `scribium-typst/src/lowering.rs` has a cohesive IR-to-Typst responsibility;
+- `arkst-typst/src/lowering.rs` has a cohesive IR-to-Typst responsibility;
   its backend-specific syntax fragments and escaping belong there. The native
   filesystem/process portion belongs in the physical adapter identified by
   F-003.
-- `scribium-cli/src/commands.rs:1-18` and `85-172` correctly own native path,
+- `arkst-cli/src/commands.rs:1-18` and `85-172` correctly own native path,
   filesystem, project loading, and output composition. The current explicit
   logical-root, canonicalization, symlink, and atomic-output tests are the
   right host boundary.
@@ -524,7 +524,7 @@ classes:
 | Quarkdown builtin names and closed argument names | Language-specified constants, but currently duplicated across dispatch and binders | F-002: centralize regular signatures/ownership; retain bespoke policies. |
 | Diagnostic codes | Stable external taxonomy, currently represented as strings | F-009: catalog/builders later; do not rename codes in this audit. |
 | Quarkdown v2.5.1 profile/version and fixture levels | Compatibility metadata | Keep as evidence-backed metadata; make level drive assertions in F-001 and profile drive policy in F-006. |
-| Typst syntax fragments and escaping | Legitimate backend implementation detail | Keep in `scribium-typst`; do not move into core IR. |
+| Typst syntax fragments and escaping | Legitimate backend implementation detail | Keep in `arkst-typst`; do not move into core IR. |
 | `.md`, `.qd`, `.scrib` extension handling and case-insensitive final extension | Explicit input contract | Keep at the frontend/CLI boundary; do not make arbitrary extensions implicit. |
 | Closed enum conversion tables | Appropriate typed registry | Keep `ClosedEnumSpec`/typed enum values; do not replace with generalized string coercion. |
 | Zero-size/default layout values | Local semantic defaults where documented by the bounded feature | Review only when upstream evidence changes; no blanket constant extraction. |
@@ -606,13 +606,13 @@ or weakening tests:
 | `cargo fmt --all --check` | PASS |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
 | `cargo test --workspace --all-features` | PASS, including core, Markdown, Quarkdown, test-support, Typst backend/integration, Markdown compatibility, and upstream-watch tests |
-| `cargo test -p scribium-core` | PASS |
-| `cargo run -p scribium-cli -- build examples/hello/main.qd` | PASS; generated Typst |
-| `cargo run -p scribium-cli -- build examples/hello/main.qd --format pdf` | PASS; generated PDF with installed Typst |
-| `cargo run -p scribium-cli -- inspect examples/hello/main.qd --emit typst` | PASS; emitted Typst |
+| `cargo test -p arkst-core` | PASS |
+| `cargo run -p arkst-cli -- build examples/hello/main.qd` | PASS; generated Typst |
+| `cargo run -p arkst-cli -- build examples/hello/main.qd --format pdf` | PASS; generated PDF with installed Typst |
+| `cargo run -p arkst-cli -- inspect examples/hello/main.qd --emit typst` | PASS; emitted Typst |
 | Existing Typst-required backend integration | PASS as part of workspace tests; 38 integration tests and subprocess checks passed |
 | Existing compatibility/conformance tests | PASS as part of workspace tests; Markdown compatibility and test-support tests pass, with F-001 documenting their semantic-strength limitation |
-| `cargo check -p scribium-core -p scribium-typst --target wasm32-unknown-unknown --all-features` | PASS |
+| `cargo check -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | PASS |
 | `cargo doc --workspace --all-features --no-deps` | PASS |
 
 The generated example outputs are ignored by the repository and were not added
@@ -639,13 +639,13 @@ These are independent, reviewable work units. None is part of this audit PR.
 
 | ID | Goal | Dependency | Risk | Expected change area | Behavior-preserving? | Blocks #61? |
 |---|---|---|---|---|---|---|
-| R1 | Make conformance levels executable assertions and run the corpus in CI | None | Medium: test policy may expose existing fixture gaps | `scribium-test-support`, fixture metadata/expected outputs, CI, compatibility docs | Yes for compiler behavior; strengthens verification | **Yes; first** |
+| R1 | Make conformance levels executable assertions and run the corpus in CI | None | Medium: test policy may expose existing fixture gaps | `arkst-test-support`, fixture metadata/expected outputs, CI, compatibility docs | Yes for compiler behavior; strengthens verification | **Yes; first** |
 | R2 | Establish one native builtin inventory and regular-signature path while retaining bespoke handlers | R1 recommended for evidence | Medium: dispatch ordering and shadowing must be regression-tested | `evaluator.rs`, `builtins.rs`, native builtin tests | Yes | **Yes; before more native semantic additions** |
 | R3 | Resolve `CompileOptions.compatibility_profile` as a real typed policy or explicitly remove/defer it | R1 not technically required | Medium: public API/configuration decision | `CompileOptions`, compatibility policy, facade/CLI/docs/tests | Yes if default behavior remains unchanged | **Yes before profile-dependent claims** |
 | R4 | Add evaluator resource budgets for range/materialization/call depth | R1 and the existing evaluator context; independent of crate moves | Medium: explicit limits can expose large-input behavior | evaluator context/options, iteration/call tests, diagnostics | Yes for inputs below documented limits | **Yes for iterable/materialization slices** |
 | R5 | Extract source/project/diagnostics/compatibility and the existing single IR behind the core facade | R1-R4 should define contracts; no semantic redesign | High: Cargo dependency and public re-export migration | new target crates, core facade, module moves, serde/source-span tests | Yes | **Recommended gate before continued cross-cutting growth** |
-| R6 | Extract engine/evaluator and AST-to-IR ownership; preserve one IR and typed value flow | R5 | High: scope, diagnostics, and frontend ownership | `scribium-engine`, core orchestration, AST-to-IR, evaluator tests | Yes | **Yes for sustained #61 expansion** |
-| R7 | Split pure Typst lowering from native subprocess execution and remove `RawTypst` | R5; coordinate with R6 for IR ownership | High: adapter/API and serde compatibility | `scribium-typst`, `scribium-typst-subprocess`, CLI, IR/lowering tests | Yes after reviewed legacy-IR decision | No for scalar-only work; yes for backend escape work |
+| R6 | Extract engine/evaluator and AST-to-IR ownership; preserve one IR and typed value flow | R5 | High: scope, diagnostics, and frontend ownership | `arkst-engine`, core orchestration, AST-to-IR, evaluator tests | Yes | **Yes for sustained #61 expansion** |
+| R7 | Split pure Typst lowering from native subprocess execution and remove `RawTypst` | R5; coordinate with R6 for IR ownership | High: adapter/API and serde compatibility | `arkst-typst`, `arkst-typst-subprocess`, CLI, IR/lowering tests | Yes after reviewed legacy-IR decision | No for scalar-only work; yes for backend escape work |
 | R8 | Correct hex alpha conversion and add consumer-level color evidence | Before any color/style consumer | Low-to-medium: verify public upstream representation | `value_conversion.rs`, tests, later style consumer | Yes for unrelated behavior | **Yes for color/style work only** |
 | R9 | Add diagnostic catalog/builders and secondary-span/de-duplication matrix tests | R5/R6 diagnostics ownership | Medium: message/code compatibility risk | diagnostics crate, evaluator/AST-to-IR/parser adapters | Yes if codes/messages are retained | No immediate block |
 | R10 | Measure callable/context copy costs and optimize only if evidence warrants | R4 resource instrumentation; after semantic contract stabilization | Medium: scope semantics can regress | evaluator benchmarks/instrumentation and context internals | Must be behavior-preserving | No immediate block; before large M3 collection growth |

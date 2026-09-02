@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1, #9
 
 ## Context
 
-Scribium must have a consistent error model with stable error codes, structured
+Arkst must have a consistent error model with stable error codes, structured
 diagnostics, and predictable exit codes.
 
 ## Decision Drivers
@@ -35,23 +35,23 @@ Use `thiserror` for library crate error types and `anyhow` for CLI error
 aggregation. Error codes are assigned per diagnostic, not per error type.
 
 ADR-0009 owns the stable diagnostic-code ranges and error/exit-code policy.
-`scribium-diagnostics` owns the shared diagnostic representation. The compiler
+`arkst-diagnostics` owns the shared diagnostic representation. The compiler
 stage detecting a problem owns that diagnostic's semantics and construction;
-`scribium-core` aggregates diagnostics but is not their implementation owner.
+`arkst-core` aggregates diagnostics but is not their implementation owner.
 
 Conceptually:
 
 ```text
 syntax/parser       -> frontend
-semantic/evaluation -> scribium-engine
-compatibility       -> scribium-compat
-Typst lowering      -> scribium-typst
+semantic/evaluation -> arkst-engine
+compatibility       -> arkst-compat
+Typst lowering      -> arkst-typst
 Typst execution     -> concrete Typst backend adapter
 project/config      -> responsible project/host layer
 all use
     ↓
-scribium-diagnostics representation
-scribium-core
+arkst-diagnostics representation
+arkst-core
     ↓
 aggregates results
 ```
@@ -96,7 +96,7 @@ aggregates results
 
 ## References
 
-- `crates/scribium-core/src/diagnostics.rs` (current implementation location
+- `crates/arkst-core/src/diagnostics.rs` (current implementation location
   during physical migration, not target ownership)
-- `crates/scribium-cli/src/exit.rs`
+- `crates/arkst-cli/src/exit.rs`
 - ADR-0015: Compiler crate boundaries

@@ -222,7 +222,7 @@ rationale = "fixture"
         tmp, root, policy = self.make_repo()
         self.addCleanup(tmp.cleanup)
         for path in [
-            "crates/scribium-engine/src/locale.rs",
+            "crates/arkst-engine/src/locale.rs",
             "tools/generate_jdk25_locale_data.py",
             "tests/compat/corpus/jdk25.json",
             "docs/compatibility/quarkdown/reference-jvm.toml",

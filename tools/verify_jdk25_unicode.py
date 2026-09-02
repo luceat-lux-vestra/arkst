@@ -68,7 +68,7 @@ def main() -> None:
     if not javac.is_file():
         raise SystemExit(f"matching javac executable does not exist: {javac}")
 
-    with tempfile.TemporaryDirectory(prefix="scribium-jdk25-differential-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="arkst-jdk25-differential-") as temporary:
         directory = Path(temporary)
         classes = directory / "classes"
         classes.mkdir()
@@ -101,9 +101,9 @@ def main() -> None:
         test_environment = environment()
         test_environment.update(
             {
-                "SCRIBIUM_JDK25_UNICODE_MAPS": str(maps),
-                "SCRIBIUM_JDK25_UNICODE_CORPUS": str(CORPUS),
-                "SCRIBIUM_JDK25_UNICODE_CORPUS_OUTPUT": str(corpus_output),
+                "ARKST_JDK25_UNICODE_MAPS": str(maps),
+                "ARKST_JDK25_UNICODE_CORPUS": str(CORPUS),
+                "ARKST_JDK25_UNICODE_CORPUS_OUTPUT": str(corpus_output),
             }
         )
         for test_name in (
@@ -115,7 +115,7 @@ def main() -> None:
                     "cargo",
                     "test",
                     "-p",
-                    "scribium-engine",
+                    "arkst-engine",
                     "--locked",
                     f"builtins::tests::{test_name}",
                     "--",

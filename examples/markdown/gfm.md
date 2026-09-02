@@ -3,7 +3,7 @@
 ## Task list
 
 - [x] Parse Markdown through the pinned Rushdown substrate
-- [x] Preserve task-list state in Scribium IR
+- [x] Preserve task-list state in Arkst IR
 - [ ] Keep extending Quarkdown compatibility
 
 ## Table

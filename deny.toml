@@ -1,4 +1,4 @@
-# Deny configuration for Scribium
+# Deny configuration for Arkst
 # https://embarkstudios.github.io/cargo-deny/
 
 [graph]

@@ -2,15 +2,15 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-12
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related ADRs:** 0002, 0005, 0006, 0014, 0016
 - **Related work:** PR #46; `refactor/markdown-parser-foundation`
 
 ## Context
 
-Scribium's source-location primitives, in-memory compilation project, and
+Arkst's source-location primitives, in-memory compilation project, and
 compiler workflow have different responsibilities. The existing workspace
-places these responsibilities behind `scribium-core`; the target architecture
+places these responsibilities behind `arkst-core`; the target architecture
 separates them without changing the implementation in this documentation-only
 step.
 
@@ -25,28 +25,28 @@ refines their crate ownership.
 
 ADR-0014 establishes the target frontend ownership:
 
-- `scribium-markdown` owns the Markdown frontend, including `BlockParser` and
+- `arkst-markdown` owns the Markdown frontend, including `BlockParser` and
   the Markdown frontend AST.
-- `scribium-quarkdown` owns Quarkdown-specific grammar and its grammar-level
+- `arkst-quarkdown` owns Quarkdown-specific grammar and its grammar-level
   result types.
-- `scribium-markdown` depends on `scribium-quarkdown` for Quarkdown grammar;
-  `scribium-quarkdown` must not depend on the Markdown frontend or on
-  `scribium-compat`.
-- `scribium-quarkdown` parses Quarkdown grammar independently of the selected
+- `arkst-markdown` depends on `arkst-quarkdown` for Quarkdown grammar;
+  `arkst-quarkdown` must not depend on the Markdown frontend or on
+  `arkst-compat`.
+- `arkst-quarkdown` parses Quarkdown grammar independently of the selected
   compatibility profile. Compatibility policy is applied by the stages that
-  consume that grammar, primarily `scribium-markdown`, `scribium-engine`, and
-  `scribium-core`.
-- Markdown parsing is not permanently owned by `scribium-core`. Its current
+  consume that grammar, primarily `arkst-markdown`, `arkst-engine`, and
+  `arkst-core`.
+- Markdown parsing is not permanently owned by `arkst-core`. Its current
   physical location may remain there during migration, but that does not
   change the target ownership.
 
-The frontend crates do not depend on `scribium-project`. A frontend parses a
+The frontend crates do not depend on `arkst-project`. A frontend parses a
 particular source input with the minimum source context required to preserve
 source locations; the final parser function signature is not defined here.
 
-## Decision 2: `scribium-source` owns source-location primitives
+## Decision 2: `arkst-source` owns source-location primitives
 
-The target `scribium-source` crate is the lowest-level, platform-independent
+The target `arkst-source` crate is the lowest-level, platform-independent
 source-location abstraction. It owns source identity and source-location value
 types, including:
 
@@ -65,14 +65,14 @@ types, including:
 The future segment-aware inline-input design may build on these types. The API
 for that design is not defined by this ADR.
 
-`scribium-source` owns the backend-neutral source-map representation, which
+`arkst-source` owns the backend-neutral source-map representation, which
 may support generated ranges. This ownership decision does not require M1 to
 use byte-precise mappings: M1 may populate the representation at line
 granularity according to ADR-0006. Backend lowering owns creation of mapping
 entries, and the planned finer-grained mapping upgrade remains governed by
 ADR-0006.
 
-`scribium-source` must not own:
+`arkst-source` must not own:
 
 - `VirtualProject` or `VirtualProjectBuilder`;
 - `ProjectMetadata`;
@@ -86,11 +86,11 @@ ADR-0006.
 The target crate is deterministic, filesystem-free, network-free, and
 compatible with `wasm32-unknown-unknown`. It provides stable primitives that
 frontends, project, diagnostics, IR, and lowering layers can share without a
-dependency on `scribium-core`.
+dependency on `arkst-core`.
 
-## Decision 3: `scribium-project` owns the in-memory compilation project
+## Decision 3: `arkst-project` owns the in-memory compilation project
 
-The target `scribium-project` crate owns the in-memory compilation project
+The target `arkst-project` crate owns the in-memory compilation project
 model. Its architectural ownership includes:
 
 - `VirtualPathBuf` and `VirtualPathError`;
@@ -107,21 +107,21 @@ images and fonts. `VirtualProject` combines the entry path, source collection,
 asset collection, and project metadata, so these concepts belong together at
 the project layer.
 
-`scribium-project` depends on `scribium-source` and may use `SourceId` and
-other low-level source primitives. `scribium-source` must never depend on
-`scribium-project`.
+`arkst-project` depends on `arkst-source` and may use `SourceId` and
+other low-level source primitives. `arkst-source` must never depend on
+`arkst-project`.
 
 `VirtualProject` remains an I/O-free, deterministic compilation unit. The
 native CLI or other host is responsible for filesystem discovery, filesystem
 reads, path canonicalization, symlink policy, configuration loading, and
 loading sources and assets before constructing a `VirtualProject`. WASM and
 other embedders construct the same project directly from in-memory data.
-Neither `scribium-project` nor lower compiler crates perform filesystem or
+Neither `arkst-project` nor lower compiler crates perform filesystem or
 network I/O.
 
-## Decision 4: `scribium-core` is the composition and orchestration layer
+## Decision 4: `arkst-core` is the composition and orchestration layer
 
-The long-term role of `scribium-core` is a stable Scribium compiler facade and
+The long-term role of `arkst-core` is a stable Arkst compiler facade and
 composition layer. It owns:
 
 - the public compiler facade;
@@ -138,16 +138,16 @@ VirtualProject
     ↓
 select entry source
     ↓
-scribium-markdown
+arkst-markdown
     ↓
-scribium-engine
+arkst-engine
     ↓
 normalized IrDocument
     ↓
 CompileResult
 ```
 
-`scribium-core` must not remain the implementation owner of:
+`arkst-core` must not remain the implementation owner of:
 
 - source identity or source-location primitives;
 - project, source, or asset stores;
@@ -157,13 +157,13 @@ CompileResult
 - shared diagnostic representation; or
 - compatibility policy implementation.
 
-`scribium-core` may re-export selected stable lower-level compatibility and
+`arkst-core` may re-export selected stable lower-level compatibility and
 diagnostic types for API convenience. Re-exporting a type does not make
-`scribium-core` the implementation owner of that type.
+`arkst-core` the implementation owner of that type.
 
 The exact `CompileOptions` fields are not decided in this ADR.
 
-`scribium-core` remains responsible for selecting the entry source from
+`arkst-core` remains responsible for selecting the entry source from
 `VirtualProject` and invoking the frontend and engine stages. Project metadata
 provides defaults, and document front matter overrides those defaults. The
 metadata behavior remains unchanged by this target ownership decision.
@@ -171,36 +171,36 @@ metadata behavior remains unchanged by this target ownership decision.
 The target interaction is conceptually:
 
 ```text
-scribium-core
+arkst-core
     |
     | project metadata defaults
     | source text + SourceId
     | selected compatibility policy
     v
-scribium-markdown
+arkst-markdown
     |
     | frontend AST, including preserved raw HTML fragments and provenance
     v
-scribium-engine
+arkst-engine
     |
-    | delegates raw HTML normalization to scribium-html
+    | delegates raw HTML normalization to arkst-html
     v
-scribium-html
+arkst-html
     |
-    | returns backend-neutral Scribium semantics or explicit foreign HTML content
+    | returns backend-neutral Arkst semantics or explicit foreign HTML content
     v
-scribium-engine (continues normalization/evaluation)
+arkst-engine (continues normalization/evaluation)
     |
     | normalized IrDocument
     v
-scribium-core / backend boundary
+arkst-core / backend boundary
 ```
 
 The exact Rust function signatures are not decided in this ADR.
 
-## Decision 5: `scribium-ir` owns the backend-neutral document IR
+## Decision 5: `arkst-ir` owns the backend-neutral document IR
 
-The target architecture contains a dedicated `scribium-ir` crate. It owns only
+The target architecture contains a dedicated `arkst-ir` crate. It owns only
 the backend-neutral document IR:
 
 - `IrDocument`;
@@ -210,9 +210,9 @@ the backend-neutral document IR:
 - `IrListItem`; and
 - `IrValue`.
 
-`scribium-ir` depends on `scribium-source` for `SourceSpan`.
+`arkst-ir` depends on `arkst-source` for `SourceSpan`.
 
-`scribium-ir` must not own:
+`arkst-ir` must not own:
 
 - Markdown AST;
 - parser implementation;
@@ -224,9 +224,9 @@ the backend-neutral document IR:
 - Typst lowering.
 
 IR nodes retain their original `SourceSpan` values, but generated-output
-mappings do not belong to `scribium-ir`. `scribium-source` owns the generic
+mappings do not belong to `arkst-ir`. `arkst-source` owns the generic
 source-map representation; the lowering backend creates entries only when it
-emits generated bytes. `scribium-core` may aggregate or expose the resulting
+emits generated bytes. `arkst-core` may aggregate or expose the resulting
 maps.
 
 The mapping lifecycle is therefore:
@@ -266,41 +266,41 @@ This correction does not introduce separate pre-evaluation and post-evaluation
 IR crates or types. A future requirement may justify another IR level, but PR
 #46 does not introduce one.
 
-## Decision 6: `scribium-engine` owns semantic analysis and evaluation
+## Decision 6: `arkst-engine` owns semantic analysis and evaluation
 
-The target architecture contains a dedicated `scribium-engine` crate. It owns
+The target architecture contains a dedicated `arkst-engine` crate. It owns
 compiler semantics after parsing and before backend lowering:
 
-- Markdown AST → Scribium IR lowering;
+- Markdown AST → Arkst IR lowering;
 - semantic analysis;
 - evaluation passes;
 - variable scope and environment handling;
 - conditional evaluation;
-- built-in Scribium and Quarkdown functions; and
+- built-in Arkst and Quarkdown functions; and
 - normalization of IR for backend consumption.
 
 The architectural ownership of the current concepts is:
 
 ```text
-ast_to_ir    -> scribium-engine
-evaluator    -> scribium-engine
-builtins     -> scribium-engine
+ast_to_ir    -> arkst-engine
+evaluator    -> arkst-engine
+builtins     -> arkst-engine
 ```
 
 This is ownership only. The concepts are not physically moved by this ADR.
 
-`scribium-engine` depends on:
+`arkst-engine` depends on:
 
-- `scribium-markdown` for the frontend AST;
-- `scribium-ir`;
-- `scribium-source`;
-- `scribium-diagnostics`;
-- `scribium-html` for raw HTML semantic normalization;
-- `scribium-compat` for compatibility policy;
-- `scribium-quarkdown` only where Quarkdown grammar-level rules, such as
+- `arkst-markdown` for the frontend AST;
+- `arkst-ir`;
+- `arkst-source`;
+- `arkst-diagnostics`;
+- `arkst-html` for raw HTML semantic normalization;
+- `arkst-compat` for compatibility policy;
+- `arkst-quarkdown` only where Quarkdown grammar-level rules, such as
   valid identifiers, are required.
 
-`scribium-engine` must not depend on:
+`arkst-engine` must not depend on:
 
 - `VirtualProject`;
 - `SourceStore`;
@@ -311,9 +311,9 @@ This is ownership only. The concepts are not physically moved by this ADR.
 The engine does not own the compilation project. Project metadata must not
 require the engine to consume an entire `VirtualProject`.
 
-## Decision 7: `scribium-diagnostics` owns the shared diagnostic representation
+## Decision 7: `arkst-diagnostics` owns the shared diagnostic representation
 
-The target architecture contains a dedicated `scribium-diagnostics` crate. It
+The target architecture contains a dedicated `arkst-diagnostics` crate. It
 owns the shared compiler diagnostic model:
 
 - `Diagnostic`;
@@ -321,31 +321,31 @@ owns the shared compiler diagnostic model:
 - common diagnostic value and representation types required across compiler
   stages.
 
-`scribium-diagnostics` depends on `scribium-source` for source-location types
+`arkst-diagnostics` depends on `arkst-source` for source-location types
 such as `SourceSpan`.
 
-`scribium-diagnostics` must remain:
+`arkst-diagnostics` must remain:
 
-- independent of `scribium-project`;
+- independent of `arkst-project`;
 - independent of all frontends;
-- independent of `scribium-engine`;
+- independent of `arkst-engine`;
 - independent of backends;
 - filesystem- and network-free; and
 - compatible with WASM.
 
-`scribium-diagnostics` owns the common representation, not every compiler
+`arkst-diagnostics` owns the common representation, not every compiler
 error definition. The stage that detects a problem owns the meaning and
 construction of that diagnostic:
 
 ```text
 Markdown/parser diagnostics      -> frontend owner
-evaluation/semantic diagnostics  -> scribium-engine
-compatibility diagnostics       -> scribium-compat
+evaluation/semantic diagnostics  -> arkst-engine
+compatibility diagnostics       -> arkst-compat
 backend diagnostics              -> backend owner
 ```
 
 There is no central registry containing all parser, evaluator, compatibility,
-and backend logic. `scribium-core` aggregates diagnostics from the stages but
+and backend logic. `arkst-core` aggregates diagnostics from the stages but
 does not become their implementation owner.
 
 The target frontend should eventually emit or normalize its recoverable parser
@@ -353,10 +353,10 @@ errors into the shared `Diagnostic` representation using the source context
 supplied to the parse. The exact parser API and conversion API are not decided
 in this ADR.
 
-## Decision 8: `scribium-compat` owns compatibility policy
+## Decision 8: `arkst-compat` owns compatibility policy
 
-The target architecture contains a dedicated `scribium-compat` crate. It owns
-Scribium's Quarkdown compatibility policy and tracking concepts, including
+The target architecture contains a dedicated `arkst-compat` crate. It owns
+Arkst's Quarkdown compatibility policy and tracking concepts, including
 architectural ownership of:
 
 - `CompatibilityProfile`;
@@ -368,10 +368,10 @@ architectural ownership of:
 - compatibility-specific unsupported-feature reporting and E8xxx diagnostic
   construction.
 
-`scribium-compat` represents compatibility policy across the language. It does
+`arkst-compat` represents compatibility policy across the language. It does
 not implement the language feature itself.
 
-`scribium-compat` must not own:
+`arkst-compat` must not own:
 
 - Markdown parsing;
 - Quarkdown grammar parsing;
@@ -394,7 +394,7 @@ redesign those policies.
 The compatibility profile may affect behavior in more than one compiler stage:
 
 ```text
-                 scribium-compat
+                 arkst-compat
                    /        \
                   v          v
         frontend behavior   engine behavior
@@ -405,7 +405,7 @@ whether a syntax or semantic feature has current verified compatibility
 evidence. The Quarkdown grammar crate itself remains independent of that policy;
 neither the grammar nor the engine owns the compatibility profile definition.
 
-`scribium-core` owns top-level compilation options and passes the selected
+`arkst-core` owns top-level compilation options and passes the selected
 compatibility policy or profile to the stages that require it. The exact Rust
 function signatures are not decided in this ADR.
 
@@ -414,110 +414,110 @@ function signatures are not decided in this ADR.
 In the following diagram, `A -> B` means that A depends on B:
 
 ```text
-scribium-project ---------> scribium-source
-scribium-quarkdown -------> scribium-source   (only if source primitives are needed)
-scribium-markdown --------> scribium-source
-scribium-markdown --------> scribium-quarkdown
-scribium-diagnostics -----> scribium-source
-scribium-compat ----------> scribium-diagnostics
-scribium-markdown --------> scribium-compat
-scribium-engine ----------> scribium-compat
-scribium-core ------------> scribium-project
-scribium-core ------------> scribium-markdown
-scribium-ir --------------> scribium-source
-scribium-engine ----------> scribium-source
-scribium-engine ----------> scribium-ir
-scribium-engine ----------> scribium-markdown
-scribium-engine ----------> scribium-html
-scribium-engine ----------> scribium-quarkdown (only for required grammar rules)
-scribium-core ------------> scribium-engine
-scribium-core ------------> scribium-ir
-scribium-markdown --------> scribium-diagnostics
-scribium-engine ----------> scribium-diagnostics
-scribium-core ------------> scribium-compat
-scribium-core ------------> scribium-diagnostics
-scribium-typst -----------> scribium-ir
-scribium-typst -----------> scribium-source
-scribium-typst -----------> scribium-diagnostics
-scribium-typst-subprocess -> scribium-typst
-scribium-typst-subprocess -> scribium-diagnostics
-scribium-html ------------> scribium-source
-scribium-html ------------> scribium-ir
-scribium-html ------------> scribium-diagnostics
-scribium-cli -------------> scribium-project
-scribium-cli -------------> scribium-core
-scribium-cli -------------> scribium-typst
-scribium-cli -------------> scribium-typst-subprocess
+arkst-project ---------> arkst-source
+arkst-quarkdown -------> arkst-source   (only if source primitives are needed)
+arkst-markdown --------> arkst-source
+arkst-markdown --------> arkst-quarkdown
+arkst-diagnostics -----> arkst-source
+arkst-compat ----------> arkst-diagnostics
+arkst-markdown --------> arkst-compat
+arkst-engine ----------> arkst-compat
+arkst-core ------------> arkst-project
+arkst-core ------------> arkst-markdown
+arkst-ir --------------> arkst-source
+arkst-engine ----------> arkst-source
+arkst-engine ----------> arkst-ir
+arkst-engine ----------> arkst-markdown
+arkst-engine ----------> arkst-html
+arkst-engine ----------> arkst-quarkdown (only for required grammar rules)
+arkst-core ------------> arkst-engine
+arkst-core ------------> arkst-ir
+arkst-markdown --------> arkst-diagnostics
+arkst-engine ----------> arkst-diagnostics
+arkst-core ------------> arkst-compat
+arkst-core ------------> arkst-diagnostics
+arkst-typst -----------> arkst-ir
+arkst-typst -----------> arkst-source
+arkst-typst -----------> arkst-diagnostics
+arkst-typst-subprocess -> arkst-typst
+arkst-typst-subprocess -> arkst-diagnostics
+arkst-html ------------> arkst-source
+arkst-html ------------> arkst-ir
+arkst-html ------------> arkst-diagnostics
+arkst-cli -------------> arkst-project
+arkst-cli -------------> arkst-core
+arkst-cli -------------> arkst-typst
+arkst-cli -------------> arkst-typst-subprocess
 ```
 
-`scribium-compat` may depend directly on `scribium-source` only if its
+`arkst-compat` may depend directly on `arkst-source` only if its
 compatibility APIs require source-location primitives directly. Otherwise it
-uses its dependency on `scribium-diagnostics`.
+uses its dependency on `arkst-diagnostics`.
 
-The frontend dependency rules are mandatory: `scribium-markdown` and
-`scribium-quarkdown` do not depend on `scribium-project`, and neither frontend
-depends on `scribium-core`. `scribium-quarkdown` does not depend on
-`scribium-markdown`.
+The frontend dependency rules are mandatory: `arkst-markdown` and
+`arkst-quarkdown` do not depend on `arkst-project`, and neither frontend
+depends on `arkst-core`. `arkst-quarkdown` does not depend on
+`arkst-markdown`.
 
 The following directions are forbidden:
 
 ```text
-scribium-source  -X-> scribium-project
-scribium-source  -X-> scribium-core
-scribium-project -X-> scribium-markdown
-scribium-project -X-> scribium-core
-scribium-markdown -X-> scribium-project
-scribium-markdown -X-> scribium-core
-scribium-quarkdown -X-> scribium-markdown
-scribium-quarkdown -X-> scribium-project
-scribium-quarkdown -X-> scribium-core
-scribium-quarkdown -X-> scribium-compat
-scribium-engine -X-> scribium-project
-scribium-engine -X-> scribium-core
-scribium-markdown -X-> html-to-markdown-rs
-scribium-typst -X-> html-to-markdown-rs
-scribium-html -X-> scribium-engine
-scribium-html -X-> scribium-markdown
-scribium-html -X-> scribium-core
-scribium-html -X-> scribium-project
-scribium-html -X-> scribium-typst
-scribium-html -X-> scribium-typst-subprocess
-scribium-compat -X-> scribium-markdown
-scribium-compat -X-> scribium-quarkdown
-scribium-compat -X-> scribium-engine
-scribium-compat -X-> scribium-project
-scribium-compat -X-> scribium-core
-scribium-compat -X-> rendering backend
-scribium-typst -X-> scribium-core
-scribium-typst -X-> scribium-project
-scribium-typst -X-> scribium-engine
-scribium-ir -X-> scribium-typst
-scribium-source -X-> scribium-typst
-scribium-source -X-> scribium-typst-subprocess
+arkst-source  -X-> arkst-project
+arkst-source  -X-> arkst-core
+arkst-project -X-> arkst-markdown
+arkst-project -X-> arkst-core
+arkst-markdown -X-> arkst-project
+arkst-markdown -X-> arkst-core
+arkst-quarkdown -X-> arkst-markdown
+arkst-quarkdown -X-> arkst-project
+arkst-quarkdown -X-> arkst-core
+arkst-quarkdown -X-> arkst-compat
+arkst-engine -X-> arkst-project
+arkst-engine -X-> arkst-core
+arkst-markdown -X-> html-to-markdown-rs
+arkst-typst -X-> html-to-markdown-rs
+arkst-html -X-> arkst-engine
+arkst-html -X-> arkst-markdown
+arkst-html -X-> arkst-core
+arkst-html -X-> arkst-project
+arkst-html -X-> arkst-typst
+arkst-html -X-> arkst-typst-subprocess
+arkst-compat -X-> arkst-markdown
+arkst-compat -X-> arkst-quarkdown
+arkst-compat -X-> arkst-engine
+arkst-compat -X-> arkst-project
+arkst-compat -X-> arkst-core
+arkst-compat -X-> rendering backend
+arkst-typst -X-> arkst-core
+arkst-typst -X-> arkst-project
+arkst-typst -X-> arkst-engine
+arkst-ir -X-> arkst-typst
+arkst-source -X-> arkst-typst
+arkst-source -X-> arkst-typst-subprocess
 ```
 
 The external implementation dependency is isolated inside the adapter:
 
 ```text
-scribium-html ------------> html-to-markdown-rs
+arkst-html ------------> html-to-markdown-rs
 ```
 
-`scribium-markdown` must not depend on the xberg library, and neither
-`scribium-typst` nor any other compiler crate may depend on it. `scribium-html`
-must not depend on `scribium-engine`, `scribium-markdown`, `scribium-core`,
-`scribium-project`, `scribium-typst`, or `scribium-typst-subprocess`.
-Only `scribium-html` may depend on the `html-to-markdown-rs` Cargo package.
+`arkst-markdown` must not depend on the xberg library, and neither
+`arkst-typst` nor any other compiler crate may depend on it. `arkst-html`
+must not depend on `arkst-engine`, `arkst-markdown`, `arkst-core`,
+`arkst-project`, `arkst-typst`, or `arkst-typst-subprocess`.
+Only `arkst-html` may depend on the `html-to-markdown-rs` Cargo package.
 
 This keeps the frontends usable without constructing an entire compilation
 project, keeps Quarkdown grammar independent from compatibility policy, and
 prevents cyclic compiler dependencies.
 
-## Decision 10: `scribium-typst` owns pure Typst lowering
+## Decision 10: `arkst-typst` owns pure Typst lowering
 
-The target `scribium-typst` crate is the pure, platform-independent Typst
+The target `arkst-typst` crate is the pure, platform-independent Typst
 lowering crate. It owns:
 
-- `scribium-ir` to Typst source lowering;
+- `arkst-ir` to Typst source lowering;
 - Typst escaping and code-generation rules;
 - generation of source-map entries while emitting Typst source;
 - Typst-specific lowering diagnostics; and
@@ -525,25 +525,25 @@ lowering crate. It owns:
 
 It depends on:
 
-- `scribium-ir`;
-- `scribium-source`; and
-- `scribium-diagnostics`.
+- `arkst-ir`;
+- `arkst-source`; and
+- `arkst-diagnostics`.
 
 It must not depend on:
 
-- `scribium-core`;
-- `scribium-project`;
-- `scribium-engine`;
+- `arkst-core`;
+- `arkst-project`;
+- `arkst-engine`;
 - Markdown or Quarkdown frontend crates;
 - filesystem, subprocess, network, or temporary-file APIs.
 
-`scribium-typst` must compile for `wasm32-unknown-unknown`. The current
-dependency from `scribium-typst` to monolithic `scribium-core` is a migration
+`arkst-typst` must compile for `wasm32-unknown-unknown`. The current
+dependency from `arkst-typst` to monolithic `arkst-core` is a migration
 artifact, not the target architecture.
 
-## Decision 11: `scribium-typst-subprocess` owns native Typst execution
+## Decision 11: `arkst-typst-subprocess` owns native Typst execution
 
-The target `scribium-typst-subprocess` crate is a native-only adapter. It owns
+The target `arkst-typst-subprocess` crate is a native-only adapter. It owns
 only the adapter that invokes an installed Typst executable, including the
 architectural equivalents of:
 
@@ -555,63 +555,63 @@ architectural equivalents of:
 
 It may depend on:
 
-- `scribium-typst`; and
-- `scribium-diagnostics`.
+- `arkst-typst`; and
+- `arkst-diagnostics`.
 
 It is not required to compile for WASM. It must not own IR, Typst lowering
 rules, source-map representation, Markdown or Quarkdown parsing, semantic
 evaluation, project loading, or CLI argument/configuration parsing. The CLI
-may depend on `scribium-typst-subprocess` when the subprocess backend is
+may depend on `arkst-typst-subprocess` when the subprocess backend is
 selected. Future in-process Typst integration is outside this crate and is
 not designed by this ADR.
 
 ## Decision 12: lowering and compiler-backend interfaces remain separate
 
-The platform-neutral Typst backend contract belongs to `scribium-typst`, but it
+The platform-neutral Typst backend contract belongs to `arkst-typst`, but it
 must not require filesystem or process types. Lowering must be usable without
 constructing or selecting a compiler backend. Conceptually:
 
-The platform-neutral compiler-backend contract belongs to `scribium-typst`, but
+The platform-neutral compiler-backend contract belongs to `arkst-typst`, but
 concrete Typst compiler execution implementations do not belong to the pure
-lowering implementation. `scribium-typst-subprocess` is the currently decided
+lowering implementation. `arkst-typst-subprocess` is the currently decided
 concrete adapter. Ownership and the name of a future in-process implementation
 are intentionally deferred to the ADR-0011 re-evaluation.
 
 ```text
-scribium-cli
+arkst-cli
     |
-    +----> scribium-project
+    +----> arkst-project
     |          |
     |          +---- constructs VirtualProject
     |
-    +----> scribium-core
+    +----> arkst-core
     |          |
     |          +---- compiles VirtualProject
     |                     |
     |                     +---- returns normalized IrDocument + diagnostics
     |
-    +----> scribium-typst
+    +----> arkst-typst
     |          |
     |          +---- lowers normalized IrDocument
     |
-    +----> scribium-typst-subprocess (optional native execution)
+    +----> arkst-typst-subprocess (optional native execution)
 ```
 
-The CLI uses `scribium-project` to construct the `VirtualProject`, passes that
-project and `CompileOptions` to `scribium-core`, and receives normalized IR and
-diagnostics. It then composes `scribium-typst` lowering and, when selected,
-native execution through `scribium-typst-subprocess`. This is a host-level
-composition flow, not a dependency from `scribium-core` to `scribium-typst`;
+The CLI uses `arkst-project` to construct the `VirtualProject`, passes that
+project and `CompileOptions` to `arkst-core`, and receives normalized IR and
+diagnostics. It then composes `arkst-typst` lowering and, when selected,
+native execution through `arkst-typst-subprocess`. This is a host-level
+composition flow, not a dependency from `arkst-core` to `arkst-typst`;
 the core facade stops at the normalized IR and shared diagnostics.
 
 Exact Rust structs and trait signatures are not defined in this ADR.
 
-## Decision 13: `scribium-html` owns HTML interoperability; Pandoc is a repository oracle
+## Decision 13: `arkst-html` owns HTML interoperability; Pandoc is a repository oracle
 
-The target architecture contains a dedicated `scribium-html` crate. It is the
+The target architecture contains a dedicated `arkst-html` crate. It is the
 HTML interoperability boundary, not a renderer and not a Typst-specific crate.
 It owns the platform-independent conversion of raw HTML fragments into
-backend-neutral Scribium semantic/IR content. Its target responsibilities are:
+backend-neutral Arkst semantic/IR content. Its target responsibilities are:
 
 - consume raw HTML fragments recognized by the Markdown frontend;
 - parse and normalize HTML through the selected external HTML conversion
@@ -619,10 +619,10 @@ backend-neutral Scribium semantic/IR content. Its target responsibilities are:
 - translate supported HTML semantics into backend-neutral IR nodes;
 - preserve unsupported foreign HTML when necessary;
 - produce HTML-conversion diagnostics; and
-- isolate the third-party HTML library API from the rest of Scribium.
+- isolate the third-party HTML library API from the rest of Arkst.
 
 The Pandoc oracle policy is a repository development and compatibility
-verification policy, not a `scribium-html` responsibility. No production crate
+verification policy, not a `arkst-html` responsibility. No production crate
 owns Pandoc.
 
 The target flow is:
@@ -631,34 +631,34 @@ The target flow is:
 Markdown / Quarkdown source
         |
         v
-scribium-markdown
+arkst-markdown
         |
         | raw HTML syntax, context, and original SourceSpan
         v
 frontend AST
         |
         v
-scribium-engine
+arkst-engine
         |
         | delegates HTML normalization
         v
-scribium-html
+arkst-html
         |
         v
-backend-neutral Scribium IR
+backend-neutral Arkst IR
         |
         v
-scribium-typst
+arkst-typst
 ```
 
 HTML conversion therefore occurs before rendering or backend code generation.
-`scribium-engine` owns language evaluation and normalization and invokes
-`scribium-html` when the frontend AST contains raw HTML requiring semantic
-normalization. `scribium-html` must not depend on `scribium-engine`.
+`arkst-engine` owns language evaluation and normalization and invokes
+`arkst-html` when the frontend AST contains raw HTML requiring semantic
+normalization. `arkst-html` must not depend on `arkst-engine`.
 
 ### Markdown recognition stops at syntax-level preservation
 
-`scribium-markdown` remains responsible for CommonMark/Markdown syntax
+`arkst-markdown` remains responsible for CommonMark/Markdown syntax
 recognition. When raw inline or block HTML is encountered, it preserves the
 original HTML source content required for conversion, whether it occurred in
 block or inline context, and its original `SourceSpan`. The frontend does not
@@ -685,7 +685,7 @@ Cargo package:   html-to-markdown-rs
 
 The package's structured conversion result, including its semantic document
 structure and visitor/customization facilities, is adapted directly by
-`scribium-html` into Scribium semantics. The exact package API calls are an
+`arkst-html` into Arkst semantics. The exact package API calls are an
 implementation detail and are not frozen by PR #46.
 
 The forbidden architecture is:
@@ -695,12 +695,12 @@ HTML
    ↓
 xberg Markdown string
    ↓
-scribium-markdown parser
+arkst-markdown parser
    ↓
 AST
 ```
 
-There must be no HTML → Markdown string → Scribium parser round-trip. The
+There must be no HTML → Markdown string → Arkst parser round-trip. The
 intended architecture is:
 
 ```text
@@ -708,19 +708,19 @@ HTML
    ↓
 xberg structured document representation
    ↓
-scribium-html adapter
+arkst-html adapter
    ↓
-Scribium IR
+Arkst IR
 ```
 
-The adapter produces Scribium semantics, not Typst. Supported constructs are
+The adapter produces Arkst semantics, not Typst. Supported constructs are
 normalized into existing backend-neutral concepts where there is a faithful
 mapping, such as paragraphs, headings, strong/emphasis, code, links, lists,
 tables, and line breaks. The final supported-tag matrix is not defined by this
 ADR, and xberg's exposed HTML/CSS concepts do not become IR concepts merely
 because the library exposes them.
 
-When HTML cannot be faithfully expressed as normal Scribium semantics, the
+When HTML cannot be faithfully expressed as normal Arkst semantics, the
 backend-neutral IR may contain an explicit foreign-content representation. Its
 concept is deliberately illustrative rather than a frozen Rust API:
 
@@ -736,19 +736,19 @@ This is permitted for HTML input/content. It is fundamentally different from
 remain forbidden in backend-neutral IR. The exact foreign-content enum or
 struct is not defined by PR #46.
 
-`scribium-typst` consumes backend-neutral IR and must never paste raw HTML into
+`arkst-typst` consumes backend-neutral IR and must never paste raw HTML into
 generated Typst source, interpret an HTML string as Typst syntax, or silently
 discard unsupported `ForeignContent(Html)`. If such content reaches the
 backend, it must be handled explicitly under the eventual compatibility and
-lowering policy. This ADR does not define the diagnostic code. `scribium-typst`
+lowering policy. This ADR does not define the diagnostic code. `arkst-typst`
 does not depend on xberg.
 
 ### Original-source provenance remains authoritative
 
-The original HTML fragment's Scribium `SourceSpan` remains authoritative
+The original HTML fragment's Arkst `SourceSpan` remains authoritative
 provenance. Exact source spans must not be fabricated for nodes produced by
 third-party normalization. If xberg does not provide exact offsets that
-correspond to the original Scribium source, generated child nodes must not
+correspond to the original Arkst source, generated child nodes must not
 claim fake byte-precise original spans. Fragment-level provenance may be used
 initially, and a later source-mapping enhancement may improve child mapping.
 Converted or synthetic offsets must never escape as though they were offsets in
@@ -761,15 +761,15 @@ oracle. It may be used for differential testing of representative HTML
 semantics, comparison with Pandoc's HTML reader and native AST/JSON, expected
 HTML → Typst conversion investigation, ambiguous interoperability cases, and
 compatibility fixtures or expected-output evidence. Pandoc results are
-reference evidence, not automatically the Scribium specification: CommonMark,
-Quarkdown compatibility policy, and accepted Scribium ADRs take precedence
+reference evidence, not automatically the Arkst specification: CommonMark,
+Quarkdown compatibility policy, and accepted Arkst ADRs take precedence
 when behavior conflicts.
 
-Pandoc is not a Scribium runtime, build, or production dependency. Scribium
+Pandoc is not a Arkst runtime, build, or production dependency. Arkst
 does not link or vendor Pandoc, require it to build, require it for normal unit
 tests, require it at runtime, or route production compilation through a Pandoc
-subprocess. The production path is Scribium → `html-to-markdown-rs`-backed
-`scribium-html`;
+subprocess. The production path is Arkst → `html-to-markdown-rs`-backed
+`arkst-html`;
 the development oracle path is tooling or isolated tests → an externally
 installed Pandoc executable. If automated oracle tests are added later, they
 must be isolated from the normal deterministic test suite and use an
@@ -778,14 +778,14 @@ WASM path.
 
 ### Adapter independence and WASM
 
-`scribium-html` depends on `scribium-source`, `scribium-ir`, and
-`scribium-diagnostics`, and on no parser, engine, project, or backend crate.
+`arkst-html` depends on `arkst-source`, `arkst-ir`, and
+`arkst-diagnostics`, and on no parser, engine, project, or backend crate.
 Its public boundary must not expose xberg types. Replacing xberg must not
-require changes to the `scribium-markdown` public AST contract beyond the raw
-HTML fragment boundary, `scribium-engine` semantic responsibilities,
-`scribium-ir`, or `scribium-typst`.
+require changes to the `arkst-markdown` public AST contract beyond the raw
+HTML fragment boundary, `arkst-engine` semantic responsibilities,
+`arkst-ir`, or `arkst-typst`.
 
-`scribium-html` is part of the platform-independent compiler path and must be
+`arkst-html` is part of the platform-independent compiler path and must be
 capable of compiling for `wasm32-unknown-unknown`. It must not add native
 filesystem, process, or network requirements. If a selected xberg feature set
 prevents the required WASM build, that is an implementation blocker to report
@@ -795,13 +795,13 @@ during physical migration; this ADR does not redesign the boundary around it.
 
 ADR-0015 has no remaining crate-ownership questions:
 
-- `scribium-source` owns backend-neutral source-map representation;
+- `arkst-source` owns backend-neutral source-map representation;
 - the lowering backend owns source-map entry generation;
-- `scribium-html` owns HTML interoperability and third-party HTML-library
+- `arkst-html` owns HTML interoperability and third-party HTML-library
   isolation;
-- `scribium-typst` owns pure IR-to-Typst lowering and Typst lowering
+- `arkst-typst` owns pure IR-to-Typst lowering and Typst lowering
   diagnostics; and
-- `scribium-typst-subprocess` owns only native Typst subprocess execution.
+- `arkst-typst-subprocess` owns only native Typst subprocess execution.
 
 ADR-0015 is Accepted and supersedes ADR-0002's workspace/crate-boundary
 decision. It refines the physical ownership surrounding ADR-0005 and ADR-0006
@@ -816,7 +816,7 @@ Physical migration can proceed through bounded, reviewable steps:
 2. migrate source, project, diagnostic, compatibility, and IR ownership
    without behavior changes;
 3. establish the frontend, engine, and backend boundaries;
-4. add `scribium-html` and isolate `html-to-markdown-rs` when HTML
+4. add `arkst-html` and isolate `html-to-markdown-rs` when HTML
    interoperability is implemented;
 5. implement the authoritative Markdown `BlockParser` foundation;
 6. preserve the existing regression baseline throughout; and

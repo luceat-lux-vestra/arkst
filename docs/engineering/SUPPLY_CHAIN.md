@@ -1,6 +1,6 @@
 # Supply-chain check authority
 
-Scribium uses three complementary dependency and supply-chain checks. They are intentionally not interchangeable.
+Arkst uses three complementary dependency and supply-chain checks. They are intentionally not interchangeable.
 
 ## PR-time blocking authority
 

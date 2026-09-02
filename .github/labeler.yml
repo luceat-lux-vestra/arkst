@@ -1,4 +1,4 @@
-# Scribium automatic PR area classification.
+# Arkst automatic PR area classification.
 # Area labels are derived only from changed paths and synchronized on each PR update.
 
 changed-files-labels-limit: 30
@@ -16,52 +16,52 @@ area:ci:
 area:core:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-core/**"
+          - "crates/arkst-core/**"
 
 area:engine:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-engine/**"
+          - "crates/arkst-engine/**"
 
 area:parser:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-markdown/**"
-          - "crates/scribium-quarkdown/**"
+          - "crates/arkst-markdown/**"
+          - "crates/arkst-quarkdown/**"
 
 area:ir:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-ir/**"
+          - "crates/arkst-ir/**"
 
 area:diagnostics:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-diagnostics/**"
+          - "crates/arkst-diagnostics/**"
 
 area:typst:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-typst/**"
-          - "crates/scribium-typst-inprocess/**"
-          - "crates/scribium-typst-subprocess/**"
+          - "crates/arkst-typst/**"
+          - "crates/arkst-typst-inprocess/**"
+          - "crates/arkst-typst-subprocess/**"
 
 area:cli:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-cli/**"
+          - "crates/arkst-cli/**"
 
 area:project:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-project/**"
-          - "crates/scribium-source/**"
+          - "crates/arkst-project/**"
+          - "crates/arkst-source/**"
 
 area:compatibility:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-compat/**"
-          - "crates/scribium-quarkdown/**"
+          - "crates/arkst-compat/**"
+          - "crates/arkst-quarkdown/**"
           - "fixtures/quarkdown-conformance/**"
           - "docs/compatibility/**"
 
@@ -70,7 +70,7 @@ area:compatibility:
 area:test:
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/scribium-test-support/**"
+          - "crates/arkst-test-support/**"
           - "fixtures/**"
 
 area:legal:

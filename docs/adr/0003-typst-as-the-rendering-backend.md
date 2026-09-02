@@ -2,12 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1
 
 ## Context
 
-Scribium must render documents to PDF, HTML, SVG, and PNG. The choice is
+Arkst must render documents to PDF, HTML, SVG, and PNG. The choice is
 between building custom renderers or delegating to an existing compiler.
 
 ## Decision Drivers
@@ -26,18 +26,18 @@ and HTML generation from scratch. Years of work for quality parity.
 
 ### Option 2: Pandoc pipeline (rejected)
 
-Pandoc converts Markdown to many formats but cannot express Scribium's
+Pandoc converts Markdown to many formats but cannot express Arkst's
 programmable document features. Lossy round-trip, no source maps.
 
 ### Option 3: Typst compiler (chosen)
 
 Typst provides professional-quality PDF, HTML, SVG, and PNG output.
-It has a mature compiler with its own programming model. Scribium translates
+It has a mature compiler with its own programming model. Arkst translates
 its semantic model into Typst input.
 
 ## Decision
 
-Typst is the exclusive rendering backend. Scribium never implements its own
+Typst is the exclusive rendering backend. Arkst never implements its own
 PDF or HTML renderer. The interface is abstracted via the `TypstBackend` trait.
 
 ## Consequences
@@ -50,7 +50,7 @@ PDF or HTML renderer. The interface is abstracted via the `TypstBackend` trait.
 
 ### Negative
 
-- Scribium output quality depends on Typst compiler version
+- Arkst output quality depends on Typst compiler version
 - Typst compilation errors must be mapped back to original source
 - In-process embedding vs subprocess tradeoff (see ADR-0005)
 
@@ -61,5 +61,5 @@ PDF or HTML renderer. The interface is abstracted via the `TypstBackend` trait.
 
 ## References
 
-- `crates/scribium-typst/src/backend.rs`
+- `crates/arkst-typst/src/backend.rs`
 - ADR-0005 (backend strategy: subprocess vs in-process)

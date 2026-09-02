@@ -215,7 +215,7 @@ fn alternative_markdown_it() {
 
     // Code spans, indented code, and fenced code are owned by their standard
     // rules and never invoke the custom recognizers. Link and image labels do
-    // retain custom inline children, so Scribium can apply an explicit policy.
+    // retain custom inline children, so Arkst can apply an explicit policy.
     assert_eq!(
         count_markdown_it_in::<QuarkdownInline, cmark::inline::link::Link>(&lf),
         1

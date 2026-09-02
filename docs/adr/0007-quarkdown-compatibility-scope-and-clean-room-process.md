@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-02
-- **Owners:** Scribium maintainers
+- **Owners:** Arkst maintainers
 - **Related issues:** #1, #4
 - **Superseded by:** ADR-0016 for the compatibility-target scope only
 
@@ -14,7 +14,7 @@ evidence requirements remain accepted.
 
 ## Context
 
-Scribium implements Quarkdown-compatible syntax without using Quarkdown source
+Arkst implements Quarkdown-compatible syntax without using Quarkdown source
 code. The scope and process for this clean-room implementation must be defined.
 
 ## Decision Drivers
@@ -38,7 +38,7 @@ explicit diagnostics.
 
 ### Option 3: No Quarkdown compatibility (rejected by product definition)
 
-Scribium identity IS Quarkdown compatibility. Not optional.
+Arkst identity IS Quarkdown compatibility. Not optional.
 
 ## Decision
 

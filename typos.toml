@@ -3,7 +3,7 @@ extend-exclude = [
     "*.lock",
     "target/*",
     "tests/compat/corpus/*",
-    "crates/scribium-engine/src/locale_data.rs",
+    "crates/arkst-engine/src/locale_data.rs",
 ]
 
 [default]
@@ -13,7 +13,7 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
-Scribium = "Scribium"
+Arkst = "Arkst"
 Quarkdown = "Quarkdown"
 Typst = "Typst"
 Markdown = "Markdown"

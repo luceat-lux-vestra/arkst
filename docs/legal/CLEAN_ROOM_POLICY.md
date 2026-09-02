@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Scribium targets complete compatibility with the publicly documented Quarkdown
+Arkst targets complete compatibility with the publicly documented Quarkdown
 document language and document-observable semantics of the tracked stable
 release. This policy governs how that target is achieved without using or
 referencing the original Quarkdown implementation code. Clean-room
@@ -30,7 +30,7 @@ Implementation may derive requirements only from:
    - Independently authored training materials
 
 4. **Independently authored specifications**
-   - Compatibility specifications written by Scribium contributors
+   - Compatibility specifications written by Arkst contributors
    - Conformance test inputs authored independently
    - Semantic analysis based on observed behavior
 
@@ -60,11 +60,11 @@ Each compatibility feature must record:
 | Field               | Description                                                  |
 |---------------------|--------------------------------------------------------------|
 | Specification source| URL or citation of the public source                         |
-| Independently       | Test input authored by Scribium contributors                 |
+| Independently       | Test input authored by Arkst contributors                 |
 | authored input      |                                                              |
 | Observed reference  | Output from the official Quarkdown implementation            |
 | behavior            |                                                              |
-| Scribium behavior   | Scribium's output for the same input                         |
+| Arkst behavior   | Arkst's output for the same input                         |
 | Compatibility level | Parsed / Semantically supported / Output-equivalent /        |
 |                     | Known divergence / Unsupported                               |
 | Known divergence    | Documented behavioral differences and rationale              |
@@ -75,7 +75,7 @@ Each compatibility feature must record:
 |----------------------|----------------------------------------------------------|
 | Unsupported          | Not handled, produces explicit diagnostic                |
 | Parsed               | Accepted syntactically, behavior undefined or rejected    |
-| Semantically         | Scribium's semantics match specified behavior             |
+| Semantically         | Arkst's semantics match specified behavior             |
 | supported            |                                                          |
 | Output-equivalent    | Typst output matches reference output for tested cases    |
 | Known divergence     | Deliberate semantic difference with documented rationale  |

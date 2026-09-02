@@ -11,7 +11,7 @@
 This project uses **GitHub private vulnerability reporting**.
 
 Please report security vulnerabilities through the GitHub Security tab
-at `https://github.com/luceat-lux-vestra/scribium/security/advisories/new`.
+at `https://github.com/luceat-lux-vestra/arkst/security/advisories/new`.
 
 Do not report security vulnerabilities via public GitHub issues.
 
@@ -24,7 +24,7 @@ Do not report security vulnerabilities via public GitHub issues.
 
 ## Scope
 
-- The Scribium CLI and library code
+- The Arkst CLI and library code
 - Build and release pipeline
 - GitHub Actions workflows
 
@@ -36,9 +36,9 @@ Do not report security vulnerabilities via public GitHub issues.
 
 ## Unsafe Document Warning
 
-Scribium processes untrusted input documents. The parser and evaluator
+Arkst processes untrusted input documents. The parser and evaluator
 are designed with safety limits (recursion depth, expansion limits, etc.),
 but no guarantees are made about security boundary enforcement in pre-1.0 versions.
 
-Do not use Scribium to process untrusted documents in security-critical
+Do not use Arkst to process untrusted documents in security-critical
 contexts before v1.0.

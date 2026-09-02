@@ -1,22 +1,22 @@
 # Quarkdown v2.5.1 layout, pagination, style, and document-configuration audit
 
-Status: complete strict audit artifact for Issue [#153](https://github.com/luceat-lux-vestra/scribium/issues/153). This is evidence and backlog work only. It does not implement a layout/configuration surface or promote the verified compatibility baseline.
+Status: complete strict audit artifact for Issue [#153](https://github.com/luceat-lux-vestra/arkst/issues/153). This is evidence and backlog work only. It does not implement a layout/configuration surface or promote the verified compatibility baseline.
 
 ## 1. Audit identity and evidence policy
 
 | Item | Pinned value |
 |---|---|
 | Quarkdown target | v2.5.1 at [`107ec3a9482f10d6f90d7580f8409b46a719d18e`](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e) |
-| Scribium audit base | [`4a9112a9ee840374350dd9a90b65f58cce96eb08`](https://github.com/luceat-lux-vestra/scribium/tree/4a9112a9ee840374350dd9a90b65f58cce96eb08), the squash merge of reviewed PR #174 / completed Issue #152 |
-| Parent tracker | [#147](https://github.com/luceat-lux-vestra/scribium/issues/147) |
+| Arkst audit base | [`4a9112a9ee840374350dd9a90b65f58cce96eb08`](https://github.com/luceat-lux-vestra/arkst/tree/4a9112a9ee840374350dd9a90b65f58cce96eb08), the squash merge of reviewed PR #174 / completed Issue #152 |
+| Parent tracker | [#147](https://github.com/luceat-lux-vestra/arkst/issues/147) |
 | Canonical manifest | [`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv) |
-| Offline guard | [`layout_document_configuration_audit.rs`](../../../crates/scribium-core/tests/layout_document_configuration_audit.rs) |
+| Offline guard | [`layout_document_configuration_audit.rs`](../../../crates/arkst-core/tests/layout_document_configuration_audit.rs) |
 
 The audit uses the repository's clean-room policy: public upstream source
 declarations and models at the exact pinned commit, public documentation,
-public tests as behavioral evidence, independent Scribium tests/fixtures, and
-current Scribium source/tests. Upstream source, tests, and fixtures were not
-copied or translated into Scribium. The checked-out upstream tree was detached
+public tests as behavioral evidence, independent Arkst tests/fixtures, and
+current Arkst source/tests. Upstream source, tests, and fixtures were not
+copied or translated into Arkst. The checked-out upstream tree was detached
 at the full target SHA; tag or `main` links are not used as canonical
 provenance.
 
@@ -44,7 +44,7 @@ callables are exactly:
 
 No additional #153-owned public callable was found. The full signatures,
 source declaration names, aliases, annotations, exact source ranges, current
-Scribium evidence, status, gap, and follow-up are in the manifest. The most
+Arkst evidence, status, gap, and follow-up are in the manifest. The most
 important ownership decisions are:
 
 - `.pageformat` owns the genuinely document-scoped `columns` field. It is not
@@ -83,7 +83,7 @@ For the 20 #153-owned rows:
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
-`PARSED_ONLY` is used deliberately. Scribium's generic frontend/IR path
+`PARSED_ONLY` is used deliberately. Arkst's generic frontend/IR path
 recognizes and source-preservingly retains unresolved calls, but no semantic
 implementation exists for those 19 names. A preserved `IrNode::FunctionCall`
 or inline directive is not a successful setter, typed node, state mutation,
@@ -133,7 +133,7 @@ There is no getter and no document content output. The mutation is
 document-scoped and must be atomic: map conversion and all format parsing must
 finish before `DocumentInfo.numbering` is replaced. Heading, figure, table,
 math, code, footnote, and custom-numbered output consumers are separate
-renderer/AST boundaries. Scribium has no binder, typed numbering model in
+renderer/AST boundaries. Arkst has no binder, typed numbering model in
 `IrDocumentState`, or numbering-aware backend path; status is `PARSED_ONLY`.
 
 #### `.font`
@@ -153,7 +153,7 @@ resource/media boundary. There is no getter, no reset function, and no
 document content output. A later implementation must validate all family and
 size candidates before one state publication, preserve source-defined
 precedence, keep resource access in the host/project boundary, and avoid JVM or
-filesystem assumptions in WASM-capable core crates. Scribium currently has no
+filesystem assumptions in WASM-capable core crates. Arkst currently has no
 font state, font resource model, or backend lowering; status is `PARSED_ONLY`.
 
 #### `.paragraphstyle`
@@ -168,7 +168,7 @@ alter renderer defaults (for example, Chinese paragraph indentation).
 
 The setter returns no output and has no getter. All four numeric conversions
 must complete before the merged state is published. This is distinct from
-inline `.text` styling and from component-local spacing. Scribium has no
+inline `.text` styling and from component-local spacing. Arkst has no
 paragraph document state, locale-aware paragraph renderer, or IR/backend
 consumer; status is `PARSED_ONLY`.
 
@@ -216,7 +216,7 @@ page-format data is not itself a getter or output node.
 
 The state is genuinely document-scoped and would require backend-neutral
 `PageFormatInfo`, selector, size, color, closed enum, and merge representation;
-it must not contain Typst page objects. Scribium only has the existing
+it must not contain Typst page objects. Arkst only has the existing
 component-oriented `IrSize` conversion and no page-format state, layer merge,
 or page backend; status is `PARSED_ONLY`.
 
@@ -238,7 +238,7 @@ overrides; a supplied default updates only the default, and supplied
 figure/table/code values update only their own override. Each call constructs
 a partial state, merges it with the current state, returns `VoidValue`, and
 emits no document content. Binding is checked before candidate evaluation.
-Scribium evaluates all candidates, converts through the existing closed-enum
+Arkst evaluates all candidates, converts through the existing closed-enum
 conversion, uses the post-nested-evaluation state as the successful merge
 base, and restores the whole pre-call state if a later conversion or nested
 evaluation fails. Callable scopes share the state. Source-defined
@@ -271,7 +271,7 @@ Canonical status: `PARTIAL`.
 body-compatible raw TeX string. The initial macro map is empty. Each success
 adds/replaces the map entry by name, returns no output, and is later consumed
 by math typesetting. The body is not a Markdown body and nested-call execution
-must not be substituted for the upstream raw-body conversion. Scribium has no
+must not be substituted for the upstream raw-body conversion. Arkst has no
 raw body binding, TeX state, math consumer, or renderer-neutral macro model;
 status is `PARSED_ONLY`. Its distinct raw-string/document-map/math-renderer
 boundary is assigned to #180, with shared binding/conversion prerequisites
@@ -289,7 +289,7 @@ plain/paged/slides behavior. `footer(content)` is exact sugar for
 
 These are AST/output primitives, not `DocumentInfo` fields. They require typed
 body/content retention, closed position conversion, repeated-page semantics,
-and renderer support. Scribium currently preserves unresolved calls only;
+and renderer support. Arkst currently preserves unresolved calls only;
 status for both is `PARSED_ONLY` and the grouped pagination follow-up is #176.
 
 #### `.currentpage`, `.totalpages`, `.formatpagenumber`, and `.resetpagenumber`
@@ -320,7 +320,7 @@ observable HTML numbering rather than an intra-page source-position split.
 All four return nodes/no direct output at evaluation time. They need
 backend-neutral typed nodes or an equivalent event representation plus
 backend-specific conformance that preserves these page-level precedence and
-renderer rules. Scribium has no such representation or lowering; all four are
+renderer rules. Arkst has no such representation or lowering; all four are
 `PARSED_ONLY` under #176.
 
 #### `.lastheading`
@@ -335,7 +335,7 @@ heading history with `depth - 1` and falls back to empty content when no entry
 exists, including out-of-range or non-positive depths. Therefore 1–6 is a
 documented/intended heading range, not an upstream call-time validation rule
 to reproduce. This behavior is derived from page/heading traversal rather than
-a generic mutable document field. Scribium has no page-aware heading history
+a generic mutable document field. Arkst has no page-aware heading history
 or node; status is `PARSED_ONLY` under #176.
 
 #### `.autopagebreak` and `.noautopagebreak`
@@ -345,7 +345,7 @@ option field starts at `1`; effective behavior is document-type/renderer
 dependent. A heading at depth less than or equal to the threshold can force a
 break. Negative values fail before mutation, while zero disables automatic
 breaks. `noautopagebreak()` is the zero-threshold shorthand. These are
-document/pipeline configuration, not component-local layout. Scribium has no
+document/pipeline configuration, not component-local layout. Arkst has no
 option mutation, heading interaction, or renderer page-break consumption;
 status is `PARSED_ONLY` under #175.
 
@@ -356,7 +356,7 @@ status is `PARSED_ONLY` under #175.
 `marker(name: InlineMarkdownContent)` creates an invisible marker heading
 that participates in location/reference and TOC behavior. It has no global
 configuration state, but its semantic effect depends on heading traversal and
-outline generation. Scribium has no marker node or location hook; status is
+outline generation. Arkst has no marker node or location hook; status is
 `PARSED_ONLY` under #177.
 
 #### `.navigation`
@@ -365,7 +365,7 @@ outline generation. Scribium has no marker node or location hook; status is
 content: MarkdownContent)` creates a navigable content container. The closed
 role domain is `TABLE_OF_CONTENTS` or `PAGE_LIST`; null leaves the role
 unspecified. It does not change layout by itself, but themes/renderers may use
-it for navigation, styling, behavior, and accessibility. Scribium has no
+it for navigation, styling, behavior, and accessibility. Arkst has no
 typed node or output path; status is `PARSED_ONLY` under #177.
 
 #### `.tableofcontents`
@@ -382,7 +382,7 @@ tracking. `focus` identifies one item by plain text and visually de-emphasizes
 the others when a match exists.
 
 This is derived AST/outline state, not a field to add to `DocumentState`.
-Scribium has no title/focus/depth binding, TOC node, heading-location hook, or
+Arkst has no title/focus/depth binding, TOC node, heading-location hook, or
 renderer output. Status is `PARSED_ONLY` under #177.
 
 ### Slides document configuration
@@ -399,12 +399,12 @@ is a closed `NONE`/`FADE`/`SLIDE`/`ZOOM` domain; speed is closed
 specified, because the upstream node constructs a transition only then.
 
 The configuration is document-wide presentation state, but upstream carries it
-as an ordered AST initializer rather than `DocumentInfo` metadata. Scribium
+as an ordered AST initializer rather than `DocumentInfo` metadata. Arkst
 has no document-type gate, typed transition domains, initializer IR, or slide
 backend. `.fragment` and `.speakernote` remain separate #154 content rows.
 Status is `PARSED_ONLY` under #178.
 
-## 5. Scribium pipeline and architecture boundary
+## 5. Arkst pipeline and architecture boundary
 
 The current path for the 19 unresolved rows is:
 
@@ -526,11 +526,11 @@ New cohesive implementation follow-ups were created, but none was started:
 
 | Issue | Exact scope | Owner/layer | Prerequisites and order |
 |---|---|---|---|
-| [#175](https://github.com/luceat-lux-vestra/scribium/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage plus border-side zeroing and color-only width inheritance | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
-| [#176](https://github.com/luceat-lux-vestra/scribium/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
-| [#177](https://github.com/luceat-lux-vestra/scribium/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
-| [#178](https://github.com/luceat-lux-vestra/scribium/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
-| [#180](https://github.com/luceat-lux-vestra/scribium/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
+| [#175](https://github.com/luceat-lux-vestra/arkst/issues/175) | `.numbering`, `.nonumbering`, `.font`, `.paragraphstyle`, `.pageformat`, `.autopagebreak`, `.noautopagebreak`; exact all-input-key `numbering.extra` storage plus border-side zeroing and color-only width inheritance | Engine + IR state; later Typst/output | #149/#165–#167; representation and renderer review; after #156 |
+| [#176](https://github.com/luceat-lux-vestra/arkst/issues/176) | `.pagemargin`, `.footer`, `.currentpage`, `.totalpages`, `.formatpagenumber`, `.resetpagenumber`, `.lastheading`; page-level formatter/reset precedence, renderer-time reset filtering, and documented-vs-runtime heading depth | Engine/IR nodes + Typst/output | #149; raw/content boundary; after #156 |
+| [#177](https://github.com/luceat-lux-vestra/arkst/issues/177) | `.marker`, `.navigation`, `.tableofcontents` | Engine/IR outline nodes + Typst/HTML output | heading/location/content evidence; #154 coordination; after #156 |
+| [#178](https://github.com/luceat-lux-vestra/arkst/issues/178) | `.slides` global configuration and closed transition domains | Engine/IR only if needed + slide backend | `doctype`/#152 interaction and #154 slide content; after #156 |
+| [#180](https://github.com/luceat-lux-vestra/arkst/issues/180) | `.texmacro` raw TeX body, document macro map, source-order replacement, and math-output consumption | Engine/IR only as backend-neutral state + math backend | #149/#166–#167; #154 math/content coordination; after #156 |
 
 The `.captionposition` raw-body work is implemented in the bounded slice by
 #166, while caption output remains separate. No issue is one-function-per-row

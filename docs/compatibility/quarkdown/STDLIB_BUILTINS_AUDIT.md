@@ -2,17 +2,17 @@
 
 ## Audit identity
 
-- Issue: [#151](https://github.com/luceat-lux-vestra/scribium/issues/151)
-- Parent: [#147](https://github.com/luceat-lux-vestra/scribium/issues/147)
+- Issue: [#151](https://github.com/luceat-lux-vestra/arkst/issues/151)
+- Parent: [#147](https://github.com/luceat-lux-vestra/arkst/issues/147)
 - Target: Quarkdown v2.5.1
 - Pinned upstream commit:
   [107ec3a9482f10d6f90d7580f8409b46a719d18e](https://github.com/iamgio/quarkdown/tree/107ec3a9482f10d6f90d7580f8409b46a719d18e)
-- Scribium audit base: d049c64934bc42b81bd859d0c70667681718afa2
+- Arkst audit base: d049c64934bc42b81bd859d0c70667681718afa2
 - Review date: 2026-08-25
 - Clean-room policy: public documentation, public API/source declarations,
   release metadata, and independently authored probes/fixtures are allowed.
   Upstream implementation code, tests, and fixtures were not copied,
-  translated, or used as Scribium implementation.
+  translated, or used as Arkst implementation.
 
 This is the canonical #151 inventory. The exact public inventory and source
 locations are in
@@ -52,7 +52,7 @@ compatibility status is introduced.
 ## How the pinned surface was constructed
 
 The sweep started with the upstream registration mechanism, not with the
-existing Scribium gap list:
+existing Arkst gap list:
 
 1. [Stdlib.kt](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/quarkdown-stdlib/src/main/kotlin/com/quarkdown/stdlib/Stdlib.kt#L19-L58)
    registers 27 stdlib modules through MultiFunctionLibraryLoader and loads
@@ -92,7 +92,7 @@ evidence.
 - Total unique public QFunction names discovered: 162
 - #151 general inventory: 60
 - Cross-owned/excluded from #151 canonical semantics: 102
-- Standalone upstream map/filter declarations: 0; current Scribium map and
+- Standalone upstream map/filter declarations: 0; current Arkst map and
   filter are extensions and are not counted in the 162.
 - Standalone upstream super declaration: 0; it is the implicit extend
   callable described above.
@@ -109,7 +109,7 @@ translation table before user functions execute.
 
 The manifest gives each row's exact v2.5.1 signature and pinned source
 location. The family records below provide the observable contract and the
-Scribium comparison fields that are not expressible in a short TSV row:
+Arkst comparison fields that are not expressible in a short TSV row:
 binding/conversion, evaluation order, laziness/callback behavior, return and
 value representation, failure and diagnostics, precedence, implementation
 location, architecture owner, and existing evidence.
@@ -128,7 +128,7 @@ rows in the manifest, sourced from
 
 - Binding/conversion: upstream Number parameters are invocation-time numeric
   conversions; named parameters are by, to, decimals, and the source names
-  shown in the manifest. Scribium routes the regular scalar inventory through
+  shown in the manifest. Arkst routes the regular scalar inventory through
   builtins.rs and shared origin-aware scalar conversion.
 - Evaluation: ordinary arguments are evaluated left-to-right before the
   operation; no callback or lazy body is part of this family. Bodies and
@@ -138,16 +138,16 @@ rows in the manifest, sourced from
   Typst-specific concept participates.
 - Failure contract: missing/extra/invalid named arguments and invalid numeric
   conversion fail at the call/binding or scalar-conversion layer.
-  Operation-domain behavior remains operation-specific; Scribium does not
+  Operation-domain behavior remains operation-specific; Arkst does not
   fabricate a text fallback.
-- Diagnostics/provenance: Scribium emits source-backed E3001/E3003
+- Diagnostics/provenance: Arkst emits source-backed E3001/E3003
   diagnostics through the existing evaluator path and preserves the call
   span. Upstream diagnostic wording is not a byte-for-byte compatibility
   requirement.
 - Native/source precedence: regular scalar dispatch remains in the engine's
   existing native path, with source-defined lookup/precedence rules owned by
   #150. No new precedence rule is introduced here.
-- Scribium evidence/owner/status: crates/scribium-engine/src/builtins.rs
+- Arkst evidence/owner/status: crates/arkst-engine/src/builtins.rs
   owns the regular scalar specification and evaluation; existing numeric unit
   cases cover conversion, rounding, domain, and failure behavior. The
   independent #151 manifest guard covers surface identity.
@@ -170,8 +170,8 @@ ObjectValue<Range>, recorded at pinned
 - Failure contract: invalid bounds, unsupported materialization, and limits
   fail with source-backed diagnostics. Empty and open-ended behavior remain
   distinct from a fabricated empty collection.
-- Scribium representation/owner: IrValue::Range and
-  Evaluator::materialize_range in scribium-engine; no backend involvement.
+- Arkst representation/owner: IrValue::Range and
+  Evaluator::materialize_range in arkst-engine; no backend involvement.
   Existing range tests cover bounded iteration and limits.
   Status: PARTIAL. The typed bounded slice is present, while the full
   v2.5.1 range/open-bound and downstream-consumer contract is not promoted.
@@ -203,7 +203,7 @@ The case strategy is pinned in
   plaintext path rejects unsupported content materialization instead of
   silently executing nested calls.
 - Implementation/precedence: regular scalar names are in
-  scribium-engine/src/builtins.rs; frontend content and IrValue::Content
+  arkst-engine/src/builtins.rs; frontend content and IrValue::Content
   remain shared engine/IR concerns. Existing source-defined/native precedence
   is not changed.
 - Evidence/status: existing scalar and content tests cover whitespace
@@ -317,12 +317,12 @@ API:
 - with by, the callback is invoked once per source element, in source order,
   and its result is converted to a comparable key;
 - equal keys retain stable ordering;
-- keys must be comparable, and current Scribium rejects heterogeneous key
+- keys must be comparable, and current Arkst rejects heterogeneous key
   kinds and None rather than ordering them by debug text;
 - invalid selector results and callback failures propagate and restore the
   existing variable snapshot; no partial sorted value is committed.
 
-Scribium implements the bounded path in evaluate_collection_transform:
+Arkst implements the bounded path in evaluate_collection_transform:
 typed iterable coercion, selector callback invocation, stable key ordering,
 typed collection return, source-backed failure, and callback-state rollback.
 Callback evaluation/scoping is linked to #150 and conversion ownership to
@@ -330,7 +330,7 @@ Callback evaluation/scoping is linked to #150 and conversion ownership to
 callback per element, stable ties, heterogeneous keys, None keys, and
 callback failure. Status: PARTIAL. The bounded selector path is evidenced,
 but the complete upstream DynamicValue/callback/conversion contract is not
-promoted. Scribium map/filter use the same evaluator machinery but are
+promoted. Arkst map/filter use the same evaluator machinery but are
 extensions and do not enter the pinned upstream inventory.
 
 ### Pair and Dictionary
@@ -355,11 +355,11 @@ and the Pair declaration in
   dictionary shape, invalid key conversion, and missing key behavior are
   separate cases. get must not be treated as supported merely because
   dictionary constructs a dictionary.
-- Scribium status: pair and dictionary are evaluator-owned typed
+- Arkst status: pair and dictionary are evaluator-owned typed
   constructors with existing tests and are SUPPORTED_SEMANTICS. get is
   UNSUPPORTED: the pinned declaration exists, but the current evaluator
   dictionary native-owner inventory contains construction and has no get
-  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/scribium/issues/194);
+  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/arkst/issues/194);
   this audit records the gap and does not implement it.
 
 ### Library inspection, localization, and logger utilities
@@ -379,12 +379,12 @@ and [Logger.kt](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d758
 These are general-language public declarations, not scalar aliases that can
 be inferred from existing arithmetic dispatch. Their observable contracts
 include context/library lookup, localization table mutation/read, and
-host/logging side effects. Scribium has no approved equivalent native owner
+host/logging side effects. Arkst has no approved equivalent native owner
 for these names in the current engine. No evaluator, host capability,
 logging, or localization implementation was added. Status: UNSUPPORTED for
-all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/scribium/issues/195)
-owns library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
-owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
+all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/arkst/issues/195)
+owns library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
+owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 owns logger/diagnostic behavior. Host/resource policy is coordinated through
 #188/#190; these are real production gaps, not evidence-only omissions.
 
@@ -420,28 +420,28 @@ contains a public QFunction with content: String and markdownavailable:
 Boolean. It is not absent from v2.5.1; its target-specific output and
 host/configuration contract remain #155-owned.
 
-## Current Scribium pipeline comparison
+## Current Arkst pipeline comparison
 
 The audit traced the current path where evidence was available:
 
-scribium-markdown/scribium-quarkdown frontend
+arkst-markdown/arkst-quarkdown frontend
 -> existing call/binding representation
--> scribium-engine conversion and evaluator
+-> arkst-engine conversion and evaluator
 -> backend-neutral IrValue/IrComponent/content
--> existing scribium-typst lowering where an owning component exists.
+-> existing arkst-typst lowering where an owning component exists.
 
 - Frontend/parser: call lexing and parsed argument/body representation remain
   #148 evidence. #166 adds the source-backed raw-body boundary beside that
   representation; it does not redefine call lexing or claim malformed-input
   recovery parity.
-- Binding/conversion: crates/scribium-engine/src/value_conversion.rs and the
+- Binding/conversion: crates/arkst-engine/src/value_conversion.rs and the
   invocation-origin path provide bounded scalar/enum/iterable conversion.
   Generalized conversion, origin semantics, diagnostics, and atomicity remain
   #149/#165–#167.
-- Regular builtin dispatch: crates/scribium-engine/src/builtins.rs contains
+- Regular builtin dispatch: crates/arkst-engine/src/builtins.rs contains
   the centralized scalar REGULAR_BUILTINS inventory and typed IrValue
   results. It does not contain cross-owned component/resource functions.
-- Evaluator dispatch: crates/scribium-engine/src/evaluator.rs owns
+- Evaluator dispatch: crates/arkst-engine/src/evaluator.rs owns
   collection access, selector transforms, Pair/Dictionary construction,
   optionality callbacks, resource boundaries, document state, and source
   precedence. The current Dictionary native-owner list has dictionary but not
@@ -464,7 +464,7 @@ scribium-markdown/scribium-quarkdown frontend
 Success-only inventory was rejected. The following failure classes were
 checked against pinned declarations and current pipeline evidence:
 
-| Failure/input class | Pinned contract to preserve | Current Scribium audit result |
+| Failure/input class | Pinned contract to preserve | Current Arkst audit result |
 |---|---|---|
 | missing required, excess, or invalid named argument | binder rejects the call; no silent default unless optional | regular scalar and bounded native paths reject with source-backed diagnostics; generalized binder gap remains #149 |
 | invalid scalar/number/Boolean/String conversion | invocation-time conversion fails at conversion layer | shared bounded conversion fails closed; broad target conversion remains #149 |
@@ -486,12 +486,12 @@ materialization E3005 where applicable.
 - [STDLIB_BUILTINS_AUDIT_MANIFEST.tsv](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) is
   the pinned, complete 162-name fixture with exact public signatures, source
   URLs, owner, and #147 disposition.
-- [stdlib_builtin_audit.rs](../../../crates/scribium-core/tests/stdlib_builtin_audit.rs)
+- [stdlib_builtin_audit.rs](../../../crates/arkst-core/tests/stdlib_builtin_audit.rs)
   independently asserts 162 rows, unique names, full-SHA evidence, 60 #151
   rows, 102 cross-owned rows, and canonical status counts. It performs no
   network access, and also compiles representative scalar, optionality,
   collection/sort, failure, and Unicode string cases through the public
-  Scribium facade, including source provenance for successful and failing
+  Arkst facade, including source provenance for successful and failing
   calls.
 - Existing engine/evaluator tests are behavior evidence rather than copied
   upstream fixtures: scalar conversion/math/string cases, typed
@@ -540,7 +540,7 @@ Important corrections:
 - llmstxt was previously described as a candidate/absent name. The pinned
   Html.kt declaration proves it is public in v2.5.1; it is now explicitly
   recorded under #155 and remains outside #151 implementation.
-- get is a pinned public Dictionary callable, but Scribium currently has no
+- get is a pinned public Dictionary callable, but Arkst currently has no
   evaluator native owner for it; it is UNSUPPORTED, not inferred from
   dictionary, and its bounded owner is #194.
 - isnone is explicitly recovered into the #151 general inventory. none
@@ -553,7 +553,7 @@ Important corrections:
   `.startswith(ignorecase:true)` now uses the corresponding Kotlin/JVM
   character-wise simple case comparison. Both rows are promoted to
   SUPPORTED_SEMANTICS; no end-to-end output claim is added.
-- map and filter are current Scribium extensions, not pinned v2.5.1 stdlib
+- map and filter are current Arkst extensions, not pinned v2.5.1 stdlib
   declarations.
 - float is a pinned Layout declaration and is #154-owned; it is not a
   general builtin.
@@ -578,10 +578,10 @@ Reconciliation links:
 
 Issue #172 closes the cohesive Unicode string-semantics gap. The four
 remaining #151 unsupported families are real pinned gaps with bounded owners:
-[#194](https://github.com/luceat-lux-vestra/scribium/issues/194) for dictionary
-lookup, [#195](https://github.com/luceat-lux-vestra/scribium/issues/195) for
-library inspection, [#196](https://github.com/luceat-lux-vestra/scribium/issues/196)
-for localization, and [#197](https://github.com/luceat-lux-vestra/scribium/issues/197)
+[#194](https://github.com/luceat-lux-vestra/arkst/issues/194) for dictionary
+lookup, [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
+library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
+for localization, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 for logger/diagnostic builtins. Implementation order follows the dependency
 bands in #156; no implementation is started here.
 Existing issues are reused:
