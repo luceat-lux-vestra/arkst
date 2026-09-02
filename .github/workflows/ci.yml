@@ -32,6 +32,10 @@ jobs:
           toolchain: 1.98.0
           components: rustfmt
       - run: cargo fmt --all --check
+      - name: Verify fail-closed distribution policy
+        run: |
+          python3 tools/ci/test_verify_distribution_policy.py
+          python3 tools/ci/verify_distribution_policy.py
       - name: Verify supported workflow YAML shape
         run: |
           python3 tools/ci/test_verify_workflow_shape.py

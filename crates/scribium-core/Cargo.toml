@@ -1,6 +1,7 @@
 [package]
 name = "scribium-core"
 version = "0.0.1"
+publish = false
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true

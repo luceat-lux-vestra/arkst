@@ -167,6 +167,10 @@ Nested objects, arrays, and block strings are not supported. Duplicate keys use 
 | Watch/LSP | Planned |
 | WASM | Deferred |
 
+Scribium has no current public package or release distribution contract. The
+workspace package, CLI, binary-release, WASM, and internal-tool decisions are
+recorded and enforced in [`docs/engineering/DISTRIBUTION_POLICY.md`](docs/engineering/DISTRIBUTION_POLICY.md).
+
 ## Architecture
 
 ```text
