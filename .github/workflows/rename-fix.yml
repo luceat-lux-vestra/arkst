@@ -30,100 +30,52 @@ jobs:
           from pathlib import Path
           import json
 
-          # ResourceBundle.Control's baseName is an inert oracle input, not a
-          # product identifier. Preserve the pinned helper byte-for-byte here.
-          helper = Path("tools/dump_jdk25_locale_oracle.java")
-          text = helper.read_text()
-          old = 'control.getCandidateLocales("arkst", locale)'
-          new = 'control.getCandidateLocales("scribium", locale)'
-          assert text.count(old) == 1
-          helper.write_text(text.replace(old, new, 1))
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected exactly one occurrence of {old!r}, got {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
 
-          # Restore the pinned helper fingerprint now that the helper is again
-          # byte-identical to the established oracle source.
-          manifest = Path("docs/compatibility/quarkdown/reference-jvm.toml")
-          text = manifest.read_text()
-          old = 'locale_public_oracle_helper_source_sha256 = "ef7cc17a016319d90fd0dbd81ab85e291249ef3515ba52aaf3b25335bac2e0e8"'
-          new = 'locale_public_oracle_helper_source_sha256 = "80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02"'
-          assert text.count(old) == 1
-          manifest.write_text(text.replace(old, new, 1))
+          # ResourceBundle.Control baseName is an inert oracle input, not a
+          # product identifier. Keep the established helper source unchanged.
+          replace_once(
+              "tools/dump_jdk25_locale_oracle.java",
+              'control.getCandidateLocales("arkst", locale)',
+              'control.getCandidateLocales("scribium", locale)',
+          )
+          replace_once(
+              "docs/compatibility/quarkdown/reference-jvm.toml",
+              'locale_public_oracle_helper_source_sha256 = "ef7cc17a016319d90fd0dbd81ab85e291249ef3515ba52aaf3b25335bac2e0e8"',
+              'locale_public_oracle_helper_source_sha256 = "80d7c48a4bc1d864e13b0ea4b327f92b6108d5e48f6846f8687e93613f91dc02"',
+          )
 
-          # Mutation tests must mutate the currently pinned identity rather than
-          # embedding a historical fingerprint that goes stale on benign source
-          # identity changes.
-          tests = Path("tools/ci/test_reference_provenance.py")
-          text = tests.read_text()
-          old = '''    def test_wrong_generator_identity(self) -> None:
-              self.fixture.mutate(
-                  "docs/compatibility/quarkdown/reference-jvm.toml",
-                  'unicode_generator_source_sha256 = "2277ccc648379577000c6e4395514be0f24fb5dbd1e3062607a916ab8b178e8a"',
-                  'unicode_generator_source_sha256 = "' + "0" * 64 + '"',
-              )
-              self.assert_rejected(self.verify_fixture)
+          # Keep mutation tests synchronized with the currently pinned renamed
+          # source identities instead of the pre-rename fingerprints.
+          replace_once(
+              "tools/ci/test_reference_provenance.py",
+              'unicode_generator_source_sha256 = "2277ccc648379577000c6e4395514be0f24fb5dbd1e3062607a916ab8b178e8a"',
+              'unicode_generator_source_sha256 = "1074fa498101d643fa7e7e7b02623f172b3b6c2fdce13d7d8799ed0a36eeac6f"',
+          )
+          replace_once(
+              "tools/ci/test_reference_provenance.py",
+              'helper_source_sha256 = "e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47"',
+              'helper_source_sha256 = "b0fb84655d5fb1416dac6df356ebe0ee84c450d319dfe2d805e14434e358fbac"',
+          )
 
-          '''
-          new = '''    def test_wrong_generator_identity(self) -> None:
-              manifest = verifier.read_toml(
-                  self.fixture.root / "docs/compatibility/quarkdown/reference-jvm.toml"
-              )
-              current = manifest["reference"]["unicode_generator_source_sha256"]
-              self.fixture.mutate(
-                  "docs/compatibility/quarkdown/reference-jvm.toml",
-                  f'unicode_generator_source_sha256 = "{current}"',
-                  'unicode_generator_source_sha256 = "' + "0" * 64 + '"',
-              )
-              self.assert_rejected(self.verify_fixture)
-
-          '''
-          assert text.count(old) == 1
-          text = text.replace(old, new, 1)
-          old = '''    def test_wrong_helper_identity(self) -> None:
-              self.fixture.mutate(
-                  "docs/compatibility/quarkdown/reference-jvm.toml",
-                  'helper_source_sha256 = "e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47"',
-                  'helper_source_sha256 = "' + "0" * 64 + '"',
-              )
-              self.assert_rejected(self.verify_fixture)
-
-          '''
-          new = '''    def test_wrong_helper_identity(self) -> None:
-              manifest = verifier.read_toml(
-                  self.fixture.root / "docs/compatibility/quarkdown/reference-jvm.toml"
-              )
-              current = manifest["reference"]["helper_source_sha256"]
-              self.fixture.mutate(
-                  "docs/compatibility/quarkdown/reference-jvm.toml",
-                  f'helper_source_sha256 = "{current}"',
-                  'helper_source_sha256 = "' + "0" * 64 + '"',
-              )
-              self.assert_rejected(self.verify_fixture)
-
-          '''
-          assert text.count(old) == 1
-          tests.write_text(text.replace(old, new, 1))
-
-          # The source fixture became three bytes shorter (Scribium -> Arkst).
-          # Preserve semantic values while updating only source-backed offsets.
+          # Scribium -> Arkst shortens this fixture by three bytes. Only the
+          # source-backed offsets after that renamed link change.
           golden = Path("fixtures/quarkdown-conformance/cases/plaintext-family/expected/ir.json")
           data = json.loads(golden.read_text())
-          spans = [
-              (113, 156),
-              (158, 180),
-              (182, 205),
-              (207, 250),
-              (252, 286),
-              (288, 313),
-          ]
+          spans = [(113,156),(158,180),(182,205),(207,250),(252,286),(288,313)]
           nodes = data["nodes"]
-          assert len(nodes) == 9
+          if len(nodes) != 9:
+              raise SystemExit(f"unexpected plaintext-family node count: {len(nodes)}")
           for node, (start, end) in zip(nodes[3:], spans, strict=True):
               paragraph = node["Paragraph"]
-              assert len(paragraph["content"]) == 1
               text_node = paragraph["content"][0]["Text"]
-              text_node["span"]["start"] = start
-              text_node["span"]["end"] = end
-              paragraph["span"]["start"] = start
-              paragraph["span"]["end"] = end
+              text_node["span"].update(start=start, end=end)
+              paragraph["span"].update(start=start, end=end)
           golden.write_text(json.dumps(data, indent=2) + "\n")
           PY
 
