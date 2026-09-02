@@ -4,7 +4,7 @@
 # listed, and every package is explicitly non-publishable until a reviewed
 # distribution decision changes this policy and the corresponding manifest.
 schema_version = 1
-decision = "no-current-public-distribution"
+decision = "github-release-cli"
 review_required = true
 
 [channels.crates_io]
@@ -14,11 +14,11 @@ distribution_status = "not-intended"
 publication_channel = "crates.io"
 
 [channels.github_release]
-publishable = false
+publishable = true
 package = "arkst-cli"
 binary = "arkst"
-distribution_status = "not-intended"
-publication_channel = "none"
+distribution_status = "intended"
+publication_channel = "github-releases"
 
 [channels.internal_tools]
 publishable = false
@@ -36,8 +36,8 @@ publication_channel = "none"
 package = "arkst-cli"
 binary = "arkst"
 cargo_install = false
-github_release = false
-distribution_status = "not-intended"
+github_release = true
+distribution_status = "intended"
 
 [[packages]]
 name = "arkst-cli"
@@ -45,8 +45,8 @@ manifest = "crates/arkst-cli/Cargo.toml"
 version = "0.0.1"
 consumer = "user-facing-cli"
 distribution = "cli"
-distribution_status = "not-intended"
-publication_channel = "none"
+distribution_status = "intended"
+publication_channel = "github-releases"
 artifact_kind = "binary"
 library_targets = []
 binary_targets = ["arkst"]

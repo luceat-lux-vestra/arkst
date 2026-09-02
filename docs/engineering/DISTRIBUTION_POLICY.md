@@ -2,70 +2,67 @@
 
 ## Current decision
 
-As of the `0cfb420dc8687ed0b61cb7e35318953e8737f7f3` baseline, Arkst has no
-current public distribution contract. The repository is experimental, has no
-release workflow, has no GitHub Releases or tags, and none of the 16 Cargo
-workspace packages has been published under its workspace name on crates.io.
-The Cargo package versions and metadata are development state, not a release
-promise.
+Arkst has an approved first public distribution contract for the `arkst` CLI
+binary from Cargo package `arkst-cli` through GitHub Releases. The intended
+first release is `v0.1.0`. This policy approves the artifact/channel contract
+only; it does not itself add a release workflow, create a tag, or publish a
+release.
 
 The canonical, machine-readable inventory is
 [`../../.github/distribution-policy.toml`](../../.github/distribution-policy.toml).
-Its `[[packages]]` entries are the complete crate-by-crate decision. Do not
+Its `[[packages]]` entries remain the complete crate-by-crate decision. Do not
 maintain a second package inventory in this document.
 
-The inventory covers the 14 `crates/*` packages and the two workspace tools,
-`arkst-markdown-compat` and `arkst-upstream-watch`. The package set is
-discovered from Cargo metadata; it is not a hand-maintained 14-package list.
+The inventory covers all 16 Cargo workspace packages discovered from Cargo
+metadata: the 14 `crates/*` packages plus `arkst-markdown-compat` and
+`arkst-upstream-watch`.
 
 ## Artifact decisions
 
-- Every workspace package is currently non-publishable. Compiler libraries
-  are internal toolchain components, `arkst-test-support` is test-only,
-  and the two compatibility/release-observer tools are repository tooling.
-  Each manifest explicitly sets `publish = false`.
-- `arkst-cli` and its `arkst` binary are useful from a repository
-  checkout, but crates.io publication and a public `cargo install` contract
-  are not currently intended. GitHub binary releases are also not currently
-  intended.
-- The `wasm32-unknown-unknown` check for `arkst-core` and `arkst-typst`
-  is a buildability invariant. It is not a distributed WASM artifact, npm
-  package, `wasm-bindgen` output, `wasm-pack` package, or browser bundle.
-  WASM bindings remain future roadmap work.
-- Internal compatibility and upstream-release observer tooling is not a
-  public package or release artifact.
-
-The README's `cargo install` wording describes the feature set of a Cargo
-install/build from the checkout context; it is not a registry publication or
-installation guarantee.
+- `arkst-cli` / binary `arkst` is the sole currently intended public artifact.
+  Its approved channel is GitHub Releases.
+- Cargo registry publication remains disabled. Every workspace manifest keeps
+  `publish = false`; crates.io and public `cargo install` are not part of the
+  current contract.
+- Compiler libraries remain internal toolchain components, `arkst-test-support`
+  remains test-only, and compatibility/upstream-watch tools remain repository
+  tooling.
+- The `wasm32-unknown-unknown` check for `arkst-core` and `arkst-typst` remains
+  a buildability invariant only. No WASM/npm/wasm-bindgen/wasm-pack artifact is
+  approved for distribution.
 
 ## Enforcement
 
-`tools/ci/verify_distribution_policy.py` runs Cargo metadata and checks:
+`tools/ci/verify_distribution_policy.py` runs Cargo metadata and verifies:
 
-1. the exact workspace package set, manifest paths, versions, target-to-binary
-   relationships, and workspace dependencies against the canonical inventory;
-2. every package's actual Cargo `publish` metadata is `[]`, which is Cargo's
-   resolved non-publishable form for `publish = false`; and
-3. the CLI, crates.io, GitHub binary, WASM, and internal-tool classifications
-   are known, explicit, and consistent.
+1. the exact workspace package set, manifest paths, versions, target identities,
+   and workspace dependencies against the canonical inventory;
+2. every package's actual Cargo `publish` metadata remains `[]`, which is Cargo's
+   resolved non-publishable form for explicit `publish = false`;
+3. GitHub Releases is enabled only for `arkst-cli` / `arkst`, while crates.io,
+   public `cargo install`, WASM distribution, and internal-tool publication stay
+   disabled; and
+4. the CLI package entry is classified as `intended` through
+   `github-releases`, while all other package classifications remain fail-closed.
 
-The verifier's tests exercise the same production validation path with
-mutations for accidental publication, new-package drift, stale entries,
-policy/Cargo disagreement, omitted internal tools, and malformed artifact
-classification. It runs inside the existing required `fmt` gate, so this
-policy does not create another required status context.
+The verifier's tests exercise the production validation path with negative
+mutations for accidental Cargo publication, workspace inventory drift, stale
+entries, GitHub Release contract drift, CLI channel mismatch, omitted internal
+tools, and malformed artifact classification. It remains inside the existing
+required `fmt` gate, so this change adds no new required status context.
 
-## Enabling distribution later
+## Next release gates
 
-A future distribution proposal must deliberately update the canonical policy,
-the affected manifest's explicit Cargo publication setting, and the relevant
-artifact/channel classification in one reviewable change. The package set,
-manifest path, target relationship, version, and publish semantics must still
-pass the verifier. The review must record the distribution decision and its
-evidence; a forgotten `publish` field must never be enough to open publication.
+This contract intentionally does not create release machinery. Before the first
+`v0.1.0` release:
 
-Only after that decision is accepted should the separately scoped package,
-dry-run, release-tag, or release-artifact work in #234/#235 be considered.
-This issue does not add release workflows, publication, tags, GitHub Releases,
-package dry-runs, SBOMs, or attestations.
+1. #235 must establish and verify immutable `refs/tags/v*` protection with no
+   bypass;
+2. #249 must add the narrowly scoped GitHub Release workflow, native artifact
+   matrix, deterministic archive names, and SHA-256 checksums; and
+3. the exact release workflow/tag state must be re-read before the first tag is
+   created.
+
+#234 remains not planned while crates.io/public `cargo install` are deferred.
+Any future registry or WASM distribution proposal must update this canonical
+policy and its fail-closed verifier in a separately reviewed change.

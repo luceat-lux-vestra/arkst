@@ -89,6 +89,52 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertEqual(len(metadata["packages"]), 16)
         self.assertTrue(all(package["publish"] == [] for package in metadata["packages"]))
 
+    def test_github_release_cli_contract_is_enabled(self) -> None:
+        policy = mod.load_policy(POLICY)
+        self.assertEqual(policy["decision"], "github-release-cli")
+        self.assertTrue(policy["channels"]["github_release"]["publishable"])
+        self.assertEqual(
+            policy["channels"]["github_release"]["publication_channel"],
+            "github-releases",
+        )
+        self.assertTrue(policy["cli"]["github_release"])
+        self.assertFalse(policy["cli"]["cargo_install"])
+
+    def test_disabling_github_release_contract_is_rejected(self) -> None:
+        policy_text = POLICY.read_text(encoding="utf-8").replace(
+            "[channels.github_release]\npublishable = true",
+            "[channels.github_release]\npublishable = false",
+            1,
+        )
+        self.reject(
+            r"policy.channels.github_release.publishable must be true",
+            policy_text=policy_text,
+        )
+
+    def test_second_cli_distribution_classification_is_rejected(self) -> None:
+        policy_text = self.set_package_field(
+            POLICY.read_text(encoding="utf-8"),
+            "arkst-core",
+            "distribution",
+            '"cli"',
+        )
+        self.reject(
+            r"exactly arkst-cli as the sole cli distribution artifact",
+            policy_text=policy_text,
+        )
+
+    def test_cli_wrong_publication_channel_is_rejected(self) -> None:
+        policy_text = self.set_package_field(
+            POLICY.read_text(encoding="utf-8"),
+            "arkst-cli",
+            "publication_channel",
+            '"crates.io"',
+        )
+        self.reject(
+            r"arkst-cli.publication_channel must be github-releases",
+            policy_text=policy_text,
+        )
+
     def test_accidental_publish_enable_is_rejected_by_cargo_metadata(self) -> None:
         metadata = self.metadata()
         self.package(metadata, "arkst-core")["publish"] = None
