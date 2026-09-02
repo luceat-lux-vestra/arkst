@@ -1,2 +1,20 @@
-# Default owners for all files
+# Default owner for the repository
 * @luceat-lux-vestra
+
+# Repository automation and governance
+/.github/ @luceat-lux-vestra
+
+# Workspace and dependency policy
+/Cargo.toml @luceat-lux-vestra
+/Cargo.lock @luceat-lux-vestra
+/deny.toml @luceat-lux-vestra
+/rust-toolchain.toml @luceat-lux-vestra
+
+# Compatibility/reference provenance contracts
+/docs/compatibility/quarkdown/reference-jvm.toml @luceat-lux-vestra
+/docs/compatibility/quarkdown/upstream.toml @luceat-lux-vestra
+/tests/compat/references.toml @luceat-lux-vestra
+
+# Licensing and provenance
+/LICENSE @luceat-lux-vestra
+/NOTICE @luceat-lux-vestra
