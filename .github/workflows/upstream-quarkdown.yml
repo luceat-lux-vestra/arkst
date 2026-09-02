@@ -39,7 +39,7 @@ jobs:
           toolchain: 1.98.0
 
       - name: Build upstream watcher
-        run: cargo build -p scribium-upstream-watch --locked
+        run: cargo build -p arkst-upstream-watch --locked
 
       - name: Determine and validate observed release
         id: observed
@@ -72,7 +72,7 @@ jobs:
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
           OBSERVED_URL: ${{ steps.observed.outputs.url }}
         run: |
-          RESULT=$(cargo run -p scribium-upstream-watch -- \
+          RESULT=$(cargo run -p arkst-upstream-watch -- \
             check-release \
             --manifest docs/compatibility/quarkdown/upstream.toml \
             --observed-tag "$OBSERVED_TAG" \
@@ -102,7 +102,7 @@ jobs:
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
         run: |
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
-          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+          MARKER="<!-- arkst-upstream-drift:$ISSUE_KEY -->"
           SAMPLE=$(jq -nc --arg marker "$MARKER" '[{number: 4242, body: ("prefix " + $marker + " suffix")}]')
           MATCH=$(printf '%s\n' "$SAMPLE" | jq -sr --arg marker "$MARKER" -f tools/ci/upstream_issue_filter.jq)
           test "$MATCH" = "4242"
@@ -129,7 +129,7 @@ jobs:
           echo "Checklist:"
           echo "- [ ] Collect permitted public documentation/release-note deltas"
           echo "- [ ] Produce a structured impact report"
-          echo "- [ ] Identify affected Scribium compatibility features"
+          echo "- [ ] Identify affected Arkst compatibility features"
           echo "- [ ] Add independently authored conformance cases"
           echo "- [ ] Perform black-box observations where necessary"
           echo "- [ ] Document known divergences"
@@ -141,7 +141,7 @@ jobs:
           echo "Clean-room warning:"
           echo "Do not inspect or translate Quarkdown implementation source while resolving this issue."
           echo ""
-          echo "<!-- scribium-upstream-drift:quarkdown:$(echo "$DRIFT_RESULT" | jq -r '.observed_tag') -->"
+          echo "<!-- arkst-upstream-drift:quarkdown:$(echo "$DRIFT_RESULT" | jq -r '.observed_tag') -->"
 
       - name: Check for existing issue
         if: steps.check_drift.outputs.drift == 'true' && github.event.inputs.dry_run != 'true'
@@ -151,7 +151,7 @@ jobs:
           OBSERVED_TAG: ${{ steps.observed.outputs.tag }}
         run: |
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
-          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+          MARKER="<!-- arkst-upstream-drift:$ISSUE_KEY -->"
           EXISTING=$(gh api --method GET "repos/${{ github.repository }}/issues" --paginate -F per_page=100 -F state=all \
             | jq -sr --arg marker "$MARKER" -f tools/ci/upstream_issue_filter.jq)
           if [ -n "$EXISTING" ]; then
@@ -174,9 +174,9 @@ jobs:
           VERIFIED_BASELINE=$(echo "$DRIFT_RESULT" | jq -r '.supported_baseline')
           URL="https://github.com/iamgio/quarkdown/releases/tag/$OBSERVED_TAG"
           ISSUE_KEY="quarkdown:$OBSERVED_TAG"
-          MARKER="<!-- scribium-upstream-drift:$ISSUE_KEY -->"
+          MARKER="<!-- arkst-upstream-drift:$ISSUE_KEY -->"
 
-          printf 'Verified compatibility baseline: %s\nTracked stable adaptation target: %s\nUpstream release URL: %s\nDetection source: scheduled upstream observer\n\n**Checklist:**\n- [ ] Collect permitted public documentation/release-note deltas\n- [ ] Produce a structured impact report\n- [ ] Identify affected Scribium compatibility features\n- [ ] Add independently authored conformance cases\n- [ ] Perform black-box observations where necessary\n- [ ] Document known divergences\n- [ ] Implement required compatibility changes\n- [ ] Prepare an adaptation PR\n- [ ] Run full conformance suite\n- [ ] Promote the verified baseline only after review and verification\n\n**Clean-room warning:**\nDo not inspect or translate Quarkdown implementation source while resolving this issue.\n\n%s\n' "$VERIFIED_BASELINE" "$OBSERVED_TAG" "$URL" "$MARKER" > "$RUNNER_TEMP/upstream-issue.md"
+          printf 'Verified compatibility baseline: %s\nTracked stable adaptation target: %s\nUpstream release URL: %s\nDetection source: scheduled upstream observer\n\n**Checklist:**\n- [ ] Collect permitted public documentation/release-note deltas\n- [ ] Produce a structured impact report\n- [ ] Identify affected Arkst compatibility features\n- [ ] Add independently authored conformance cases\n- [ ] Perform black-box observations where necessary\n- [ ] Document known divergences\n- [ ] Implement required compatibility changes\n- [ ] Prepare an adaptation PR\n- [ ] Run full conformance suite\n- [ ] Promote the verified baseline only after review and verification\n\n**Clean-room warning:**\nDo not inspect or translate Quarkdown implementation source while resolving this issue.\n\n%s\n' "$VERIFIED_BASELINE" "$OBSERVED_TAG" "$URL" "$MARKER" > "$RUNNER_TEMP/upstream-issue.md"
 
           gh issue create \
             --repo ${{ github.repository }} \
