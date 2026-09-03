@@ -445,8 +445,127 @@ fn audit_malformed_braces_are_structured_and_source_backed() {
     assert_eq!(source_slice(source, diagnostic.span), "{unterminated");
 }
 
+fn assert_escaped_argument(
+    source: &str,
+    arguments: &[CallArgument],
+    argument_span: ByteSpan,
+    content_span: ByteSpan,
+    expected_content: &str,
+) {
+    let [CallArgument::Positional {
+        value: Value::Content(content),
+        span,
+    }] = arguments
+    else {
+        panic!("expected one source-backed positional content argument")
+    };
+    assert_eq!(*span, argument_span);
+    assert_eq!(
+        source_slice(source, *span),
+        &source[argument_span.start..argument_span.end]
+    );
+    assert_eq!(source_slice(source, content_span), expected_content);
+    let mut source_content = String::new();
+    for inline in content {
+        let span = match inline {
+            Inline::Text { span, .. } | Inline::HardBreak { span } | Inline::SoftBreak { span } => {
+                *span
+            }
+            inline => panic!("expected source-backed escaped argument content: {inline:?}"),
+        };
+        source_content.push_str(source_slice(source, span));
+    }
+    assert_eq!(source_content, expected_content);
+    assert!(argument_span.is_valid_for(source));
+    assert!(content_span.is_valid_for(source));
+    assert!(source.is_char_boundary(content_span.start));
+    assert!(source.is_char_boundary(content_span.end));
+}
+
 #[test]
-fn audit_records_current_escaped_delimiter_gap() {
+fn audit_verifies_escaped_delimiter_source_preservation_and_mode_isolation() {
+    let block_source = ".foo {a \\} b}\ntrailing source\n";
+    let block_output = parse_with_diagnostics(block_source);
+    assert!(block_output.diagnostics.is_empty(), "{block_output:?}");
+    let Block::DirectiveCall {
+        name,
+        name_span,
+        arguments,
+        span,
+        ..
+    } = &block_output.document.nodes[0]
+    else {
+        panic!("expected complete escaped-closing block call")
+    };
+    assert_eq!(name, "foo");
+    assert_eq!(*name_span, ByteSpan::new(0, 4));
+    assert_eq!(*span, ByteSpan::new(0, 13));
+    assert_eq!(source_slice(block_source, *span), ".foo {a \\} b}");
+    assert_escaped_argument(
+        block_source,
+        arguments,
+        ByteSpan::new(5, 13),
+        ByteSpan::new(6, 12),
+        r"a \} b",
+    );
+    assert!(block_output.document.nodes.iter().any(|node| matches!(
+        node,
+        Block::Paragraph { span, .. }
+            if source_slice(block_source, *span).contains("trailing source")
+    )));
+    assert_markdown_isolated(block_source);
+
+    let cases = [
+        ("prefix .foo {a \\{ b} suffix\n", r"a \{ b"),
+        (
+            "prefix .foo {a \\{ nested \\} b} suffix\n",
+            r"a \{ nested \} b",
+        ),
+        ("prefix .foo {한글 \\} text} suffix\n", "한글 \\} text"),
+        ("prefix .foo {a \\}\r\nb} suffix\r\n", "a \\}\r\nb"),
+    ];
+    for (source, expected_content) in cases {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let call_start = source.find(".foo").expect("call start");
+        let call_end = source.find(" suffix").expect("call end");
+        let call_span = ByteSpan::new(call_start, call_end);
+        let call = first_inline_call(&output.document);
+        let Inline::DirectiveCall {
+            name,
+            name_span,
+            arguments,
+            span,
+            ..
+        } = call
+        else {
+            unreachable!()
+        };
+        assert_eq!(name, "foo");
+        assert_eq!(*name_span, ByteSpan::new(call_start, call_start + 4));
+        assert_eq!(*span, call_span);
+        assert_eq!(source_slice(source, *span), &source[call_start..call_end]);
+        assert_escaped_argument(
+            source,
+            arguments,
+            ByteSpan::new(call_start + 5, call_end),
+            ByteSpan::new(call_start + 6, call_end - 1),
+            expected_content,
+        );
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!("expected inline paragraph")
+        };
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { span, .. } if source_slice(source, *span) == "prefix "
+        )));
+        assert!(content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { span, .. } if source_slice(source, *span) == " suffix"
+        )));
+        assert_markdown_isolated(source);
+    }
+
     let escaped_introducer = r"\.foo {x}";
     let output = parse_with_diagnostics(escaped_introducer);
     assert!(output.diagnostics.is_empty(), "{output:?}");
@@ -457,97 +576,72 @@ fn audit_records_current_escaped_delimiter_gap() {
             .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
         _ => false,
     }));
-    assert_eq!(
-        output.document.nodes,
-        vec![Block::Paragraph {
-            content: vec![
-                Inline::Text {
-                    content: ".foo ".to_string(),
-                    span: ByteSpan::new(0, 6),
-                },
-                Inline::Text {
-                    content: "{x}".to_string(),
-                    span: ByteSpan::new(6, 9),
-                },
-            ],
-            span: ByteSpan::new(0, 9),
-        }]
-    );
+    assert_markdown_isolated(escaped_introducer);
+}
 
-    let escaped_closing = r".foo {a \} b}";
-    let output = parse_with_diagnostics(escaped_closing);
+#[test]
+fn audit_escaped_opening_brace_keeps_block_body_lifecycle_and_spans() {
+    let source = ".foo {a \\{ b}\n  body\n";
+    let output = parse_with_diagnostics(source);
     assert!(output.diagnostics.is_empty(), "{output:?}");
-    let call = first_inline_call(&output.document);
-    let Inline::DirectiveCall {
-        arguments, span, ..
-    } = call
+    let Block::DirectiveCall {
+        name,
+        name_span,
+        arguments,
+        body: Some(body),
+        raw_body: Some(raw_body),
+        span,
+        ..
+    } = &output.document.nodes[0]
     else {
-        unreachable!()
+        panic!("expected escaped-opening block call with an owned body")
     };
-    assert_eq!(source_slice(escaped_closing, *span), r".foo {a \}");
-    let positional_args = positional_args(arguments);
-    assert!(matches!(
-        positional_args.as_slice(),
-        [Value::Content(content)]
-            if content.iter().all(|inline| matches!(inline, Inline::Text { .. }))
-                && content.iter().map(|inline| match inline {
-                    Inline::Text { span, .. } => source_slice(escaped_closing, *span),
-                    _ => unreachable!(),
-                }).collect::<Vec<_>>().concat() == r"a \"
-    ));
-
-    let escaped_opening = r".foo {a \{ b}";
-    let output = parse_with_diagnostics(escaped_opening);
-    assert_eq!(output.diagnostics.len(), 1, "{output:?}");
-    assert_eq!(output.diagnostics[0].code, "E2003");
-    assert_eq!(
-        source_slice(escaped_opening, output.diagnostics[0].span),
-        r"{a \{ b}"
+    assert_eq!(name, "foo");
+    assert_eq!(*name_span, ByteSpan::new(0, 4));
+    assert_eq!(*span, ByteSpan::new(0, 20));
+    assert_eq!(source_slice(source, *span), ".foo {a \\{ b}\n  body");
+    assert_escaped_argument(
+        source,
+        arguments,
+        ByteSpan::new(5, 13),
+        ByteSpan::new(6, 12),
+        r"a \{ b",
     );
-
-    let nested_escaped = r".foo {a \{ nested \} b}";
-    let output = parse_with_diagnostics(nested_escaped);
-    assert!(output.diagnostics.is_empty(), "{output:?}");
-    let Block::DirectiveCall { span, .. } = &output.document.nodes[0] else {
-        panic!("expected current parser to close the escaped nested-brace probe")
+    assert_eq!(raw_body.span, ByteSpan::new(13, 21));
+    assert_eq!(
+        raw_body
+            .source
+            .slice(raw_body.span)
+            .expect("raw body source"),
+        "\n  body\n"
+    );
+    let [Block::Paragraph {
+        content,
+        span: body_span,
+    }] = body.as_slice()
+    else {
+        panic!("expected one source-backed body paragraph")
     };
-    assert_eq!(source_slice(nested_escaped, *span), nested_escaped);
-
-    let utf8 = r".foo {한글 \} text}";
-    let output = parse_with_diagnostics(utf8);
-    assert!(output.diagnostics.is_empty(), "{output:?}");
-    let call = first_inline_call(&output.document);
-    let Inline::DirectiveCall { span, .. } = call else {
-        unreachable!()
+    assert_eq!(*body_span, ByteSpan::new(16, 20));
+    let argument_span = match &arguments[0] {
+        CallArgument::Positional { span, .. } => *span,
+        CallArgument::Named(_) => panic!("expected positional escaped argument"),
     };
-    assert_eq!(source_slice(utf8, *span), r".foo {한글 \}");
-
-    let crlf = ".foo {a \\}\r\nb}";
-    let output = parse_with_diagnostics(crlf);
-    assert!(output.diagnostics.is_empty(), "{output:?}");
-    let Block::DirectiveCall { span, .. } = &output.document.nodes[0] else {
-        panic!("expected current parser to emit the truncated CRLF call")
+    let [Inline::Text {
+        span: text_span, ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one source-backed body text node")
     };
-    assert_eq!(source_slice(crlf, *span), ".foo {a \\}");
-    assert!(matches!(output.document.nodes[1], Block::Paragraph { .. }));
-
-    for source in [
-        escaped_introducer,
-        escaped_closing,
-        escaped_opening,
-        nested_escaped,
-        utf8,
-        crlf,
-    ] {
-        let markdown = parse_with_mode(source, Mode::Markdown);
-        assert!(!markdown.document.nodes.iter().any(|node| match node {
-            Block::DirectiveCall { .. } => true,
-            Block::Paragraph { content, .. } => content
-                .iter()
-                .any(|inline| matches!(inline, Inline::DirectiveCall { .. })),
-            _ => false,
-        }));
+    assert_eq!(*text_span, ByteSpan::new(16, 20));
+    assert_eq!(source_slice(source, *body_span), "body");
+    assert_eq!(source_slice(source, *text_span), "body");
+    for span in [*span, argument_span, raw_body.span, *body_span, *text_span] {
+        assert!(span.is_valid_for(source));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
     }
+    assert_markdown_isolated(source);
 }
 
 #[derive(Debug, Clone, Copy)]

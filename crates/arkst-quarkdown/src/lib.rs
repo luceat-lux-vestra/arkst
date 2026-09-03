@@ -303,7 +303,7 @@ pub fn needs_more_input(source: &str) -> bool {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;
-    for &byte in bytes {
+    for (cursor, &byte) in bytes.iter().enumerate() {
         if in_string {
             if escaped {
                 escaped = false;
@@ -316,8 +316,8 @@ pub fn needs_more_input(source: &str) -> bool {
         }
         match byte {
             b'"' => in_string = true,
-            b'{' => depth = depth.saturating_add(1),
-            b'}' => depth = depth.saturating_sub(1),
+            b'{' if !is_escaped_delimiter(bytes, cursor) => depth = depth.saturating_add(1),
+            b'}' if !is_escaped_delimiter(bytes, cursor) => depth = depth.saturating_sub(1),
             _ => {}
         }
     }
@@ -325,6 +325,10 @@ pub fn needs_more_input(source: &str) -> bool {
         return true;
     }
     has_trailing_continuation(source)
+}
+
+fn is_escaped_delimiter(bytes: &[u8], cursor: usize) -> bool {
+    cursor > 0 && bytes[cursor - 1] == b'\\'
 }
 
 /// Return whether the source ends with an unescaped continuation marker.
@@ -782,8 +786,8 @@ fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
         } else {
             match byte {
                 b'"' => in_string = true,
-                b'{' => depth += 1,
-                b'}' => {
+                b'{' if !is_escaped_delimiter(bytes, cursor) => depth += 1,
+                b'}' if !is_escaped_delimiter(bytes, cursor) => {
                     depth -= 1;
                     if depth == 0 {
                         let content = ByteSpan::new(open + 1, cursor);
@@ -1268,6 +1272,83 @@ mod tests {
     }
 
     #[test]
+    fn escaped_brace_delimiters_remain_source_backed_content() {
+        let cases = [
+            (
+                r".foo {a \} b}",
+                ByteSpan::new(5, 13),
+                ByteSpan::new(6, 12),
+                r"a \} b",
+            ),
+            (
+                r".foo {a \{ b}",
+                ByteSpan::new(5, 13),
+                ByteSpan::new(6, 12),
+                r"a \{ b",
+            ),
+            (
+                r".foo {a \{ nested \} b}",
+                ByteSpan::new(5, 23),
+                ByteSpan::new(6, 22),
+                r"a \{ nested \} b",
+            ),
+            (
+                ".foo {한글 \\} text}",
+                ByteSpan::new(5, 21),
+                ByteSpan::new(6, 20),
+                "한글 \\} text",
+            ),
+            (
+                ".foo {a \\}\r\nb}",
+                ByteSpan::new(5, 14),
+                ByteSpan::new(6, 13),
+                "a \\}\r\nb",
+            ),
+        ];
+
+        for (source, argument_span, content_span, expected_content) in cases {
+            let (call, end) = parse_call(source)
+                .unwrap_or_else(|error| panic!("unexpected {error:?} for {source:?}"))
+                .expect("expected complete call");
+            assert_eq!(end, source.len(), "{source:?}");
+            assert_eq!(call.span, ByteSpan::new(0, source.len()), "{source:?}");
+            assert_eq!(call.name_span, ByteSpan::new(0, 4), "{source:?}");
+            assert_eq!(call.arguments.len(), 1, "{source:?}");
+
+            let CallArgument::Positional(argument) = &call.arguments[0] else {
+                panic!("expected positional argument for {source:?}")
+            };
+            assert_eq!(argument.span, argument_span, "{source:?}");
+            let ArgContent::Content(content) = &argument.content else {
+                panic!("expected source-backed content for {source:?}")
+            };
+            assert_eq!(*content, content_span, "{source:?}");
+            assert_eq!(&source[call.span.start..call.span.end], source);
+            assert_eq!(
+                &source[argument_span.start..argument_span.end],
+                &source[5..]
+            );
+            assert_eq!(&source[content.start..content.end], expected_content);
+            assert!(call.span.is_valid_for(source));
+            assert!(argument_span.is_valid_for(source));
+            assert!(content.is_valid_for(source));
+            assert!(source.is_char_boundary(content.start));
+            assert!(source.is_char_boundary(content.end));
+        }
+
+        let crlf = ".foo {a \\}\r\nb}";
+        assert!(crlf.as_bytes().windows(2).any(|pair| pair == b"\r\n"));
+    }
+
+    #[test]
+    fn needs_more_input_uses_escaped_brace_delimiter_depth() {
+        assert!(!needs_more_input(r".foo {a \{ b}"));
+        assert!(!needs_more_input(r".foo {a \} b}"));
+        assert!(!needs_more_input(r#".foo {"{"}"#));
+        assert!(needs_more_input(r".foo {a { b}"));
+    }
+
+    #[test]
     fn parses_typed_ranges_without_confusing_numbers_or_references() {
         for (source, start, end) in [
             (".foo {2..4}", Some(2), Some(4)),
@@ -1407,7 +1488,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_chains_deterministically() {
-        for source in [".a::", ".a:::b", ".a:: {x}"] {
+        for source in [".a::", ".a:::b", ".a:: {x}", ".foo {x}::"] {
             let error = parse_call(source).unwrap_err();
             assert_eq!(error.code, "E2004", "{source:?}");
             assert!(error.span.is_valid_for(source), "{source:?}");
