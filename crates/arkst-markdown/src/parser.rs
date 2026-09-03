@@ -1690,22 +1690,26 @@ fn convert_inline(
                     })
                 }
                 Err(error) => {
+                    let recover_source = error.code == "E2003";
                     diagnostics.push(ParserDiagnostic {
                         code: error.code,
                         message: error.message,
                         span: offset_span(error.span, base).unwrap_or(span),
                     });
-                    // The extension parser consumed this complete source
-                    // segment when the call was malformed. Keep that exact
-                    // segment visible in the AST instead of dropping it
-                    // after recording the grammar diagnostic. Recovery uses
-                    // the original bytes directly: normal text
-                    // normalization would change the source-backed meaning
-                    // of malformed input.
-                    return Some(Inline::Text {
-                        content: source.get(call_span.start..call_span.end)?.to_string(),
-                        span: offset_span(call_span, base)?,
-                    });
+                    if recover_source {
+                        // The extension parser consumed this complete source
+                        // segment for an E2003 malformed call. Keep that exact
+                        // segment visible in the AST instead of dropping it
+                        // after recording the grammar diagnostic. Recovery
+                        // uses the original bytes directly: normal text
+                        // normalization would change the source-backed
+                        // meaning of malformed input.
+                        return Some(Inline::Text {
+                            content: source.get(call_span.start..call_span.end)?.to_string(),
+                            span: offset_span(call_span, base)?,
+                        });
+                    }
+                    return None;
                 }
             };
             let call_name = call.name.clone();
@@ -3360,6 +3364,46 @@ mod tests {
             })
             .collect();
         assert_eq!(text_source, source);
+    }
+
+    #[test]
+    fn malformed_inline_chain_keeps_e2004_recovery_unapplied() {
+        let source = "prefix .foo {x}::";
+        let output = parse_with_diagnostics(source);
+        let diagnostics: Vec<_> = output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E2004")
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "expected one E2004: {output:?}");
+        let chain_start = source.find("::").expect("chain separator");
+        assert_eq!(
+            diagnostics[0].span,
+            ByteSpan::new(chain_start, chain_start + "::".len())
+        );
+
+        let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+            panic!(
+                "expected malformed inline paragraph, got {:?}",
+                output.document.nodes
+            )
+        };
+        assert_eq!(
+            content
+                .iter()
+                .filter_map(|inline| match inline {
+                    Inline::Text { content, .. } => Some(content.as_str()),
+                    _ => None,
+                })
+                .collect::<String>(),
+            "prefix "
+        );
+        assert!(!content.iter().any(|inline| matches!(
+            inline,
+            Inline::Text { content, span }
+                if content == ".foo {x}::"
+                    && &source[span.start..span.end] == ".foo {x}::"
+        )));
     }
 
     #[test]
