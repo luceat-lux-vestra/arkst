@@ -22,6 +22,50 @@ cargo test
 3. Wait for discussion and acceptance before starting work.
 4. Reference the issue in your branch and commits.
 
+## Roadmap Milestone Governance
+
+[`docs/ROADMAP.md`](docs/ROADMAP.md) is the canonical roadmap. Native GitHub
+milestones, their milestone-owned issues, and the authoritative umbrella or
+tracker are the execution metadata for that roadmap. A milestone shell is not
+implementation authorization: future M4–M7 shells may remain open while their
+roadmap status is `Not started`, and implementation children attach only after
+the milestone is activated. Cross-cutting compatibility/reconciliation,
+research, host-capability, and generic hardening work remains milestone-null
+when it spans milestones or has no single primary owner, with the reason
+recorded in the governing tracker.
+
+### Activation invariant
+
+Before the first implementation PR of a roadmap milestone:
+
+1. The native GitHub milestone exists and is open.
+2. The roadmap status agrees with activation.
+3. The authoritative umbrella or tracker is assigned to the native milestone.
+4. Every open milestone-owned child is assigned to that native milestone.
+5. Cross-cutting issues are explicitly classified rather than accidentally
+   omitted.
+6. Milestone assignment does not bypass dependency, design, evidence, review,
+   or merge gates.
+
+### Closure invariant
+
+Before closing a roadmap or native milestone:
+
+1. The milestone exit and evidence gate is complete.
+2. The milestone-owned open issue count is zero, or every exception has been
+   explicitly moved or reclassified.
+3. The roadmap, governance documentation, umbrella, and evidence agree.
+4. The umbrella or tracker is completed.
+5. Only then is the native milestone closed.
+6. GitHub state is fresh-read to verify the closed state and zero open owned
+   issues.
+
+### Fresh-task audit
+
+Before starting the next implementation task, verify the current `main` SHA,
+current roadmap and native milestone state, parent or umbrella, dependencies,
+milestone assignment, and roadmap/governance consistency.
+
 ## Branch Convention
 
 ```
