@@ -178,11 +178,13 @@ Call syntax has the following properties:
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
-- Arkst's bounded #164 grammar/frontend slice consumes the optional separator
-  before the first and subsequent arguments and before `::`, and accepts a
-  trailing continuation without fabricating an argument. Complete-call,
-  argument, named name/value, head, and chain-segment spans remain direct
-  ranges into the unchanged source. The pinned token directly checks backslash
+- Arkst's bounded #164 grammar/frontend slice transactionally probes the
+  optional separator before the first and subsequent arguments and before
+  `::`; a separate root-level suffix accepts exactly one trailing continuation
+  without fabricating an argument. Complete-call spans include that suffix,
+  while argument, named name/value, head, and chain-segment spans remain direct
+  ranges into the unchanged source and non-argument remainder stays available
+  to the outer parser. The pinned token directly checks backslash
   + LF, so actual CRLF acceptance is recorded separately as Arkst
   source-preservation/frontend evidence rather than raw-CRLF upstream
   conformance. Binding, evaluation, chain value flow, and output remain

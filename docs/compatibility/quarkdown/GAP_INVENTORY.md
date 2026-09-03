@@ -123,11 +123,14 @@ bounded to preserving the consumed malformed inline source segment after
 recording the existing `E2003`; its UTF-8 and real-CRLF tests are
 parser/frontend evidence only, not a semantic or output compatibility claim.
 Issue [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) is the
-completed bounded separator-placement slice: `arkst-quarkdown` consumes the
-optional separator before the first and subsequent arguments and before `::`,
-and accepts a valid trailing continuation without fabricating an argument.
-`arkst-markdown` keeps first-line and continued-chain headers pending only when
-following physical input exists. LF is the pinned upstream continuation
+completed bounded separator-placement slice: `arkst-quarkdown` transactionally
+probes the optional separator before the first and subsequent arguments and
+before `::`, and a separate root-level suffix consumes exactly one valid
+trailing continuation without fabricating an argument. Head, chain-segment,
+and argument spans do not absorb that suffix, and non-argument remainder stays
+available to outer parsing. `arkst-markdown` keeps first-line and continued-chain
+headers pending only when following physical input exists and routes a qualifying
+indented line into the existing body lifecycle. LF is the pinned upstream continuation
 evidence; actual CRLF is retained as separate Arkst source-preservation/
 frontend evidence. No binder, evaluator, chain value-flow, IR, renderer, or
 output compatibility claim follows from this parser/frontend result.

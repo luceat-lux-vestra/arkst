@@ -208,14 +208,14 @@ pub fn parse_directive_at(
     let mut cursor = first.1;
     let mut end = first.0.span.end;
 
-    loop {
+    let trailing_separator = loop {
         let separator = scan_argument_separator(bytes, cursor);
         let chain_start = separator.end;
         if !chain_start
             .checked_add(2)
             .is_some_and(|limit| source.as_bytes().get(chain_start..limit) == Some(b"::"))
         {
-            break;
+            break separator;
         }
         let segment_start = chain_start + 2;
         let segment = parse_segment(source, segment_start, false).map_err(|error| {
@@ -239,6 +239,12 @@ pub fn parse_directive_at(
         cursor = segment.1;
         end = segment.0.span.end;
         chain.push(segment.0);
+    };
+
+    if trailing_separator.has_continuation {
+        if let Some(trailing_end) = consume_trailing_line_continuation(bytes, cursor) {
+            end = trailing_end;
+        }
     }
 
     let first = first.0;
@@ -701,31 +707,7 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
         let separator = scan_argument_separator(bytes, cursor);
         let argument_start = separator.end;
         let Some(&byte) = bytes.get(argument_start) else {
-            if separator.continuation_start.is_some() {
-                // `trailingLineContinuation` is a separate valid grammar
-                // production. It consumes the continuation and any optional
-                // indentation without fabricating an argument.
-                end = argument_start;
-                cursor = argument_start;
-            }
             break;
-        };
-        let malformed_continuation = || {
-            ParseError::new(
-                "E2004",
-                "line continuation must be followed by an argument or chain",
-                ByteSpan::new(
-                    separator
-                        .continuation_start
-                        .unwrap_or(argument_start)
-                        .min(source.len()),
-                    separator
-                        .continuation_start
-                        .unwrap_or(argument_start)
-                        .saturating_add(1)
-                        .min(source.len()),
-                ),
-            )
         };
         if byte == b'{' {
             let arg = parse_braced(source, argument_start)?;
@@ -737,31 +719,13 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
 
         let arg_name_start = argument_start;
         let Some(arg_name_end) = scan_identifier(bytes, arg_name_start) else {
-            if separator.continuation_start.is_some()
-                && !is_chain_separator_at(bytes, argument_start)
-            {
-                return Err(malformed_continuation());
-            }
             break;
         };
         if bytes.get(arg_name_end) != Some(&b':') {
-            if separator.continuation_start.is_some()
-                && !is_chain_separator_at(bytes, argument_start)
-            {
-                return Err(malformed_continuation());
-            }
             break;
         }
         let open = arg_name_end + 1;
         if bytes.get(open) != Some(&b'{') {
-            // The named-argument parser is one optional argument in the
-            // surrounding repeat. If its braced-value boundary does not
-            // match, leave the entire candidate for the caller's
-            // remainder path instead of fabricating a diagnostic, unless
-            // a continuation explicitly promised another argument.
-            if separator.continuation_start.is_some() {
-                return Err(malformed_continuation());
-            }
             break;
         }
         let value = parse_braced(source, open)?;
@@ -785,7 +749,7 @@ fn parse_arguments(source: &str, after_name: usize) -> Result<ParsedArguments, P
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ArgumentSeparator {
     end: usize,
-    continuation_start: Option<usize>,
+    has_continuation: bool,
 }
 
 /// Consume the bounded equivalent of Quarkdown's reusable `argumentSeparator`:
@@ -794,25 +758,31 @@ struct ArgumentSeparator {
 /// part of an accepted argument, chain, or trailing continuation.
 fn scan_argument_separator(bytes: &[u8], start: usize) -> ArgumentSeparator {
     let mut cursor = start;
-    let mut continuation_start = None;
+    let mut has_continuation = false;
     loop {
         cursor = skip_horizontal(bytes, cursor);
         let Some(after_continuation) = consume_continuation(bytes, cursor) else {
             break;
         };
-        continuation_start.get_or_insert(cursor);
+        has_continuation = true;
         cursor = skip_line_indentation(bytes, after_continuation);
     }
     ArgumentSeparator {
         end: cursor,
-        continuation_start,
+        has_continuation,
     }
 }
 
-fn is_chain_separator_at(bytes: &[u8], cursor: usize) -> bool {
-    cursor
-        .checked_add(2)
-        .is_some_and(|limit| bytes.get(cursor..limit) == Some(b"::"))
+/// Consume the separate root-level `trailingLineContinuation` production.
+///
+/// Unlike `scan_argument_separator`, this consumes exactly one continuation
+/// and its optional next-line indentation. It is applied only after argument
+/// and chain parsing has finished, so it can widen the complete call span
+/// without widening a call segment or argument span.
+fn consume_trailing_line_continuation(bytes: &[u8], start: usize) -> Option<usize> {
+    let cursor = skip_horizontal(bytes, start);
+    let after_continuation = consume_continuation(bytes, cursor)?;
+    Some(skip_line_indentation(bytes, after_continuation))
 }
 
 fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
@@ -1506,22 +1476,33 @@ mod tests {
     #[test]
     fn parses_argument_separators_before_first_argument_and_at_trailing_edge() {
         let cases = [
-            (".foo \\\n{x}", ByteSpan::new(7, 10), None),
+            (
+                ".foo \\\n{x}",
+                ByteSpan::new(7, 10),
+                None,
+                ByteSpan::new(0, 10),
+            ),
             (
                 ".foo \\\nname:{x}",
                 ByteSpan::new(7, 15),
                 Some(ByteSpan::new(7, 11)),
+                ByteSpan::new(0, 15),
             ),
-            (".foo {x} \\\n", ByteSpan::new(5, 8), None),
+            (
+                ".foo {x} \\\n",
+                ByteSpan::new(5, 8),
+                None,
+                ByteSpan::new(0, 8),
+            ),
         ];
 
-        for (source, argument_span, named_name_span) in cases {
+        for (source, argument_span, named_name_span, head_span) in cases {
             let (call, end) = parse_call(source)
                 .unwrap_or_else(|error| panic!("unexpected {error:?} for {source:?}"))
                 .expect("expected complete call");
             assert_eq!(end, source.len(), "{source:?}");
             assert_eq!(call.span, ByteSpan::new(0, source.len()), "{source:?}");
-            assert_eq!(call.head_span, ByteSpan::new(0, source.len()), "{source:?}");
+            assert_eq!(call.head_span, head_span, "{source:?}");
             assert_eq!(call.arguments.len(), 1, "{source:?}");
             let argument = &call.arguments[0];
             let argument_span_actual = match argument {
@@ -1615,12 +1596,65 @@ mod tests {
         assert_eq!(call.chain[0].name, "1");
         assert_eq!(call.span, ByteSpan::new(0, 5));
         assert_eq!(end, 5);
-        let source = concat!(".call {a} \\", "\n\nnext");
-        {
-            let error = parse_call(source).unwrap_err();
-            assert_eq!(error.code, "E2004", "{source:?}");
-            assert!(error.span.is_valid_for(source), "{source:?}");
+    }
+
+    #[test]
+    fn trailing_continuation_is_root_suffix_and_leaves_remainder() {
+        let source = concat!(".foo {x} \\", "\nfollowing");
+        let (call, end) = parse_call(source).unwrap().unwrap();
+        assert_eq!(call.span, ByteSpan::new(0, 11));
+        assert_eq!(call.head_span, ByteSpan::new(0, 8));
+        assert_eq!(call.arguments.len(), 1);
+        assert_eq!(call.positional_args()[0].span, ByteSpan::new(5, 8));
+        assert_eq!(end, 11);
+        assert_eq!(&source[end..], "following");
+        for span in [call.span, call.head_span, call.positional_args()[0].span] {
+            assert!(span.is_valid_for(source));
+            assert!(source.is_char_boundary(span.start));
+            assert!(source.is_char_boundary(span.end));
         }
+
+        let source = concat!(".foo \\", "\nname: {x}");
+        let (call, end) = parse_call(source).unwrap().unwrap();
+        assert_eq!(call.span, ByteSpan::new(0, 7));
+        assert_eq!(call.head_span, ByteSpan::new(0, 4));
+        assert!(call.arguments.is_empty());
+        assert_eq!(end, 7);
+        assert_eq!(&source[end..], "name: {x}");
+
+        let source = concat!(".foo {x} \\", "\n\\\nfollowing");
+        let (call, end) = parse_call(source).unwrap().unwrap();
+        assert_eq!(call.span, ByteSpan::new(0, 11));
+        assert_eq!(call.head_span, ByteSpan::new(0, 8));
+        assert_eq!(call.arguments.len(), 1);
+        assert_eq!(end, 11);
+        assert_eq!(&source[end..], "\\\nfollowing");
+
+        let source = concat!(".a {x}::b {y} \\", "\nfollowing");
+        let (call, end) = parse_call(source).unwrap().unwrap();
+        assert_eq!(call.span, ByteSpan::new(0, 16));
+        assert_eq!(call.head_span, ByteSpan::new(0, 6));
+        assert_eq!(call.chain[0].span, ByteSpan::new(8, 13));
+        assert_eq!(call.positional_args()[0].span, ByteSpan::new(3, 6));
+        assert_eq!(
+            call.chain[0].positional_args()[0].span,
+            ByteSpan::new(10, 13)
+        );
+        let head_argument_span = call.positional_args()[0].span;
+        let chain_argument_span = call.chain[0].positional_args()[0].span;
+        for span in [
+            call.span,
+            call.head_span,
+            call.chain[0].span,
+            head_argument_span,
+            chain_argument_span,
+        ] {
+            assert!(span.is_valid_for(source));
+            assert!(source.is_char_boundary(span.start));
+            assert!(source.is_char_boundary(span.end));
+        }
+        assert_eq!(end, 16);
+        assert_eq!(&source[end..], "following");
     }
 
     #[test]

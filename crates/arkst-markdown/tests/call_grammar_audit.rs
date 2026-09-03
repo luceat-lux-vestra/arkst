@@ -1140,10 +1140,18 @@ fn audit_accepts_trailing_continuation_without_fabricating_an_argument() {
     let followed_by_paragraph = concat!(".foo {x} ", "\\", "\nfollowing\n");
     let output = parse_with_diagnostics(followed_by_paragraph);
     assert!(output.diagnostics.is_empty(), "{output:?}");
-    assert!(matches!(
-        output.document.nodes.first(),
-        Some(Block::DirectiveCall { arguments, .. }) if arguments.len() == 1
-    ));
+    let Block::DirectiveCall {
+        arguments,
+        head_span,
+        span,
+        ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected the trailing-suffix call to remain observable")
+    };
+    assert_eq!(arguments.len(), 1);
+    assert_eq!(source_slice(followed_by_paragraph, *head_span), ".foo {x}");
+    assert_eq!(source_slice(followed_by_paragraph, *span), ".foo {x} \\\n");
     assert!(output.document.nodes.iter().any(|node| matches!(
         node,
         Block::Paragraph { content, .. }
@@ -1153,6 +1161,100 @@ fn audit_accepts_trailing_continuation_without_fabricating_an_argument() {
             ))
     )));
     assert_markdown_isolated(followed_by_paragraph);
+
+    let inline_remainder = concat!("prefix .foo {x} ", "\\", "\nfollowing\n");
+    let output = parse_with_diagnostics(inline_remainder);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Inline::DirectiveCall {
+        head_span,
+        span,
+        arguments,
+        ..
+    } = first_inline_call(&output.document)
+    else {
+        unreachable!()
+    };
+    assert_eq!(source_slice(inline_remainder, *head_span), ".foo {x}");
+    assert_eq!(source_slice(inline_remainder, *span), ".foo {x} \\\n");
+    assert_eq!(arguments.len(), 1);
+    let Block::Paragraph { content, .. } = &output.document.nodes[0] else {
+        panic!("expected inline remainder paragraph")
+    };
+    assert!(content.iter().any(|inline| matches!(
+        inline,
+        Inline::Text { span, .. } if source_slice(inline_remainder, *span).contains("following")
+    )));
+    assert_markdown_isolated(inline_remainder);
+
+    let adjacency = concat!(".foo ", "\\", "\nname: {x}\n");
+    let output = parse_with_diagnostics(adjacency);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall {
+        arguments,
+        head_span,
+        span,
+        ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected the valid trailing continuation call")
+    };
+    assert!(arguments.is_empty());
+    assert_eq!(source_slice(adjacency, *head_span), ".foo");
+    assert_eq!(source_slice(adjacency, *span), ".foo \\\n");
+    assert!(output.document.nodes.iter().any(|node| matches!(
+        node,
+        Block::Paragraph { span, .. } if source_slice(adjacency, *span).contains("name: {x}")
+    )));
+    assert_markdown_isolated(adjacency);
+}
+
+#[test]
+fn audit_continuation_suffix_can_start_a_source_backed_block_body() {
+    for source in [
+        concat!(".foo {x} ", "\\", "\n  body\n\noutside\n"),
+        concat!(".foo ", "\\", "\n  body\n\noutside\n"),
+    ] {
+        let output = parse_with_diagnostics(source);
+        assert!(output.diagnostics.is_empty(), "{output:?}");
+        let Block::DirectiveCall {
+            arguments,
+            body: Some(body),
+            raw_body: Some(raw_body),
+            head_span,
+            ..
+        } = &output.document.nodes[0]
+        else {
+            panic!("expected a continuation-header directive body")
+        };
+        assert_eq!(
+            source_slice(source, *head_span),
+            if arguments.is_empty() {
+                ".foo"
+            } else {
+                ".foo {x}"
+            }
+        );
+        assert!(raw_body.span.is_valid_for(source));
+        assert!(source.is_char_boundary(raw_body.span.start));
+        assert!(source.is_char_boundary(raw_body.span.end));
+        assert_eq!(source_slice(source, raw_body.span), "body\n\n");
+        let [Block::Paragraph {
+            span: body_span, ..
+        }] = body.as_slice()
+        else {
+            panic!("expected one source-backed body paragraph")
+        };
+        assert_eq!(source_slice(source, *body_span), "body");
+        assert!(output.document.nodes.iter().any(|node| matches!(
+            node,
+            Block::Paragraph { content, .. }
+                if content.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Text { span, .. } if source_slice(source, *span) == "outside"
+                ))
+        )));
+        assert_markdown_isolated(source);
+    }
 }
 
 #[test]

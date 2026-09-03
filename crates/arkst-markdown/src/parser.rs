@@ -283,6 +283,7 @@ impl BlockParser for QuarkdownBlockParser {
             let candidate = source.get(call_start..candidate_end)?;
             let continuation_pending =
                 as_extension_data!(arena, node_ref, QuarkdownBlock).continuation_pending;
+            let mut header_became_body = false;
             // Let the Quarkdown grammar classify the complete original
             // candidate. A second line-prefix scanner would drift from the
             // shared identifier and delimiter contract.
@@ -303,6 +304,36 @@ impl BlockParser for QuarkdownBlockParser {
                         block.raw_body_end = call_end;
                         block.header_pending = false;
                         block.continuation_pending = false;
+                        reader.advance_to_eol();
+                        return Some(State::HAS_CHILDREN);
+                    } else if source
+                        .get(call_start..call_end)
+                        .is_some_and(arkst_quarkdown::has_trailing_continuation)
+                        && !is_blank(&line)
+                        && body_line_prefix(&line, source, segment, call_start).is_some()
+                    {
+                        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+                        block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = body_start;
+                        block.raw_body_end = call_end;
+                        block.header_pending = false;
+                        block.continuation_pending = false;
+                        header_became_body = true;
+                    } else if source
+                        .get(call_start..call_end)
+                        .is_some_and(arkst_quarkdown::has_trailing_continuation)
+                    {
+                        // A valid root-level trailing continuation ends the
+                        // header before this unrelated remainder. Finalize
+                        // the call but leave the current physical line for
+                        // Rushdown to parse as a separate block.
+                        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+                        block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = body_start;
+                        block.raw_body_end = call_end;
+                        block.header_pending = false;
+                        block.continuation_pending = false;
+                        return None;
                     } else {
                         return None;
                     }
@@ -313,8 +344,10 @@ impl BlockParser for QuarkdownBlockParser {
                             && arkst_quarkdown::has_trailing_continuation(candidate)) => {}
                 _ => return None,
             }
-            reader.advance_to_eol();
-            return Some(State::HAS_CHILDREN);
+            if !header_became_body {
+                reader.advance_to_eol();
+                return Some(State::HAS_CHILDREN);
+            }
         }
 
         if is_blank(&line) {
