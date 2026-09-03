@@ -148,9 +148,11 @@ inventory is not implemented.
 
 ## Follow-up reconciliation
 
-The audit did not create a competing issue for #157–#164. #157, #158, and #163
-are implemented bounded parser/frontend or grammar-shape slices; #159, #160,
-#162, and #164 remain parser/frontend or grammar-shape work. #163 provides the
+The audit did not create a competing issue for #157–#164. #157, #158, #159,
+#160, and #163 are implemented bounded parser/frontend or grammar-shape slices;
+#162 and #164 remain parser/frontend or grammar-shape work. #159's
+source-preserving malformed inline recovery is a completed parser/frontend
+slice. #163 provides the
 ordered grammar/frontend handoff. #165 consumes that ordered shape and owns
 shared structural binding; #149 remains the target-driven conversion boundary
 and evidence basis.

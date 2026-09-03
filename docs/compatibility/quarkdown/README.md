@@ -136,8 +136,8 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: ordinary and tight nested calls plus supported Markdown inline content preserve source structure; semantic/output support remains separate |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
-| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; malformed recovery remains #159 |
-| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; inline recovery suffix loss is #159 |
+| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; bounded malformed recovery is covered by #159, while escaped-delimiter and separator gaps remain #162/#164 |
+| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; bounded inline recovery retains the original source segment after `E2003`, while escaped-delimiter and separator gaps remain #162/#164 |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -846,7 +846,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Nested calls                    | `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
 | Inline (mid-paragraph) call     | `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument` |
 | Tight-call boundaries           | `arkst-quarkdown/src/lib.rs::tight_word_adjacency_and_symbol_boundaries_are_explicit`, `arkst-quarkdown/src/lib.rs::parses_implicit_positional_references_and_boundaries`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
-| Malformed-call diagnostics      | `arkst-quarkdown/src/lib.rs::rejects_malformed_arguments_and_preserves_unmatched_named_candidates`, `arkst-markdown/src/parser.rs::malformed_root_block_reports_argument_span`, `arkst-markdown/src/parser.rs::malformed_inline_call_preserves_full_source_offset` |
+| Malformed-call diagnostics      | `arkst-quarkdown/src/lib.rs::rejects_malformed_arguments_and_preserves_unmatched_named_candidates`, `arkst-markdown/src/parser.rs::malformed_root_block_reports_argument_span`, `arkst-markdown/src/parser.rs::malformed_inline_call_preserves_full_source_offset`, `malformed_inline_recovery_preserves_utf8_crlf_and_following_source`, `valid_inline_call_still_preserves_trailing_text` |
 | v2.5.1 link parentheses         | `arkst-markdown/tests/quarkdown_v2_5_1.rs::qd251_links_accept_balanced_escaped_and_nested_parentheses`, `qd251_unbalanced_plain_destination_stays_literal`, `qd251_trailing_parenthesis_and_surrounding_text_are_not_swallowed`, `qd251_links_preserve_utf8_and_crlf_source_boundaries`, `qd251_link_boundary_is_identical_in_md_qd_and_qd_body_modes`, `qd251_link_correction_empty_destinations_have_complete_spans`, `qd251_link_correction_preserves_angle_and_title_forms`, `qd251_link_correction_preserves_multiline_title_span`, `qd251_link_correction_preserves_autolink_backslashes_and_email_semantics`, `qd251_link_correction_preserves_reference_and_image_destinations`, `qd251_link_correction_preserves_utf8_and_crlf_edge_spans` |
 | v2.5.1 deep four-space lists   | `arkst-markdown/tests/quarkdown_v2_5_1.rs::qd251_deep_four_space_lists_have_exact_depth_in_md_and_qd`, `qd251_deep_list_preserves_siblings_dedent_and_following_content`, `qd251_nested_paragraph_and_list_content_remain_in_their_items`, `qd251_deep_lists_preserve_utf8_and_crlf_spans`, `qd251_qd_body_uses_dynamic_indent_before_markdown_list_parsing` |
 | M2 blockquotes / strikethrough / task lists / tables | `arkst-markdown/src/parser.rs::preserved_markdown_structures_keep_nested_semantics_and_source_spans`, `arkst-engine/src/ast_to_ir.rs::convert_structures_preserves_task_table_and_nested_spans`, `arkst-engine/src/evaluator.rs::structures_recurse_through_evaluator_without_losing_semantics`, `arkst-typst/src/lowering.rs::lower_structured_markdown_nodes_preserves_semantics_and_source_map`, `arkst-typst/tests/backend_integration.rs::integration_markdown_structures_compile_to_valid_pdf` |
@@ -872,9 +872,9 @@ identifier/reference boundaries, multiline nested positional/named arguments,
 source-ordered mixed arguments, line continuation with arbitrary leading
 indentation, parser-preserved `::` chains, tight brace-wrapped calls, normal
 boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd` isolation,
-and the existing dynamic body-indentation lifecycle. Malformed recovery,
-separator placement, and escaped delimiters remain their separately owned
-gaps. The AST-to-IR handoff retains the ordered argument representation needed
+and the existing dynamic body-indentation lifecycle. Separator placement and
+escaped delimiters remain their separately owned gaps; malformed recovery is
+now a bounded parser/frontend slice in #159. The AST-to-IR handoff retains the ordered argument representation needed
 by the engine binder. The shared binder's `E3003` positional-after-named
 diagnostic is semantic evidence owned by #165, not a grammar/frontend claim.
 
@@ -1276,7 +1276,11 @@ accessed dates.
   offending positional and preceding named spans. #163 owns the representation;
   #165 owns bounded semantic binding. Complete value/conversion compatibility
   remains partial; see #163 and #165.
-- Malformed inline recovery currently drops following source text; see #159.
+- Bounded malformed inline recovery retains the original consumed extension
+  segment as source-backed text after recording `E2003`, including exact
+  brace-to-source-end diagnostic spans and UTF-8/real-CRLF evidence. This is
+  parser/frontend evidence only; semantic and output compatibility remain
+  separate contracts.
 - Supported Markdown inline structure inside static Quarkdown content
   arguments is retained through the Rushdown frontend with original-source
   spans; this is parser/frontend evidence only. Dynamic String/content
