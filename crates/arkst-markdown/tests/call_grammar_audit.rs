@@ -579,6 +579,71 @@ fn audit_verifies_escaped_delimiter_source_preservation_and_mode_isolation() {
     assert_markdown_isolated(escaped_introducer);
 }
 
+#[test]
+fn audit_escaped_opening_brace_keeps_block_body_lifecycle_and_spans() {
+    let source = ".foo {a \\{ b}\n  body\n";
+    let output = parse_with_diagnostics(source);
+    assert!(output.diagnostics.is_empty(), "{output:?}");
+    let Block::DirectiveCall {
+        name,
+        name_span,
+        arguments,
+        body: Some(body),
+        raw_body: Some(raw_body),
+        span,
+        ..
+    } = &output.document.nodes[0]
+    else {
+        panic!("expected escaped-opening block call with an owned body")
+    };
+    assert_eq!(name, "foo");
+    assert_eq!(*name_span, ByteSpan::new(0, 4));
+    assert_eq!(*span, ByteSpan::new(0, 20));
+    assert_eq!(source_slice(source, *span), ".foo {a \\{ b}\n  body");
+    assert_escaped_argument(
+        source,
+        arguments,
+        ByteSpan::new(5, 13),
+        ByteSpan::new(6, 12),
+        r"a \{ b",
+    );
+    assert_eq!(raw_body.span, ByteSpan::new(13, 21));
+    assert_eq!(
+        raw_body
+            .source
+            .slice(raw_body.span)
+            .expect("raw body source"),
+        "\n  body\n"
+    );
+    let [Block::Paragraph {
+        content,
+        span: body_span,
+    }] = body.as_slice()
+    else {
+        panic!("expected one source-backed body paragraph")
+    };
+    assert_eq!(*body_span, ByteSpan::new(16, 20));
+    let argument_span = match &arguments[0] {
+        CallArgument::Positional { span, .. } => *span,
+        CallArgument::Named(_) => panic!("expected positional escaped argument"),
+    };
+    let [Inline::Text {
+        span: text_span, ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one source-backed body text node")
+    };
+    assert_eq!(*text_span, ByteSpan::new(16, 20));
+    assert_eq!(source_slice(source, *body_span), "body");
+    assert_eq!(source_slice(source, *text_span), "body");
+    for span in [*span, argument_span, raw_body.span, *body_span, *text_span] {
+        assert!(span.is_valid_for(source));
+        assert!(source.is_char_boundary(span.start));
+        assert!(source.is_char_boundary(span.end));
+    }
+    assert_markdown_isolated(source);
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ExpectedArgument {
     Positional {

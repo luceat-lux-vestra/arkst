@@ -303,7 +303,7 @@ pub fn needs_more_input(source: &str) -> bool {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;
-    for &byte in bytes {
+    for (cursor, &byte) in bytes.iter().enumerate() {
         if in_string {
             if escaped {
                 escaped = false;
@@ -316,8 +316,8 @@ pub fn needs_more_input(source: &str) -> bool {
         }
         match byte {
             b'"' => in_string = true,
-            b'{' => depth = depth.saturating_add(1),
-            b'}' => depth = depth.saturating_sub(1),
+            b'{' if !is_escaped_delimiter(bytes, cursor) => depth = depth.saturating_add(1),
+            b'}' if !is_escaped_delimiter(bytes, cursor) => depth = depth.saturating_sub(1),
             _ => {}
         }
     }
@@ -325,6 +325,10 @@ pub fn needs_more_input(source: &str) -> bool {
         return true;
     }
     has_trailing_continuation(source)
+}
+
+fn is_escaped_delimiter(bytes: &[u8], cursor: usize) -> bool {
+    cursor > 0 && bytes[cursor - 1] == b'\\'
 }
 
 /// Return whether the source ends with an unescaped continuation marker.
@@ -780,11 +784,10 @@ fn parse_braced(source: &str, open: usize) -> Result<Arg, ParseError> {
                 in_string = false;
             }
         } else {
-            let escaped_delimiter = cursor > 0 && bytes[cursor - 1] == b'\\';
             match byte {
                 b'"' => in_string = true,
-                b'{' if !escaped_delimiter => depth += 1,
-                b'}' if !escaped_delimiter => {
+                b'{' if !is_escaped_delimiter(bytes, cursor) => depth += 1,
+                b'}' if !is_escaped_delimiter(bytes, cursor) => {
                     depth -= 1;
                     if depth == 0 {
                         let content = ByteSpan::new(open + 1, cursor);
@@ -1335,6 +1338,14 @@ mod tests {
 
         let crlf = ".foo {a \\}\r\nb}";
         assert!(crlf.as_bytes().windows(2).any(|pair| pair == b"\r\n"));
+    }
+
+    #[test]
+    fn needs_more_input_uses_escaped_brace_delimiter_depth() {
+        assert!(!needs_more_input(r".foo {a \{ b}"));
+        assert!(!needs_more_input(r".foo {a \} b}"));
+        assert!(!needs_more_input(r#".foo {"{"}"#));
+        assert!(needs_more_input(r".foo {a { b}"));
     }
 
     #[test]
