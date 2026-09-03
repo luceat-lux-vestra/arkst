@@ -132,12 +132,12 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
 | Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only: identifier and `:{` adjacency are aligned by #157; source-ordered mixed shape is retained by #163 and consumed by the shared engine binder in #165 |
 | Mixed positional/named         | `.panel {Intro} width:{320}`     | Parsed                   | Parsed-only: frontend/IR retains the complete source-ordered sequence, including positional-after-named; the shared engine binder rejects invalid ordering with source-backed `E3003`; no complete value/conversion compatibility claim is made (#163, #165) |
-| Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Partial: escaped argument delimiters are counted by the current parser; UTF-8/CRLF truncation and `E2003` behavior are tracked by #162 |
+| Escaped call/argument delimiters | `\.foo {x}`, `.foo {a \} b}` | Parsed                   | Parsed-only: the escaped introducer remains literal, escaped braces remain source-backed content without changing delimiter depth, and UTF-8/actual-CRLF spans are preserved; parser/frontend slice implemented by #162 |
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: ordinary and tight nested calls plus supported Markdown inline content preserve source structure; semantic/output support remains separate |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
-| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; bounded malformed recovery is covered by #159, while escaped-delimiter and separator gaps remain #162/#164 |
-| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; bounded inline recovery retains the original source segment after `E2003`, while escaped-delimiter and separator gaps remain #162/#164 |
+| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; bounded malformed recovery is covered by #159, while separator placement remains #164 |
+| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; bounded inline recovery retains the original source segment after `E2003`, while separator placement remains #164 |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -841,7 +841,7 @@ implementation-evidence counterpart of the upstream provenance recorded in
 | Positional arguments            | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification` |
 | Named arguments                 | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`, `call_and_named_identifiers_share_the_pinned_scanner`; `arkst-markdown/tests/call_grammar_audit.rs::audit_aligns_named_argument_identifier_lexing_and_spans`, `audit_requires_adjacent_named_argument_delimiters_and_preserves_source` |
 | Mixed positional/named          | `arkst-quarkdown/src/lib.rs::parses_positional_named_and_mixed_arguments`; `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_ordered_mixed_arguments_until_binder_validation`, `audit_aligns_named_argument_identifier_lexing_and_spans` |
-| Escaped call/argument delimiters | `arkst-markdown/tests/call_grammar_audit.rs::audit_records_current_escaped_delimiter_gap` |
+| Escaped call/argument delimiters | `arkst-quarkdown/src/lib.rs::escaped_brace_delimiters_remain_source_backed_content`; `arkst-markdown/tests/call_grammar_audit.rs::audit_verifies_escaped_delimiter_source_preservation_and_mode_isolation` |
 | Indented body argument          | `arkst-markdown/src/parser.rs::quarkdown_body_uses_first_body_line_indent_not_fixed_width`, `quarkdown_body_rejects_one_space`, `quarkdown_body_tab_preserves_text_and_utf8_spans`, `quarkdown_body_dedent_terminates_body_and_shallower_lines_are_not_absorbed`, `quarkdown_body_preserves_nested_markdown`, `quarkdown_body_preserves_nested_quarkdown_blocks`, `quarkdown_body_is_container_relative_in_lists_and_blockquotes`, `quarkdown_body_blank_lines_preserve_body_lifecycle` |
 | Nested calls                    | `arkst-quarkdown/src/lib.rs::parses_nested_content_and_scalar_classification`, `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument`, `audit_preserves_nested_tight_utf8_and_crlf_provenance` |
 | Inline (mid-paragraph) call     | `arkst-markdown/src/parser.rs::nested_content_calls_keep_prefix_suffix_and_original_spans`, `arkst-markdown/tests/call_grammar_audit.rs::audit_preserves_nested_tight_call_wrapper_inside_content_argument` |
@@ -872,9 +872,10 @@ identifier/reference boundaries, multiline nested positional/named arguments,
 source-ordered mixed arguments, line continuation with arbitrary leading
 indentation, parser-preserved `::` chains, tight brace-wrapped calls, normal
 boundary regressions, malformed recovery, UTF-8, CRLF, `.md`/`.qd` isolation,
-and the existing dynamic body-indentation lifecycle. Separator placement and
-escaped delimiters remain their separately owned gaps; malformed recovery is
-now a bounded parser/frontend slice in #159. The AST-to-IR handoff retains the ordered argument representation needed
+and the existing dynamic body-indentation lifecycle. Separator placement
+remains its separately owned gap; escaped delimiter handling is now a bounded
+parser/frontend slice in #162, and malformed recovery is a bounded slice in
+#159. The AST-to-IR handoff retains the ordered argument representation needed
 by the engine binder. The shared binder's `E3003` positional-after-named
 diagnostic is semantic evidence owned by #165, not a grammar/frontend claim.
 
@@ -1266,10 +1267,6 @@ accessed dates.
   and before `::`, and consumes a trailing continuation without an argument;
   current Arkst does not preserve those forms and reports `E2004` in some
   paths; see #164.
-- Escaped call/argument delimiters are not fully aligned with pinned
-  `GrammarUtils.unescapedMatch()` and balanced-brace behavior; the current
-  parser can truncate arguments or report `E2003`, while the escaped call
-  introducer remains literal; see #162.
 - Arkst's grammar/frontend and IR preserve positional-after-named in the
   source-ordered argument shape without parser `E2001`. The shared engine
   binder rejects that invalid shape with source-backed `E3003`, including the

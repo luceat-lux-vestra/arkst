@@ -166,9 +166,9 @@ Call syntax has the following properties:
   frontend/IR representation is the bounded #163 prerequisite; shared
   semantic binding is the #165 engine contract.
 - An escaped call introducer is literal, and escaped `{`/`}` delimiters do not
-  change call-argument depth in pinned v2.5.1. Arkst currently records the
-  introducer boundary but counts escaped argument braces while scanning; the
-  resulting UTF-8/CRLF truncation and malformed behavior are tracked by #162.
+  change call-argument depth in pinned v2.5.1. Arkst preserves those escaped
+  delimiters as source-backed content, including UTF-8 and actual-CRLF spans;
+  this bounded parser/frontend correction is implemented by #162.
 - An argument may contain a plain value (`{320}`, `{center}`, `{"text"}`) or
   arbitrary content, including **nested calls**: `.outer {.inner {value}}`.
   Supported Markdown inline structure in static content arguments is retained
@@ -213,8 +213,8 @@ Call syntax has the following properties:
   as an inline call, not a block-level call.
 - Malformed inline calls retain their `E2003` diagnostic span and the consumed
   original source segment, including following source text. This bounded
-  parser/frontend recovery is evidenced by #159; escaped-delimiter and
-  separator gaps remain #162/#164.
+  parser/frontend recovery is evidenced by #159; separator placement remains
+  the separately owned #164 gap.
 
 ### Block-level calls with indented body (Implemented)
 
