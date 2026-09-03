@@ -131,9 +131,13 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 
 ## M4 — Developer Experience
 
+**Status:** Not started
+
 **Objective:** Watch mode, inspect commands, source maps, structured diagnostics.
 
 ## M5 — Quarkdown Compatibility Convergence
+
+**Status:** Not started
 
 **Objective:** Converge toward complete verified compatibility with the
 publicly documented Quarkdown language as the stable upstream target advances.
@@ -152,12 +156,16 @@ because a feature is documented upstream.
 
 ## M6 — Library API, LSP, WASM Bindings
 
+**Status:** Not started
+
 **Objective:** Embedding, editor integration, `arkst-wasm` bindings crate.
 
 WASM compilation is an M0 architecture constraint (core + lowering).
 M6 delivers the `arkst-wasm` bindings crate and WASM CI coverage.
 
 ## M7 — Hardening
+
+**Status:** Not started
 
 **Objective:** Fuzzing, benchmarks, security audit, 1.0 release.
 
