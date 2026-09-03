@@ -178,17 +178,20 @@ Call syntax has the following properties:
 - Braced arguments may span physical lines, including nested braces. Their
   indentation is preserved as source content and is not a fixed-width syntax
   rule.
-- Current Arkst consumes a backslash continuation only after an argument
-  has already been parsed; `.foo \\` followed by a first argument stops at
-  `.foo`, and a trailing continuation reports `E2004`. Pinned v2.5.1 places an
-  optional separator before every argument and separately consumes a trailing
-  continuation. The pinned token directly checks backslash + LF, so local
-  CRLF acceptance is recorded separately rather than treated as raw-CRLF
-  upstream conformance. Separator placement is tracked by #164.
-- `::` parses and structurally preserves a direct call chain (`.a {x}::b {y}`),
-  but current Arkst requires `::` immediately at the current call end;
-  whitespace or a line continuation before `::` is the #164 separator gap.
-  The direct form includes each segment and argument source span. The
+- Arkst's bounded #164 grammar/frontend slice consumes the optional separator
+  before the first and subsequent arguments and before `::`, and accepts a
+  trailing continuation without fabricating an argument. Complete-call,
+  argument, named name/value, head, and chain-segment spans remain direct
+  ranges into the unchanged source. The pinned token directly checks backslash
+  + LF, so actual CRLF acceptance is recorded separately as Arkst
+  source-preservation/frontend evidence rather than raw-CRLF upstream
+  conformance. Binding, evaluation, chain value flow, and output remain
+  separate contracts.
+- `::` parses and structurally preserves direct, whitespace-separated, and
+  continuation-separated call chains (`.a {x}::b {y}`, `.a {x} ::b {y}`, and
+  `.a {x} \\` followed by `::b {y}`). The bounded #164 parser/frontend slice
+  includes each segment and argument source span in the complete call while
+  keeping the head span limited to the first segment. The
   evaluator executes
   supported chain segments directly in strict left-to-right order: the prior
   semantic value is injected as the next segment's first positional argument,
@@ -213,8 +216,9 @@ Call syntax has the following properties:
   as an inline call, not a block-level call.
 - Malformed inline calls retain their `E2003` diagnostic span and the consumed
   original source segment, including following source text. This bounded
-  parser/frontend recovery is evidenced by #159; separator placement remains
-  the separately owned #164 gap.
+  parser/frontend recovery is evidenced by #159; #164's valid separator
+  placement is a separate parser/frontend correction and does not change
+  malformed recovery or semantic/output contracts.
 
 ### Block-level calls with indented body (Implemented)
 

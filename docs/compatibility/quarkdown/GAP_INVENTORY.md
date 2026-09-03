@@ -116,19 +116,21 @@ adjacency, implicit positional references,
 positional/named and multiline arguments, continuation, nested calls, chains,
 tight calls, inline/block placement, dynamic body indentation, protected
 Markdown contexts, escaped delimiters, malformed recovery, argument-ownership
-boundaries, and source provenance. The #157, #158, #159, and #162
+boundaries, and source provenance. The #157, #158, #159, #162, and #164
 lexical/frontend production slices are implemented as recorded in the audit
 below. #159 is
 bounded to preserving the consumed malformed inline source segment after
 recording the existing `E2003`; its UTF-8 and real-CRLF tests are
 parser/frontend evidence only, not a semantic or output compatibility claim.
-The remaining bounded production follow-up is:
-
-- [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) — align
-  optional argument-separator placement before the first argument and `::`,
-  plus pinned trailing-continuation consumption; bounded to
-  `arkst-quarkdown` separator scanning and `arkst-markdown` block/inline
-  integration, with LF/CRLF evidence kept separate.
+Issue [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) is the
+completed bounded separator-placement slice: `arkst-quarkdown` consumes the
+optional separator before the first and subsequent arguments and before `::`,
+and accepts a valid trailing continuation without fabricating an argument.
+`arkst-markdown` keeps first-line and continued-chain headers pending only when
+following physical input exists. LF is the pinned upstream continuation
+evidence; actual CRLF is retained as separate Arkst source-preservation/
+frontend evidence. No binder, evaluator, chain value-flow, IR, renderer, or
+output compatibility claim follows from this parser/frontend result.
 
 These remaining gaps are not hidden by expected-failure allowlists or by the
 #157/#163 implementations. #157 is limited to the grammar/frontend identifier,
@@ -182,7 +184,8 @@ separation is `NOT_APPLICABLE` to #150. No row is promoted to
 valid for its bounded foundation but does not establish full v2.5.1
 compatibility.
 
-The audit reuses #148/#158–#164 for grammar/frontend boundaries and
+The audit reuses #148/#158–#164 for grammar/frontend boundaries, with #164's
+separator-placement slice now implemented, and
 #149/#165–#167 for binding, conversion, diagnostics, and commit atomicity. It
 does not create duplicate builtin or test issues. The bounded engine-owned
 `.extend`/`.super` implementation is tracked by

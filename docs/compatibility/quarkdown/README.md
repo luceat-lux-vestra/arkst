@@ -127,7 +127,7 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 
 | Feature                        | Syntax                           | Compatibility            | Status           |
 |--------------------------------|----------------------------------|--------------------------|------------------|
-| Dot-prefixed call              | `.note`                          | Parsed                   | Parsed-only: pinned identifier and call-start lexical boundaries are aligned by #157; separator and recovery gaps remain |
+| Dot-prefixed call              | `.note`                          | Parsed                   | Parsed-only: pinned identifier and call-start lexical boundaries are aligned by #157; #164 aligns bounded separator placement, while broader recovery/content boundaries remain separate |
 | Implicit positional refs       | `.1`, `.2`, ... in a headerless callable body | Parser-supported numeric identifiers; binding is separate | Parsed-only lexical recognition, including `.0`/`.01` and `.1abc` as `.1` plus remainder; implicit-reference evaluation remains #150-owned |
 | Positional arguments           | `.range {1} {10}`                | Parsed                   | Parsed-only grammar evidence; semantic support is separate |
 | Named arguments                | `.panel width:{320}`             | Parsed                   | Parsed-only: identifier and `:{` adjacency are aligned by #157; source-ordered mixed shape is retained by #163 and consumed by the shared engine binder in #165 |
@@ -136,8 +136,8 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Indented body argument         | `.panel {x}` + indent            | Parsed                   | Parsed-only grammar evidence; body semantics are separate |
 | Nested calls                   | `.outer {.inner {x}}`            | Parsed                   | Partial: ordinary and tight nested calls plus supported Markdown inline content preserve source structure; semantic/output support remains separate |
 | Inline (mid-paragraph) call    | `see .note {x}`                  | Parsed                   | Parsed-only placement evidence; semantic/output support is separate |
-| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; bounded malformed recovery is covered by #159, while separator placement remains #164 |
-| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; bounded inline recovery retains the original source segment after `E2003`, while separator placement remains #164 |
+| Tight-call boundaries          | word adjacency rejected          | Parsed                   | Parsed-only: top-level and nested tight calls preserve wrapper and inner provenance; the shared parser also covers #164 separators in tight calls, while bounded malformed recovery is covered by #159 |
+| Malformed-call diagnostics     | `E2003`, `E2004` | Error                  | Partial: incomplete optional named candidates remain source remainder; bounded inline recovery retains the original source segment after `E2003`, and genuine malformed chains/continuations retain `E2004`; valid #164 separators do not |
 | Variables                      | `.var {name} {value}`, `.name`, `.name {value}`, `.if {.name}` | Semantically supported | Implemented      |
 | Conditionals                   | `.if {cond}` / `.ifnot {cond}`, including selected logical expressions | Semantically supported for literals, variables, and the logical/comparison slice | Implemented (evidenced slice) |
 | Logical/comparison predicates  | `.islower`, `.isgreater`, `.equals`, `.not` | Typed boolean results, numeric ordering, plain-text equality fallback, lazy conditional use | Implemented (bounded v2.5.1 slice) |
@@ -159,8 +159,8 @@ audit is documentation/guard-only and preserves the #155 → #156 → #187 order
 | Row/column/grid                | `.row`, `.column`, `.grid columns:{2}` with a Markdown block body | Block-only native consumers with typed `IrComponent::Stacked`: Row, Column, and positive-column Grid; typed main/cross alignment and Size gaps; structured children and source provenance; argument validation before lazy body evaluation; pure Typst lowering and real backend integration evidence | Implemented (bounded Stacked layout slice) |
 | Container sizing               | `.container`, optional `width`, `height`, `fullwidth`, and Markdown body | Empty/body-only structured Container; origin-aware Size/Boolean conversion; deterministic Typst block sizing | Partial (bounded) |
 | Semantic evaluation            | `.if`/`.ifnot` + variables + user-defined functions + block `.let` + evidenced chain builtins | Partial / In progress | Implemented (partial) |
-| Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; optional whitespace/continuation before `::` remains the grammar gap in #164 |
-| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Partial: after-argument continuation is evidenced, but first-argument, trailing, and chain-separator placement are tracked by #164 |
+| Call chaining (`::`)           | `.a {x}::b {y}` and documented nested equivalent `.b {.a {x}} {y}` | Semantically supported for the evidenced scalar builtins, including `.otherwise` and `.isnone`; direct chain and nested forms share value-context invocation, with strict left-to-right flow and source-backed `E3001` failures for unimplemented callees | Partial: direct-chain semantic slice is evidenced; #164 implements the bounded whitespace/continuation placement in the parser/frontend, while broader chain semantics remain separate |
+| Line continuation (`\`)        | `\` at end of line               | Parsed                   | Parsed-only bounded parser/frontend support before the first and subsequent arguments, before `::`, and at the trailing edge; LF is pinned evidence, actual CRLF is separate local source-preservation evidence |
 | Tight / brace-wrapped calls    | `H{.text {2}}O`                  | Parsed                   | Parsed-only: top-level and nested tight wrapper/inner spans are preserved |
 | Multi-line arguments           | `{.…}` parsing spans lines        | Parsed                   | Parsed-only grammar evidence |
 | `.json` data loading           | `.json {path}` (new in v2.5.0)   | UTF-8 JSON mapped to recursive typed `IrValue` collections/dictionaries/scalars; exact binary64 integer boundary; logical resource diagnostics | Partial (bounded source-relative resource slice; #155/#188) |
@@ -1264,9 +1264,12 @@ accessed dates.
   #150-owned, and declaration name validity remains the evaluator-owned
   contract.
 - Pinned v2.5.1 permits optional argument separators before the first argument
-  and before `::`, and consumes a trailing continuation without an argument;
-  current Arkst does not preserve those forms and reports `E2004` in some
-  paths; see #164.
+  and before `::`, and consumes a trailing continuation without an argument.
+  Arkst now preserves those forms in the bounded `arkst-quarkdown` grammar and
+  `arkst-markdown` block/inline lifecycle slice implemented by #164. The pinned
+  continuation token is LF-specific; actual CRLF acceptance is recorded only
+  as Arkst source-preservation/frontend evidence. Binding, evaluation, chain
+  value flow, and output compatibility remain separate.
 - Arkst's grammar/frontend and IR preserve positional-after-named in the
   source-ordered argument shape without parser `E2001`. The shared engine
   binder rejects that invalid shape with source-backed `E3003`, including the
