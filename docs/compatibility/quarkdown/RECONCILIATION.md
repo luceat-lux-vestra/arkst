@@ -48,7 +48,7 @@ surfaces.
 
 | Audit / canonical owner | Canonical artifact and executable guard | Enumerated rows | Status result | Cross-audit rule |
 |---|---|---:|---|---|
-| #148 grammar/frontend | [`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md); `crates/arkst-markdown/tests/call_grammar_audit.rs` | 15 | 8 `PARTIAL`, 7 `PARSED_ONLY` | Recognition/provenance only; #165 owns shared structural binding, #149 owns target-driven conversion, and #150 owns evaluation. #157, #158, and #163's bounded grammar/frontend slices are implemented; remaining grammar gaps retain their row statuses. |
+| #148 grammar/frontend | [`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md); `crates/arkst-markdown/tests/call_grammar_audit.rs` | 15 | 1 `PARTIAL`, 14 `PARSED_ONLY` | Recognition/provenance only; #165 owns shared structural binding, #149 owns target-driven conversion, and #150 owns evaluation. #157, #158, #163, and #164's bounded grammar/frontend slices are implemented; the remaining protected-context row retains its conservative status. |
 | #149 value/binding/conversion | [`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md) | 23 | 10 `SUPPORTED_SEMANTICS`, 12 `PARTIAL`, 1 `NOT_APPLICABLE` | Shared conversion and binding are engine-owned; consumers link back instead of adding local adapters. |
 | #150 programmable semantics | [`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md) | 16 | 14 `PARTIAL`, 1 `UNSUPPORTED`, 1 `NOT_APPLICABLE` | Callable, scope, order, failure, extension, and provenance semantics remain separate from syntax and content producers. |
 | #151 stdlib/general builtins | [`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md) and [`STDLIB_BUILTINS_AUDIT_MANIFEST.tsv`](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) | 162 | 43 `SUPPORTED_SEMANTICS`, 6 `PARTIAL`, 10 `UNSUPPORTED`, 1 `NOT_APPLICABLE` among 60 #151-owned rows; 102 explicit handoffs | The complete pinned declaration sweep is retained; cross-owned names are not silently omitted or reclassified. |
@@ -89,7 +89,7 @@ status recorded by its owner.
 
 | Surface or boundary | Primary owner and status | Consumer/handoff | Evidence and residual gap |
 |---|---|---|---|
-| Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #165 binding, #149 conversion, #150 evaluation, #154 content | Parser tests retain spans; the remaining pinned grammar/provenance gap is #164. #159's malformed-inline source recovery, #158's nested tight-call, #160's Markdown-content preservation, #162's escaped-delimiter correction, and #163's ordered argument handoff are implemented bounded slices. Parser recognition is never a semantic claim. |
+| Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #165 binding, #149 conversion, #150 evaluation, #154 content | Parser tests retain spans; #159's malformed-inline source recovery, #158's nested tight-call, #160's Markdown-content preservation, #162's escaped-delimiter correction, and #164's separator placement and lifecycle correction are implemented bounded slices. Parser recognition is never a semantic claim. |
 | Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149 plus #165 for structural binding and #166 for the bounded target/raw-body slice; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths and bounded source-backed conversion consumers are evidenced; broader target coverage, diagnostics, and atomicity gaps remain. |
 | Variables, callable scope, lazy evaluation, iteration, optionality, extension, failure, and evaluator provenance | #150; `PARTIAL` except `.node` | #151 builtin declarations; #154 content results | Current bounded callable and `.extend`/`.super` paths are tested. #169 covers source-defined and regular scalar-native targets through the shared evaluator and canonical binder/conversion path, including stable scope-local extension-link identity, replacement retirement, and lifetime; specialized native owners, renderer output, and upstream partial-effects parity remain gaps. |
 | General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` are now `SUPPORTED_SEMANTICS` at the bounded scalar boundary after #172; `.get` is #194-owned, library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
@@ -159,7 +159,7 @@ semantic or output compatibility.
 
 | Gap class | Current ownership |
 |---|---|
-| `PRODUCTION_GAP` | #164–#167, #169, #173–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. |
+| `PRODUCTION_GAP` | #165–#167, #169, #173–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
 | `BACKEND_GAP` | #201 parity evidence and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
@@ -172,8 +172,8 @@ numbers are not inferred from a numeric sequence.
 
 | Issues | Origin / canonical owner | Scope and dependency decision | Recommended band |
 |---|---|---|---|
-| [#162](https://github.com/luceat-lux-vestra/arkst/issues/162) | #148 / Markdown and Quarkdown frontend | Implemented bounded escaped call/argument delimiter recognition and balanced-brace depth in `arkst-quarkdown::parse_braced`, with source-backed `.qd`/`.md` integration evidence. This remains parser/frontend evidence only and does not absorb binder/evaluator behavior. | Completed bounded parser/frontend slice; #164 remains separate. |
-| [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) | #148 / Markdown and Quarkdown frontend | Separator placement before the first argument, before `::`, and at the trailing edge. This production grammar/provenance gap must not absorb binder/evaluator behavior. | Frontend band; parallel after #187. |
+| [#162](https://github.com/luceat-lux-vestra/arkst/issues/162) | #148 / Markdown and Quarkdown frontend | Implemented bounded escaped call/argument delimiter recognition and balanced-brace depth in `arkst-quarkdown::parse_braced`, with source-backed `.qd`/`.md` integration evidence. This remains parser/frontend evidence only and does not absorb binder/evaluator behavior. | Completed bounded parser/frontend slice; #164 remains a separate completed slice. |
+| [#164](https://github.com/luceat-lux-vestra/arkst/issues/164) | #148 / Markdown and Quarkdown frontend | Implemented bounded transactional separator probes before the first and subsequent arguments and before `::`, plus a separate root-level suffix consuming exactly one valid trailing continuation without a fabricated argument. `arkst-markdown` keeps pending block headers aligned with the grammar at physical-line boundaries and leaves non-argument remainder available to outer parsing. Exact source spans, block/inline placement, LF evidence, and separate actual-CRLF local evidence are covered; binder/evaluator behavior is out of scope. | Completed bounded parser/frontend slice; broader grammar and semantic/output contracts remain separate. |
 | [#160](https://github.com/luceat-lux-vestra/arkst/issues/160) | #148 → #154 / Markdown content conversion | Implemented bounded frontend slice: supported Markdown inline nodes in static Quarkdown content arguments retain Rushdown structure and original-source spans, including the #158 nested tight-call shape. This establishes no evaluator, IR, or output compatibility; dynamic/content conversion is separately owned by #166. | Completed parser/frontend slice; broader content and output contracts remain with #154. |
 | [#163](https://github.com/luceat-lux-vestra/arkst/issues/163) | #148 → #165 / grammar representation for engine binding | Implemented in the grammar/frontend and IR: head and chain segments preserve one source-ordered argument sequence with provenance while retaining legacy projections for adapters. #165 consumes this representation for semantic binding. | Completed bounded representation prerequisite; grammar recognition remains separate from semantic compatibility. |
 | [#165](https://github.com/luceat-lux-vestra/arkst/issues/165) | #149 / shared engine binder | Implemented bounded engine contract: one binder validates ordered mixed arguments, exact names/aliases, named eligibility, duplicate/collision/excess rules, required/optional/default slots, and target-owned body policy for native, source-defined, and callback paths. Broader commit/diagnostic guarantees remain separate. | Completed bounded engine binding slice; #166 and #167 remain. |
@@ -231,7 +231,7 @@ closed, or treated as proof of complete v2.5.1 compatibility.
                                  │ sequencing preference; no hard #188 edge
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
-  #164                     #188 resolver              #190 capability
+  #164 (completed)          #188 resolver              #190 capability
         │                        │                        │
         ▼                        ▼                        │
       #163                    #189 data                 │
@@ -325,7 +325,7 @@ freeze wording is no longer a complete status. After
 
 - #187 is **completed as the backend-strategy re-evaluation** and #200 is the
   explicit-selection follow-up;
-- Remaining work in #164–#185 is **sequenced after the relevant shared
+- Remaining work in #165–#185 is **sequenced after the relevant shared
   engine/backend/content prerequisites**, with parallel work only where the
   graph permits it; completed bounded slices such as #159 remain recorded as
   evidence rather than being reopened by this sequence;

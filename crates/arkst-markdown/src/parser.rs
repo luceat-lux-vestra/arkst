@@ -229,9 +229,10 @@ impl BlockParser for QuarkdownBlockParser {
         let line_end = end - start;
         let line_source = source.get(start..end)?;
         let needs_more_input = arkst_quarkdown::needs_more_input(line_source);
+        let has_following_input = segment.stop() < source.len();
         let continuation_pending = arkst_quarkdown::has_trailing_continuation(line_source);
         let (call_segment, header_pending) = match arkst_quarkdown::parse_call(line_source) {
-            Ok(Some((_call, _call_end))) if needs_more_input => {
+            Ok(Some((_call, _call_end))) if needs_more_input && has_following_input => {
                 (Segment::new(start, segment.stop()), true)
             }
             Ok(Some((call, call_end))) => {
@@ -247,7 +248,9 @@ impl BlockParser for QuarkdownBlockParser {
                 )
             }
             Ok(None) => return None,
-            Err(_) if needs_more_input => (Segment::new(start, segment.stop()), true),
+            Err(_) if needs_more_input && has_following_input => {
+                (Segment::new(start, segment.stop()), true)
+            }
             Err(_) => (Segment::new(start, start + line_end), false),
         };
         let node_ref = arena.new_node(QuarkdownBlock {
@@ -280,6 +283,7 @@ impl BlockParser for QuarkdownBlockParser {
             let candidate = source.get(call_start..candidate_end)?;
             let continuation_pending =
                 as_extension_data!(arena, node_ref, QuarkdownBlock).continuation_pending;
+            let mut header_became_body = false;
             // Let the Quarkdown grammar classify the complete original
             // candidate. A second line-prefix scanner would drift from the
             // shared identifier and delimiter contract.
@@ -289,16 +293,47 @@ impl BlockParser for QuarkdownBlockParser {
                     let body_start = skip_argument_separator(source, call_end);
                     let trailing = source.get(call_end..candidate_end)?;
                     let has_continuation = arkst_quarkdown::has_trailing_continuation(candidate);
-                    if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
+                    let has_following_input = candidate_end < source.len();
+                    if has_continuation && has_following_input {
+                        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
+                            .continuation_pending = true;
+                    } else if trailing.bytes().all(|byte| byte.is_ascii_whitespace()) {
                         let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
                         block.call = Segment::new(call_start, call_end);
                         block.raw_body_start = body_start;
                         block.raw_body_end = call_end;
                         block.header_pending = false;
                         block.continuation_pending = false;
-                    } else if has_continuation {
-                        as_extension_data_mut!(arena, node_ref, QuarkdownBlock)
-                            .continuation_pending = true;
+                        reader.advance_to_eol();
+                        return Some(State::HAS_CHILDREN);
+                    } else if source
+                        .get(call_start..call_end)
+                        .is_some_and(arkst_quarkdown::has_trailing_continuation)
+                        && !is_blank(&line)
+                        && body_line_prefix(&line, source, segment, call_start).is_some()
+                    {
+                        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+                        block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = body_start;
+                        block.raw_body_end = call_end;
+                        block.header_pending = false;
+                        block.continuation_pending = false;
+                        header_became_body = true;
+                    } else if source
+                        .get(call_start..call_end)
+                        .is_some_and(arkst_quarkdown::has_trailing_continuation)
+                    {
+                        // A valid root-level trailing continuation ends the
+                        // header before this unrelated remainder. Finalize
+                        // the call but leave the current physical line for
+                        // Rushdown to parse as a separate block.
+                        let block = as_extension_data_mut!(arena, node_ref, QuarkdownBlock);
+                        block.call = Segment::new(call_start, call_end);
+                        block.raw_body_start = body_start;
+                        block.raw_body_end = call_end;
+                        block.header_pending = false;
+                        block.continuation_pending = false;
+                        return None;
                     } else {
                         return None;
                     }
@@ -309,8 +344,10 @@ impl BlockParser for QuarkdownBlockParser {
                             && arkst_quarkdown::has_trailing_continuation(candidate)) => {}
                 _ => return None,
             }
-            reader.advance_to_eol();
-            return Some(State::HAS_CHILDREN);
+            if !header_became_body {
+                reader.advance_to_eol();
+                return Some(State::HAS_CHILDREN);
+            }
         }
 
         if is_blank(&line) {
