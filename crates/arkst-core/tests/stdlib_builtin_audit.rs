@@ -244,7 +244,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .iter()
             .filter(|row| row[4] == "SUPPORTED_SEMANTICS")
             .count(),
-        43
+        44
     );
     assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 6);
     for name in ["capitalize", "startswith"] {
@@ -256,8 +256,14 @@ fn canonical_status_and_owner_counts_are_explicit() {
     }
     assert_eq!(
         owned.iter().filter(|row| row[4] == "UNSUPPORTED").count(),
-        10
+        9
     );
+    let get = owned
+        .iter()
+        .find(|row| row[0] == "get")
+        .expect("dictionary lookup row");
+    assert_eq!(get[3], "#151");
+    assert_eq!(get[4], "SUPPORTED_SEMANTICS");
     assert_eq!(
         owned
             .iter()
@@ -338,4 +344,46 @@ fn representative_collection_and_failure_contracts_remain_fail_closed() {
         Some(source_id)
     );
     assert!(failed.ir.nodes.is_empty(), "{failed:?}");
+}
+
+#[test]
+fn dictionary_get_semantics_are_observable_through_the_public_facade() {
+    let setup = ".var {table}\n    .dictionary\n        - title: stored\n        - count: 7\n\n";
+    let direct_source = format!("{setup}.get {{.table}} {{title}} orelse:{{ignored}}\n");
+    let chained_source = format!("{setup}.table::get {{title}} orelse:{{ignored}}\n");
+    let (direct, direct_id) = compile_source(&direct_source);
+    let (chained, chained_id) = compile_source(&chained_source);
+
+    assert!(direct.diagnostics.is_empty(), "{direct:?}");
+    assert!(chained.diagnostics.is_empty(), "{chained:?}");
+    assert_eq!(output_text(&direct), "stored");
+    assert_eq!(output_text(&chained), "stored");
+    assert_eq!(direct.ir.nodes.len(), 1);
+    assert_eq!(chained.ir.nodes.len(), 1);
+    assert!(direct.ir.nodes.iter().all(|node| match node {
+        IrNode::Paragraph { span, content } => {
+            span.source_id == direct_id
+                && content.iter().all(|inline| match inline {
+                    IrInline::Text { span, .. } => span.source_id == direct_id,
+                    _ => true,
+                })
+        }
+        _ => false,
+    }));
+    assert!(chained.ir.nodes.iter().all(|node| match node {
+        IrNode::Paragraph { span, content } => {
+            span.source_id == chained_id
+                && content.iter().all(|inline| match inline {
+                    IrInline::Text { span, .. } => span.source_id == chained_id,
+                    _ => true,
+                })
+        }
+        _ => false,
+    }));
+
+    let missing_source =
+        format!("{setup}.table::get {{missing}} orelse:{{fallback}}\n.table::get {{missing}}\n");
+    let (missing, _) = compile_source(&missing_source);
+    assert!(missing.diagnostics.is_empty(), "{missing:?}");
+    assert_eq!(output_text(&missing), "fallback\nNone");
 }

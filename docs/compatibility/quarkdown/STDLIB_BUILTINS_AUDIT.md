@@ -100,8 +100,9 @@ evidence.
 The canonical ownership reconciliation with #152 retains `localization` and
 `localize` in this #151 general stdlib inventory. #152 records both names only
 as `NOT_APPLICABLE` ownership handoffs, so the #151 total remains 60 and its
-10-name `UNSUPPORTED` count remains unchanged. The standard-library initial
-state is also not an empty localization map after registration: `Stdlib` loads
+9-name `UNSUPPORTED` count reflects the bounded `.get` implementation. The
+standard-library initial state is also not an empty localization map after
+registration: `Stdlib` loads
 `/lib/localization.qd`, whose `.localization name:{std}` call seeds the standard
 translation table before user functions execute.
 
@@ -347,20 +348,22 @@ and the Pair declaration in
 - Binding/conversion/evaluation: Pair and Dictionary values are recursively
   typed dynamic values; construction validates arity/body/named shape before
   committing the value. Dictionary lookup is a separate key/fallback
-  operation and is not implied by construction.
+  operation and is not implied by construction. `.get` uses the shared binder
+  with required `dictionary` and `key` slots plus optional `orelse`, evaluates
+  supplied arguments eagerly, converts the dictionary and key through the
+  existing target boundaries, and performs exact ordered String-key lookup.
 - Return/value representation: IrValue::Pair and IrValue::Dictionary retain
   nested values and source spans; dictionary iteration exposes typed
   key/value Pairs through the shared iterable adapter.
-- Failure/diagnostics: wrong arity, unknown names, bodies, non-iterable
-  dictionary shape, invalid key conversion, and missing key behavior are
-  separate cases. get must not be treated as supported merely because
-  dictionary constructs a dictionary.
-- Arkst status: pair and dictionary are evaluator-owned typed
-  constructors with existing tests and are SUPPORTED_SEMANTICS. get is
-  UNSUPPORTED: the pinned declaration exists, but the current evaluator
-  dictionary native-owner inventory contains construction and has no get
-  dispatch. The bounded implementation owner is [#194](https://github.com/luceat-lux-vestra/arkst/issues/194);
-  this audit records the gap and does not implement it.
+- Failure/diagnostics: wrong arity, unknown names, bodies, non-dictionary
+  shape, malformed internal keys, invalid key conversion, and missing-key
+  fallback behavior are separate cases. Failures preserve source-backed
+  provenance and do not publish a fabricated value.
+- Arkst status: pair and dictionary construction plus `.get` are
+  evaluator-owned typed operations and are `SUPPORTED_SEMANTICS`. The
+  dedicated `DictionaryLookup` native owner returns the stored typed value,
+  the typed fallback, or `IrValue::None` when the key is absent. No renderer
+  or output-equivalence claim is made.
 
 ### Library inspection, localization, and logger utilities
 
@@ -442,10 +445,10 @@ arkst-markdown/arkst-quarkdown frontend
   the centralized scalar REGULAR_BUILTINS inventory and typed IrValue
   results. It does not contain cross-owned component/resource functions.
 - Evaluator dispatch: crates/arkst-engine/src/evaluator.rs owns
-  collection access, selector transforms, Pair/Dictionary construction,
-  optionality callbacks, resource boundaries, document state, and source
-  precedence. The current Dictionary native-owner list has dictionary but not
-  get, which is why get remains UNSUPPORTED and is assigned to #194.
+  collection access, selector transforms, Pair/Dictionary construction and
+  lookup, optionality callbacks, resource boundaries, document state, and
+  source precedence. `.get` has a dedicated `DictionaryLookup` native owner;
+  it does not share the dictionary-construction dispatch.
 - Return representation: current paths use IrValue Number, String, Boolean,
   None, Range, Collection, Pair, and Dictionary rather than backend-specific
   strings. Content-producing and component-producing functions are not
@@ -469,7 +472,7 @@ checked against pinned declarations and current pipeline evidence:
 | missing required, excess, or invalid named argument | binder rejects the call; no silent default unless optional | regular scalar and bounded native paths reject with source-backed diagnostics; generalized binder gap remains #149 |
 | invalid scalar/number/Boolean/String conversion | invocation-time conversion fails at conversion layer | shared bounded conversion fails closed; broad target conversion remains #149 |
 | wrong value shape or rich content used as scalar | typed target conversion does not fabricate debug text | current scalar helpers reject collections/ranges/components; content projection is explicit |
-| empty iterable, out-of-range index, or missing dictionary key | access returns the declared None/fallback shape; other operations retain operation-specific empty behavior | access/fallback and empty aggregate cases are tested; #194 owns the missing `.get` lookup contract |
+| empty iterable, out-of-range index, or missing dictionary key | access returns the declared None/fallback shape; other operations retain operation-specific empty behavior | access/fallback and empty aggregate cases are tested; #194 provides the bounded `.get` lookup contract |
 | incompatible comparison or unsupported natural order | comparison/sort fails rather than inventing an order | typed comparisons and sorted key checks fail with source spans |
 | callback or nested callback failure | failure propagates; callback state must not partially commit | existing evaluator callback/sort snapshots cover bounded paths; canonical flow is #150 |
 | unknown library/function lookup | lookup failure is observable, not an empty successful result | #195 owns the UNSUPPORTED library-inspection family; no fake result is added |
@@ -499,7 +502,7 @@ materialization E3005 where applicable.
   selector sorting and callback failure/atomicity, optionality callback
   behavior, and source-backed diagnostics.
 - The guard does not assert support merely because a public name occurs in the
-  manifest. get (#194), library inspection (#195), localization (#196),
+  manifest. `.get` (#194), library inspection (#195), localization (#196),
   logger/diagnostic builtins (#197), plaintext, range, sorted, and callback
   dispositions are separate claim checks.
 
@@ -512,20 +515,20 @@ separately.
 | #147 status | Count |
 |---|---:|
 | SUPPORTED_END_TO_END | 0 |
-| SUPPORTED_SEMANTICS | 43 |
+| SUPPORTED_SEMANTICS | 44 |
 | PARSED_ONLY | 0 |
 | PARTIAL | 6 |
-| UNSUPPORTED | 10 |
+| UNSUPPORTED | 9 |
 | DEFERRED | 0 |
 | BLOCKED | 0 |
 | UNKNOWN | 0 |
 | NOT_APPLICABLE | 1 |
 
 The six PARTIAL names are sorted, range, plaintext, otherwise, ifpresent, and
-takeif. The ten UNSUPPORTED names are get, libexists, functionexists,
-libraries, libfunctions, localization, localize, log, debug, and error.
+takeif. The nine UNSUPPORTED names are libexists, functionexists, libraries,
+libfunctions, localization, localize, log, debug, and error.
 The one NOT_APPLICABLE inventory row is none because its value taxonomy
-belongs to #149. The 43 SUPPORTED_SEMANTICS rows are bounded engine semantic
+belongs to #149. The 44 SUPPORTED_SEMANTICS rows are bounded engine semantic
 claims; none is promoted to SUPPORTED_END_TO_END.
 
 ## Corrections and reconciliation
@@ -540,9 +543,9 @@ Important corrections:
 - llmstxt was previously described as a candidate/absent name. The pinned
   Html.kt declaration proves it is public in v2.5.1; it is now explicitly
   recorded under #155 and remains outside #151 implementation.
-- get is a pinned public Dictionary callable, but Arkst currently has no
-  evaluator native owner for it; it is UNSUPPORTED, not inferred from
-  dictionary, and its bounded owner is #194.
+- get is a pinned public Dictionary callable with a dedicated evaluator-native
+  typed lookup owner. It is `SUPPORTED_SEMANTICS` at the bounded evaluator/IR
+  boundary, not `SUPPORTED_END_TO_END`.
 - isnone is explicitly recovered into the #151 general inventory. none
   remains a #149 value-model boundary, and callback optionality remains #150.
 - sorted is selector/key-based with stable ordering evidence; it is not an
@@ -576,10 +579,9 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 closes the cohesive Unicode string-semantics gap. The four
+Issue #172 closes the cohesive Unicode string-semantics gap. The three
 remaining #151 unsupported families are real pinned gaps with bounded owners:
-[#194](https://github.com/luceat-lux-vestra/arkst/issues/194) for dictionary
-lookup, [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
 library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
 for localization, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 for logger/diagnostic builtins. Implementation order follows the dependency
@@ -595,25 +597,26 @@ Existing issues are reused:
 
 Remaining implementation questions are the full DynamicValue conversion
 matrix, exact diagnostics/atomicity deltas for currently bounded semantics,
-and sorted selector/conversion edge cases. Dictionary lookup, library
-inspection, localization, and logger ownership are no longer open
-reconciliation questions; #194–#197 own those bounded contracts and their
-host/resource coordination is explicit. This audit does not select the next
-implementation or alter the #157–#169 order.
+and sorted selector/conversion edge cases. Dictionary lookup is now a bounded
+semantic implementation. Library inspection, localization, and logger
+ownership are no longer open reconciliation questions; #195–#197 own those
+bounded contracts and their host/resource coordination is explicit. This
+audit does not select the next implementation or alter the #157–#169 order.
 
 For #156, the usable reconciliation input is:
 
 - pinned public surface: 162;
 - #151-owned inventory: 60;
 - cross-owned/excluded: 102;
-- #151 status counts: 43 SUPPORTED_SEMANTICS, 6 PARTIAL,
-  10 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
+- #151 status counts: 44 SUPPORTED_SEMANTICS, 6 PARTIAL,
+  9 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
   categories;
 - newly recovered omission: isnone as an explicit general predicate;
 - corrected prior omission: llmstxt is public, #155-owned, and excluded from
   #151 implementation;
-- corrected prior ownership/status: get is public but currently unsupported;
-  float is #154-owned; map/filter are extensions;
+- corrected prior ownership/status: get is public and now has bounded
+  `SUPPORTED_SEMANTICS` evidence; float is #154-owned; map/filter are
+  extensions;
 - completed implementation: #172, bounded Unicode string case/prefix semantics;
 - production behavior: the two audited string semantics are corrected and
   promoted at the bounded semantic boundary; broader output claims remain

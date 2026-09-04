@@ -456,6 +456,24 @@ the upstream `asDouble()` conversion to every element; invalid conversions
 contribute zero, and `.average` divides by the full input count (empty input
 therefore produces `NaN`). These results remain typed until an output boundary.
 
+### Dictionary lookup (Quarkdown v2.5.1 evidenced slice)
+
+`.get` looks up an exact String key in an existing ordered dictionary:
+
+```text
+.get {.table} {title} orelse:{fallback}
+.table::get {title}
+```
+
+The `dictionary` and `key` arguments are required. `orelse` is optional and
+remains a typed dynamic value: a present key returns the stored value, while a
+missing key returns the supplied fallback or `None` when the slot is omitted.
+Key matching is exact and does not lowercase, case-fold, normalize Unicode, or
+stringify structured values. Supplied arguments use the ordinary eager
+evaluation order, and chained calls use the existing prior-value injection.
+This is a bounded semantic evaluator/IR contract; it makes no renderer or
+output-equivalence claim.
+
 ### Scoped `.let` (Implemented slice)
 
 Block-form `.let` invokes a one-parameter lambda in a child scope. The value

@@ -51,7 +51,7 @@ surfaces.
 | #148 grammar/frontend | [`CALL_GRAMMAR_AUDIT.md`](CALL_GRAMMAR_AUDIT.md); `crates/arkst-markdown/tests/call_grammar_audit.rs` | 15 | 1 `PARTIAL`, 14 `PARSED_ONLY` | Recognition/provenance only; #165 owns shared structural binding, #149 owns target-driven conversion, and #150 owns evaluation. #157, #158, #163, and #164's bounded grammar/frontend slices are implemented; the remaining protected-context row retains its conservative status. |
 | #149 value/binding/conversion | [`VALUE_MODEL_AUDIT.md`](VALUE_MODEL_AUDIT.md) | 23 | 10 `SUPPORTED_SEMANTICS`, 12 `PARTIAL`, 1 `NOT_APPLICABLE` | Shared conversion and binding are engine-owned; consumers link back instead of adding local adapters. |
 | #150 programmable semantics | [`PROGRAMMABLE_SEMANTICS_AUDIT.md`](PROGRAMMABLE_SEMANTICS_AUDIT.md) | 16 | 14 `PARTIAL`, 1 `UNSUPPORTED`, 1 `NOT_APPLICABLE` | Callable, scope, order, failure, extension, and provenance semantics remain separate from syntax and content producers. |
-| #151 stdlib/general builtins | [`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md) and [`STDLIB_BUILTINS_AUDIT_MANIFEST.tsv`](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) | 162 | 43 `SUPPORTED_SEMANTICS`, 6 `PARTIAL`, 10 `UNSUPPORTED`, 1 `NOT_APPLICABLE` among 60 #151-owned rows; 102 explicit handoffs | The complete pinned declaration sweep is retained; cross-owned names are not silently omitted or reclassified. |
+| #151 stdlib/general builtins | [`STDLIB_BUILTINS_AUDIT.md`](STDLIB_BUILTINS_AUDIT.md) and [`STDLIB_BUILTINS_AUDIT_MANIFEST.tsv`](STDLIB_BUILTINS_AUDIT_MANIFEST.tsv) | 162 | 44 `SUPPORTED_SEMANTICS`, 6 `PARTIAL`, 9 `UNSUPPORTED`, 1 `NOT_APPLICABLE` among 60 #151-owned rows; 102 explicit handoffs | The complete pinned declaration sweep is retained; cross-owned names are not silently omitted or reclassified. |
 | #152 document metadata/state | [`DOCUMENT_STATE_AUDIT.md`](DOCUMENT_STATE_AUDIT.md) and [`DOCUMENT_STATE_AUDIT_MANIFEST.tsv`](DOCUMENT_STATE_AUDIT_MANIFEST.tsv) | 43 | 8 #152-owned `PARTIAL`; 35 `NOT_APPLICABLE` handoffs | #152 owns document metadata/state semantics; layout, content, resource, and localization rows retain their owners. |
 | #153 layout/configuration | [`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT.md) and [`LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv`](LAYOUT_DOCUMENT_CONFIGURATION_AUDIT_MANIFEST.tsv) | 47 | 19 #153-owned `PARSED_ONLY`, 1 #153-owned `PARTIAL`; 27 handoffs | Document-wide configuration is not promoted from component-local content or parser retention. |
 | #154 content/media/Markdown extensions | [`CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md`](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT.md) and [`CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv`](CONTENT_MEDIA_MARKDOWN_EXTENSIONS_AUDIT_MANIFEST.tsv) | 83 | 13 `SUPPORTED_END_TO_END`, 3 `SUPPORTED_SEMANTICS`, 1 `PARSED_ONLY`, 13 `PARTIAL`, 37 `UNSUPPORTED`, 2 `DEFERRED`, 1 `BLOCKED`, 1 `UNKNOWN` among 71 #154-owned rows; 12 handoffs | Ordinary Markdown, Quarkdown content producers, resources, and global configuration remain distinct layers. |
@@ -92,7 +92,7 @@ status recorded by its owner.
 | Dot-call grammar, separators, escaped delimiters, tight calls, and malformed recovery | #148; `PARTIAL` or `PARSED_ONLY` per row | #165 binding, #149 conversion, #150 evaluation, #154 content | Parser tests retain spans; #159's malformed-inline source recovery, #158's nested tight-call, #160's Markdown-content preservation, #162's escaped-delimiter correction, and #164's separator placement and lifecycle correction are implemented bounded slices. Parser recognition is never a semantic claim. |
 | Value taxonomy, origin-sensitive conversion, binding, and conversion diagnostics | #149 plus #165 for structural binding and #166 for the bounded target/raw-body slice; mostly `SUPPORTED_SEMANTICS` or `PARTIAL` per row | #150, #152, #153, #154, #155 | Current typed engine paths and bounded source-backed conversion consumers are evidenced; broader target coverage, diagnostics, and atomicity gaps remain. |
 | Variables, callable scope, lazy evaluation, iteration, optionality, extension, failure, and evaluator provenance | #150; `PARTIAL` except `.node` | #151 builtin declarations; #154 content results | Current bounded callable and `.extend`/`.super` paths are tested. #169 covers source-defined and regular scalar-native targets through the shared evaluator and canonical binder/conversion path, including stable scope-local extension-link identity, replacement retirement, and lifetime; specialized native owners, renderer output, and upstream partial-effects parity remain gaps. |
-| General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` are now `SUPPORTED_SEMANTICS` at the bounded scalar boundary after #172; `.get` is #194-owned, library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
+| General stdlib declaration set and bounded scalar/numeric/collection functions | #151; exact per-name status in the 162-row manifest | #149 value boundary; #150 callback flow; #152–#155 consumers | The 162-name pinned sweep is complete. `.capitalize`/`.startswith` are `SUPPORTED_SEMANTICS` at the bounded scalar boundary after #172, and `.get` is now `SUPPORTED_SEMANTICS` through the #194 evaluator-native typed lookup. Library inspection is #195-owned, localization is #196-owned, and `.log`/`.debug`/`.error` are #197-owned `UNSUPPORTED` contracts. |
 | `.docname`, `.docdescription`, `.doctype`, `.docauthor`, `.docauthors`, `.dockeywords`, `.doclang`, `.theme` | #152; all eight `PARTIAL` | #149 conversion; #153 layout; #154 output; #173 locale closure | Evaluator/IR state and independent fixtures exist. #166 covers bounded source-backed body conversion without parsed-body evaluation; rendering, complete locale coverage, and broader metadata remain gaps. |
 | `.captionposition` | #153; `PARTIAL` | #152 state snapshot; #154 caption-producing content | Typed evaluator/IR merge, serde, and bounded raw block-body conversion evidence exists; caption rendering and broader target coverage remain open. |
 | Remaining document-wide layout/configuration (`.numbering`, `.pageformat`, `.font`, page counters, navigation, `.slides`, and related rows) | #153; 19 `PARSED_ONLY` rows | #154 component/content consumers; #175–#178 | Parser/retention evidence does not establish state, IR, or output support. Follow-up ownership remains grouped by contract. |
@@ -117,7 +117,7 @@ All upstream evidence used for a current claim is pinned to
 records the permitted public documentation, declarations, and black-box
 evidence. No Quarkdown source, test, or fixture was copied or translated.
 
-The independent corpus currently contains 18 cases:
+The independent corpus currently contains 19 cases:
 
 - parser/provenance: `call-dot-prefixed-basic`, `call-positional-basic`, and
   `call-indented-body-basic`;
@@ -127,7 +127,8 @@ The independent corpus currently contains 18 cases:
 - evaluator/value semantics: `dynamic-value-scalar-family`,
   `numeric-arithmetic-family`, `numeric-decimal-family`,
   `numeric-transcendental-family`, `optionality-callback-family`,
-  `plaintext-family`, `string-scalar-family`, and `br-line-break-family`.
+  `plaintext-family`, `string-scalar-family`, `br-line-break-family`, and
+  `dictionary-get-family`.
 
 The corpus is intentionally bounded and is not a claim that every manifest
 row has an executable fixture. `Parsed` cases establish parser-level evidence;
@@ -159,7 +160,7 @@ semantic or output compatibility.
 
 | Gap class | Current ownership |
 |---|---|
-| `PRODUCTION_GAP` | #165–#167, #169, #173–#185, #188, #189, and #194–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. |
+| `PRODUCTION_GAP` | #165–#167, #169, #173–#185, #188, #189, and #195–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
 | `BACKEND_GAP` | #201 parity evidence and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
@@ -189,7 +190,7 @@ numbers are not inferred from a numeric sequence.
 | [#183](https://github.com/luceat-lux-vestra/arkst/issues/183) | #154 / table producers | Table generation/computation and output. Depends on #181 shared identifiers/captions, #165–#167 conversion, and #189 for CSV/data-file input where applicable. | After shared content and data-file prerequisites. |
 | [#184](https://github.com/luceat-lux-vestra/arkst/issues/184) | #154 / component and slide content | Component-local content, containers, slide content, plus `.keybinding` and `.loremipsum` content-producer review; no generalized style framework. Depends on #178 for slide configuration and #175 only for document-wide policy. | After layout/content prerequisites. |
 | [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) | #154 / math, code, and explicit breaks | Math/code/break producers and output. Depends on #180 and #181 plus shared conversion/raw-body contracts. | After macro/shared-content prerequisites. |
-| [#194](https://github.com/luceat-lux-vestra/arkst/issues/194) | #151 / dictionary lookup | `.get` lookup, key conversion, missing-key/`orelse` behavior, typed nested values, diagnostics, and atomicity. Depends on #165–#167; it does not duplicate dictionary construction. | After #187; parallel stdlib family band after shared engine prerequisites. |
+| [#194](https://github.com/luceat-lux-vestra/arkst/issues/194) | #151 / dictionary lookup | Implemented bounded `.get` lookup, key conversion, missing-key/`orelse` behavior, typed nested values, diagnostics, and atomicity. Uses #165–#167 and does not duplicate dictionary construction. No renderer/output-equivalence claim is made. | Bounded semantic slice complete; broader output evidence remains out of scope. |
 | [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) | #151 / library/runtime inspection | `.libexists`, `.functionexists`, `.libraries`, and `.libfunctions` under one deterministic registry view. Depends on #165–#167 and coordinates capability/resource policy with #188/#190; no plugin registry. | After shared engine and #187 strategy; capability/resource coordination band. |
 | [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) | #151 / localization table and lookup | `.localization` mutation and `.localize` lookup, including seeded `std`, merge/replace, separators, typed values, diagnostics, and atomicity. Depends on #165–#167 and coordinates with #173 without moving `.doclang`. | After #187; parallel stdlib/state band after shared engine prerequisites. |
 | [#197](https://github.com/luceat-lux-vestra/arkst/issues/197) | #151 / logger and diagnostic builtins | `.log`, `.debug`, and `.error` severity/return behavior through an explicit sink/capability or deterministic rejection. Depends on #165–#167 and #190; no implicit process streams. | After shared engine and #187/#190 host-boundary decisions; semantic work can be parallel. |
@@ -386,7 +387,7 @@ The reconciliation supplies evidence for each parent completion criterion:
 - supported claims are tied to the appropriate frontend, evaluator, IR,
   backend/output, fixture, or platform evidence layer;
 - every actionable partial/unsupported/unknown resource and implementation gap
-  points to the listed bounded follow-ups (including #194–#199), an explicit
+  points to the listed bounded follow-ups (including #195–#199), an explicit
   product/backend defer, or an explicit blocker;
 - historical trackers are retained without being mistaken for current
   compatibility proof;
