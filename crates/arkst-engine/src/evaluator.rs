@@ -4745,7 +4745,18 @@ impl Evaluator {
                 ));
                 return CallOutcome::Failed;
             };
-            let Some(value) = entries.get(localization_key) else {
+            // Quarkdown v2.5.1's `BaseContext.localize()` performs
+            // `entries[key.lowercase()] ?: entries[key]`: the lowercase form
+            // of the key is tried first, and only the original key is tried
+            // if that lookup misses. This is not general case-insensitive
+            // lookup: the table name and locale tag above remain exact, and
+            // when both the lowercase and original keys exist and differ,
+            // the lowercase-key entry wins.
+            let localization_key_lowercase = builtins::canonical_lowercase(localization_key);
+            let value = entries
+                .get(localization_key_lowercase.as_str())
+                .or_else(|| entries.get(localization_key));
+            let Some(value) = value else {
                 diagnostics.push(localization_error(
                     format!(
                         "Could not find localization key `{localization_key}` in table `{table_name}` for locale {}",
@@ -15879,6 +15890,48 @@ mod tests {
         );
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("entry keys"));
+    }
+
+    /// `crate::locale::resolve` mirrors JVM `Locale.forLanguageTag`, which
+    /// never fails: any syntactically-typed String is accepted, falling back
+    /// to the `und` (undetermined) tag for unparsable content (verified
+    /// independently against `resolve("42")`, `resolve("e")`,
+    /// `resolve("!!!")`, and other adversarial strings, all of which return
+    /// `Some(..)`). So the only reachable "invalid locale" failure in
+    /// `.localization` is a locale key that isn't a typed String at all, not
+    /// a malformed identifier string -- exercised here with deterministic
+    /// code/message/span assertions.
+    #[test]
+    fn localization_rejects_non_string_locale_keys_with_a_source_backed_diagnostic() {
+        let non_string_locale = IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::Boolean(true)),
+                second: Box::new(IrValue::Dictionary(IrDictionary {
+                    entries: vec![IrPair {
+                        first: Box::new(IrValue::String("key".to_string())),
+                        second: Box::new(IrValue::String("value".to_string())),
+                        span: span(12, 20),
+                    }],
+                    span: span(10, 20),
+                })),
+                span: span(5, 20),
+            }],
+            span: span(0, 20),
+        };
+        let mut diagnostics = Vec::new();
+        assert!(validate_localization_dictionary(
+            &non_string_locale,
+            span(0, 20),
+            &mut diagnostics
+        )
+        .is_err());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3001");
+        assert_eq!(
+            diagnostics[0].message,
+            "`.localization` locale keys must remain typed strings"
+        );
+        assert_eq!(diagnostics[0].primary, Some(span(5, 20)));
     }
 
     fn lambda_parameter(name: &str, start: usize) -> IrParameter {

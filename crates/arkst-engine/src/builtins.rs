@@ -869,6 +869,24 @@ fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
     Some(result)
 }
 
+/// Kotlin/JVM's locale-invariant `String.lowercase()` (`toLowerCase(Locale.ROOT)`),
+/// applied through the pinned per-scalar full-lowercase mapping table. For
+/// example U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE) expands to the two
+/// scalars U+0069 U+0307, not the single ASCII `i` a byte-wise lowering would
+/// produce. Context-sensitive `SpecialCasing.txt` rules (for example Greek
+/// final sigma) are not modeled: the pinned oracle data is captured per
+/// character, not per string.
+pub(crate) fn canonical_lowercase(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for character in text.chars() {
+        match unicode_mapping_to_string(&unicode_full_lowercase(character)) {
+            Some(mapping) if !mapping.is_empty() => result.push_str(&mapping),
+            _ => result.push(character),
+        }
+    }
+    result
+}
+
 fn evaluate_plaintext(
     _builtin: &BuiltinSpec,
     mut arguments: BoundArguments,
