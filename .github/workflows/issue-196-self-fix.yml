@@ -1,0 +1,66 @@
+name: Temporary issue 196 self-fix
+
+on:
+  push:
+    branches: [compat/196-localization-semantics]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-196-self-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: compat/196-localization-semantics
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download exact pinned Temurin 25
+        id: jdk
+        shell: bash
+        run: |
+          readarray -t values < <(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          with Path('docs/compatibility/quarkdown/reference-jvm.toml').open('rb') as stream:
+              reference = tomllib.load(stream)['reference']
+          print(reference['archive_filename'])
+          print(reference['archive_url'])
+          print(reference['archive_sha256'])
+          PY
+          )
+          archive="$RUNNER_TEMP/${values[0]}"
+          curl --fail --location --retry 3 --output "$archive" "${values[1]}"
+          printf '%s  %s\n' "${values[2]}" "$archive" | sha256sum --check --strict
+          extract_root="$RUNNER_TEMP/temurin25"
+          mkdir -p "$extract_root"
+          tar --extract --gzip --file "$archive" --directory "$extract_root"
+          java="$(find "$extract_root" -path '*/bin/java' -print -quit)"
+          test -x "$java"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'java=%s\n' "$java" >> "$GITHUB_OUTPUT"
+
+      - name: Apply and verify exact localization fix
+        env:
+          REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
+          REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
+        run: |
+          python3 tools/self_fix_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
+
+      - name: Commit final corrected branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/issue-196-self-fix.yml tools/self_fix_196.py
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(stdlib): preserve pinned JVM word boundaries in localization'
+          git push origin HEAD:compat/196-localization-semantics
