@@ -1,0 +1,62 @@
++ /usr/bin/python3 tools/generate_jdk25_unicode_case.py --java /home/runner/work/_temp/temurin25/jdk-25.0.4.1+1/bin/java --archive /home/runner/work/_temp/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz --check
+reference_jvm=25.0.4.1+1-LTS
+archive_bytes=141329719
+archive_sha256=dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e
+unicode_version=16.0.0
+oracle_output_sha256=f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d
+scalar_mapping_records=2933
+utf16_char_records=65536
+oracle_records=68469
+simple_titlecase_records=1149
+full_uppercase_records=1270
+full_lowercase_records=1178
+cased_records=4578
+generated_source_bytes=151899
+generated_source_sha256=99795d070b84ca6e71ecc3d497cd87cdafa9b374537f83389dd25f386a6fa2fe
++ /usr/bin/python3 tools/generate_word_break_jdk25.py --java /home/runner/work/_temp/temurin25/jdk-25.0.4.1+1/bin/java --archive /home/runner/work/_temp/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz --check
+word_break_oracle_output_sha256=b59f957c6be01cf1af7134228b740dd61503c835124be1378a5a88d277f34af1
+word_break_generated_source_bytes=58203
+word_break_generated_source_sha256=96640a2ed979f17e58f03c0d2341e862aa818b8957a5c0692e2608c42e6051a4
+word_break_num_categories=22
+word_break_num_states=20
+word_break_category_range_count=2246
++ /usr/bin/python3 tools/verify_jdk25_unicode.py --java /home/runner/work/_temp/temurin25/jdk-25.0.4.1+1/bin/java --archive /home/runner/work/_temp/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz
+reference_jvm=25.0.4.1+1-LTS
+archive_bytes=141329719
+archive_sha256=dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e
+unicode_version=16.0.0
+oracle_output_sha256=f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d
+scalar_mapping_records=2933
+utf16_char_records=65536
+oracle_records=68469
+simple_titlecase_records=1149
+full_uppercase_records=1270
+full_lowercase_records=1178
+cased_records=4578
+generated_source_bytes=151899
+generated_source_sha256=99795d070b84ca6e71ecc3d497cd87cdafa9b374537f83389dd25f386a6fa2fe
+word_break_oracle_output_sha256=b59f957c6be01cf1af7134228b740dd61503c835124be1378a5a88d277f34af1
+word_break_generated_source_bytes=58203
+word_break_generated_source_sha256=96640a2ed979f17e58f03c0d2341e862aa818b8957a5c0692e2608c42e6051a4
+word_break_num_categories=22
+word_break_num_states=20
+word_break_category_range_count=2246
+Traceback (most recent call last):
+  File "/home/runner/work/arkst/arkst/tools/verify_jdk25_unicode.py", line 155, in <module>
+    main()
+  File "/home/runner/work/arkst/arkst/tools/verify_jdk25_unicode.py", line 127, in main
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['cargo', 'test', '-p', 'arkst-engine', '--locked', 'builtins::tests::jdk25_oracle_matches_all_generated_case_mappings', '--', '--exact']' returned non-zero exit status 101.
+Traceback (most recent call last):
+  File "/home/runner/work/arkst/arkst/tools/cleanup_196.py", line 229, in <module>
+    main()
+  File "/home/runner/work/arkst/arkst/tools/cleanup_196.py", line 216, in main
+    run(sys.executable, "tools/verify_jdk25_unicode.py", "--java", str(args.java), "--archive", str(args.archive))
+  File "/home/runner/work/arkst/arkst/tools/cleanup_196.py", line 62, in run
+    subprocess.run(args, cwd=ROOT, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '('/usr/bin/python3', 'tools/verify_jdk25_unicode.py', '--java', '/home/runner/work/_temp/temurin25/jdk-25.0.4.1+1/bin/java', '--archive', '/home/runner/work/_temp/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz')' returned non-zero exit status 1.
