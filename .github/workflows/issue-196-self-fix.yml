@@ -105,12 +105,34 @@ jobs:
           fi
 
       - name: Commit final corrected branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/issue-196-self-fix.yml tools/self_fix_196.py
-          git add -A
-          git diff --cached --check
-          git commit -m 'fix(stdlib): preserve pinned JVM word boundaries in localization'
-          git push origin HEAD:compat/196-localization-semantics
+          set +e
+          (
+            set -ex
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git rm .github/workflows/issue-196-self-fix.yml tools/self_fix_196.py
+            git add -A
+            git status --short
+            git diff --cached --check
+            git commit -m 'fix(stdlib): preserve pinned JVM word boundaries in localization'
+            git push origin HEAD:compat/196-localization-semantics
+          ) > /tmp/commit-push.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/commit-push.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo 'Temporary final commit/push diagnostic (will be deleted after repair):'
+              echo
+              echo '```text'
+              tail -c 50000 /tmp/commit-push.log
+              echo
+              echo '```'
+            } > /tmp/comment.md
+            gh api "repos/$GITHUB_REPOSITORY/issues/269/comments" -F body=@/tmp/comment.md
+            exit "$status"
+          fi
