@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: issue-196-self-fix
@@ -51,8 +53,12 @@ jobs:
         env:
           REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
           REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
+          set +e
+          (
+            set -e
+            python3 - <<'PY'
           from pathlib import Path
           path = Path('tools/self_fix_196.py')
           source = path.read_text(encoding='utf-8')
@@ -62,8 +68,24 @@ jobs:
           source = source[:end] + source[end:].replace("\n'''\n\n\ndef main() -> None:", '\n"""\n\n\ndef main() -> None:', 1)
           path.write_text(source, encoding='utf-8')
           PY
-          python3 -m py_compile tools/self_fix_196.py
-          python3 tools/self_fix_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
+            python3 -m py_compile tools/self_fix_196.py
+            python3 tools/self_fix_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
+          ) > /tmp/self-fix.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/self-fix.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo 'Temporary self-fix diagnostic (will be deleted after repair):'
+              echo
+              echo '```text'
+              tail -c 50000 /tmp/self-fix.log
+              echo
+              echo '```'
+            } > /tmp/comment.md
+            gh api "repos/$GITHUB_REPOSITORY/issues/269/comments" -F body=@/tmp/comment.md
+            exit "$status"
+          fi
 
       - name: Commit final corrected branch
         shell: bash
