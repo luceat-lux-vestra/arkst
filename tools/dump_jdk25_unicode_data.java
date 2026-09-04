@@ -59,6 +59,43 @@ final class DumpJdk25UnicodeData {
                     encode(lowercase),
                     encode(titlecase)));
         }
+
+        // ConditionalSpecialCasing's Final_Cased rule needs the Unicode
+        // Cased property while lowering a complete string. Character's
+        // public predicates expose the same derived property used by the
+        // pinned JDK implementation: Uppercase, Lowercase, or Titlecase.
+        for (int codePoint = Character.MIN_CODE_POINT;
+                codePoint <= Character.MAX_CODE_POINT;
+                codePoint++) {
+            if (isCased(codePoint)) {
+                System.out.println(String.join("\t", "CASED", hex(codePoint)));
+            }
+        }
+
+        // The pinned JDK's Final_Cased implementation also consults its
+        // locale-root word-boundary iterator. Capture the scalar contexts
+        // that can occur between the cased letter before, and the sigma at,
+        // a word's final position. This is an oracle observation of the
+        // public String.lowercase contract, not runtime JDK code.
+        for (int codePoint = Character.MIN_CODE_POINT;
+                codePoint <= Character.MAX_CODE_POINT;
+                codePoint++) {
+            if (!isCased(codePoint) && isFinalSigmaContext(codePoint)) {
+                System.out.println(String.join("\t", "FINAL_SIGMA", hex(codePoint)));
+            }
+        }
+    }
+
+    private static boolean isCased(int codePoint) {
+        return Character.isLowerCase(codePoint)
+                || Character.isUpperCase(codePoint)
+                || Character.isTitleCase(codePoint);
+    }
+
+    private static boolean isFinalSigmaContext(int codePoint) {
+        String input = "Ο" + new String(Character.toChars(codePoint)) + "Σ";
+        String lowercase = input.toLowerCase(Locale.ROOT);
+        return lowercase.codePointBefore(lowercase.length()) == 0x03C2;
     }
 
     private static void dumpCorpus() throws IOException {
@@ -78,6 +115,10 @@ final class DumpJdk25UnicodeData {
                     case "START" -> {
                         require(fields, 3);
                         System.out.println("START\t" + regionMatches(fields[1], fields[2]));
+                    }
+                    case "LOWER" -> {
+                        require(fields, 2);
+                        System.out.println("LOWER\t" + encode(fields[1].toLowerCase(Locale.ROOT)));
                     }
                     default -> throw new IllegalArgumentException(
                             "unknown corpus operation: " + fields[0]);

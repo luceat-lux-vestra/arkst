@@ -6,6 +6,7 @@ use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
 use crate::unicode_case::{
     full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
+    is_cased as unicode_is_cased, is_final_sigma_context as unicode_is_final_sigma_context,
     simple_lowercase as unicode_simple_lowercase,
     simple_titlecase_mapping as unicode_simple_titlecase_mapping,
     simple_uppercase as unicode_simple_uppercase, UNICODE_VERSION,
@@ -36,7 +37,7 @@ const PINNED_JVM_ARCHIVE_SHA256: &str =
     "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e";
 #[cfg(test)]
 const PINNED_ORACLE_OUTPUT_SHA256: &str =
-    "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862";
+    "df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9";
 const _: () = {
     assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
     assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
@@ -869,22 +870,60 @@ fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
     Some(result)
 }
 
-/// Kotlin/JVM's locale-invariant `String.lowercase()` (`toLowerCase(Locale.ROOT)`),
-/// applied through the pinned per-scalar full-lowercase mapping table. For
-/// example U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE) expands to the two
-/// scalars U+0069 U+0307, not the single ASCII `i` a byte-wise lowering would
-/// produce. Context-sensitive `SpecialCasing.txt` rules (for example Greek
-/// final sigma) are not modeled: the pinned oracle data is captured per
-/// character, not per string.
+/// Kotlin/JVM's locale-invariant `String.lowercase()` (`toLowerCase(Locale.ROOT)`).
+/// The unconditional mappings come from the pinned full-lowercase table; the
+/// contextual Greek final-sigma rule is evaluated over the complete input
+/// string using the generated pinned `Cased` property. For example U+0130
+/// (LATIN CAPITAL LETTER I WITH DOT ABOVE) expands to U+0069 U+0307, while
+/// U+03A3 becomes U+03C2 only when it is final after a cased character.
 pub(crate) fn canonical_lowercase(text: &str) -> String {
+    let characters: Vec<_> = text.chars().collect();
     let mut result = String::with_capacity(text.len());
-    for character in text.chars() {
+    for (index, &character) in characters.iter().enumerate() {
+        if character == '\u{03A3}' && is_final_sigma(&characters, index) {
+            result.push('\u{03C2}');
+            continue;
+        }
         match unicode_mapping_to_string(&unicode_full_lowercase(character)) {
             Some(mapping) if !mapping.is_empty() => result.push_str(&mapping),
             _ => result.push(character),
         }
     }
     result
+}
+
+/// Implements the invariant-locale `Final_Sigma` condition used by the
+/// pinned JVM string lowercasing path. The generated `Cased` property is
+/// consulted on both sides of the sigma, so the result depends on the whole
+/// string rather than independently lowering each scalar.
+fn is_final_sigma(characters: &[char], index: usize) -> bool {
+    let mut cursor = index;
+    let has_cased_before = loop {
+        let Some(next) = cursor.checked_sub(1) else {
+            break false;
+        };
+        cursor = next;
+        let character = characters[cursor];
+        if unicode_is_cased(character) {
+            break true;
+        }
+        if !unicode_is_final_sigma_context(character) {
+            break false;
+        }
+    };
+    if !has_cased_before {
+        return false;
+    }
+
+    for &character in &characters[index + 1..] {
+        if unicode_is_cased(character) {
+            return false;
+        }
+        if !unicode_is_final_sigma_context(character) {
+            break;
+        }
+    }
+    true
 }
 
 fn evaluate_plaintext(
@@ -1515,18 +1554,18 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        deterministic_transcendental, evaluate, evaluate_with_origins, lookup, regular_builtins,
-        simple_lowercase as unicode_simple_lowercase, simple_uppercase as unicode_simple_uppercase,
-        unicode_titlecase, BuiltinBodyPolicy, PINNED_JVM_ARCHIVE_SHA256,
-        PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION, PINNED_JVM_VENDOR_VERSION,
-        PINNED_JVM_VERSION, PINNED_ORACLE_OUTPUT_SHA256,
+        canonical_lowercase, deterministic_transcendental, evaluate, evaluate_with_origins, lookup,
+        regular_builtins, simple_lowercase as unicode_simple_lowercase,
+        simple_uppercase as unicode_simple_uppercase, unicode_titlecase, BuiltinBodyPolicy,
+        PINNED_JVM_ARCHIVE_SHA256, PINNED_JVM_RUNTIME_VERSION, PINNED_JVM_UNICODE_VERSION,
+        PINNED_JVM_VENDOR_VERSION, PINNED_JVM_VERSION, PINNED_ORACLE_OUTPUT_SHA256,
     };
     use crate::unicode_case::{
         full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
-        simple_titlecase_mapping as unicode_simple_titlecase_mapping, ORACLE_OUTPUT_SHA256,
-        REFERENCE_JVM_ARCHIVE_SHA256, REFERENCE_JVM_RUNTIME_VERSION, REFERENCE_JVM_VENDOR_VERSION,
-        REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT, UNICODE_VERSION,
-        UTF16_CHAR_RECORD_COUNT,
+        simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,
+        FINAL_SIGMA_CONTEXT_RECORD_COUNT, ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256,
+        REFERENCE_JVM_RUNTIME_VERSION, REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION,
+        SCALAR_MAPPING_RECORD_COUNT, UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,
     };
     use crate::value_conversion::InvocationValue;
     use arkst_ir::{
@@ -2715,6 +2754,8 @@ mod tests {
         let maps = std::fs::read_to_string(path).expect("read transient JDK25 mapping oracle");
         let mut scalar_count = 0;
         let mut char_count = 0;
+        let mut cased_count = 0;
+        let mut final_sigma_context_count = 0;
         let mut bmp_capitalize_count = 0;
         for line in maps.lines() {
             let fields: Vec<_> = line.split('\t').collect();
@@ -2804,12 +2845,30 @@ mod tests {
                     bmp_capitalize_count += 1;
                     char_count += 1;
                 }
+                Some("CASED") => {
+                    assert_eq!(fields.len(), 2, "malformed CASED oracle row: {line}");
+                    let codepoint = oracle_codepoint(fields[1]);
+                    let character =
+                        char::from_u32(codepoint).expect("CASED oracle input is a Unicode scalar");
+                    assert!(crate::unicode_case::is_cased(character));
+                    cased_count += 1;
+                }
+                Some("FINAL_SIGMA") => {
+                    assert_eq!(fields.len(), 2, "malformed FINAL_SIGMA row: {line}");
+                    let codepoint = oracle_codepoint(fields[1]);
+                    let character = char::from_u32(codepoint)
+                        .expect("FINAL_SIGMA oracle input is a Unicode scalar");
+                    assert!(crate::unicode_case::is_final_sigma_context(character));
+                    final_sigma_context_count += 1;
+                }
                 Some(kind) => panic!("unknown JDK25 oracle row type {kind}"),
                 None => panic!("empty JDK25 oracle row"),
             }
         }
         assert_eq!(scalar_count, SCALAR_MAPPING_RECORD_COUNT);
         assert_eq!(char_count, UTF16_CHAR_RECORD_COUNT);
+        assert_eq!(cased_count, CASED_RECORD_COUNT);
+        assert_eq!(final_sigma_context_count, FINAL_SIGMA_CONTEXT_RECORD_COUNT);
         assert_eq!(bmp_capitalize_count, 63488);
     }
 
@@ -2871,6 +2930,16 @@ mod tests {
                         actual, expected,
                         "startswith({:?}, {:?})",
                         fields[1], fields[2]
+                    );
+                }
+                Some("LOWER") => {
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(result_fields.len(), 2);
+                    assert_eq!(
+                        canonical_lowercase(fields[1]),
+                        decode_oracle_string(result_fields[1]),
+                        "lowercase({:?})",
+                        fields[1]
                     );
                 }
                 Some(kind) => panic!("unknown corpus operation {kind}"),

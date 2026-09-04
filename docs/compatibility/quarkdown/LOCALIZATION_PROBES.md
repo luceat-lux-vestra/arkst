@@ -38,19 +38,35 @@ without fetching anything upstream.
 
 ## Method
 
-The `quarkdown-linux-x64.zip` archive bundles an x86_64 JRE, which does not
-run on this document's aarch64 review host. Its launcher script
-(`bin/quarkdown`) falls back to the system `JAVA_HOME`/`java` on `PATH` when
-no bundled runtime is present at `<install>/runtime`, so the bundled
-`runtime/` directory was moved aside and a local Temurin-unrelated OpenJDK 21
-(`java -version` → `openjdk version "21.0.12" 2026-07-21`) was used instead.
-This is **not** the pinned Temurin 25 reference used for the generated
-Unicode/locale tables — it is a separate, ordinary JVM used only to execute
-Quarkdown's own JAR and observe its behavior, which is not JDK-version
-sensitive for any of the probes below (no Unicode case mapping or locale
-provider comparison is being made here). `quarkdown --version` reported
-`quarkdown version 2.5.1`, confirming the extracted JAR matches the release
-tag.
+The `quarkdown-linux-x64.zip` archive and the pinned Linux x64 Temurin archive
+were executed together inside a `linux/amd64` container because this review
+host is aarch64. The bundled Quarkdown `runtime/` directory was moved aside so
+the launcher used the exact pinned JDK below. `quarkdown --version` reported
+`quarkdown version 2.5.1`.
+
+The casing-sensitive probes in this document therefore use the exact pinned
+runtime, not an ordinary host JDK:
+
+- Quarkdown archive: `quarkdown-linux-x64.zip`, SHA-256
+  `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`.
+- JVM archive: `OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz`, SHA-256
+  `dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e`.
+- Runtime: Eclipse Temurin `25.0.4.1+1-LTS`, vendor
+  `Temurin-25.0.4.1+1`, Java version date `2026-08-18`, CLDR provider.
+- Exact command used inside the container for each probe:
+
+  ```sh
+  JAVA_HOME=/tmp/jdk/jdk-25.0.4.1+1 \
+  PATH=/tmp/jdk/jdk-25.0.4.1+1/bin:$PATH \
+  /tmp/quarkdown/quarkdown/bin/quarkdown \
+  compile --pipe --strict --allow=all /dev/stdin
+  ```
+
+The command was run with `docker run --platform linux/amd64` and the archive
+was extracted with the matching pinned JDK's `jar` tool. This matters for
+probe 1: `.localize` directly executes Kotlin/JVM `key.lowercase()`, including
+context-sensitive Unicode casing. The non-casing probes remain supplementary
+observations, but they were also rerun in this exact environment.
 
 Each probe is compiled with:
 
@@ -117,6 +133,39 @@ order.
 `"warning"` (misses), and the original requested key `warning` also misses
 `Warning`. **Not general case-insensitive lookup**: a case-different exact
 key does not satisfy the lookup.
+
+#### Contextual Greek final sigma
+
+The pinned JVM's whole-string invariant lowercase maps `ΟΣ` (U+039F U+03A3)
+to `ος` (U+03BF U+03C2), not `οσ` (U+03BF U+03C3), because the sigma is final
+after a cased letter:
+
+```
+.doclang {en}
+.localization {t}
+    - en
+      - ος: final
+.localize {t:ΟΣ}
+```
+→ observed stdout body: `<main><p>final</p></main>`.
+
+The same exact command produced observed stdout body
+`<main><p>contextual</p></main>` when both entries were present, proving the
+whole-string lowercase result wins before original-key fallback:
+
+```
+.doclang {en}
+.localization {t}
+    - en
+      - ος: contextual
+      - ΟΣ: original
+.localize {t:ΟΣ}
+```
+
+An entry containing only the context-insensitive `οσ` key (U+03BF U+03C3)
+failed with `LocalizationKeyNotFoundException`; it did not match the pinned
+lowercase result `ος` or the original `ΟΣ`. This negative case prevents an
+incorrect simple per-scalar sigma mapping from passing.
 
 ### 2. Custom separator, first-boundary split
 

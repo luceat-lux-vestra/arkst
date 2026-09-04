@@ -398,6 +398,43 @@ fn localize_key_lookup_tries_lowercase_before_original() {
 }
 
 #[test]
+fn localize_key_lookup_uses_contextual_greek_final_sigma() {
+    let final_sigma = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - ος: final
+.localize {ui:ΟΣ}
+"#,
+    );
+    assert!(final_sigma.diagnostics.is_empty(), "{final_sigma:?}");
+    assert_eq!(output_text(&final_sigma), "final");
+
+    let lowercase_wins = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - ος: contextual
+      - ΟΣ: original
+.localize {ui:ΟΣ}
+"#,
+    );
+    assert!(lowercase_wins.diagnostics.is_empty(), "{lowercase_wins:?}");
+    assert_eq!(output_text(&lowercase_wins), "contextual");
+
+    let incorrect_sigma = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - οσ: incorrect
+.localize {ui:ΟΣ}
+"#,
+    );
+    assert_eq!(incorrect_sigma.diagnostics.len(), 1, "{incorrect_sigma:?}");
+    assert!(output_text(&incorrect_sigma).is_empty());
+}
+
+#[test]
 fn localize_key_lookup_is_not_general_case_insensitive() {
     // Only "Warning" (not "warning") exists. `warning.lowercase()` == "warning"
     // misses, and the original requested key "warning" also misses "Warning" --

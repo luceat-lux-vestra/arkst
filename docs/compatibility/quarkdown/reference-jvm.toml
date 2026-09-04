@@ -70,9 +70,9 @@ java_version_output = [
 ]
 
 # SHA-256 of tools/dump_jdk25_unicode_data.java.
-helper_source_sha256 = "b0fb84655d5fb1416dac6df356ebe0ee84c450d319dfe2d805e14434e358fbac"
-oracle_output_sha256 = "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862"
-generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb520dbfb9211ad"
+helper_source_sha256 = "2b6459d6dfee9e2780c50e1734ac8302900bd9d601acae401b0af064c0ba568f"
+oracle_output_sha256 = "df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9"
+generated_source_sha256 = "0a27e755125cc7dcb9aa757fde0b0ef8bc46e3014a60c445931934e912d24f76"
 
 # Phase B JDK25 locale snapshot fingerprints. These fields describe the
 # generated locale artifacts, while the fields above remain the Phase A
@@ -110,19 +110,19 @@ locale_accepted_timezone_ids = 468
 # existing fields above remain the authoritative detailed JDK values.
 unicode_helper_path = "tools/dump_jdk25_unicode_data.java"
 unicode_generator_path = "tools/generate_jdk25_unicode_case.py"
-unicode_generator_source_sha256 = "1074fa498101d643fa7e7e7b02623f172b3b6c2fdce13d7d8799ed0a36eeac6f"
+unicode_generator_source_sha256 = "7c872bc872c4db6141b2d40e5ded0e75dcd06b129ef7cf278f37ed4f42daaa08"
 unicode_verifier_path = "tools/verify_jdk25_unicode.py"
 unicode_verifier_source_sha256 = "3dab2fcd82bf413998efb2b64d56f7239338db4170658ad16f30517ae64d3a5a"
 unicode_corpus_path = "tools/jdk25_unicode_corpus.tsv"
-unicode_corpus_bytes = 361
-unicode_corpus_min_bytes = 361
-unicode_corpus_max_bytes = 361
-unicode_corpus_record_count = 23
-unicode_corpus_sha256 = "4c8c30aa62cfcca25c0130eb646cab984a3f0b3de47323d4e017f6a5a40164f2"
+unicode_corpus_bytes = 444
+unicode_corpus_min_bytes = 444
+unicode_corpus_max_bytes = 444
+unicode_corpus_record_count = 30
+unicode_corpus_sha256 = "06afe4d9162eae5d19068eb5a9a9405ccf7fa10214baf0a72702b795258a4af7"
 unicode_generated_source_path = "crates/arkst-engine/src/unicode_case.rs"
-unicode_generated_source_bytes = 148058
-unicode_generated_source_min_bytes = 148058
-unicode_generated_source_max_bytes = 148058
+unicode_generated_source_bytes = 159815
+unicode_generated_source_min_bytes = 159815
+unicode_generated_source_max_bytes = 159815
 unicode_generated_source_record_count = 68469
 unicode_scalar_mapping_record_count = 2933
 unicode_utf16_char_record_count = 65536
