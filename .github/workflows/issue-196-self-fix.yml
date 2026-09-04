@@ -52,6 +52,17 @@ jobs:
           REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
           REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/self_fix_196.py')
+          source = path.read_text(encoding='utf-8')
+          start = source.index("    return f'''//! Locale.ROOT word-break DFA")
+          source = source[:start] + source[start:].replace("    return f'''//! Locale.ROOT word-break DFA", '    return f"""//! Locale.ROOT word-break DFA', 1)
+          end = source.index("\n'''\n\n\ndef main() -> None:", start)
+          source = source[:end] + source[end:].replace("\n'''\n\n\ndef main() -> None:", '\n"""\n\n\ndef main() -> None:', 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+          python3 -m py_compile tools/self_fix_196.py
           python3 tools/self_fix_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
 
       - name: Commit final corrected branch
