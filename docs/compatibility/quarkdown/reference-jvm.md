@@ -50,7 +50,11 @@ APIs and captures:
   `.startswith(ignorecase:true)`; and
 - `Character.isLowerCase`, `Character.isUpperCase`, and
   `Character.isTitleCase`, which provide the pinned `Cased` property used by
-  invariant-locale contextual final-sigma lowering.
+  invariant-locale contextual final-sigma lowering; and
+- the exact `Locale.ROOT` `RuleBasedBreakIterator` forward DFA/category mapping
+  used by JDK `ConditionalSpecialCasing.isFinalCased`, captured into a separate
+  generated `word_break.rs` so sequence-sensitive word boundaries do not depend
+  on a host JVM or locale at runtime.
 
 The helper is independently authored and is not runtime code. The transient
 oracle output is not checked in. The checked-in generated Rust table is
@@ -60,8 +64,10 @@ The helper SHA-256 is
 `2b6459d6dfee9e2780c50e1734ac8302900bd9d601acae401b0af064c0ba568f`, and the
 complete oracle output SHA-256 is
 `df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9`.
-The generated data contains `2933` non-identity scalar rows and all `65536`
-UTF-16 code-unit rows.
+The generated case data contains `2933` non-identity scalar rows and all
+`65536` UTF-16 code-unit rows. Final-sigma word segmentation is separately
+generated from the same pinned runtime's root word-break DFA; the Reference JVM
+check regenerates both artifacts byte-for-byte.
 
 Compared with the former JDK 17/Unicode 13 baseline, the direct Temurin
 comparison found `134` newly non-identity scalar rows and `20` changed BMP

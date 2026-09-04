@@ -167,6 +167,13 @@ failed with `LocalizationKeyNotFoundException`; it did not match the pinned
 lowercase result `ος` or the original `ΟΣ`. This negative case prevents an
 incorrect simple per-scalar sigma mapping from passing.
 
+The repository's pinned Temurin differential additionally gates sequence-sensitive
+word boundaries that a one-character sigma probe cannot prove. In particular,
+`ΟΣ'Α` lowercases with ordinary sigma while `ΟΣ''Α` lowercases with final sigma;
+the Reference JVM corpus checks both forms (and the analogous single/repeated
+period forms) against the exact Temurin 25 runtime before `.localize` can rely on
+the generated word-break DFA.
+
 ### 2. Custom separator, first-boundary split
 
 ```

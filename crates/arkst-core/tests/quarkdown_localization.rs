@@ -435,6 +435,51 @@ fn localize_key_lookup_uses_contextual_greek_final_sigma() {
 }
 
 #[test]
+fn localize_key_lookup_preserves_sequence_sensitive_jvm_word_boundaries() {
+    let single_apostrophe = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - οσ'α: ordinary
+.localize {ui:ΟΣ'Α}
+"#,
+    );
+    assert!(
+        single_apostrophe.diagnostics.is_empty(),
+        "{single_apostrophe:?}"
+    );
+    assert_eq!(output_text(&single_apostrophe), "ordinary");
+
+    let repeated_apostrophe = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - ος''α: final
+.localize {ui:ΟΣ''Α}
+"#,
+    );
+    assert!(
+        repeated_apostrophe.diagnostics.is_empty(),
+        "{repeated_apostrophe:?}"
+    );
+    assert_eq!(output_text(&repeated_apostrophe), "final");
+
+    let repeated_period = compile_source(
+        r#".doclang {en}
+.localization {ui}
+    - en
+      - ος..α: final
+.localize {ui:ΟΣ..Α}
+"#,
+    );
+    assert!(
+        repeated_period.diagnostics.is_empty(),
+        "{repeated_period:?}"
+    );
+    assert_eq!(output_text(&repeated_period), "final");
+}
+
+#[test]
 fn localize_key_lookup_is_not_general_case_insensitive() {
     // Only "Warning" (not "warning") exists. `warning.lowercase()` == "warning"
     // misses, and the original requested key "warning" also misses "Warning" --

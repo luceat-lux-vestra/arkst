@@ -6,8 +6,7 @@ use crate::invocation_binder::{self, Candidate};
 use crate::invocation_binder::{BoundInvocation, BoundSlot, ParameterMetadata};
 use crate::unicode_case::{
     full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
-    is_cased as unicode_is_cased, is_final_sigma_context as unicode_is_final_sigma_context,
-    simple_lowercase as unicode_simple_lowercase,
+    is_cased as unicode_is_cased, simple_lowercase as unicode_simple_lowercase,
     simple_titlecase_mapping as unicode_simple_titlecase_mapping,
     simple_uppercase as unicode_simple_uppercase, UNICODE_VERSION,
 };
@@ -871,16 +870,26 @@ fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
 }
 
 /// Kotlin/JVM's locale-invariant `String.lowercase()` (`toLowerCase(Locale.ROOT)`).
-/// The unconditional mappings come from the pinned full-lowercase table; the
-/// contextual Greek final-sigma rule is evaluated over the complete input
-/// string using the generated pinned `Cased` property. For example U+0130
-/// (LATIN CAPITAL LETTER I WITH DOT ABOVE) expands to U+0069 U+0307, while
-/// U+03A3 becomes U+03C2 only when it is final after a cased character.
+/// Unconditional mappings come from the pinned full-lowercase table. Greek
+/// Final_Sigma uses the exact generated Locale.ROOT word boundaries from the
+/// same pinned Temurin 25 runtime, so punctuation sequences are contextual.
 pub(crate) fn canonical_lowercase(text: &str) -> String {
     let characters: Vec<_> = text.chars().collect();
+    let boundaries = characters
+        .iter()
+        .any(|&character| character == '\u{03A3}')
+        .then(|| crate::word_break::boundaries(&characters));
     let mut result = String::with_capacity(text.len());
     for (index, &character) in characters.iter().enumerate() {
-        if character == '\u{03A3}' && is_final_sigma(&characters, index) {
+        if character == '\u{03A3}'
+            && is_final_sigma(
+                &characters,
+                index,
+                boundaries
+                    .as_deref()
+                    .expect("sigma requires word boundaries"),
+            )
+        {
             result.push('\u{03C2}');
             continue;
         }
@@ -892,36 +901,27 @@ pub(crate) fn canonical_lowercase(text: &str) -> String {
     result
 }
 
-/// Implements the invariant-locale `Final_Sigma` condition used by the
-/// pinned JVM string lowercasing path. The generated `Cased` property is
-/// consulted on both sides of the sigma, so the result depends on the whole
-/// string rather than independently lowering each scalar.
-fn is_final_sigma(characters: &[char], index: usize) -> bool {
+fn is_final_sigma(characters: &[char], index: usize, boundaries: &[bool]) -> bool {
+    debug_assert_eq!(boundaries.len(), characters.len() + 1);
     let mut cursor = index;
-    let has_cased_before = loop {
-        let Some(next) = cursor.checked_sub(1) else {
-            break false;
-        };
-        cursor = next;
-        let character = characters[cursor];
-        if unicode_is_cased(character) {
-            break true;
+    let mut has_cased_before = false;
+    while cursor > 0 && !boundaries[cursor] {
+        cursor -= 1;
+        if unicode_is_cased(characters[cursor]) {
+            has_cased_before = true;
+            break;
         }
-        if !unicode_is_final_sigma_context(character) {
-            break false;
-        }
-    };
+    }
     if !has_cased_before {
         return false;
     }
 
-    for &character in &characters[index + 1..] {
-        if unicode_is_cased(character) {
+    cursor = index + 1;
+    while cursor < characters.len() && !boundaries[cursor] {
+        if unicode_is_cased(characters[cursor]) {
             return false;
         }
-        if !unicode_is_final_sigma_context(character) {
-            break;
-        }
+        cursor += 1;
     }
     true
 }
