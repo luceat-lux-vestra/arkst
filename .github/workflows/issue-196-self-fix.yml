@@ -76,6 +76,8 @@ jobs:
               '''pub const REFERENCE_JVM_ARCHIVE_SHA256: &str =\n    "{reference['archive_sha256']}";\npub const WORD_BREAK_ORACLE_SHA256: &str =\n    "{oracle_sha}";''',
               1,
           )
+          source = source.replace('assert_eq!(points("ΟΣ\'\'Α"), vec![0, 2, 3, 5]);', 'assert_eq!(points("ΟΣ\'\'Α"), vec![0, 2, 3, 4, 5]);', 1)
+          source = source.replace('assert_eq!(points("ΟΣ..Α"), vec![0, 2, 3, 5]);', 'assert_eq!(points("ΟΣ..Α"), vec![0, 2, 3, 4, 5]);', 1)
           source = source.replace(
               '    run("cargo", "fmt", "--all", "--", "--check")',
               '    run("cargo", "fmt", "--all")\n    run("cargo", "fmt", "--all", "--", "--check")',
