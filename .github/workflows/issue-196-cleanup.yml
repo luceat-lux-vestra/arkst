@@ -1,0 +1,87 @@
+name: Temporary issue 196 oracle cleanup
+
+on:
+  push:
+    branches: [compat/196-localization-semantics]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: issue-196-oracle-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: compat/196-localization-semantics
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download exact pinned Temurin 25
+        id: jdk
+        shell: bash
+        run: |
+          readarray -t values < <(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          with Path('docs/compatibility/quarkdown/reference-jvm.toml').open('rb') as stream:
+              reference = tomllib.load(stream)['reference']
+          print(reference['archive_filename'])
+          print(reference['archive_url'])
+          print(reference['archive_sha256'])
+          PY
+          )
+          archive="$RUNNER_TEMP/${values[0]}"
+          curl --fail --location --retry 3 --output "$archive" "${values[1]}"
+          printf '%s  %s\n' "${values[2]}" "$archive" | sha256sum --check --strict
+          extract_root="$RUNNER_TEMP/temurin25"
+          mkdir -p "$extract_root"
+          tar --extract --gzip --file "$archive" --directory "$extract_root"
+          java="$(find "$extract_root" -path '*/bin/java' -print -quit)"
+          test -x "$java"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'java=%s\n' "$java" >> "$GITHUB_OUTPUT"
+
+      - name: Remove obsolete scalar sigma oracle and verify
+        env:
+          REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
+          REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          python3 tools/cleanup_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE" > /tmp/cleanup.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/cleanup.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo 'Temporary issue-196 cleanup diagnostic:'
+              echo
+              echo '```text'
+              tail -c 50000 /tmp/cleanup.log
+              echo
+              echo '```'
+            } > /tmp/comment.md
+            gh api "repos/$GITHUB_REPOSITORY/issues/269/comments" -F body=@/tmp/comment.md
+            exit "$status"
+          fi
+
+      - name: Commit bounded final cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/issue-196-cleanup.yml tools/cleanup_196.py
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(stdlib): remove obsolete scalar sigma oracle'
+          git push origin HEAD:compat/196-localization-semantics
