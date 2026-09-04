@@ -1,0 +1,9 @@
+.var {table}
+    .dictionary
+        - title: stored
+        - count: 7
+
+.get {.table} {count}
+.table::get {title} orelse:{ignored}
+.table::get {missing} orelse:{fallback}
+.table::get {missing}

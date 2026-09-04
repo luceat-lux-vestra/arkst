@@ -65,7 +65,7 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
             "missing artifact: {artifact}"
         );
     }
-    assert!(RECONCILIATION.contains("18 cases"));
+    assert!(RECONCILIATION.contains("19 cases"));
     assert!(RECONCILIATION.contains("No Quarkdown source, test, or fixture was copied"));
     assert!(RECONCILIATION.contains("SUPPORTED_END_TO_END"));
     assert!(RECONCILIATION.contains("SUPPORTED_SEMANTICS"));
@@ -105,7 +105,6 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
 #[test]
 fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
     for (name, issue, family) in [
-        ("get", "#194", "dictionary lookup"),
         ("libexists", "#195", "library inspection"),
         ("functionexists", "#195", "library inspection"),
         ("libraries", "#195", "library inspection"),
@@ -129,6 +128,17 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         );
         assert!(RECONCILIATION.contains(family));
     }
+}
+
+#[test]
+fn reconciliation_records_dictionary_lookup_as_semantically_supported() {
+    let row = stdlib_row("get");
+    assert_eq!(row[3], "#151");
+    assert_eq!(row[4], "SUPPORTED_SEMANTICS");
+    assert!(STDLIB_AUDIT.contains("dedicated `DictionaryLookup` native owner"));
+    assert!(STDLIB_AUDIT.contains("#194"));
+    assert!(RECONCILIATION.contains("#194"));
+    assert!(RECONCILIATION.contains("dictionary-get-family"));
 }
 
 #[test]

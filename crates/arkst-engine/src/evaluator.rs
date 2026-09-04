@@ -3241,6 +3241,34 @@ impl Evaluator {
             );
         }
 
+        if is_dictionary_lookup(name) {
+            let Some(binding_plan) = native_binding_plan.as_ref() else {
+                return CallOutcome::Failed;
+            };
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+            return self.evaluate_dictionary_lookup(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                binding_plan,
+            );
+        }
+
         if is_collection_access(name) {
             let Some(binding_plan) = native_binding_plan.as_ref() else {
                 return CallOutcome::Failed;
@@ -6439,6 +6467,211 @@ impl Evaluator {
             entries,
             span: *span,
         }))
+    }
+
+    /// Evaluates `.get` as a typed lookup over the existing ordered dictionary
+    /// representation. Argument evaluation remains eager and source ordered;
+    /// the fallback is selected only after all arguments and dictionary keys
+    /// have been validated.
+    fn evaluate_dictionary_lookup(
+        &self,
+        positional_args: &[InvocationValue],
+        named_args: &[InvocationNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let candidates = invocation_candidates(
+            positional_args
+                .iter()
+                .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+                .collect(),
+            named_args.to_vec(),
+        );
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                let message = if let Some(argument_name) =
+                    error.message.strip_prefix("unknown named argument ")
+                {
+                    format!(
+                        "Unknown named argument `{}` for `.get`",
+                        argument_name.trim_matches('`')
+                    )
+                } else if error.message == "received too many positional arguments" {
+                    format!(
+                        "`.get` accepts a dictionary and key (received {} positional arguments)",
+                        positional_args.len()
+                    )
+                } else if error
+                    .message
+                    .starts_with("missing required argument `dictionary`")
+                {
+                    "`.get` requires a dictionary argument".to_string()
+                } else if error.message.starts_with("missing required argument `key`") {
+                    "`.get` requires a key argument".to_string()
+                } else if let Some(parameter) =
+                    error
+                        .message
+                        .strip_prefix("parameter ")
+                        .and_then(|message| {
+                            message.strip_suffix(" collides with an already bound argument")
+                        })
+                {
+                    format!("`.get` received the {parameter} argument more than once")
+                } else {
+                    error.message.clone()
+                };
+                let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
+                diagnostic.message = message;
+                diagnostics.push(diagnostic);
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: dictionary_argument,
+            span: dictionary_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let Some(BoundSlot::Explicit {
+            value: key_argument,
+            span: key_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let fallback = match slots.next() {
+            Some(BoundSlot::Explicit { value, .. }) => value.value,
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => IrValue::None,
+        };
+        let dictionary_parameter_span =
+            parameters.first().and_then(|parameter| parameter.name_span);
+        let key_parameter_span = parameters.get(1).and_then(|parameter| parameter.name_span);
+
+        let dictionary = match value_conversion::convert_target_with_origin(
+            &dictionary_argument,
+            value_conversion::ConversionTarget::Dictionary,
+            dictionary_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::Value(_)) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        value_conversion::ConversionError::UnsupportedValue {
+                            target: value_conversion::ConversionTarget::Dictionary,
+                        },
+                        Some(dictionary_span),
+                        Some("dictionary"),
+                        dictionary_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` dictionary"),
+                ));
+                return CallOutcome::Failed;
+            }
+            Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        value_conversion::ConversionError::UnsupportedValue {
+                            target: value_conversion::ConversionTarget::Dictionary,
+                        },
+                        Some(dictionary_span),
+                        Some("dictionary"),
+                        dictionary_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` dictionary"),
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(dictionary_span),
+                        Some("dictionary"),
+                        dictionary_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` dictionary"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let key = match value_conversion::convert_target_with_origin(
+            &key_argument,
+            value_conversion::ConversionTarget::String,
+            key_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::String(key))) => key,
+            Ok(value_conversion::TargetValue::Value(_)) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        value_conversion::ConversionError::UnsupportedValue {
+                            target: value_conversion::ConversionTarget::String,
+                        },
+                        Some(key_span),
+                        Some("key"),
+                        key_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` key"),
+                ));
+                return CallOutcome::Failed;
+            }
+            Ok(value_conversion::TargetValue::RawMarkdown { .. }) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        value_conversion::ConversionError::UnsupportedValue {
+                            target: value_conversion::ConversionTarget::String,
+                        },
+                        Some(key_span),
+                        Some("key"),
+                        key_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` key"),
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(key_span),
+                        Some("key"),
+                        key_parameter_span,
+                        *span,
+                    ),
+                    Some("`.get` key"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let mut found = None;
+        for pair in &dictionary.entries {
+            match pair.first.as_ref() {
+                IrValue::String(entry_key) => {
+                    if found.is_none() && entry_key == &key {
+                        found = Some(pair.second.as_ref().clone());
+                    }
+                }
+                _ => {
+                    diagnostics.push(iteration_error(
+                        "Dictionary keys must remain typed strings".to_string(),
+                        pair.span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        }
+        CallOutcome::Value(found.unwrap_or(fallback))
     }
 
     fn evaluate_dictionary_entries(
@@ -10424,6 +10657,7 @@ pub(crate) enum NativeDispatchOwner {
     Range,
     Pair,
     Dictionary,
+    DictionaryLookup,
     CollectionAccess,
     CollectionTransform,
 }
@@ -10464,6 +10698,7 @@ const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
 const RANGE_NATIVE_NAMES: &[&str] = &["range"];
 const PAIR_NATIVE_NAMES: &[&str] = &["pair"];
 const DICTIONARY_NATIVE_NAMES: &[&str] = &["dictionary"];
+const DICTIONARY_LOOKUP_NATIVE_NAMES: &[&str] = &["get"];
 const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "size",
     "first",
@@ -10560,6 +10795,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Dictionary,
         names: DICTIONARY_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::DictionaryLookup,
+        names: DICTIONARY_LOOKUP_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::CollectionAccess,
@@ -11427,6 +11666,10 @@ fn is_dictionary(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Dictionary)
 }
 
+fn is_dictionary_lookup(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::DictionaryLookup)
+}
+
 fn is_collection_access(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::CollectionAccess)
 }
@@ -11626,6 +11869,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::required("from"),
                 ParameterMetadata::required("index"),
                 ParameterMetadata::optional("orelse"),
+            ],
+            BodyPolicy::Reject,
+        ),
+        "get" => (
+            vec![
+                ParameterMetadata::required("dictionary"),
+                ParameterMetadata::required("key"),
+                ParameterMetadata::defaulted("orelse"),
             ],
             BodyPolicy::Reject,
         ),
@@ -12691,6 +12942,17 @@ fn callable_binding_message(message: String, hint: &str) -> String {
 }
 
 fn native_binding_message(name: &str, message: String) -> String {
+    if name == "get" {
+        if message == "missing required argument `dictionary`" {
+            return "`.get` requires a dictionary argument".to_string();
+        }
+        if message == "missing required argument `key`" {
+            return "`.get` requires a key argument".to_string();
+        }
+        if message == "received too many positional arguments" {
+            return "`.get` accepts a dictionary and key".to_string();
+        }
+    }
     if message == "missing required argument `content`" {
         return if name == "html" {
             "`.html` requires one `content` argument or body".to_string()
@@ -14898,6 +15160,20 @@ mod tests {
         }])
     }
 
+    fn dictionary_value(entries: &[(&str, IrValue)]) -> IrValue {
+        IrValue::Dictionary(IrDictionary {
+            entries: entries
+                .iter()
+                .map(|(key, value)| IrPair {
+                    first: Box::new(IrValue::String((*key).to_string())),
+                    second: Box::new(value.clone()),
+                    span: span(10, 20),
+                })
+                .collect(),
+            span: span(0, 30),
+        })
+    }
+
     fn lambda_parameter(name: &str, start: usize) -> IrParameter {
         IrParameter {
             name: name.to_string(),
@@ -16301,6 +16577,411 @@ mod tests {
             CallOutcome::Value(IrValue::String(value)) if value == "a"
         ));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn dictionary_lookup_preserves_recursive_value_types_and_exact_string_keys() {
+        let evaluator = Evaluator::new();
+        let nested_dictionary = dictionary_value(&[("nested", IrValue::Boolean(false))]);
+        let values = [
+            ("string", IrValue::String("value".to_string())),
+            ("number", IrValue::Number(3.5)),
+            ("boolean", IrValue::Boolean(true)),
+            ("none", IrValue::None),
+            (
+                "collection",
+                IrValue::Collection(vec![IrValue::Number(1.0), IrValue::Boolean(false)]),
+            ),
+            (
+                "pair",
+                IrValue::Pair(IrPair {
+                    first: Box::new(IrValue::String("left".to_string())),
+                    second: Box::new(IrValue::Number(2.0)),
+                    span: span(31, 40),
+                }),
+            ),
+            ("dictionary", nested_dictionary),
+        ];
+        let dictionary = dictionary_value(&values);
+        let original_dictionary = dictionary.clone();
+        let operation_span = span(0, 40);
+
+        for (key, expected) in values {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "get",
+                &[dictionary.clone(), IrValue::String(key.to_string())],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(value) if value == expected));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), IrValue::String("case".to_string())],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Value(IrValue::None)));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let numeric_key_dictionary =
+            dictionary_value(&[("1", IrValue::String("numeric key".to_string()))]);
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[numeric_key_dictionary, IrValue::Number(1.0)],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::String(value)) if value == "numeric key"
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(dictionary, original_dictionary);
+
+        let mut first_diagnostics = Vec::new();
+        let mut first_context = EvaluationContext::new();
+        let first = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), IrValue::String("number".to_string())],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut first_diagnostics,
+            &mut first_context,
+        );
+        let mut second_diagnostics = Vec::new();
+        let mut second_context = EvaluationContext::new();
+        let second = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), IrValue::String("number".to_string())],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut second_diagnostics,
+            &mut second_context,
+        );
+        assert_eq!(first, second);
+        assert_eq!(first_diagnostics.len(), second_diagnostics.len());
+        assert!(first_diagnostics.is_empty());
+        assert!(second_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn dictionary_lookup_handles_missing_and_explicit_fallback_slots() {
+        let evaluator = Evaluator::new();
+        let dictionary = dictionary_value(&[("present", IrValue::String("stored".to_string()))]);
+        let operation_span = span(0, 40);
+        let fallbacks = [
+            IrValue::String("fallback".to_string()),
+            IrValue::Number(4.0),
+            IrValue::Boolean(false),
+            IrValue::Collection(vec![IrValue::Number(8.0)]),
+            IrValue::Pair(IrPair {
+                first: Box::new(IrValue::String("left".to_string())),
+                second: Box::new(IrValue::None),
+                span: span(41, 45),
+            }),
+            dictionary_value(&[("fallback", IrValue::Boolean(true))]),
+            IrValue::None,
+        ];
+
+        for fallback in fallbacks {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "get",
+                &[
+                    dictionary.clone(),
+                    IrValue::String("missing".to_string()),
+                    fallback.clone(),
+                ],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Value(value) if value == fallback));
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        }
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), IrValue::String("missing".to_string())],
+            &[named_arg(
+                "orelse",
+                IrValue::String("named fallback".to_string()),
+            )],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::String(value)) if value == "named fallback"
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[
+                dictionary.clone(),
+                IrValue::String("present".to_string()),
+                IrValue::Collection(vec![IrValue::Boolean(false)]),
+            ],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(
+            outcome,
+            CallOutcome::Value(IrValue::String(value)) if value == "stored"
+        ));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn dictionary_lookup_uses_shared_binding_and_conversion_failures() {
+        let evaluator = Evaluator::new();
+        let dictionary = dictionary_value(&[("present", IrValue::String("stored".to_string()))]);
+        let operation_span = span(50, 90);
+
+        for (positional, named, body) in [
+            (Vec::new(), Vec::new(), false),
+            (vec![dictionary.clone()], Vec::new(), false),
+            (
+                vec![
+                    dictionary.clone(),
+                    IrValue::String("key".to_string()),
+                    IrValue::None,
+                    IrValue::None,
+                ],
+                Vec::new(),
+                false,
+            ),
+            (
+                vec![dictionary.clone(), IrValue::String("key".to_string())],
+                vec![named_arg("fallback", IrValue::None)],
+                false,
+            ),
+            (
+                vec![dictionary.clone(), IrValue::String("key".to_string())],
+                vec![named_arg("dictionary", dictionary.clone())],
+                false,
+            ),
+            (
+                vec![dictionary.clone(), IrValue::String("key".to_string())],
+                Vec::new(),
+                true,
+            ),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "get",
+                &positional,
+                &named,
+                body.then_some(CallBody::Block(&[text_paragraph("body")])),
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Failed));
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+            assert_eq!(diagnostics[0].code, "E3001");
+            assert_eq!(
+                diagnostics[0].primary.map(|span| span.source_id),
+                Some(SourceId(1))
+            );
+        }
+
+        for first in [
+            IrValue::String("not a dictionary".to_string()),
+            IrValue::Boolean(true),
+            IrValue::Collection(Vec::new()),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut context = EvaluationContext::new();
+            let outcome = evaluator.evaluate_call_value(
+                "get",
+                &[first, IrValue::String("key".to_string())],
+                &[],
+                None,
+                None,
+                &operation_span,
+                &mut diagnostics,
+                &mut context,
+            );
+            assert!(matches!(outcome, CallOutcome::Failed));
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+            assert!(diagnostics[0].message.contains("dictionary"));
+        }
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), IrValue::Collection(Vec::new())],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+
+        assert!(diagnostics[0].message.contains("key"));
+
+        let malformed = IrValue::Dictionary(IrDictionary {
+            entries: vec![
+                IrPair {
+                    first: Box::new(IrValue::String("present".to_string())),
+                    second: Box::new(IrValue::String("stored".to_string())),
+                    span: span(91, 100),
+                },
+                IrPair {
+                    first: Box::new(IrValue::Number(1.0)),
+                    second: Box::new(IrValue::String("malformed".to_string())),
+                    span: span(101, 110),
+                },
+            ],
+            span: span(91, 110),
+        });
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[malformed, IrValue::String("present".to_string())],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].primary, Some(span(101, 110)));
+    }
+
+    #[test]
+    fn dictionary_lookup_evaluates_fallback_and_nested_failures_atomically() {
+        let evaluator = Evaluator::new();
+        let dictionary = dictionary_value(&[("present", IrValue::String("stored".to_string()))]);
+        let operation_span = span(0, 30);
+        let failing = call_value(
+            "multiply",
+            vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+        );
+
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::new();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[
+                dictionary.clone(),
+                IrValue::String("missing".to_string()),
+                failing.clone(),
+            ],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[
+                dictionary.clone(),
+                IrValue::String("present".to_string()),
+                call_value(
+                    "multiply",
+                    vec![IrValue::Boolean(true), IrValue::Number(2.0)],
+                ),
+            ],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+
+        diagnostics.clear();
+        let outcome = evaluator.evaluate_call_value(
+            "get",
+            &[dictionary.clone(), failing],
+            &[],
+            None,
+            None,
+            &operation_span,
+            &mut diagnostics,
+            &mut context,
+        );
+        assert!(matches!(outcome, CallOutcome::Failed));
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+
+        let chained = evaluate(vec![
+            var_declaration("table", dictionary.clone()),
+            chain_node(
+                chain_segment("table", 0, 5, Vec::new()),
+                vec![chain_segment(
+                    "get",
+                    5,
+                    20,
+                    vec![IrValue::String("present".to_string())],
+                )],
+            ),
+        ]);
+        let nested = evaluate(vec![IrNode::FunctionCall {
+            name: "get".to_string(),
+            positional_args: vec![dictionary, IrValue::String("present".to_string())],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span: span(0, 20),
+        }]);
+        assert_eq!(chained, nested);
     }
 
     #[test]

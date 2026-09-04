@@ -1,0 +1,5 @@
+id = "dictionary-get-family"
+feature = "dictionary-lookup"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-dictionary-get"
+description = "Typed dictionary lookup with exact keys, supplied fallback, omitted fallback, and chain injection"
