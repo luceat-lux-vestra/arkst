@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   cleanup:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -52,7 +53,6 @@ jobs:
         env:
           REFERENCE_JAVA: ${{ steps.jdk.outputs.java }}
           REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set +e
@@ -61,26 +61,22 @@ jobs:
           set -e
           cat /tmp/cleanup.log
           if [ "$status" -ne 0 ]; then
-            {
-              echo 'Temporary issue-196 cleanup diagnostic:'
-              echo
-              echo '```text'
-              tail -c 50000 /tmp/cleanup.log
-              echo
-              echo '```'
-            } > /tmp/comment.md
-            gh api "repos/$GITHUB_REPOSITORY/issues/269/comments" -F body=@/tmp/comment.md
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            tail -c 50000 /tmp/cleanup.log > cleanup-diagnostic.txt
+            git add cleanup-diagnostic.txt
+            git commit -m 'chore(ci): capture issue 196 cleanup diagnostic'
+            git push origin HEAD:compat/196-localization-semantics
             exit "$status"
           fi
 
       - name: Commit bounded final cleanup
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm -f .github/workflows/issue-196-cleanup.yml tools/cleanup_196.py
+          if [ -f cleanup-diagnostic.txt ]; then git rm -f cleanup-diagnostic.txt; fi
           git add -A
           git diff --cached --check
           git commit -m 'fix(stdlib): remove obsolete scalar sigma oracle'
