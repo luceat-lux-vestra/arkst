@@ -244,7 +244,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .iter()
             .filter(|row| row[4] == "SUPPORTED_SEMANTICS")
             .count(),
-        44
+        46
     );
     assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 6);
     for name in ["capitalize", "startswith"] {
@@ -256,7 +256,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
     }
     assert_eq!(
         owned.iter().filter(|row| row[4] == "UNSUPPORTED").count(),
-        9
+        7
     );
     let get = owned
         .iter()
@@ -277,7 +277,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .find(|row| row[0] == name)
             .expect("localization row");
         assert_eq!(row[3], "#151");
-        assert_eq!(row[4], "UNSUPPORTED");
+        assert_eq!(row[4], "SUPPORTED_SEMANTICS");
     }
     assert_eq!(
         rows.iter()

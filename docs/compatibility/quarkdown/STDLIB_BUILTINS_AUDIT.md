@@ -99,8 +99,7 @@ evidence.
 
 The canonical ownership reconciliation with #152 retains `localization` and
 `localize` in this #151 general stdlib inventory. #152 records both names only
-as `NOT_APPLICABLE` ownership handoffs, so the #151 total remains 60 and its
-9-name `UNSUPPORTED` count reflects the bounded `.get` implementation. The
+as `NOT_APPLICABLE` ownership handoffs, so the #151 total remains 60. The
 standard-library initial state is also not an empty localization map after
 registration: `Stdlib` loads
 `/lib/localization.qd`, whose `.localization name:{std}` call seeds the standard
@@ -382,14 +381,39 @@ and [Logger.kt](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d758
 These are general-language public declarations, not scalar aliases that can
 be inferred from existing arithmetic dispatch. Their observable contracts
 include context/library lookup, localization table mutation/read, and
-host/logging side effects. Arkst has no approved equivalent native owner
-for these names in the current engine. No evaluator, host capability,
-logging, or localization implementation was added. Status: UNSUPPORTED for
-all 9 names. Their bounded ownership is now explicit: [#195](https://github.com/luceat-lux-vestra/arkst/issues/195)
-owns library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
-owns localization table mutation/lookup, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
+host/logging side effects. The seven library-inspection and logger names have
+no approved equivalent native owner in the current engine and remain
+`UNSUPPORTED`. The [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
+localization names are now a bounded `SUPPORTED_SEMANTICS` evaluator slice;
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) owns library
+inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 owns logger/diagnostic behavior. Host/resource policy is coordinated through
-#188/#190; these are real production gaps, not evidence-only omissions.
+#188/#190.
+
+### Bounded #196 localization contract
+
+`.localization` and `.localize` use a dedicated evaluator-native
+`Localization` owner, the shared #165 binder, canonical String/Boolean and
+Dictionary conversion, and the existing #173 locale resolver. Localization
+tables are deterministic evaluator working state attached to the existing
+shared `DocumentState`; they are not added to serialized `IrDocumentState`.
+Candidate dictionaries are fully validated before one atomic publication.
+`merge:false` rejects an existing table; `merge:true` adds locales and
+replaces conflicting keys while preserving unrelated entries. `.localize`
+requires the current `.doclang` locale, splits only at the first configured
+separator, performs exact table/locale/key lookup, and fails without locale
+fallback or fabricated values. The existing #167 savepoint journal records
+table-level undo state for nested failure and callable rollback.
+
+The non-empty seeded `std` table is bounded to the ten public locale warning
+and error entries independently observed with the pinned v2.5.1 Reference JVM;
+it is not an exhaustive `/lib/localization.qd` resource-data claim. Independent
+Arkst tests cover body/named binding, canonical names and tags, invalid
+candidate atomicity, merge precedence, custom separators, missing locale and
+exact-entry failures, nested rollback, and source-defined shadowing. The
+independently authored `localization-family` conformance case verifies the
+successful IR boundary. No renderer, locale-aware output, hyphenation, or
+resource-equivalence claim is made.
 
 ## Cross-owned public surface
 
@@ -515,20 +539,21 @@ separately.
 | #147 status | Count |
 |---|---:|
 | SUPPORTED_END_TO_END | 0 |
-| SUPPORTED_SEMANTICS | 44 |
+| SUPPORTED_SEMANTICS | 46 |
 | PARSED_ONLY | 0 |
 | PARTIAL | 6 |
-| UNSUPPORTED | 9 |
+| UNSUPPORTED | 7 |
 | DEFERRED | 0 |
 | BLOCKED | 0 |
 | UNKNOWN | 0 |
 | NOT_APPLICABLE | 1 |
 
 The six PARTIAL names are sorted, range, plaintext, otherwise, ifpresent, and
-takeif. The nine UNSUPPORTED names are libexists, functionexists, libraries,
-libfunctions, localization, localize, log, debug, and error.
+takeif. The seven UNSUPPORTED names are libexists, functionexists, libraries,
+libfunctions, log, debug, and error. Localization and localize are the two
+new `SUPPORTED_SEMANTICS` rows owned by #196.
 The one NOT_APPLICABLE inventory row is none because its value taxonomy
-belongs to #149. The 44 SUPPORTED_SEMANTICS rows are bounded engine semantic
+belongs to #149. The 46 SUPPORTED_SEMANTICS rows are bounded engine semantic
 claims; none is promoted to SUPPORTED_END_TO_END.
 
 ## Corrections and reconciliation
@@ -579,13 +604,12 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 closes the cohesive Unicode string-semantics gap. The three
+Issue #172 closes the cohesive Unicode string-semantics gap. The two
 remaining #151 unsupported families are real pinned gaps with bounded owners:
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
-library inspection, [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
-for localization, and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
+library inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 for logger/diagnostic builtins. Implementation order follows the dependency
-bands in #156; no implementation is started here.
+bands in #156; #196 is the completed bounded localization slice.
 Existing issues are reused:
 
 - #149 and #165–#167 for value, binding, conversion, diagnostics, and
@@ -608,8 +632,8 @@ For #156, the usable reconciliation input is:
 - pinned public surface: 162;
 - #151-owned inventory: 60;
 - cross-owned/excluded: 102;
-- #151 status counts: 44 SUPPORTED_SEMANTICS, 6 PARTIAL,
-  9 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
+- #151 status counts: 46 SUPPORTED_SEMANTICS, 6 PARTIAL,
+  7 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
   categories;
 - newly recovered omission: isnone as an explicit general predicate;
 - corrected prior omission: llmstxt is public, #155-owned, and excluded from

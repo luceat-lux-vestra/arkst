@@ -106,7 +106,7 @@ and conversion details are linked to the canonical [#149 value-model audit](VALU
 | `.dockeywords` | `dockeywords(keywords: Iterable<DynamicValue>? = null)`; `@LikelyBody`; no alias | Empty ordered list | Getter returns ordered strings. Setter replaces the complete list, preserving order and duplicate values; no deduplication is evidenced | Current replacement and duplicate behavior are implemented for bounded iterable/scalar inputs; source-backed body conversion and generalized target coverage remain partial | `PARTIAL` |
 | `.doclang` | `doclang(locale: String? = null)`; no alias | Locale absent; getter returns `""` | Getter returns `locale.localizedName` or empty text. Setter resolves case-insensitive English name or language tag, replaces locale, and returns `VoidValue`; malformed tags follow the JDK valid-prefix/root result, while type/arity/binding errors fail before assignment | Issue #173 closes the available-locale gap with a deterministic checked-in snapshot of the pinned reference JDK universe; source-backed body text is converted before lookup without evaluating parsed body nodes. Locale-aware rendering and broader body/output behavior remain outside this slice | `PARTIAL` |
 | `.theme` | `theme(color: String? = null, layout: String? = null)`; `layout` is `@LikelyNamed`; no alias | No theme (`null`) before the first call | There is no getter. Every successful call replaces the complete `DocumentTheme`; omitted components become null, supplied strings are lowercased, and the setter returns `VoidValue` | Current `Some(empty)` versus `None` distinction, raw-body fallback, and rollback are evidenced; theme resolution/rendering are not | `PARTIAL` |
-| `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `UNSUPPORTED` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; this evidence is retained here without re-auditing #151 semantics | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
+| `.localization` / `.localize` | Public localization table mutation/read; exact signatures and canonical `SUPPORTED_SEMANTICS` status remain in the #151 manifest | #151-owned; not a #152 row | The standard-library registration hook loads `/lib/localization.qd` before any function call, so the standard pipeline starts with a seeded `std` table; #196 implements the bounded evaluator table/lookup semantics, while this audit retains only the ownership handoff | Canonical handoff to #151; #152 assigns `NOT_APPLICABLE` in its manifest | `NOT_APPLICABLE` handoff |
 
 ## 5. Family-level semantic analysis
 
@@ -243,7 +243,9 @@ no JVM, OS locale database, filesystem, network, or global locale state.
 The IR still stores only canonical tag and localized-name data and has no
 localization-table state. #166 covers the bounded source-backed raw-body
 fallback without evaluating parsed body nodes. Locale-aware rendering,
-hyphenation, `.localization`, and `.localize` remain separately owned gaps.
+hyphenation, and exhaustive localization resource-data equivalence remain
+separately owned gaps; #196 covers the bounded table and lookup semantics
+without moving them into #152.
 
 ### Theme
 
@@ -286,7 +288,7 @@ effects:
 | keywords | replace | iterable element conversion | Current Arkst builds the replacement list before assignment; duplicates/order preserved | Ordered strings or `VoidValue` |
 | locale | replace | name/tag lookup | Pinned assignment follows a successful lookup; current Arkst restores old state if a later nested evaluation fails | Localized name or `VoidValue` |
 | theme | replace full object | nullable scalar conversion; upstream render-time existence check | Current Arkst commits one whole object and restores on failure | `VoidValue`; no getter |
-| localization table (#151) | create or merge; stdlib starts with the seeded `std` table | table locale/value conversion and duplicate-name rule | Upstream duplicate-table check and table build precede table assignment; no cross-call transaction is evidenced | `VoidValue` |
+| localization table (#151) | create or merge; stdlib starts with the seeded `std` table | table locale/value conversion and duplicate-name rule | Upstream duplicate-table check and table build precede table assignment; Arkst validates the complete candidate before publication and uses #167 table-level savepoint undo | `VoidValue` |
 | localize (#151) | none | locale/table/key lookup | No mutation | Localized string |
 
 The pinned `FunctionCall.execute` validates, binds, and invokes without an
@@ -353,10 +355,10 @@ round-trips, old state with omitted fields, ordered author/info records,
 duplicate keywords, `None` locale, and the distinction between absent theme and
 explicit empty theme.
 
-Localization tables are not persisted because no Arkst implementation owns
-them. The audit does not add a speculative field or generic serialization
-framework. Any future localization representation is a #151/#156
-reconciliation concern rather than a hidden #152 document-only change.
+Localization tables are not persisted because they are evaluator working state
+owned by #196, not public document state. The audit does not add a speculative
+field or generic serialization framework. Any future serialized localization
+representation remains outside this #152 document-state contract.
 
 ## 11. Renderer and front-matter boundary
 

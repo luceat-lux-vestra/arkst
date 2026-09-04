@@ -1,0 +1,11 @@
+.doclang {en}
+.localization {labels}
+    - English
+      - welcome: Hello there
+      - path/name: Nested name
+    - Italian
+      - welcome: Ciao qui
+.doclang {it}
+.localize {labels:welcome}
+.doclang {en}
+.localize {labels/path/name} separator:{/}
