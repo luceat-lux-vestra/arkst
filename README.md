@@ -8,7 +8,7 @@
 
 Arkst accepts Markdown and Quarkdown-compatible documents, evaluates supported programmable-document semantics into a backend-neutral IR, lowers that IR to Typst, and can invoke the official Typst compiler to produce PDF.
 
-> Quarkdown compatibility is partial and evidence-based. The current baseline is tracked against Quarkdown v2.5.1 under [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/).
+> Quarkdown compatibility is partial and evidence-based. The current verified baseline is referenced against Quarkdown v2.5.1 under [`docs/compatibility/quarkdown/`](docs/compatibility/quarkdown/).
 >
 > Arkst is independent and is not affiliated with, endorsed by, or sponsored by Typst GmbH or the Quarkdown project.
 
