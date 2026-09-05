@@ -269,7 +269,7 @@ class StaticAuthorityTests(unittest.TestCase):
 
 
 class WorkflowBoundaryTests(unittest.TestCase):
-    def test_production_dispatch_is_live_only(self):
+    def test_production_dispatch_is_live_only_and_commit_pinned(self):
         workflow = (
             HERE.parents[1] / ".github" / "workflows" / "hardening-drift-audit.yml"
         ).read_text(encoding="utf-8")
@@ -278,6 +278,8 @@ class WorkflowBoundaryTests(unittest.TestCase):
         self.assertNotIn("inputs:", workflow)
         self.assertNotIn("policy-drift", workflow)
         self.assertNotIn("infrastructure-failure", workflow)
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertNotIn("ref: main", workflow)
 
 
 class ReporterLifecycleTests(unittest.TestCase):
