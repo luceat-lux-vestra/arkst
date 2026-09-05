@@ -26,8 +26,10 @@ class ProvenanceFixture:
         "tools/verify_reference_provenance.py",
         "tools/verify_jdk25_unicode.py",
         "tools/generate_jdk25_unicode_case.py",
+        "tools/generate_word_break_jdk25.py",
         "tools/generate_jdk25_locale_data.py",
         "tools/dump_jdk25_unicode_data.java",
+        "tools/dump_word_break_jdk25.java",
         "tools/dump_jdk25_locale_data.java",
         "tools/dump_jdk25_locale_display_data.java",
         "tools/dump_jdk25_locale_oracle.java",
@@ -37,6 +39,7 @@ class ProvenanceFixture:
         "tools/jdk25_unicode_corpus.tsv",
         "tools/jdk25_available_locale_order.tsv",
         "crates/arkst-engine/src/unicode_case.rs",
+        "crates/arkst-engine/src/word_break.rs",
         "crates/arkst-engine/src/locale.rs",
         "crates/arkst-engine/src/locale_data.rs",
         "crates/arkst-engine/data/jdk25_locale_display.bin",
@@ -309,7 +312,7 @@ class ReferenceProvenanceTests(unittest.TestCase):
     def test_wrong_generator_identity(self) -> None:
         self.fixture.mutate(
             "docs/compatibility/quarkdown/reference-jvm.toml",
-            'unicode_generator_source_sha256 = "7c872bc872c4db6141b2d40e5ded0e75dcd06b129ef7cf278f37ed4f42daaa08"',
+            'unicode_generator_source_sha256 = "2d33f70ca87801e9083fdce58d57d6bfa3fc54d0c8f671cc30ade28c6b702b8a"',
             'unicode_generator_source_sha256 = "' + "0" * 64 + '"',
         )
         self.assert_rejected(self.verify_fixture)
@@ -317,7 +320,7 @@ class ReferenceProvenanceTests(unittest.TestCase):
     def test_wrong_helper_identity(self) -> None:
         self.fixture.mutate(
             "docs/compatibility/quarkdown/reference-jvm.toml",
-            'helper_source_sha256 = "2b6459d6dfee9e2780c50e1734ac8302900bd9d601acae401b0af064c0ba568f"',
+            'helper_source_sha256 = "31534a3c5c8c63910479b16ae3eed994e71e14bae7105e84d9703b9f7e6bfea6"',
             'helper_source_sha256 = "' + "0" * 64 + '"',
         )
         self.assert_rejected(self.verify_fixture)
