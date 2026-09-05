@@ -115,11 +115,12 @@ pub struct ResourceText {
     pub text: String,
 }
 
-/// A successfully read source used by `.include`.
+/// A successfully resolved and read logical project source.
 ///
-/// The included source identity is part of the contract. The evaluator uses
-/// it for nested source-relative access, cycle detection, and source-backed
-/// diagnostics.
+/// The source identity is part of the resource contract. `.include` uses it
+/// for nested source-relative access, cycle detection, and source-backed
+/// diagnostics; subdocument registration consumers can reuse the same
+/// canonical identity without introducing a second resolver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludedSource {
     pub path: String,
@@ -185,7 +186,12 @@ pub trait ResourceProvider {
         reference: &str,
     ) -> Result<ResourceText, ResourceAccessError>;
 
-    /// Resolves and reads an included source while retaining its identity.
+    /// Resolves and reads a project source while retaining canonical logical
+    /// path and source identity.
+    ///
+    /// Non-path semantic dispatch, such as an explicit loadable-library
+    /// registry, must happen before this method is called. Bare strings are
+    /// deliberately not guessed to be library names by the resource layer.
     fn read_source(
         &self,
         source_id: arkst_source::SourceId,
