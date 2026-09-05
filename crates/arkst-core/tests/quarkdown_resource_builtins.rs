@@ -408,3 +408,69 @@ fn markdown_is_raw_native_content_and_llmstxt_is_explicitly_deferred() {
         matches!(result.ir.nodes.first(), Some(IrNode::TargetSpecificContent { content }) if matches!(IrValue::String(content.content.clone()), IrValue::String(_)))
     );
 }
+
+#[test]
+fn pathtoroot_reports_project_root_for_top_level_and_regular_includes() {
+    let project = project(
+        "main.qd",
+        &[
+            ("main.qd", ".pathtoroot\n.include {utils/example.qd}\n"),
+            (
+                "utils/example.qd",
+                ".pathtoroot\n.pathtoroot granularity:{subdocument}\n",
+            ),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), ".\n..\n..");
+}
+
+#[test]
+fn pathtoroot_subdocument_root_is_inherited_by_nested_regular_includes() {
+    let project = project(
+        "main.qd",
+        &[
+            (
+                "main.qd",
+                ".include {subdocuments/subdocument.qd} sandbox:{subdocument}\n",
+            ),
+            (
+                "subdocuments/subdocument.qd",
+                ".include {../utils/example.qd}\n",
+            ),
+            (
+                "utils/example.qd",
+                ".pathtoroot\n.pathtoroot granularity:{subdocument}\n",
+            ),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), "..\n../subdocuments");
+}
+
+#[test]
+fn pathtoroot_rejects_invalid_granularity_without_host_path_leakage() {
+    let project = project(
+        "main.qd",
+        &[("main.qd", ".pathtoroot granularity:{workspace}\n")],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert_eq!(result.diagnostics.len(), 1);
+    assert_eq!(result.diagnostics[0].code, "E3003");
+    assert!(result.diagnostics[0].message.contains("workspace"));
+    assert!(!result.diagnostics[0].message.contains("/Users/"));
+    assert!(!result.diagnostics[0].message.contains("C:\\\\"));
+}

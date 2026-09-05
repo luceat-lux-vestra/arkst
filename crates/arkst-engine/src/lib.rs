@@ -127,6 +127,18 @@ pub struct IncludedSource {
     pub text: String,
 }
 
+/// Logical root requested by a resource-aware evaluator operation.
+///
+/// The engine sees source identities only. Project composition remains
+/// responsible for mapping those identities to canonical logical paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceRoot {
+    /// The root of the complete logical project.
+    Project,
+    /// The parent directory of a source that defines a nested document root.
+    Source(arkst_source::SourceId),
+}
+
 /// Minimal semantic resource failures translated by the composition adapter.
 ///
 /// These variants intentionally contain only stable semantic information and
@@ -154,6 +166,17 @@ pub trait ResourceProvider {
     /// Returns the stable logical path used for diagnostics and include-cycle
     /// messages for a source identity.
     fn source_path(&self, source_id: arkst_source::SourceId) -> Option<String>;
+
+    /// Returns the platform-neutral relative path from `source_id`'s parent
+    /// directory to the requested logical root.
+    fn relative_path_to_root(
+        &self,
+        source_id: arkst_source::SourceId,
+        root: ResourceRoot,
+    ) -> Result<String, ResourceAccessError> {
+        let _ = root;
+        Err(ResourceAccessError::UnknownSource { source_id })
+    }
 
     /// Reads any project resource as validated UTF-8 text.
     fn read_text(

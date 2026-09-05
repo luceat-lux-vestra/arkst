@@ -1,10 +1,12 @@
 //! Adapters from the in-memory project model to engine-neutral inputs.
 
 use arkst_engine::{
-    DocumentMetadataDefaults, IncludedSource, ResourceAccessError, ResourceProvider, ResourceText,
+    DocumentMetadataDefaults, IncludedSource, ResourceAccessError, ResourceProvider,
+    ResourceRoot as EngineResourceRoot, ResourceText,
 };
 use arkst_project::{
-    ProjectMetadata, ResourceAccessError as ProjectResourceAccessError, VirtualProject,
+    ProjectMetadata, ResourceAccessError as ProjectResourceAccessError,
+    ResourceRoot as ProjectResourceRoot, VirtualProject,
 };
 use arkst_source::SourceId;
 
@@ -36,6 +38,20 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
             .sources()
             .path_by_id(source_id)
             .map(ToString::to_string)
+    }
+
+    fn relative_path_to_root(
+        &self,
+        source_id: SourceId,
+        root: EngineResourceRoot,
+    ) -> Result<String, ResourceAccessError> {
+        let root = match root {
+            EngineResourceRoot::Project => ProjectResourceRoot::Project,
+            EngineResourceRoot::Source(source_id) => ProjectResourceRoot::Source(source_id),
+        };
+        self.project
+            .relative_path_to_resource_root(source_id, root)
+            .map_err(map_resource_error)
     }
 
     fn read_text(
