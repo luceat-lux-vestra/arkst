@@ -174,6 +174,13 @@ the Reference JVM corpus checks both forms (and the analogous single/repeated
 period forms) against the exact Temurin 25 runtime before `.localize` can rely on
 the generated word-break DFA.
 
+The same differential also covers supplementary-plane casing so the JVM's
+UTF-16 representation cannot hide a scalar-conversion bug. For example,
+`𐐀Σ` (U+10400 U+03A3) must lowercase to `𐐨ς` (U+10428 U+03C2), proving that
+the supplementary Deseret scalar mapping and contextual Final_Sigma rule
+compose correctly. This is pinned-JVM oracle evidence, not an additional
+Quarkdown black-box claim.
+
 ### 2. Custom separator, first-boundary split
 
 ```
