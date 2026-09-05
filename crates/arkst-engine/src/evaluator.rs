@@ -51,7 +51,7 @@ use crate::value_conversion::{
 use crate::{ast_to_ir, builtins};
 use crate::{
     Capabilities, Capability, EvaluationLimits, IncludedSource, ResourceAccessError,
-    ResourceProvider, ResourceText,
+    ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -788,6 +788,7 @@ struct EvaluationContext<'a> {
     resources: Option<&'a dyn ResourceProvider>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
+    subdocument_root: Option<SourceId>,
     active_sources: Vec<SourceId>,
     document_state: Rc<RefCell<DocumentState>>,
     limits: EvaluationLimits,
@@ -1119,6 +1120,7 @@ impl<'a> EvaluationContext<'a> {
             resources: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
+            subdocument_root: None,
             active_sources: Vec::new(),
             document_state: Rc::new(RefCell::new(DocumentState::default())),
             limits,
@@ -1159,6 +1161,7 @@ impl<'a> EvaluationContext<'a> {
             resources: self.resources,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
+            subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
@@ -1184,6 +1187,7 @@ impl<'a> EvaluationContext<'a> {
             resources: Some(resources),
             metadata_defaults: metadata_defaults.clone(),
             current_source: Some(source_id),
+            subdocument_root: None,
             active_sources: vec![source_id],
             ..Self::with_limits(limits)
         }
@@ -1244,6 +1248,7 @@ impl<'a> EvaluationContext<'a> {
             resources: self.resources,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
+            subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
@@ -1767,6 +1772,7 @@ impl<'a> EvaluationContext<'a> {
             resources: None,
             metadata_defaults: Default::default(),
             current_source: None,
+            subdocument_root: None,
             active_sources: Vec::new(),
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
@@ -6544,6 +6550,14 @@ impl Evaluator {
         };
 
         match name {
+            "pathtoroot" => self.evaluate_path_to_root(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
             "read" => self.evaluate_read(
                 &evaluated_positional,
                 &evaluated_named,
@@ -6569,6 +6583,44 @@ impl Evaluator {
                 binding_plan,
             ),
             _ => CallOutcome::Failed,
+        }
+    }
+
+    fn evaluate_path_to_root(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let granularity = match path_to_root_granularity_argument(
+            positional_args,
+            named_args,
+            binding_plan,
+            span,
+            diagnostics,
+        ) {
+            Ok(granularity) => granularity,
+            Err(()) => return CallOutcome::Failed,
+        };
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let root = match granularity {
+            PathRootGranularity::Project => ResourceRoot::Project,
+            PathRootGranularity::Subdocument => context
+                .subdocument_root
+                .map(ResourceRoot::Source)
+                .unwrap_or(ResourceRoot::Project),
+        };
+        match provider.relative_path_to_root(source_id, root) {
+            Ok(path) => CallOutcome::Value(IrValue::String(path)),
+            Err(error) => {
+                diagnostics.push(resource_access_diagnostic("pathtoroot", error, *span));
+                CallOutcome::Failed
+            }
         }
     }
 
@@ -6785,9 +6837,16 @@ impl Evaluator {
                 context.current_source = previous_source;
                 result
             }
-            IncludeSandbox::Scope | IncludeSandbox::Subdocument => {
+            IncludeSandbox::Scope => {
                 let mut child = context.ephemeral_child();
                 child.current_source = Some(target_id);
+                child.active_sources = context.active_sources.clone();
+                self.evaluate_nodes(&document.nodes, diagnostics, &mut child)
+            }
+            IncludeSandbox::Subdocument => {
+                let mut child = context.ephemeral_child();
+                child.current_source = Some(target_id);
+                child.subdocument_root = Some(target_id);
                 child.active_sources = context.active_sources.clone();
                 self.evaluate_nodes(&document.nodes, diagnostics, &mut child)
             }
@@ -11209,7 +11268,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
-const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include"];
+const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include", "pathtoroot"];
 const LET_NATIVE_NAMES: &[&str] = &["let"];
 const FOREACH_NATIVE_NAMES: &[&str] = &["foreach"];
 const REPEAT_NATIVE_NAMES: &[&str] = &["repeat"];
@@ -12359,6 +12418,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             ],
             BodyPolicy::Reject,
         ),
+        "pathtoroot" => (
+            vec![ParameterMetadata::defaulted("granularity")],
+            BodyPolicy::Reject,
+        ),
         "var" => (
             vec![
                 ParameterMetadata::required("name"),
@@ -13279,6 +13342,59 @@ fn resource_lines_argument(
     };
     let _ = span;
     Ok(Some(range.clone()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathRootGranularity {
+    Project,
+    Subdocument,
+}
+
+fn path_to_root_granularity_argument(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<PathRootGranularity, ()> {
+    let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
+        .map_err(|error| {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                error.message,
+                error.primary,
+                "Pass at most one `granularity` value: `project` or `subdocument`.",
+            ));
+        })?;
+    match bound.slots.into_iter().next() {
+        Some(BoundSlot::Explicit { value, span }) => {
+            let Some(value) = builtins::adapt_string_argument(&value) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.pathtoroot` `granularity` must be a String".to_string(),
+                    span,
+                    "Use `project` or `subdocument`.",
+                ));
+                return Err(());
+            };
+            match value.to_ascii_lowercase().as_str() {
+                "project" => Ok(PathRootGranularity::Project),
+                "subdocument" => Ok(PathRootGranularity::Subdocument),
+                _ => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3003",
+                        format!("unsupported `.pathtoroot` granularity `{value}`"),
+                        span,
+                        "Use `project` or `subdocument`.",
+                    ));
+                    Err(())
+                }
+            }
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => Ok(PathRootGranularity::Project),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,7 +1,7 @@
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_engine::{
     ast_to_ir::ast_to_ir_with_diagnostics_for_mode, DocumentMetadataDefaults, IncludedSource,
-    ResourceAccessError, ResourceProvider, ResourceText,
+    ResourceAccessError, ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_ir::{IrDocument, IrInline, IrNode};
 use arkst_markdown::Mode;
@@ -14,13 +14,31 @@ struct FakeResources {
     paths: HashMap<SourceId, String>,
     sources: HashMap<(SourceId, String), IncludedSource>,
     text: HashMap<(SourceId, String), Result<ResourceText, ResourceAccessError>>,
+    roots: HashMap<(SourceId, Option<SourceId>), Result<String, ResourceAccessError>>,
     source_requests: RefCell<Vec<(SourceId, String)>>,
     text_requests: RefCell<Vec<(SourceId, String)>>,
+    root_requests: RefCell<Vec<(SourceId, ResourceRoot)>>,
 }
 
 impl ResourceProvider for FakeResources {
     fn source_path(&self, source_id: SourceId) -> Option<String> {
         self.paths.get(&source_id).cloned()
+    }
+
+    fn relative_path_to_root(
+        &self,
+        source_id: SourceId,
+        root: ResourceRoot,
+    ) -> Result<String, ResourceAccessError> {
+        self.root_requests.borrow_mut().push((source_id, root));
+        let root_id = match root {
+            ResourceRoot::Project => None,
+            ResourceRoot::Source(source_id) => Some(source_id),
+        };
+        self.roots
+            .get(&(source_id, root_id))
+            .cloned()
+            .unwrap_or(Err(ResourceAccessError::UnknownSource { source_id }))
     }
 
     fn read_text(
@@ -297,4 +315,83 @@ fn resource_builtin_without_provider_keeps_its_legacy_context_diagnostic() {
         19,
         "Compile through the project API so logical resources are supplied explicitly.",
     );
+}
+
+#[test]
+fn pathtoroot_tracks_project_and_nested_subdocument_roots_without_host_paths() {
+    let main = SourceId(21);
+    let subdocument = SourceId(22);
+    let utility = SourceId(23);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources
+        .paths
+        .insert(subdocument, "subdocuments/subdocument.qd".into());
+    resources.paths.insert(utility, "utils/example.qd".into());
+    resources.sources.insert(
+        (main, "subdocuments/subdocument.qd".into()),
+        IncludedSource {
+            path: "subdocuments/subdocument.qd".into(),
+            source_id: subdocument,
+            text: ".include {../utils/example.qd}".into(),
+        },
+    );
+    resources.sources.insert(
+        (subdocument, "../utils/example.qd".into()),
+        IncludedSource {
+            path: "utils/example.qd".into(),
+            source_id: utility,
+            text: ".pathtoroot\n.pathtoroot granularity:{subdocument}".into(),
+        },
+    );
+    resources.roots.insert((utility, None), Ok("..".into()));
+    resources
+        .roots
+        .insert((utility, Some(subdocument)), Ok("../subdocuments".into()));
+
+    let (result, diagnostics) = evaluate(
+        ".include {subdocuments/subdocument.qd} sandbox:{subdocument}",
+        main,
+        &resources,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.root_requests.borrow().as_slice(),
+        &[
+            (utility, ResourceRoot::Project),
+            (utility, ResourceRoot::Source(subdocument)),
+        ]
+    );
+    assert_eq!(result.nodes.len(), 2);
+}
+
+#[test]
+fn pathtoroot_subdocument_granularity_falls_back_to_project_root_at_top_level() {
+    let main = SourceId(31);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.roots.insert((main, None), Ok(".".into()));
+
+    let (result, diagnostics) = evaluate(".pathtoroot granularity:{subdocument}", main, &resources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.root_requests.borrow().as_slice(),
+        &[(main, ResourceRoot::Project)]
+    );
+    assert_eq!(result.nodes.len(), 1);
+}
+
+#[test]
+fn pathtoroot_rejects_unknown_granularity_before_requesting_a_root() {
+    let main = SourceId(41);
+    let resources = FakeResources {
+        paths: [(main, "main.qd".into())].into_iter().collect(),
+        ..FakeResources::default()
+    };
+
+    let (_, diagnostics) = evaluate(".pathtoroot granularity:{workspace}", main, &resources);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "E3003");
+    assert!(diagnostics[0].message.contains("workspace"));
+    assert!(resources.root_requests.borrow().is_empty());
 }
