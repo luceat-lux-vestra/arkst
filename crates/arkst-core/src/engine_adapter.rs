@@ -113,3 +113,124 @@ fn map_resource_error(error: ProjectResourceAccessError) -> ResourceAccessError 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkst_project::{VirtualPathBuf, VirtualProjectBuilder};
+
+    fn project() -> VirtualProject {
+        VirtualProjectBuilder::new()
+            .entry("docs/main.qd")
+            .expect("valid entry")
+            .add_source("docs/main.qd", "root")
+            .expect("valid source")
+            .add_source("docs/guide/chapter.qd", "chapter")
+            .expect("valid source")
+            .add_source("docs/shared/target.md", "target")
+            .expect("valid source")
+            .add_source("docs/shared/nested/child.qd", "child")
+            .expect("valid source")
+            .add_source("docs/guide/theme", "local theme")
+            .expect("valid source")
+            .build()
+            .expect("valid project")
+    }
+
+    fn source_id(project: &VirtualProject, path: &str) -> SourceId {
+        project
+            .sources()
+            .get_id(&VirtualPathBuf::parse(path).expect("valid logical path"))
+            .expect("source exists")
+    }
+
+    #[test]
+    fn source_reads_preserve_subdocument_identity_across_normalized_aliases() {
+        let project = project();
+        let chapter = source_id(&project, "docs/guide/chapter.qd");
+        let target = source_id(&project, "docs/shared/target.md");
+        let provider = VirtualProjectResourceProvider::new(&project);
+
+        for reference in [
+            "../shared/target.md",
+            "../shared/./target.md",
+            "../shared//target.md",
+            "../shared/tmp/../target.md",
+        ] {
+            let source = provider
+                .read_source(chapter, reference)
+                .expect("target resolves");
+            assert_eq!(source.path, "docs/shared/target.md", "{reference}");
+            assert_eq!(source.source_id, target, "{reference}");
+            assert_eq!(source.text, "target", "{reference}");
+        }
+    }
+
+    #[test]
+    fn nested_subdocument_targets_use_the_defining_source_identity_as_their_base() {
+        let project = project();
+        let target = source_id(&project, "docs/shared/target.md");
+        let child = source_id(&project, "docs/shared/nested/child.qd");
+        let provider = VirtualProjectResourceProvider::new(&project);
+
+        let source = provider
+            .read_source(target, "nested/child.qd")
+            .expect("nested target resolves from its defining source");
+        assert_eq!(source.path, "docs/shared/nested/child.qd");
+        assert_eq!(source.source_id, child);
+        assert_eq!(source.text, "child");
+    }
+
+    #[test]
+    fn subdocument_source_reads_fail_closed_for_invalid_or_missing_targets() {
+        let project = project();
+        let chapter = source_id(&project, "docs/guide/chapter.qd");
+        let provider = VirtualProjectResourceProvider::new(&project);
+
+        assert!(matches!(
+            provider.read_source(chapter, "missing.md"),
+            Err(ResourceAccessError::NotFound { path }) if path == "docs/guide/missing.md"
+        ));
+        for reference in [
+            "https://example.test/target.qd",
+            "/target.qd",
+            r"C:\target.qd",
+        ] {
+            assert!(matches!(
+                provider.read_source(chapter, reference),
+                Err(ResourceAccessError::UnsupportedReference { .. })
+            ));
+        }
+        assert!(matches!(
+            provider.read_source(chapter, "../../../outside.qd"),
+            Err(ResourceAccessError::Boundary { .. })
+        ));
+        assert!(matches!(
+            provider.read_source(SourceId(u32::MAX - 1), "target.qd"),
+            Err(ResourceAccessError::UnknownSource { .. })
+        ));
+    }
+
+    #[test]
+    fn bare_names_remain_local_until_an_explicit_library_registry_intercepts() {
+        let project = project();
+        let chapter = source_id(&project, "docs/guide/chapter.qd");
+        let local_theme = source_id(&project, "docs/guide/theme");
+        let provider = VirtualProjectResourceProvider::new(&project);
+
+        // Quarkdown checks its explicit, case-sensitive loadable-library
+        // registry before file lookup. The logical resource provider owns only
+        // the second step and therefore must not infer a library from syntax.
+        let source = provider
+            .read_source(chapter, "theme")
+            .expect("bare local path resolves normally");
+        assert_eq!(source.path, "docs/guide/theme");
+        assert_eq!(source.source_id, local_theme);
+        assert_eq!(source.text, "local theme");
+
+        assert!(matches!(
+            provider.read_source(chapter, "Theme"),
+            Err(ResourceAccessError::NotFound { path }) if path == "docs/guide/Theme"
+        ));
+    }
+}
