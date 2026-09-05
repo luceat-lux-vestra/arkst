@@ -103,6 +103,14 @@ jobs:
           if source.count(old) != 1:
               raise SystemExit('supplementary lowercase generator patch target mismatch')
           generator.write_text(source.replace(old, new, 1), encoding='utf-8')
+
+          markdown = Path('tests/compat/references.toml')
+          refs = markdown.read_text(encoding='utf-8')
+          old_hash = 'verifier_source_sha256 = "65721566856454475815b1425cdaafa3a68a6161ca64006b1399e9b370540cec"'
+          new_hash = 'verifier_source_sha256 = "611daca71017fcd175a34f2fea8bcfb00b5ccba1ec6b8c705d7517d5fb44840e"'
+          if refs.count(old_hash) != 1:
+              raise SystemExit('Markdown shared verifier hash target mismatch')
+          markdown.write_text(refs.replace(old_hash, new_hash, 1), encoding='utf-8')
           PY
 
           python3 tools/cleanup_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
