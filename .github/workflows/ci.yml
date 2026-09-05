@@ -53,7 +53,9 @@ jobs:
           python3 tools/ci/test_verify_workflow_security.py
           python3 tools/ci/verify_workflow_security.py
       - name: Test recurring hardening drift audit
-        run: python3 tools/ci/test_hardening_drift_audit.py
+        run: |
+          python3 tools/ci/test_hardening_drift_audit.py
+          python3 tools/ci/test_hardening_drift_live.py
       - name: Install pinned actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
