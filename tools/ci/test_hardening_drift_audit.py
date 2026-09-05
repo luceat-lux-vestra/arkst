@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -267,6 +268,18 @@ class StaticAuthorityTests(unittest.TestCase):
         self.assertTrue(any(item.control == "security-reporting" for item in findings))
 
 
+class WorkflowBoundaryTests(unittest.TestCase):
+    def test_production_dispatch_is_live_only(self):
+        workflow = (
+            HERE.parents[1] / ".github" / "workflows" / "hardening-drift-audit.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("--mode live", workflow)
+        self.assertNotIn("inputs:", workflow)
+        self.assertNotIn("policy-drift", workflow)
+        self.assertNotIn("infrastructure-failure", workflow)
+
+
 class ReporterLifecycleTests(unittest.TestCase):
     def payload(self, classification):
         return {
@@ -315,6 +328,24 @@ class ReporterLifecycleTests(unittest.TestCase):
     def test_missing_detector_output_becomes_infrastructure_failure(self):
         payload = REPORT.decode_result("")
         self.assertEqual(payload["classification"], "infrastructure-failure")
+
+    def test_marker_search_does_not_depend_on_labels(self):
+        client = REPORT.GitHubIssueClient("example/repo", "token")
+        requested = []
+
+        def fake_request(method, path, payload=None):
+            requested.append((method, path, payload))
+            return [{"number": 12, "state": "open", "body": REPORT.MARKER}]
+
+        client._request = fake_request
+        owned = client.find_owned(REPORT.MARKER)
+        self.assertEqual([item.number for item in owned], [12])
+        self.assertNotIn("labels=", requested[0][1])
+
+    def test_malformed_clean_payload_is_rejected(self):
+        encoded = base64.b64encode(json.dumps({"classification": "clean"}).encode()).decode()
+        with self.assertRaises(REPORT.ReporterError):
+            REPORT.decode_result(encoded)
 
 
 if __name__ == "__main__":
