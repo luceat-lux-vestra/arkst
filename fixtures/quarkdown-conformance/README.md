@@ -5,10 +5,13 @@ Quarkdown compatibility implementation. The corpus is an executable compatibilit
 claim: `arkst-test-support` loads every case from the workspace test suite and
 enforces the declared `compatibility_level`.
 
-The corpus is intentionally bounded. Its 19 cases provide independent parser,
+The corpus is intentionally bounded. Its 20 cases provide independent parser,
 evaluator, document-state, value, and IR evidence for the slices listed in the
 case metadata; they do not imply that every public v2.5.1 surface is supported
-or output-equivalent. The canonical status for the complete audited surface is
+or output-equivalent. The `localization-family` case covers the conformance-level
+localization slice; Unicode casing and word-boundary edge cases are additionally
+gated by the pinned Reference JVM differential rather than duplicated as corpus
+fixtures. The canonical status for the complete audited surface is
 [`docs/compatibility/quarkdown/RECONCILIATION.md`](../../docs/compatibility/quarkdown/RECONCILIATION.md),
 with detailed row evidence in the linked audit manifests. A missing fixture is
 not positive support evidence, and unsupported/deferred rows must retain their

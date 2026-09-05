@@ -65,7 +65,7 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
             "missing artifact: {artifact}"
         );
     }
-    assert!(RECONCILIATION.contains("19 cases"));
+    assert!(RECONCILIATION.contains("20 cases"));
     assert!(RECONCILIATION.contains("No Quarkdown source, test, or fixture was copied"));
     assert!(RECONCILIATION.contains("SUPPORTED_END_TO_END"));
     assert!(RECONCILIATION.contains("SUPPORTED_SEMANTICS"));
@@ -109,8 +109,6 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         ("functionexists", "#195", "library inspection"),
         ("libraries", "#195", "library inspection"),
         ("libfunctions", "#195", "library inspection"),
-        ("localization", "#196", "localization"),
-        ("localize", "#196", "localization"),
         ("log", "#197", "logger"),
         ("debug", "#197", "logger"),
         ("error", "#197", "logger"),
@@ -128,6 +126,17 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         );
         assert!(RECONCILIATION.contains(family));
     }
+}
+
+#[test]
+fn reconciliation_records_localization_as_semantically_supported() {
+    for name in ["localization", "localize"] {
+        let row = stdlib_row(name);
+        assert_eq!(row[3], "#151");
+        assert_eq!(row[4], "SUPPORTED_SEMANTICS");
+    }
+    assert!(STDLIB_AUDIT.contains("Bounded #196 localization contract"));
+    assert!(RECONCILIATION.contains("localization-family"));
 }
 
 #[test]

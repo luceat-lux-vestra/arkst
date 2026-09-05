@@ -9,7 +9,7 @@ contract = "arkst.reference-data-integrity"
 contract_version = 1
 source_kind = "archive-backed"
 verifier_path = "tools/verify_reference_provenance.py"
-verifier_source_sha256 = "65721566856454475815b1425cdaafa3a68a6161ca64006b1399e9b370540cec"
+verifier_source_sha256 = "611daca71017fcd175a34f2fea8bcfb00b5ccba1ec6b8c705d7517d5fb44840e"
 notice_path = "NOTICE"
 notice_required_markers = [
   "== Reference JVM and generated compatibility data ==",
@@ -70,9 +70,9 @@ java_version_output = [
 ]
 
 # SHA-256 of tools/dump_jdk25_unicode_data.java.
-helper_source_sha256 = "b0fb84655d5fb1416dac6df356ebe0ee84c450d319dfe2d805e14434e358fbac"
-oracle_output_sha256 = "f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862"
-generated_source_sha256 = "6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb520dbfb9211ad"
+helper_source_sha256 = "31534a3c5c8c63910479b16ae3eed994e71e14bae7105e84d9703b9f7e6bfea6"
+oracle_output_sha256 = "f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d"
+generated_source_sha256 = "f40c055e50fe18097f5d765c7087919dbf04fced1397da397046f1a0d3e89eef"
 
 # Phase B JDK25 locale snapshot fingerprints. These fields describe the
 # generated locale artifacts, while the fields above remain the Phase A
@@ -110,24 +110,38 @@ locale_accepted_timezone_ids = 468
 # existing fields above remain the authoritative detailed JDK values.
 unicode_helper_path = "tools/dump_jdk25_unicode_data.java"
 unicode_generator_path = "tools/generate_jdk25_unicode_case.py"
-unicode_generator_source_sha256 = "1074fa498101d643fa7e7e7b02623f172b3b6c2fdce13d7d8799ed0a36eeac6f"
+unicode_generator_source_sha256 = "2d33f70ca87801e9083fdce58d57d6bfa3fc54d0c8f671cc30ade28c6b702b8a"
 unicode_verifier_path = "tools/verify_jdk25_unicode.py"
-unicode_verifier_source_sha256 = "3dab2fcd82bf413998efb2b64d56f7239338db4170658ad16f30517ae64d3a5a"
+unicode_verifier_source_sha256 = "0915e9c4e1bb3d8685c6d48b1e4e4d77c592b7182f6140ae2e476216ad8d9688"
 unicode_corpus_path = "tools/jdk25_unicode_corpus.tsv"
-unicode_corpus_bytes = 361
-unicode_corpus_min_bytes = 361
-unicode_corpus_max_bytes = 361
-unicode_corpus_record_count = 23
-unicode_corpus_sha256 = "4c8c30aa62cfcca25c0130eb646cab984a3f0b3de47323d4e017f6a5a40164f2"
+unicode_corpus_bytes = 542
+unicode_corpus_min_bytes = 542
+unicode_corpus_max_bytes = 542
+unicode_corpus_record_count = 37
+unicode_corpus_sha256 = "49fbece6fb1601c1b6cd25228302fc0216c346555c73f31e40fc3a08e3d6bf52"
 unicode_generated_source_path = "crates/arkst-engine/src/unicode_case.rs"
-unicode_generated_source_bytes = 148058
-unicode_generated_source_min_bytes = 148058
-unicode_generated_source_max_bytes = 148058
+unicode_generated_source_bytes = 151917
+unicode_generated_source_min_bytes = 151917
+unicode_generated_source_max_bytes = 151917
 unicode_generated_source_record_count = 68469
 unicode_scalar_mapping_record_count = 2933
 unicode_utf16_char_record_count = 65536
 unicode_artifact_size_policy = "exact"
 unicode_generated_source_limit_bytes = 1048576
+
+# Exact Locale.ROOT word-break DFA used by ConditionalSpecialCasing Final_Sigma.
+word_break_helper_path = "tools/dump_word_break_jdk25.java"
+word_break_helper_source_sha256 = "4f0a20c0df410db31ff8fd5e4f02cd1dcb8728815a3f64f18f9a8ca1875db74e"
+word_break_generator_path = "tools/generate_word_break_jdk25.py"
+word_break_generator_source_sha256 = "023c1216c57258750020a1538fe2e20600e5015e5d0cebe14fe96eed86615786"
+word_break_oracle_output_sha256 = "b59f957c6be01cf1af7134228b740dd61503c835124be1378a5a88d277f34af1"
+word_break_generated_source_path = "crates/arkst-engine/src/word_break.rs"
+word_break_generated_source_bytes = 58203
+word_break_generated_source_sha256 = "96640a2ed979f17e58f03c0d2341e862aa818b8957a5c0692e2608c42e6051a4"
+word_break_generated_source_limit_bytes = 262144
+word_break_num_categories = 22
+word_break_num_states = 20
+word_break_category_range_count = 2246
 
 locale_dump_helper_path = "tools/dump_jdk25_locale_data.java"
 locale_display_dump_helper_path = "tools/dump_jdk25_locale_display_data.java"

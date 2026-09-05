@@ -47,18 +47,27 @@ APIs and captures:
 - full upper/lower mappings and the Kotlin `Char.titlecase()` transformation
   needed by `.capitalize`; and
 - `String.regionMatches(true, ...)`, which is the external oracle for
-  `.startswith(ignorecase:true)`.
+  `.startswith(ignorecase:true)`; and
+- `Character.isLowerCase`, `Character.isUpperCase`, and
+  `Character.isTitleCase`, which provide the pinned `Cased` property used by
+  invariant-locale contextual final-sigma lowering; and
+- the exact `Locale.ROOT` `RuleBasedBreakIterator` forward DFA/category mapping
+  used by JDK `ConditionalSpecialCasing.isFinalCased`, captured into a separate
+  generated `word_break.rs` so sequence-sensitive word boundaries do not depend
+  on a host JVM or locale at runtime.
 
 The helper is independently authored and is not runtime code. The transient
 oracle output is not checked in. The checked-in generated Rust table is
-`148058` bytes with SHA-256
-`6b8f1a69a693357fd601b0908333370a2304edd642ac8ff6dbb520dbfb9211ad`.
+`159815` bytes with SHA-256
+`0a27e755125cc7dcb9aa757fde0b0ef8bc46e3014a60c445931934e912d24f76`.
 The helper SHA-256 is
-`e10e15f92ef6f996ed117e2d5e3d590a01df511abad7ffc583e349f59b76fa47`, and the
+`2b6459d6dfee9e2780c50e1734ac8302900bd9d601acae401b0af064c0ba568f`, and the
 complete oracle output SHA-256 is
-`f5efcfe8628d7794a459872a54f501c8541859a6daf2d0ed382af46cb6cdd862`.
-The generated data contains `2933` non-identity scalar rows and all `65536`
-UTF-16 code-unit rows.
+`df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9`.
+The generated case data contains `2933` non-identity scalar rows and all
+`65536` UTF-16 code-unit rows. Final-sigma word segmentation is separately
+generated from the same pinned runtime's root word-break DFA; the Reference JVM
+check regenerates both artifacts byte-for-byte.
 
 Compared with the former JDK 17/Unicode 13 baseline, the direct Temurin
 comparison found `134` newly non-identity scalar rows and `20` changed BMP
@@ -73,9 +82,11 @@ newly paired `Ꟑ`/`ꟑ` behavior.
 For migration evidence only, the same helper under the former exact Temurin
 `17.0.20.1+1` runtime emitted `68335` rows, `2685553` bytes, and SHA-256
 `d771cf16704b8543fc4b1cb191a746b35ca78b7dd4b7c2587774bebc91031f5b`. The
-Temurin 25 oracle emits `68469` rows, `2688843` bytes, and the SHA recorded
-above. The JDK 17 values are historical comparison evidence, not an active
-compatibility baseline.
+Temurin 25 oracle emits `99997` rows, `3199082` bytes, and the SHA recorded
+above; this includes `4578` generated `Cased` property records and `26950`
+generated Final_Sigma context records in addition to the `68469` scalar/
+UTF-16 mapping records. The JDK 17 values are historical comparison evidence,
+not an active compatibility baseline.
 
 The runtime has no JVM, filesystem, network, host-locale, or mutable-global
 dependency. The generation/check path validates the exact archive, Java

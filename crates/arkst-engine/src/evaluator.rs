@@ -417,9 +417,41 @@ enum CallOutcome {
     Unresolved,
 }
 
-/// Mutable evaluator-only document state. Its final form is copied into the
-/// serializable IR snapshot after evaluation completes.
-#[derive(Debug, Clone, Default)]
+type LocalizationTable = BTreeMap<String, BTreeMap<String, String>>;
+type LocalizationTables = BTreeMap<String, LocalizationTable>;
+type LocalizationTableUndo = BTreeMap<String, Option<LocalizationTable>>;
+
+/// The bounded, independently evidenced portion of Quarkdown's initial
+/// standard localization table. This is evaluator working state, not public
+/// document IR or a claim of exhaustive resource-data equivalence.
+fn seeded_localization_tables() -> LocalizationTables {
+    let mut std = BTreeMap::new();
+    for (locale, warning, error) in [
+        ("zh", "警告", "错误"),
+        ("en", "Warning", "Error"),
+        ("fr", "Attention", "Erreur"),
+        ("de", "Warnung", "Fehler"),
+        ("it", "Attenzione", "Errore"),
+        ("ja", "警告", "エラー"),
+        ("pl", "Ostrzeżenie", "Błąd"),
+        ("pt", "Aviso", "Erro"),
+        ("ru", "Предупреждение", "Ошибка"),
+        ("uk", "Попередження", "Помилка"),
+    ] {
+        let mut entries = BTreeMap::new();
+        entries.insert("warning".to_string(), warning.to_string());
+        entries.insert("error".to_string(), error.to_string());
+        std.insert(locale.to_string(), entries);
+    }
+    let mut tables = BTreeMap::new();
+    tables.insert("std".to_string(), std);
+    tables
+}
+
+/// Mutable evaluator-only document state. Its public portion is copied into
+/// the serializable IR snapshot after evaluation completes; localization
+/// tables deliberately remain evaluator working state.
+#[derive(Debug, Clone)]
 struct DocumentState {
     name: String,
     description: String,
@@ -429,6 +461,23 @@ struct DocumentState {
     theme: Option<IrDocumentTheme>,
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
+    localization_tables: LocalizationTables,
+}
+
+impl Default for DocumentState {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            document_type: Default::default(),
+            authors: Vec::new(),
+            keywords: Vec::new(),
+            theme: None,
+            locale: None,
+            caption_position: Default::default(),
+            localization_tables: seeded_localization_tables(),
+        }
+    }
 }
 
 impl DocumentState {
@@ -442,6 +491,7 @@ impl DocumentState {
             theme: snapshot.theme.clone(),
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
+            localization_tables: seeded_localization_tables(),
         }
     }
 
@@ -812,6 +862,7 @@ enum DocumentStateField {
     Theme,
     Locale,
     CaptionPosition,
+    LocalizationTables,
 }
 
 enum DocumentStateUndo {
@@ -823,6 +874,7 @@ enum DocumentStateUndo {
     Theme(Option<IrDocumentTheme>),
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
+    LocalizationTables(LocalizationTableUndo),
 }
 
 enum InvocationUndo {
@@ -967,8 +1019,35 @@ impl InvocationTransaction {
             if entry.is_dead_at(parent_index) {
                 continue;
             }
-            if parent.first_writes.insert(entry.key()) {
+            let inserted = parent.first_writes.insert(entry.key());
+            if inserted {
                 parent.entries.push(entry);
+                continue;
+            }
+            let InvocationUndo::DocumentState {
+                field: DocumentStateField::LocalizationTables,
+                previous: DocumentStateUndo::LocalizationTables(child_previous),
+            } = entry
+            else {
+                continue;
+            };
+            let Some(InvocationUndo::DocumentState {
+                previous: DocumentStateUndo::LocalizationTables(parent_previous),
+                ..
+            }) = parent.entries.iter_mut().find(|entry| {
+                matches!(
+                    entry,
+                    InvocationUndo::DocumentState {
+                        field: DocumentStateField::LocalizationTables,
+                        ..
+                    }
+                )
+            })
+            else {
+                continue;
+            };
+            for (name, previous) in child_previous {
+                parent_previous.entry(name).or_insert(previous);
             }
         }
     }
@@ -1782,6 +1861,18 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::Theme(previous) => state.theme = previous,
             DocumentStateUndo::Locale(previous) => state.locale = previous,
             DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
+            DocumentStateUndo::LocalizationTables(previous) => {
+                for (name, table) in previous {
+                    match table {
+                        Some(table) => {
+                            state.localization_tables.insert(name, table);
+                        }
+                        None => {
+                            state.localization_tables.remove(&name);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1881,6 +1972,121 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().locale = Some(locale);
+    }
+
+    fn localization_table_undo_contains(&self, name: &str) -> bool {
+        self.transaction
+            .borrow()
+            .savepoints
+            .last()
+            .is_some_and(|savepoint| {
+                savepoint.entries.iter().any(|entry| {
+                    matches!(
+                        entry,
+                        InvocationUndo::DocumentState {
+                            previous: DocumentStateUndo::LocalizationTables(previous),
+                            ..
+                        } if previous.contains_key(name)
+                    )
+                })
+            })
+    }
+
+    fn record_localization_table_undo(&self, name: String, previous: Option<LocalizationTable>) {
+        let mut transaction = self.transaction.borrow_mut();
+        let Some(savepoint) = transaction.savepoints.last_mut() else {
+            return;
+        };
+        let Some(InvocationUndo::DocumentState {
+            previous: DocumentStateUndo::LocalizationTables(previous_tables),
+            ..
+        }) = savepoint.entries.iter_mut().rev().find(|entry| {
+            matches!(
+                entry,
+                InvocationUndo::DocumentState {
+                    field: DocumentStateField::LocalizationTables,
+                    ..
+                }
+            )
+        })
+        else {
+            return;
+        };
+        previous_tables.entry(name).or_insert(previous);
+    }
+
+    /// Publishes one already-validated localization candidate. The touched
+    /// table is captured at table granularity in the first-write undo entry;
+    /// replacement/absent paths move values, while an existing-table merge
+    /// clones only the table being merged. Unrelated tables are not copied,
+    /// and later writes in the same savepoint reuse that entry.
+    fn publish_localization_table(
+        &self,
+        name: String,
+        candidate: LocalizationTable,
+        merge: bool,
+    ) -> bool {
+        if !merge
+            && self
+                .document_state
+                .borrow()
+                .localization_tables
+                .contains_key(&name)
+        {
+            return false;
+        }
+
+        let first_write = self
+            .transaction
+            .borrow_mut()
+            .first_write(UndoKey::DocumentState {
+                field: DocumentStateField::LocalizationTables,
+            });
+        if first_write {
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::DocumentState {
+                    field: DocumentStateField::LocalizationTables,
+                    previous: DocumentStateUndo::LocalizationTables(BTreeMap::new()),
+                });
+        }
+        let capture_table = !self.localization_table_undo_contains(&name);
+        let previous = {
+            let mut state = self.document_state.borrow_mut();
+            if capture_table {
+                let previous = state.localization_tables.remove(&name);
+                let mut candidate = Some(candidate);
+                let mut next = if merge {
+                    previous.clone().unwrap_or_default()
+                } else {
+                    let Some(candidate) = candidate.take() else {
+                        unreachable!("localization candidate must be present")
+                    };
+                    candidate
+                };
+                if merge {
+                    let Some(candidate) = candidate.take() else {
+                        unreachable!("localization candidate must be present")
+                    };
+                    for (locale, entries) in candidate {
+                        next.entry(locale).or_default().extend(entries);
+                    }
+                }
+                state.localization_tables.insert(name.clone(), next);
+                Some(previous)
+            } else {
+                if merge {
+                    merge_localization_table(&mut state.localization_tables, &name, candidate);
+                } else {
+                    state.localization_tables.insert(name.clone(), candidate);
+                }
+                None
+            }
+        };
+        if let Some(previous) = previous {
+            self.record_localization_table_undo(name, previous);
+        }
+        true
     }
 
     fn set_caption_position(&self, caption_position: IrCaptionPositionInfo) {
@@ -2920,6 +3126,23 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+            );
+        }
+
+        if is_localization(name) && context.get_function(name).is_none() {
+            return self.evaluate_localization_builtin(
+                name,
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                raw_body,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -4371,9 +4594,311 @@ impl Evaluator {
         )))
     }
 
-    /// Implements the read/write document-state builtins without changing
-    /// the ordinary lexical scope maps. Argument evaluation and bounded
-    /// String conversion complete before the shared state is mutated.
+    /// Implements the localization builtins after shared argument evaluation
+    /// and binding, publishing only a completely validated candidate.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_localization_builtin(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+
+        // Bind the source-backed raw body through the shared final-parameter
+        // contract. The selected Dictionary target materializes its dynamic
+        // Markdown form below; parsed body nodes never bypass the binder.
+        let body_candidate = if body.is_some() {
+            match source_backed_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                ".localization",
+                diagnostics,
+            ) {
+                Ok(candidate) => candidate,
+                Err(outcome) => return outcome,
+            }
+        } else {
+            None
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter().enumerate();
+
+        if name == "localize" {
+            let Some((
+                key_index,
+                BoundSlot::Explicit {
+                    value: key,
+                    span: key_span,
+                },
+            )) = slots.next()
+            else {
+                return CallOutcome::Failed;
+            };
+            let separator_slot = slots.next();
+            let separator = match separator_slot {
+                Some((
+                    separator_index,
+                    BoundSlot::Explicit {
+                        value,
+                        span: argument_span,
+                    },
+                )) => {
+                    let separator = match builtins::scalar_string_conversion(&value) {
+                        Ok(separator) => separator,
+                        Err(error) => {
+                            diagnostics.push(localization_conversion_diagnostic(
+                                error,
+                                argument_span,
+                                "separator",
+                                parameters
+                                    .get(separator_index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                                ".localize",
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    separator
+                }
+                Some((_, BoundSlot::Omitted | BoundSlot::Defaulted)) | None => ":".to_string(),
+            };
+            let key = match builtins::scalar_string_conversion(&key) {
+                Ok(key) => key,
+                Err(error) => {
+                    diagnostics.push(localization_conversion_diagnostic(
+                        error,
+                        key_span,
+                        "key",
+                        parameters
+                            .get(key_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                        ".localize",
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            let Some((table_name, localization_key)) = key.split_once(&separator) else {
+                diagnostics.push(localization_error(
+                    "`.localize` key must contain a table/key separator",
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            let locale = context.document_state.borrow().locale.clone();
+            let Some(locale) = locale else {
+                diagnostics.push(localization_error(
+                    "`.localize` requires a document locale selected by `.doclang`",
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            let state = context.document_state.borrow();
+            let Some(table) = state.localization_tables.get(table_name) else {
+                diagnostics.push(localization_error(
+                    format!("Could not find localization table `{table_name}`"),
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            let Some(entries) = table.get(&locale.tag) else {
+                diagnostics.push(localization_error(
+                    format!(
+                        "Could not find locale `{}` in table `{table_name}`",
+                        locale.tag
+                    ),
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            // Quarkdown v2.5.1's `BaseContext.localize()` performs
+            // `entries[key.lowercase()] ?: entries[key]`: the lowercase form
+            // of the key is tried first, and only the original key is tried
+            // if that lookup misses. This is not general case-insensitive
+            // lookup: the table name and locale tag above remain exact, and
+            // when both the lowercase and original keys exist and differ,
+            // the lowercase-key entry wins.
+            let localization_key_lowercase = builtins::canonical_lowercase(localization_key);
+            let value = entries
+                .get(localization_key_lowercase.as_str())
+                .or_else(|| entries.get(localization_key));
+            let Some(value) = value else {
+                diagnostics.push(localization_error(
+                    format!(
+                        "Could not find localization key `{localization_key}` in table `{table_name}` for locale {}",
+                        locale.tag
+                    ),
+                    key_span,
+                ));
+                return CallOutcome::Failed;
+            };
+            return CallOutcome::Value(IrValue::String(value.clone()));
+        }
+
+        let Some((
+            name_index,
+            BoundSlot::Explicit {
+                value: table_name,
+                span: table_name_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let merge = match slots.next() {
+            Some((
+                merge_index,
+                BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                },
+            )) => {
+                match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
+                    Ok(ScalarValue::Boolean(merge)) => merge,
+                    Ok(_) => unreachable!("Boolean conversion returned a non-Boolean value"),
+                    Err(error) => {
+                        diagnostics.push(localization_conversion_diagnostic(
+                            error,
+                            argument_span,
+                            "merge",
+                            parameters
+                                .get(merge_index)
+                                .and_then(|parameter| parameter.name_span),
+                            *span,
+                            ".localization",
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            Some((_, BoundSlot::Omitted | BoundSlot::Defaulted)) | None => false,
+        };
+        let Some((
+            contents_index,
+            BoundSlot::Explicit {
+                value: contents,
+                span: contents_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let table_name = match builtins::scalar_string_conversion(&table_name) {
+            Ok(name) => name,
+            Err(error) => {
+                diagnostics.push(localization_conversion_diagnostic(
+                    error,
+                    table_name_span,
+                    "name",
+                    parameters
+                        .get(name_index)
+                        .and_then(|parameter| parameter.name_span),
+                    *span,
+                    ".localization",
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let dictionary = match value_conversion::convert_target_with_origin(
+            &contents,
+            value_conversion::ConversionTarget::Dictionary,
+            contents_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
+                let nodes = match self.parse_dynamic_markdown_content(
+                    &text,
+                    contents_span,
+                    value_conversion::RawMarkdownTarget::Dictionary,
+                    diagnostics,
+                ) {
+                    Ok(nodes) => nodes,
+                    Err(outcome) => return outcome,
+                };
+                let entries = match self.evaluate_dictionary_entries(
+                    &nodes,
+                    contents_span,
+                    diagnostics,
+                    context,
+                    ".localization",
+                ) {
+                    Ok(entries) => entries,
+                    Err(outcome) => return outcome,
+                };
+                IrDictionary {
+                    entries,
+                    span: contents_span,
+                }
+            }
+            Ok(value_conversion::TargetValue::Value(_)) => {
+                diagnostics.push(localization_error(
+                    "`.localization` contents must be a typed Dictionary",
+                    contents_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(localization_conversion_diagnostic(
+                    error,
+                    contents_span,
+                    "contents",
+                    parameters
+                        .get(contents_index)
+                        .and_then(|parameter| parameter.name_span),
+                    *span,
+                    ".localization",
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let candidate = match validate_localization_dictionary(&dictionary, *span, diagnostics) {
+            Ok(candidate) => candidate,
+            Err(()) => return CallOutcome::Failed,
+        };
+        if !context.publish_localization_table(table_name, candidate, merge) {
+            diagnostics.push(localization_error(
+                "`.localization` table name is already defined; pass `merge:{true}` to extend it",
+                table_name_span,
+            ));
+            return CallOutcome::Failed;
+        }
+        CallOutcome::NoValue
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn evaluate_document_state_builtin(
         &self,
@@ -10639,6 +11164,7 @@ pub(crate) enum NativeDispatchOwner {
     RegularScalar,
     Conditional,
     DocumentState,
+    Localization,
     Html,
     Markdown,
     Resource,
@@ -10680,6 +11206,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "theme",
     "captionposition",
 ];
+const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include"];
@@ -10723,6 +11250,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::DocumentState,
         names: DOCUMENT_STATE_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Localization,
+        names: LOCALIZATION_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Html,
@@ -10873,6 +11404,10 @@ fn is_whitespace(name: &str) -> bool {
 
 fn is_document_state(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::DocumentState)
+}
+
+fn is_localization(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Localization)
 }
 
 fn is_html(name: &str) -> bool {
@@ -11718,6 +12253,21 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("layout"),
             ],
             BodyPolicy::BindFinal,
+        ),
+        "localization" => (
+            vec![
+                ParameterMetadata::required("name"),
+                ParameterMetadata::defaulted("merge"),
+                ParameterMetadata::required("contents"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "localize" => (
+            vec![
+                ParameterMetadata::required("key"),
+                ParameterMetadata::defaulted("separator"),
+            ],
+            BodyPolicy::Reject,
         ),
         "if" | "ifnot" => (
             vec![
@@ -13650,6 +14200,120 @@ fn function_error_at(message: String, span: SourceSpan) -> Diagnostic {
     }
 }
 
+fn merge_localization_table(
+    tables: &mut LocalizationTables,
+    name: &str,
+    candidate: BTreeMap<String, BTreeMap<String, String>>,
+) {
+    let table = tables.entry(name.to_string()).or_default();
+    for (locale, entries) in candidate {
+        let current = table.entry(locale).or_default();
+        current.extend(entries);
+    }
+}
+
+fn validate_localization_dictionary(
+    dictionary: &IrDictionary,
+    call_span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, ()> {
+    let mut locales = BTreeMap::new();
+    for locale_pair in &dictionary.entries {
+        let locale_identifier = match locale_pair.first.as_ref() {
+            IrValue::String(value) => value,
+            _ => {
+                diagnostics.push(localization_error(
+                    "`.localization` locale keys must remain typed strings",
+                    locale_pair.span,
+                ));
+                return Err(());
+            }
+        };
+        let locale = match crate::locale::resolve(locale_identifier) {
+            Some(locale) => locale,
+            None => {
+                diagnostics.push(localization_error(
+                    format!("`.localization` locale `{locale_identifier}` was not found"),
+                    locale_pair.span,
+                ));
+                return Err(());
+            }
+        };
+        let IrValue::Dictionary(entries) = locale_pair.second.as_ref() else {
+            diagnostics.push(localization_error(
+                "`.localization` locale values must be Dictionaries",
+                locale_pair.span,
+            ));
+            return Err(());
+        };
+        let mut localized_entries = BTreeMap::new();
+        for entry_pair in &entries.entries {
+            let key = match entry_pair.first.as_ref() {
+                IrValue::String(value) => value.clone(),
+                _ => {
+                    diagnostics.push(localization_error(
+                        "`.localization` entry keys must remain typed strings",
+                        entry_pair.span,
+                    ));
+                    return Err(());
+                }
+            };
+            let value = match builtins::scalar_string_conversion(&InvocationValue::static_value(
+                entry_pair.second.as_ref().clone(),
+            )) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(localization_conversion_diagnostic(
+                        error,
+                        entry_pair.span,
+                        "contents",
+                        None,
+                        call_span,
+                        ".localization",
+                    ));
+                    return Err(());
+                }
+            };
+            localized_entries.insert(key, value);
+        }
+        locales.insert(locale.tag, localized_entries);
+    }
+    Ok(locales)
+}
+
+fn localization_conversion_diagnostic(
+    error: value_conversion::ConversionError,
+    candidate_span: SourceSpan,
+    parameter: &str,
+    parameter_span: Option<SourceSpan>,
+    call_span: SourceSpan,
+    context: &str,
+) -> Diagnostic {
+    conversion_failure_diagnostic(
+        value_conversion::ConversionFailure::new(
+            error,
+            Some(candidate_span),
+            Some(parameter),
+            parameter_span,
+            call_span,
+        ),
+        Some(context),
+    )
+}
+
+fn localization_error(message: impl Into<String>, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3001".to_string(),
+        severity: Severity::Error,
+        message: message.into(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Localization state is published only after complete candidate validation.".to_string(),
+        ],
+    }
+}
+
 fn document_state_conversion_error(message: String, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3001".to_string(),
@@ -15172,6 +15836,102 @@ mod tests {
                 .collect(),
             span: span(0, 30),
         })
+    }
+
+    #[test]
+    fn localization_validation_uses_canonical_strings_and_rejects_inner_key_shapes() {
+        let dictionary = IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("en".to_string())),
+                second: Box::new(IrValue::Dictionary(IrDictionary {
+                    entries: vec![
+                        IrPair {
+                            first: Box::new(IrValue::String("count".to_string())),
+                            second: Box::new(IrValue::Number(7.0)),
+                            span: span(2, 3),
+                        },
+                        IrPair {
+                            first: Box::new(IrValue::String("enabled".to_string())),
+                            second: Box::new(IrValue::Boolean(true)),
+                            span: span(3, 4),
+                        },
+                    ],
+                    span: span(1, 5),
+                })),
+                span: span(0, 5),
+            }],
+            span: span(0, 5),
+        };
+        let mut diagnostics = Vec::new();
+        let table = validate_localization_dictionary(&dictionary, span(0, 5), &mut diagnostics)
+            .expect("canonical String conversion should accept scalar values");
+        assert_eq!(table["en"]["count"], "7");
+        assert_eq!(table["en"]["enabled"], "true");
+        assert!(diagnostics.is_empty());
+
+        let malformed = IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::String("en".to_string())),
+                second: Box::new(IrValue::Dictionary(IrDictionary {
+                    entries: vec![IrPair {
+                        first: Box::new(IrValue::Number(1.0)),
+                        second: Box::new(IrValue::String("not accepted".to_string())),
+                        span: span(2, 3),
+                    }],
+                    span: span(1, 3),
+                })),
+                span: span(0, 3),
+            }],
+            span: span(0, 3),
+        };
+        diagnostics.clear();
+        assert!(
+            validate_localization_dictionary(&malformed, span(0, 3), &mut diagnostics).is_err()
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("entry keys"));
+    }
+
+    /// `crate::locale::resolve` mirrors JVM `Locale.forLanguageTag`, which
+    /// never fails: any syntactically-typed String is accepted, falling back
+    /// to the `und` (undetermined) tag for unparsable content (verified
+    /// independently against `resolve("42")`, `resolve("e")`,
+    /// `resolve("!!!")`, and other adversarial strings, all of which return
+    /// `Some(..)`). So the only reachable "invalid locale" failure in
+    /// `.localization` is a locale key that isn't a typed String at all, not
+    /// a malformed identifier string -- exercised here with deterministic
+    /// code/message/span assertions.
+    #[test]
+    fn localization_rejects_non_string_locale_keys_with_a_source_backed_diagnostic() {
+        let non_string_locale = IrDictionary {
+            entries: vec![IrPair {
+                first: Box::new(IrValue::Boolean(true)),
+                second: Box::new(IrValue::Dictionary(IrDictionary {
+                    entries: vec![IrPair {
+                        first: Box::new(IrValue::String("key".to_string())),
+                        second: Box::new(IrValue::String("value".to_string())),
+                        span: span(12, 20),
+                    }],
+                    span: span(10, 20),
+                })),
+                span: span(5, 20),
+            }],
+            span: span(0, 20),
+        };
+        let mut diagnostics = Vec::new();
+        assert!(validate_localization_dictionary(
+            &non_string_locale,
+            span(0, 20),
+            &mut diagnostics
+        )
+        .is_err());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3001");
+        assert_eq!(
+            diagnostics[0].message,
+            "`.localization` locale keys must remain typed strings"
+        );
+        assert_eq!(diagnostics[0].primary, Some(span(5, 20)));
     }
 
     fn lambda_parameter(name: &str, start: usize) -> IrParameter {

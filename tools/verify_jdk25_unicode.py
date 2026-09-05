@@ -63,6 +63,20 @@ def main() -> None:
         check=True,
         env=environment(),
     )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools/generate_word_break_jdk25.py"),
+            "--java",
+            str(args.java),
+            "--archive",
+            str(args.archive),
+            "--check",
+        ],
+        cwd=ROOT,
+        check=True,
+        env=environment(),
+    )
 
     javac = args.java.parent / "javac"
     if not javac.is_file():

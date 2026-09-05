@@ -315,6 +315,8 @@ def check_jdk_static(root: Path, manifest_path: Path) -> tuple[dict[str, Any], d
         ("unicode_helper_path", "helper_source_sha256", "JDK Unicode helper"),
         ("unicode_generator_path", "unicode_generator_source_sha256", "JDK Unicode generator"),
         ("unicode_verifier_path", "unicode_verifier_source_sha256", "JDK Unicode verifier"),
+        ("word_break_helper_path", "word_break_helper_source_sha256", "JDK word-break helper"),
+        ("word_break_generator_path", "word_break_generator_source_sha256", "JDK word-break generator"),
         ("locale_dump_helper_path", "locale_dump_helper_source_sha256", "JDK locale helper"),
         ("locale_display_dump_helper_path", "locale_display_dump_helper_source_sha256", "JDK display helper"),
         ("locale_public_oracle_helper_path", "locale_public_oracle_helper_source_sha256", "JDK public oracle helper"),
@@ -380,6 +382,32 @@ def check_jdk_static(root: Path, manifest_path: Path) -> tuple[dict[str, Any], d
     )
     if corpus_records != require_int(reference, "unicode_corpus_record_count", "JDK Unicode corpus records"):
         raise VerificationError("JDK Unicode oracle corpus record count changed")
+
+    word_break_path = relative_path(root, reference.get("word_break_generated_source_path"), "JDK word-break artifact path")
+    word_break_bytes = require_int(reference, "word_break_generated_source_bytes", "JDK word-break artifact bytes")
+    word_break_limit = require_int(reference, "word_break_generated_source_limit_bytes", "JDK word-break artifact limit")
+    if word_break_bytes > word_break_limit:
+        raise VerificationError("JDK word-break artifact exceeds its size limit")
+    check_artifact(
+        word_break_path,
+        label="JDK word-break generated Rust",
+        expected_bytes=word_break_bytes,
+        minimum_bytes=word_break_bytes,
+        maximum_bytes=word_break_bytes,
+        expected_sha256=require_sha(reference, "word_break_generated_source_sha256", "JDK word-break artifact SHA-256"),
+        policy="exact",
+    )
+    word_break_source = word_break_path.read_text(encoding="utf-8")
+    for name, expected in (
+        ("REFERENCE_JVM_VERSION", reference["java_version"]),
+        ("REFERENCE_JVM_RUNTIME_VERSION", reference["runtime_version"]),
+        ("REFERENCE_JVM_ARCHIVE_SHA256", reference["archive_sha256"]),
+        ("WORD_BREAK_ORACLE_SHA256", reference["word_break_oracle_output_sha256"]),
+        ("WORD_BREAK_NUM_CATEGORIES", reference["word_break_num_categories"]),
+        ("WORD_BREAK_NUM_STATES", reference["word_break_num_states"]),
+        ("WORD_BREAK_CATEGORY_RANGE_COUNT", reference["word_break_category_range_count"]),
+    ):
+        check_rust_const(word_break_source, name, expected, "JDK word-break artifact")
 
     locale_path = relative_path(root, reference.get("locale_generated_rust_path"), "JDK locale artifact path")
     locale_source = locale_path.read_text(encoding="utf-8") if locale_path.is_file() else ""

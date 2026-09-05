@@ -1,0 +1,5 @@
+id = "localization-family"
+feature = "localization"
+compatibility_level = "Semantically supported"
+specification_source = "quarkdown-v2.5.1-localization"
+description = "Locale-specific table entries, merge-safe lookup, and a custom separator"

@@ -115,7 +115,7 @@ fn manifest_is_complete_and_machine_checkable() {
 #[test]
 fn audit_reconciles_seeded_std_localization_and_doclang_binding() {
     let audit = include_str!("../../../docs/compatibility/quarkdown/DOCUMENT_STATE_AUDIT.md");
-    assert!(audit.contains("localization and localize are retained as #151-owned"));
+    assert!(audit.contains("#196 implements the bounded evaluator table/lookup semantics"));
     assert!(audit.contains("localization name:{std}"));
     assert!(audit.contains("doclang(locale: String? = null)"));
     assert!(!audit.contains("doclang(language: String? = null)"));
