@@ -160,10 +160,7 @@ mod tests {
 
         assert_eq!(
             project
-                .resolve_logical_resource(
-                    ResourceResolutionBase::Source(main),
-                    "partials/a.qd",
-                )
+                .resolve_logical_resource(ResourceResolutionBase::Source(main), "partials/a.qd",)
                 .unwrap(),
             VirtualPathBuf::parse("docs/partials/a.qd").unwrap()
         );
@@ -205,10 +202,7 @@ mod tests {
 
         for reference in ["/etc/passwd", r"C:\\secret.txt", "https://example.test/a"] {
             assert!(matches!(
-                project.resolve_logical_resource(
-                    ResourceResolutionBase::Source(main),
-                    reference,
-                ),
+                project.resolve_logical_resource(ResourceResolutionBase::Source(main), reference,),
                 Err(ResourceAccessError::UnsupportedReference { .. })
             ));
         }
@@ -221,10 +215,8 @@ mod tests {
             Err(ResourceAccessError::Boundary(_))
         ));
         assert!(matches!(
-            project.resolve_logical_resource(
-                ResourceResolutionBase::ProjectRoot,
-                "../outside.txt",
-            ),
+            project
+                .resolve_logical_resource(ResourceResolutionBase::ProjectRoot, "../outside.txt",),
             Err(ResourceAccessError::Boundary(_))
         ));
     }
@@ -235,10 +227,8 @@ mod tests {
         let unknown = SourceId(u32::MAX - 1);
 
         assert_eq!(
-            project.resolve_logical_resource(
-                ResourceResolutionBase::Source(unknown),
-                "docs/main.qd",
-            ),
+            project
+                .resolve_logical_resource(ResourceResolutionBase::Source(unknown), "docs/main.qd",),
             Err(ResourceAccessError::UnknownSource(unknown))
         );
         assert_eq!(
