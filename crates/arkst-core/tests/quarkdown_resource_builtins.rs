@@ -474,3 +474,69 @@ fn pathtoroot_rejects_invalid_granularity_without_host_path_leakage() {
     assert!(!result.diagnostics[0].message.contains("/Users/"));
     assert!(!result.diagnostics[0].message.contains("C:\\\\"));
 }
+
+#[test]
+fn includeall_matches_repeated_shared_include_for_body_lists() {
+    let project = project(
+        "main.qd",
+        &[
+            (
+                "main.qd",
+                ".includeall\n    - first.qd\n    - second.qd\n.shared\n",
+            ),
+            ("first.qd", ".var {shared} {first}\nfirst\n"),
+            ("second.qd", ".shared\n.var {shared} {second}\nsecond\n"),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), "first\nfirst\nsecond\nsecond");
+}
+
+#[test]
+fn includeall_failure_discards_partial_output_and_stops_later_paths() {
+    let project = project(
+        "main.qd",
+        &[
+            (
+                "main.qd",
+                ".includeall\n    - first.qd\n    - missing.qd\n    - third.qd\n.shared\n",
+            ),
+            ("first.qd", ".var {shared} {first}\n"),
+            ("third.qd", ".var {shared} {third}\n"),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0].message.contains("missing.qd"));
+    assert_eq!(paragraph_text(&result), "");
+}
+
+#[test]
+fn includeall_nested_sources_keep_their_own_relative_resource_base() {
+    let project = project(
+        "docs/main.qd",
+        &[
+            (
+                "docs/main.qd",
+                ".includeall\n    - parts/first.qd\n    - parts/second.qd\n",
+            ),
+            ("docs/parts/first.qd", ".read {data/first.txt}\n"),
+            ("docs/parts/second.qd", ".read {data/second.txt}\n"),
+        ],
+        &[
+            ("docs/parts/data/first.txt", b"first-data"),
+            ("docs/parts/data/second.txt", b"second-data"),
+        ],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(paragraph_text(&result), "first-data\nsecond-data");
+}

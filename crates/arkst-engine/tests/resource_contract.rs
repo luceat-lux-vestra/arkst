@@ -395,3 +395,143 @@ fn pathtoroot_rejects_unknown_granularity_before_requesting_a_root() {
     assert!(diagnostics[0].message.contains("workspace"));
     assert!(resources.root_requests.borrow().is_empty());
 }
+
+fn document_paragraph_text(document: &IrDocument) -> String {
+    document
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Paragraph { content, .. } => Some(
+                content
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        IrInline::Text { content, .. } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>(),
+            ),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn includeall_body_list_preserves_order_and_shared_state() {
+    let main = SourceId(51);
+    let first = SourceId(52);
+    let second = SourceId(53);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.paths.insert(first, "first.qd".into());
+    resources.paths.insert(second, "second.qd".into());
+    resources.sources.insert(
+        (main, "first.qd".into()),
+        IncludedSource {
+            path: "first.qd".into(),
+            source_id: first,
+            text: ".var {shared} {first}\nfirst".into(),
+        },
+    );
+    resources.sources.insert(
+        (main, "second.qd".into()),
+        IncludedSource {
+            path: "second.qd".into(),
+            source_id: second,
+            text: ".shared\n.var {shared} {second}\nsecond".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(
+        ".includeall\n    - first.qd\n    - second.qd\n.shared",
+        main,
+        &resources,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "first.qd".into()), (main, "second.qd".into())]
+    );
+    assert_eq!(
+        document_paragraph_text(&result),
+        "first\nfirst\nsecond\nsecond"
+    );
+}
+
+#[test]
+fn includeall_is_fail_fast_after_processing_prior_shared_include() {
+    let main = SourceId(61);
+    let first = SourceId(62);
+    let third = SourceId(63);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.paths.insert(first, "first.qd".into());
+    resources.paths.insert(third, "third.qd".into());
+    resources.sources.insert(
+        (main, "first.qd".into()),
+        IncludedSource {
+            path: "first.qd".into(),
+            source_id: first,
+            text: ".var {shared} {first}".into(),
+        },
+    );
+    resources.sources.insert(
+        (main, "third.qd".into()),
+        IncludedSource {
+            path: "third.qd".into(),
+            source_id: third,
+            text: ".var {shared} {third}".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(
+        ".includeall\n    - first.qd\n    - missing.qd\n    - third.qd\n.shared",
+        main,
+        &resources,
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3001");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "first.qd".into()), (main, "missing.qd".into())]
+    );
+    assert_eq!(document_paragraph_text(&result), "");
+}
+
+#[test]
+fn includeall_rejects_non_iterable_before_requesting_sources() {
+    let main = SourceId(71);
+    let resources = FakeResources {
+        paths: [(main, "main.qd".into())].into_iter().collect(),
+        ..FakeResources::default()
+    };
+    let (_, diagnostics) = evaluate(".includeall {first.qd}", main, &resources);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(resources.source_requests.borrow().is_empty());
+}
+
+#[test]
+fn includeall_binding_collision_is_rejected_before_body_resource_access() {
+    let main = SourceId(81);
+    let side = SourceId(82);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.paths.insert(side, "side.qd".into());
+    resources.sources.insert(
+        (main, "side.qd".into()),
+        IncludedSource {
+            path: "side.qd".into(),
+            source_id: side,
+            text: "side".into(),
+        },
+    );
+
+    let (_, diagnostics) = evaluate(
+        ".includeall {ignored.qd}\n    - .include {side.qd}",
+        main,
+        &resources,
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3001");
+    assert!(resources.source_requests.borrow().is_empty());
+}

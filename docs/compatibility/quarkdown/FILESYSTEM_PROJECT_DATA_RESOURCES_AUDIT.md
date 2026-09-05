@@ -55,16 +55,16 @@ row has a source URL containing the exact target SHA.
 
 The owned evaluator/data result is deliberately narrow:
 
-- `.read`, `.json`, and `.include` are `PARTIAL`. Their local,
+- `.read`, `.json`, `.include`, `.includeall`, and `.pathtoroot` are `PARTIAL`. Their local,
   source-relative, in-memory subsets are evidenced, including strict text
   decoding, JSON conversion, nested source identity, active-stack cycle
-  checks, repeated includes, and include sandbox behavior. Absolute/global
-  FileSystem semantics, loadable libraries, complete upstream permission and
-  diagnostic behavior, and the full nested graph contract remain open.
-- `.includeall`, `.pathtoroot`, `.listfiles`, `.filename`, `.csv`,
-  `.bibliography`, `.subdocument`, and `.env` are `UNSUPPORTED` at this base.
-  The manifest states the absent contract and assigns each bounded follow-up;
-  absence is not inferred merely from a missing high-level test.
+  checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
+  and logical project/subdocument root projection. Absolute/global FileSystem semantics,
+  loadable libraries, complete upstream permission and diagnostic behavior, public WASM
+  resource ingestion, and the full nested graph contract remain open.
+- `.listfiles`, `.filename`, `.csv`, `.bibliography`, `.subdocument`, and `.env`
+  remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
+  follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
   semantic boundary is represented, while specific consumers and output layers
@@ -206,9 +206,10 @@ The ordered redesign/re-evaluation remains #187; no #187 work is started here.
 conformance. Current code and tests confirm a bounded `.read`, `.json`, and
 `.include` source-relative VirtualProject slice with nested source identity,
 typed provider errors, cycle detection, repeated includes, and strict UTF-8
-behavior. They do not confirm upstream absolute/global permission semantics,
-loadable library names, `.includeall`, `.pathtoroot`, `.listfiles`,
-`.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.
+behavior. They do not confirm upstream absolute/global permission semantics, loadable library
+names, `.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.
+Current `.includeall` and `.pathtoroot` evidence is bounded to deterministic logical-project
+semantics and does not claim those remaining host/library/WASM contracts.
 
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
