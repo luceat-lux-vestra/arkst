@@ -61,6 +61,11 @@ jobs:
           path = Path('crates/arkst-engine/src/builtins.rs')
           text = path.read_text(encoding='utf-8')
           text = text.replace(
+              "        .iter()\n        .any(|&character| character == '\\u{03A3}')",
+              "        .contains(&'\\u{03A3}')",
+              1,
+          )
+          text = text.replace(
               '    "df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9";',
               '    "f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d";',
               1,
@@ -90,6 +95,16 @@ jobs:
           if 'FINAL_SIGMA_CONTEXT_RECORD_COUNT' in text or 'is_final_sigma_context' in text:
               raise SystemExit('stale scalar Final_Sigma test reference remains')
           path.write_text(text, encoding='utf-8')
+
+          # Diagnostic-only runtime patch: if the focused differential fails,
+          # print its captured assertion output before propagating the failure.
+          verify = Path('tools/verify_jdk25_unicode.py')
+          source = verify.read_text(encoding='utf-8')
+          old = '''            result = subprocess.run(\n                [\n                    "cargo",\n                    "test",\n                    "-p",\n                    "arkst-engine",\n                    "--locked",\n                    f"builtins::tests::{test_name}",\n                    "--",\n                    "--exact",\n                ],\n                cwd=ROOT,\n                check=True,\n                capture_output=True,\n                text=True,\n                env=test_environment,\n            )\n            if "running 1 test" not in result.stdout or "1 passed" not in result.stdout:\n'''
+          new = '''            result = subprocess.run(\n                [\n                    "cargo",\n                    "test",\n                    "-p",\n                    "arkst-engine",\n                    "--locked",\n                    f"builtins::tests::{test_name}",\n                    "--",\n                    "--exact",\n                ],\n                cwd=ROOT,\n                check=False,\n                capture_output=True,\n                text=True,\n                env=test_environment,\n            )\n            if result.returncode != 0:\n                print(result.stdout, end="")\n                print(result.stderr, end="", file=sys.stderr)\n                raise RuntimeError(f"focused test failed: {test_name}")\n            if "running 1 test" not in result.stdout or "1 passed" not in result.stdout:\n'''
+          if source.count(old) != 1:
+              raise SystemExit('verify diagnostic patch target mismatch')
+          verify.write_text(source.replace(old, new, 1), encoding='utf-8')
           PY
 
           set +e
@@ -100,6 +115,9 @@ jobs:
           if [ "$status" -ne 0 ]; then
             exit "$status"
           fi
+
+          # The verifier patch above is diagnostic-only and must not survive.
+          git checkout HEAD -- tools/verify_jdk25_unicode.py
 
       - name: Commit bounded final cleanup
         shell: bash
