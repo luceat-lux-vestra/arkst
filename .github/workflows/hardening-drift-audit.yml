@@ -26,12 +26,14 @@ jobs:
           persist-credentials: false
 
       - name: Test hardening audit implementation
-        run: python3 tools/ci/test_hardening_drift_audit.py
+        run: |
+          python3 tools/ci/test_hardening_drift_audit.py
+          python3 tools/ci/test_hardening_drift_live.py
 
       - name: Run read-only hardening drift detection
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 tools/ci/hardening_drift_audit.py --mode live --output "$RUNNER_TEMP/hardening-drift.json"
+        run: python3 tools/ci/hardening_drift_live.py --mode live --output "$RUNNER_TEMP/hardening-drift.json"
 
       - name: Publish trusted detector result
         id: result
