@@ -34,6 +34,33 @@ research, host-capability, and generic hardening work remains milestone-null
 when it spans milestones or has no single primary owner, with the reason
 recorded in the governing tracker.
 
+### Metadata authority
+
+Native GitHub Sub-issues are authoritative for primary parent/child ownership
+and decomposition. An owned issue has exactly one correct native parent. Prose
+lists, `Parent` references, and cross-links are explanatory or navigational
+context only; they must agree with native metadata and do not override it.
+
+Native GitHub Issue Dependencies, when used, represent only proven hard
+blockers: the downstream issue cannot correctly complete its stated contract
+without the prerequisite. Do not encode roadmap order, milestone
+co-membership, cross-links, completed historical prerequisites, coordination,
+or convenient sequencing as blockers.
+
+Native milestones group work by release or delivery horizon and are separate
+from parent/child ownership. A milestone-owned issue may depend on
+milestone-null cross-cutting infrastructure without moving that infrastructure
+into the milestone or changing the issue's primary owner.
+
+Set a milestone due date only when repository evidence or a real external
+commitment justifies that date. Otherwise omit the due date; do not invent a
+replacement schedule.
+
+Fresh governance audits fail closed. Contradictory, unknown, unverified, or
+insufficiently evidenced ownership, dependency, milestone, or due-date
+metadata must be reconciled before implementation starts or a milestone
+transition is declared complete.
+
 ### Activation invariant
 
 Before the first implementation PR of a roadmap milestone:
