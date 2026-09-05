@@ -1,0 +1,72 @@
+name: Hardening drift audit
+
+on:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardening-drift-audit
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: detect-hardening-drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      result_b64: ${{ steps.result.outputs.result_b64 }}
+    steps:
+      - name: Checkout trusted repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test hardening audit implementation
+        run: python3 tools/ci/test_hardening_drift_audit.py
+
+      - name: Run read-only hardening drift detection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/hardening_drift_audit.py --mode live --output "$RUNNER_TEMP/hardening-drift.json"
+
+      - name: Publish trusted detector result
+        id: result
+        env:
+          RESULT_PATH: ${{ runner.temp }}/hardening-drift.json
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = base64.b64encode(Path(os.environ["RESULT_PATH"]).read_bytes()).decode("ascii")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"result_b64={encoded}\n")
+          PY
+
+  report:
+    name: report-hardening-drift
+    needs: detect
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout trusted audit commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Reconcile the one owned hardening-drift issue
+        env:
+          AUDIT_RESULT_B64: ${{ needs.detect.outputs.result_b64 }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 tools/ci/report_hardening_drift.py --run-url "$RUN_URL"
