@@ -1,5 +1,6 @@
 use arkst_project::{
-    ResourceAccessError, ResourceResolutionBase, ResourceRoot, VirtualPathBuf, VirtualProjectBuilder,
+    ResourceAccessError, ResourceResolutionBase, ResourceRoot, VirtualPathBuf,
+    VirtualProjectBuilder,
 };
 
 fn project() -> arkst_project::VirtualProject {
@@ -67,10 +68,8 @@ fn public_resolver_fails_closed_and_projects_logical_roots_only() {
         ));
     }
     assert!(matches!(
-        project.resolve_logical_resource(
-            ResourceResolutionBase::Source(main),
-            "../../outside.txt",
-        ),
+        project
+            .resolve_logical_resource(ResourceResolutionBase::Source(main), "../../outside.txt",),
         Err(ResourceAccessError::Boundary(_))
     ));
 
