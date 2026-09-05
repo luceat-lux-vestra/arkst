@@ -36,7 +36,7 @@ const PINNED_JVM_ARCHIVE_SHA256: &str =
     "dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e";
 #[cfg(test)]
 const PINNED_ORACLE_OUTPUT_SHA256: &str =
-    "df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9";
+    "f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d";
 const _: () = {
     assert!(UNICODE_VERSION.0 == PINNED_JVM_UNICODE_VERSION.0);
     assert!(UNICODE_VERSION.1 == PINNED_JVM_UNICODE_VERSION.1);
@@ -876,8 +876,7 @@ fn unicode_mapping_to_string(mapping: &[u32]) -> Option<String> {
 pub(crate) fn canonical_lowercase(text: &str) -> String {
     let characters: Vec<_> = text.chars().collect();
     let boundaries = characters
-        .iter()
-        .any(|&character| character == '\u{03A3}')
+        .contains(&'\u{03A3}')
         .then(|| crate::word_break::boundaries(&characters));
     let mut result = String::with_capacity(text.len());
     for (index, &character) in characters.iter().enumerate() {
@@ -1563,9 +1562,9 @@ mod tests {
     use crate::unicode_case::{
         full_lowercase as unicode_full_lowercase, full_uppercase as unicode_full_uppercase,
         simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,
-        FINAL_SIGMA_CONTEXT_RECORD_COUNT, ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256,
-        REFERENCE_JVM_RUNTIME_VERSION, REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION,
-        SCALAR_MAPPING_RECORD_COUNT, UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,
+        ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256, REFERENCE_JVM_RUNTIME_VERSION,
+        REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT,
+        UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,
     };
     use crate::value_conversion::InvocationValue;
     use arkst_ir::{
@@ -2755,7 +2754,6 @@ mod tests {
         let mut scalar_count = 0;
         let mut char_count = 0;
         let mut cased_count = 0;
-        let mut final_sigma_context_count = 0;
         let mut bmp_capitalize_count = 0;
         for line in maps.lines() {
             let fields: Vec<_> = line.split('\t').collect();
@@ -2853,14 +2851,6 @@ mod tests {
                     assert!(crate::unicode_case::is_cased(character));
                     cased_count += 1;
                 }
-                Some("FINAL_SIGMA") => {
-                    assert_eq!(fields.len(), 2, "malformed FINAL_SIGMA row: {line}");
-                    let codepoint = oracle_codepoint(fields[1]);
-                    let character = char::from_u32(codepoint)
-                        .expect("FINAL_SIGMA oracle input is a Unicode scalar");
-                    assert!(crate::unicode_case::is_final_sigma_context(character));
-                    final_sigma_context_count += 1;
-                }
                 Some(kind) => panic!("unknown JDK25 oracle row type {kind}"),
                 None => panic!("empty JDK25 oracle row"),
             }
@@ -2868,7 +2858,6 @@ mod tests {
         assert_eq!(scalar_count, SCALAR_MAPPING_RECORD_COUNT);
         assert_eq!(char_count, UTF16_CHAR_RECORD_COUNT);
         assert_eq!(cased_count, CASED_RECORD_COUNT);
-        assert_eq!(final_sigma_context_count, FINAL_SIGMA_CONTEXT_RECORD_COUNT);
         assert_eq!(bmp_capitalize_count, 63488);
     }
 

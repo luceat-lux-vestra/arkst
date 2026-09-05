@@ -170,22 +170,19 @@ def parse_sequence(value: str) -> tuple[int, ...]:
 
 def parse_oracle(
     output: str,
-) -> tuple[list[tuple[int, int, int]], list[dict[str, object]], list[int], list[int]]:
+) -> tuple[list[tuple[int, int, int]], list[dict[str, object]], list[int]]:
     scalar_rows: list[tuple[int, int, int]] = []
     char_rows: list[dict[str, object]] = []
     cased_rows: list[int] = []
-    final_sigma_context_rows: list[int] = []
     scalar_previous = -1
     char_previous = -1
     cased_previous = -1
-    final_sigma_context_previous = -1
     saw_chars = False
     saw_cased = False
-    saw_final_sigma_context = False
     for line_number, line in enumerate(output.splitlines(), 1):
         fields = line.split("\t")
         if fields[0] == "SCALAR":
-            if saw_chars or saw_cased or saw_final_sigma_context or len(fields) != 4:
+            if saw_chars or saw_cased or len(fields) != 4:
                 raise ValueError(f"oracle:{line_number}: malformed SCALAR row")
             codepoint = parse_codepoint(fields[1])
             uppercase = parse_codepoint(fields[2])
@@ -218,7 +215,7 @@ def parse_oracle(
             )
             char_previous = code_unit
         elif fields[0] == "CASED":
-            if not saw_chars or saw_final_sigma_context or len(fields) != 2:
+            if not saw_chars or len(fields) != 2:
                 raise ValueError(f"oracle:{line_number}: malformed CASED row")
             codepoint = parse_codepoint(fields[1])
             if codepoint <= cased_previous:
@@ -226,24 +223,13 @@ def parse_oracle(
             cased_rows.append(codepoint)
             cased_previous = codepoint
             saw_cased = True
-        elif fields[0] == "FINAL_SIGMA":
-            if not saw_cased or len(fields) != 2:
-                raise ValueError(f"oracle:{line_number}: malformed FINAL_SIGMA row")
-            codepoint = parse_codepoint(fields[1])
-            if codepoint <= final_sigma_context_previous:
-                raise ValueError(f"oracle:{line_number}: FINAL_SIGMA rows are not sorted")
-            final_sigma_context_rows.append(codepoint)
-            final_sigma_context_previous = codepoint
-            saw_final_sigma_context = True
         else:
             raise ValueError(f"oracle:{line_number}: unknown row type {fields[0]!r}")
     if len(char_rows) != MAX_CODE_UNIT + 1:
         raise ValueError(f"oracle: expected {MAX_CODE_UNIT + 1} CHAR rows, got {len(char_rows)}")
     if not cased_rows:
         raise ValueError("oracle: CASED property is empty")
-    if not final_sigma_context_rows:
-        raise ValueError("oracle: FINAL_SIGMA property is empty")
-    return scalar_rows, char_rows, cased_rows, final_sigma_context_rows
+    return scalar_rows, char_rows, cased_rows
 
 
 def ranges(mapping: Iterable[tuple[int, int]]) -> list[tuple[int, int, int]]:
@@ -336,7 +322,6 @@ def generate_source(
     scalar_rows: list[tuple[int, int, int]],
     char_rows: list[dict[str, object]],
     cased_rows: list[int],
-    final_sigma_context_rows: list[int],
     reference: dict[str, object],
     oracle_sha256: str,
 ) -> str:
@@ -378,10 +363,9 @@ def generate_source(
 //! used by Kotlin/JVM-compatible case-insensitive prefix comparison. Full
 //! UTF-16-Char mappings cover the input domain used by Kotlin
 //! `replaceFirstChar(Char::titlecase)`. Identity mappings are implicit.
-//! The generated Cased property supports the invariant-locale
-//! context-sensitive Final_Sigma rule used by complete-string lowercase, and
-//! the generated Final_Sigma context property captures the pinned JDK word
-//! boundary behavior without a runtime locale or word-break dependency.
+//! The generated Cased property supports invariant-locale contextual
+//! Final_Sigma lowering. Word boundaries are generated separately from the same
+//! pinned runtime into `word_break.rs`; no scalar approximation is retained here.
 //!
 //! The runtime owns no JVM, filesystem, network, locale database, or mutable
 //! global state. This file is regenerated only by the generation-time oracle.
@@ -402,7 +386,6 @@ pub const SIMPLE_TITLECASE_RECORD_COUNT: usize = {len(simple_title)};
 pub const FULL_UPPERCASE_RECORD_COUNT: usize = {len(full_upper)};
 pub const FULL_LOWERCASE_RECORD_COUNT: usize = {len(full_lower)};
 pub const CASED_RECORD_COUNT: usize = {len(cased_rows)};
-pub const FINAL_SIGMA_CONTEXT_RECORD_COUNT: usize = {len(final_sigma_context_rows)};
 
 pub(crate) fn simple_uppercase(character: char) -> char {{
     lookup(character, SIMPLE_UPPERCASE_RANGES).unwrap_or(character)
@@ -421,15 +404,11 @@ pub(crate) fn full_uppercase(character: char) -> [u32; 3] {{
 }}
 
 pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{
-    lookup_full(character, FULL_LOWERCASE).unwrap_or([character as u32, 0, 0])
+    lookup_full(character, FULL_LOWERCASE).unwrap_or([simple_lowercase(character) as u32, 0, 0])
 }}
 
 pub(crate) fn is_cased(character: char) -> bool {{
     contains(character as u32, CASED_RANGES)
-}}
-
-pub(crate) fn is_final_sigma_context(character: char) -> bool {{
-    contains(character as u32, FINAL_SIGMA_CONTEXT_RANGES)
 }}
 
 fn contains(codepoint: u32, ranges: &[(u32, u32)]) -> bool {{
@@ -460,8 +439,7 @@ fn lookup_full(character: char, table: &[(u32, [u32; 3])]) -> Option<[u32; 3]> {
 {rust_ranges("SIMPLE_TITLECASE_RANGES", simple_title)}
 {rust_full_table("FULL_UPPERCASE", full_upper)}
 {rust_full_table("FULL_LOWERCASE", full_lower)}
-{rust_property_ranges("CASED_RANGES", cased_rows)}
-{rust_property_ranges("FINAL_SIGMA_CONTEXT_RANGES", final_sigma_context_rows)}'''
+{rust_property_ranges("CASED_RANGES", cased_rows)}'''
 
 
 def build_oracle(java: Path, javac: Path) -> tuple[str, str]:
@@ -514,12 +492,11 @@ def main() -> None:
     expected_oracle_sha = reference.get("oracle_output_sha256")
     if expected_oracle_sha is not None and oracle_sha != expected_oracle_sha:
         raise ValueError(f"oracle output SHA-256 changed: expected {expected_oracle_sha}, got {oracle_sha}")
-    scalar_rows, char_rows, cased_rows, final_sigma_context_rows = parse_oracle(oracle_output)
+    scalar_rows, char_rows, cased_rows = parse_oracle(oracle_output)
     generated = generate_source(
         scalar_rows,
         char_rows,
         cased_rows,
-        final_sigma_context_rows,
         reference,
         oracle_sha,
     )
@@ -555,7 +532,6 @@ def main() -> None:
     print(f"full_uppercase_records={sum(1 for row in char_rows if tuple(row['full_upper']) != (int(row['code_unit']),))}")
     print(f"full_lowercase_records={sum(1 for row in char_rows if tuple(row['full_lower']) != (int(row['code_unit']),))}")
     print(f"cased_records={len(cased_rows)}")
-    print(f"final_sigma_context_records={len(final_sigma_context_rows)}")
     print(f"generated_source_bytes={generated_bytes}")
     print(f"generated_source_sha256={generated_sha}")
 
