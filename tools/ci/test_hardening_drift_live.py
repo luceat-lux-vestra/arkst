@@ -64,6 +64,36 @@ class RepositoryReadbackBoundaryTests(unittest.TestCase):
         with self.assertRaises(AUDIT.AuditInfrastructureError):
             AUDIT.check_repository_settings(normalized)
 
+    def test_live_adapter_integrates_manual_inventory_and_restores_checker(self):
+        original_base = LIVE.BASE_LIVE_CHECKS
+        original_check = LIVE.audit.check_repository_settings
+
+        def fake_base_live_checks(_client, _run):
+            findings = LIVE.audit.check_repository_settings(minimum_visible_repository())
+            return findings, [{"control": "existing-manual", "reason": "fixture"}]
+
+        LIVE.BASE_LIVE_CHECKS = fake_base_live_checks
+        try:
+            findings, manual = LIVE.live_checks(None)
+        finally:
+            LIVE.BASE_LIVE_CHECKS = original_base
+
+        self.assertEqual(findings, [])
+        controls = {item["control"] for item in manual}
+        self.assertIn("existing-manual", controls)
+        self.assertEqual(
+            {
+                control
+                for control in controls
+                if control.startswith("repository-settings.")
+            },
+            {
+                f"repository-settings.{key}"
+                for key in LIVE.PRIVILEGE_SENSITIVE_REPOSITORY_SETTINGS
+            },
+        )
+        self.assertIs(LIVE.audit.check_repository_settings, original_check)
+
 
 if __name__ == "__main__":
     unittest.main()
