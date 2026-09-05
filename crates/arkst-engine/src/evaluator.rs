@@ -6529,7 +6529,7 @@ impl Evaluator {
         name: &str,
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
-        _body: Option<CallBody<'_>>,
+        body: Option<CallBody<'_>>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -6569,6 +6569,15 @@ impl Evaluator {
             "json" => self.evaluate_json(
                 &evaluated_positional,
                 &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
+            "includeall" => self.evaluate_include_all(
+                &evaluated_positional,
+                &evaluated_named,
+                body,
                 span,
                 diagnostics,
                 context,
@@ -6730,6 +6739,100 @@ impl Evaluator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_include_all(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let body_candidate = match body {
+            Some(body) => {
+                let body_span = call_body_source_span(body, *span);
+                let value = match self.evaluate_call_body(body, span, diagnostics, context) {
+                    CallOutcome::Value(value) => value,
+                    CallOutcome::NoValue => IrValue::Content(Vec::new()),
+                    CallOutcome::Failed => return CallOutcome::Failed,
+                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                };
+                Some(Candidate::Positional {
+                    value,
+                    span: body_span,
+                })
+            }
+            None => None,
+        };
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(BoundSlot::Explicit {
+            value: paths,
+            span: paths_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let elements = match self.coerce_iterable(
+            InvocationValue::static_value(paths),
+            &paths_span,
+            diagnostics,
+            context,
+        ) {
+            Ok(elements) => elements,
+            Err(outcome) => return outcome,
+        };
+        let mut outputs = Vec::new();
+        if let Err(error) = outputs.try_reserve(elements.len()) {
+            diagnostics.push(resource_diagnostic(
+                "E3001",
+                format!("`.includeall` output cannot be allocated: {error}"),
+                *span,
+                "Use a smaller deterministic include collection.",
+            ));
+            return CallOutcome::Failed;
+        }
+        for (index, element) in elements.into_iter().enumerate() {
+            let Some(reference) = builtins::adapt_string_argument(&element) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    format!("`.includeall` path at index {index} must adapt to String"),
+                    *span,
+                    "Use scalar or plain-text path values; rich content is not rendered into a resource path.",
+                ));
+                return CallOutcome::Failed;
+            };
+            match self.evaluate_include_reference(
+                reference,
+                IncludeSandbox::Share,
+                span,
+                diagnostics,
+                context,
+            ) {
+                CallOutcome::Value(value) => outputs.push(value),
+                CallOutcome::Failed => return CallOutcome::Failed,
+                CallOutcome::NoValue | CallOutcome::Unresolved => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3001",
+                        "`.includeall` received a non-value result from `.include`".to_string(),
+                        *span,
+                        "Each bulk include must produce the same semantic result as an ordinary shared `.include`.",
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        }
+        CallOutcome::Value(IrValue::Collection(outputs))
+    }
+
     fn evaluate_include(
         &self,
         positional_args: &[IrValue],
@@ -6753,6 +6856,17 @@ impl Evaluator {
             Ok(sandbox) => sandbox,
             Err(()) => return CallOutcome::Failed,
         };
+        self.evaluate_include_reference(reference, sandbox, span, diagnostics, context)
+    }
+
+    fn evaluate_include_reference(
+        &self,
+        reference: String,
+        sandbox: IncludeSandbox,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -11268,7 +11382,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
-const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include", "pathtoroot"];
+const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include", "includeall", "pathtoroot"];
 const LET_NATIVE_NAMES: &[&str] = &["let"];
 const FOREACH_NATIVE_NAMES: &[&str] = &["foreach"];
 const REPEAT_NATIVE_NAMES: &[&str] = &["repeat"];
@@ -12417,6 +12531,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("sandbox"),
             ],
             BodyPolicy::Reject,
+        ),
+        "includeall" => (
+            vec![ParameterMetadata::required("paths")],
+            BodyPolicy::BindFinal,
         ),
         "pathtoroot" => (
             vec![ParameterMetadata::defaulted("granularity")],
