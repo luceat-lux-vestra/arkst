@@ -6,12 +6,14 @@
 
 pub mod asset_store;
 pub mod resource;
+pub mod resource_resolver;
 pub mod source_store;
 pub mod virtual_path;
 pub mod virtual_project;
 
 pub use asset_store::*;
 pub use resource::*;
+pub use resource_resolver::*;
 pub use source_store::*;
 pub use virtual_path::*;
 pub use virtual_project::*;
