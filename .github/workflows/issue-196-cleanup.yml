@@ -94,12 +94,16 @@ jobs:
           )
           if 'FINAL_SIGMA_CONTEXT_RECORD_COUNT' in text or 'is_final_sigma_context' in text:
               raise SystemExit('stale scalar Final_Sigma test reference remains')
-          path.write_text(text, encoding='utf-8')
+          old_import = '''        simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,\n        ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256,\n        REFERENCE_JVM_RUNTIME_VERSION, REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION,\n        SCALAR_MAPPING_RECORD_COUNT, UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,\n'''
+          new_import = '''        simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,\n        ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256, REFERENCE_JVM_RUNTIME_VERSION,\n        REFERENCE_JVM_VENDOR_VERSION, REFERENCE_JVM_VERSION, SCALAR_MAPPING_RECORD_COUNT,\n        UNICODE_VERSION, UTF16_CHAR_RECORD_COUNT,\n'''
+          if text.count(old_import) != 1:
+              raise SystemExit('rustfmt-stable builtins import target mismatch')
+          path.write_text(text.replace(old_import, new_import, 1), encoding='utf-8')
 
           generator = Path('tools/generate_jdk25_unicode_case.py')
           source = generator.read_text(encoding='utf-8')
           old = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE).unwrap_or([character as u32, 0, 0])\n}}'''
-          new = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE)\n        .unwrap_or([simple_lowercase(character) as u32, 0, 0])\n}}'''
+          new = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE).unwrap_or([simple_lowercase(character) as u32, 0, 0])\n}}'''
           if source.count(old) != 1:
               raise SystemExit('supplementary lowercase generator patch target mismatch')
           generator.write_text(source.replace(old, new, 1), encoding='utf-8')
