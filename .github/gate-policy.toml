@@ -112,6 +112,16 @@ always_present = true
 rationale = "Diff-scoped dependency review is intentionally advisory: the required license job already validates the resulting Rust dependency graph unconditionally with cargo-deny. Keep this distinct evidence without adding a redundant blocking context."
 
 [[producer]]
+workflow = ".github/workflows/codeql.yml"
+job = "analyze"
+classification = "advisory"
+contexts = ["codeql (actions)", "codeql (rust)"]
+always_present = true
+matrix_axis = "language"
+matrix_values = ["actions", "rust"]
+rationale = "Always-present CodeQL advanced setup for GitHub Actions workflow and Rust static analysis. It is distinct security evidence and remains advisory until reliability and enforcement are separately proven."
+
+[[producer]]
 workflow = ".github/workflows/docs.yml"
 job = "spelling"
 classification = "path_scoped_optional"

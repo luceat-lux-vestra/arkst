@@ -27,6 +27,7 @@ ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {
     ".github/workflows/upstream-quarkdown.yml": {"issues"},
 }
 ALLOWED_JOB_WRITE_PERMISSIONS = {
+    (".github/workflows/codeql.yml", "analyze"): {"security-events"},
     (".github/workflows/security.yml", "report-failure"): {"issues"},
 }
 
