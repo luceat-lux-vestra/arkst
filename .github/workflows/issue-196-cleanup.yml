@@ -96,6 +96,17 @@ jobs:
               raise SystemExit('stale scalar Final_Sigma test reference remains')
           path.write_text(text, encoding='utf-8')
 
+          # Full String.lowercase operates on Unicode code points. The generated
+          # full table is intentionally BMP/UTF-16-Char based, so supplementary
+          # scalars must fall back to the complete scalar simple-lower mapping.
+          generator = Path('tools/generate_jdk25_unicode_case.py')
+          source = generator.read_text(encoding='utf-8')
+          old = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE).unwrap_or([character as u32, 0, 0])\n}}'''
+          new = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE)\n        .unwrap_or([simple_lowercase(character) as u32, 0, 0])\n}}'''
+          if source.count(old) != 1:
+              raise SystemExit('supplementary lowercase generator patch target mismatch')
+          generator.write_text(source.replace(old, new, 1), encoding='utf-8')
+
           # Diagnostic-only runtime patch: if the focused differential fails,
           # print its captured assertion output before propagating the failure.
           verify = Path('tools/verify_jdk25_unicode.py')
