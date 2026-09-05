@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 import hardening_drift_audit as audit
 
+BASE_LIVE_CHECKS = audit.live_checks
+
 # GitHub's scheduled GITHUB_TOKEN may omit repository merge-policy fields from
 # GET /repos/{owner}/{repo}. When a field is absent, the audit must not assume
 # that the configured value is correct, but it also must not misclassify a
@@ -61,7 +63,7 @@ def live_checks(
 
     audit.check_repository_settings = bounded_check
     try:
-        findings, manual = audit.live_checks(client, run)
+        findings, manual = BASE_LIVE_CHECKS(client, run)
     finally:
         audit.check_repository_settings = original_check
     return findings, [*manual, *captured_manual]
