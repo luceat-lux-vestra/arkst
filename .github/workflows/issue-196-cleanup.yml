@@ -96,9 +96,6 @@ jobs:
               raise SystemExit('stale scalar Final_Sigma test reference remains')
           path.write_text(text, encoding='utf-8')
 
-          # Full String.lowercase operates on Unicode code points. The generated
-          # full table is intentionally BMP/UTF-16-Char based, so supplementary
-          # scalars must fall back to the complete scalar simple-lower mapping.
           generator = Path('tools/generate_jdk25_unicode_case.py')
           source = generator.read_text(encoding='utf-8')
           old = '''pub(crate) fn full_lowercase(character: char) -> [u32; 3] {{\n    lookup_full(character, FULL_LOWERCASE).unwrap_or([character as u32, 0, 0])\n}}'''
@@ -106,29 +103,9 @@ jobs:
           if source.count(old) != 1:
               raise SystemExit('supplementary lowercase generator patch target mismatch')
           generator.write_text(source.replace(old, new, 1), encoding='utf-8')
-
-          # Diagnostic-only runtime patch: if the focused differential fails,
-          # print its captured assertion output before propagating the failure.
-          verify = Path('tools/verify_jdk25_unicode.py')
-          source = verify.read_text(encoding='utf-8')
-          old = '''            result = subprocess.run(\n                [\n                    "cargo",\n                    "test",\n                    "-p",\n                    "arkst-engine",\n                    "--locked",\n                    f"builtins::tests::{test_name}",\n                    "--",\n                    "--exact",\n                ],\n                cwd=ROOT,\n                check=True,\n                capture_output=True,\n                text=True,\n                env=test_environment,\n            )\n            if "running 1 test" not in result.stdout or "1 passed" not in result.stdout:\n'''
-          new = '''            result = subprocess.run(\n                [\n                    "cargo",\n                    "test",\n                    "-p",\n                    "arkst-engine",\n                    "--locked",\n                    f"builtins::tests::{test_name}",\n                    "--",\n                    "--exact",\n                ],\n                cwd=ROOT,\n                check=False,\n                capture_output=True,\n                text=True,\n                env=test_environment,\n            )\n            if result.returncode != 0:\n                print(result.stdout, end="")\n                print(result.stderr, end="", file=sys.stderr)\n                raise RuntimeError(f"focused test failed: {test_name}")\n            if "running 1 test" not in result.stdout or "1 passed" not in result.stdout:\n'''
-          if source.count(old) != 1:
-              raise SystemExit('verify diagnostic patch target mismatch')
-          verify.write_text(source.replace(old, new, 1), encoding='utf-8')
           PY
 
-          set +e
-          python3 tools/cleanup_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE" > /tmp/cleanup.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/cleanup.log
-          if [ "$status" -ne 0 ]; then
-            exit "$status"
-          fi
-
-          # The verifier patch above is diagnostic-only and must not survive.
-          git checkout HEAD -- tools/verify_jdk25_unicode.py
+          python3 tools/cleanup_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE"
 
       - name: Commit bounded final cleanup
         shell: bash
