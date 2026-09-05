@@ -58,11 +58,11 @@ jobs:
       contents: read
       issues: write
     steps:
-      - name: Checkout trusted main reporter
+      - name: Checkout trusted audit commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: main
+          ref: ${{ github.sha }}
 
       - name: Reconcile the one owned hardening-drift issue
         env:
