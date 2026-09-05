@@ -64,9 +64,10 @@ class GitHubIssueClient:
         page = 1
         matches: list[OwnedIssue] = []
         while True:
-            query = urllib.parse.urlencode(
-                {"state": "all", "per_page": 100, "page": page, "labels": "type:task,area:ci"}
-            )
+            # Marker ownership is authoritative. Labels are presentation/triage metadata and
+            # must never make an already-owned issue invisible, otherwise label drift could
+            # cause the reporter to create a duplicate issue.
+            query = urllib.parse.urlencode({"state": "all", "per_page": 100, "page": page})
             items = self._request("GET", f"/issues?{query}")
             if not isinstance(items, list):
                 raise ReporterError("issues list returned non-list payload")
@@ -75,9 +76,13 @@ class GitHubIssueClient:
                     continue
                 body = item.get("body") or ""
                 if marker in body:
+                    try:
+                        number = int(item["number"])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise ReporterError("marker-owned issue has malformed number") from exc
                     matches.append(
                         OwnedIssue(
-                            number=int(item["number"]),
+                            number=number,
                             state=str(item.get("state", "")),
                             body=str(body),
                         )
@@ -109,6 +114,8 @@ class GitHubIssueClient:
 
 
 def render_body(audit: dict[str, Any], run_url: str) -> str:
+    # Stay comfortably below GitHub's issue-body limit even when a validator emits
+    # many findings. The workflow run remains the full diagnostic source.
     return "\n".join(
         [
             MARKER,
@@ -120,18 +127,18 @@ def render_body(audit: dict[str, Any], run_url: str) -> str:
             "",
             "### Confirmed policy drift",
             "```json",
-            json.dumps(audit.get("policy_findings", []), indent=2)[:30000],
+            json.dumps(audit.get("policy_findings", []), indent=2)[:16000],
             "```",
             "",
             "### Infrastructure/readback failures",
             "```json",
-            json.dumps(audit.get("infrastructure_failures", []), indent=2)[:20000],
+            json.dumps(audit.get("infrastructure_failures", []), indent=2)[:12000],
             "```",
             "",
             "### Explicit manual-readback controls",
             "The scheduled low-privilege audit does not claim continuous coverage for these controls.",
             "```json",
-            json.dumps(audit.get("manual_readback", []), indent=2)[:20000],
+            json.dumps(audit.get("manual_readback", []), indent=2)[:12000],
             "```",
             "",
             "This issue is owned by the hardening drift audit. Non-clean runs update/reopen it; a clean run records recovery and closes it.",
@@ -175,27 +182,65 @@ def reconcile(client: IssueClient, audit: dict[str, Any], run_url: str) -> str:
     return f"updated-issue-{current.number}"
 
 
-def decode_result(encoded: str) -> dict[str, Any]:
-    if not encoded:
-        return {
-            "schema_version": 1,
-            "classification": "infrastructure-failure",
-            "policy_findings": [],
-            "infrastructure_failures": [
-                {
-                    "control": "detector-output",
-                    "details": "detector did not publish a result payload",
-                }
-            ],
-            "manual_readback": [],
-        }
-    try:
-        payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ReporterError(f"invalid detector payload: {exc}") from exc
+def _validate_result(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ReporterError("detector payload must be an object")
+    required = {
+        "schema_version",
+        "classification",
+        "policy_findings",
+        "infrastructure_failures",
+        "manual_readback",
+    }
+    missing = sorted(required - set(payload))
+    if missing:
+        raise ReporterError(f"detector payload missing fields: {missing!r}")
+    if payload.get("schema_version") != 1:
+        raise ReporterError(f"unsupported detector schema: {payload.get('schema_version')!r}")
+    if payload.get("classification") not in {
+        "clean",
+        "policy-drift",
+        "infrastructure-failure",
+    }:
+        raise ReporterError(f"unsupported classification: {payload.get('classification')!r}")
+    for key in ("policy_findings", "infrastructure_failures", "manual_readback"):
+        if not isinstance(payload.get(key), list):
+            raise ReporterError(f"detector payload field {key!r} must be an array")
+    for key in ("policy_findings", "infrastructure_failures"):
+        for item in payload[key]:
+            if not isinstance(item, dict) or not isinstance(item.get("control"), str) or not isinstance(
+                item.get("details"), str
+            ):
+                raise ReporterError(f"detector payload field {key!r} contains a malformed finding")
+    for item in payload["manual_readback"]:
+        if not isinstance(item, dict) or not isinstance(item.get("control"), str) or not isinstance(
+            item.get("reason"), str
+        ):
+            raise ReporterError("detector payload manual_readback contains a malformed control")
     return payload
+
+
+def decode_result(encoded: str) -> dict[str, Any]:
+    if not encoded:
+        return _validate_result(
+            {
+                "schema_version": 1,
+                "classification": "infrastructure-failure",
+                "policy_findings": [],
+                "infrastructure_failures": [
+                    {
+                        "control": "detector-output",
+                        "details": "detector did not publish a result payload",
+                    }
+                ],
+                "manual_readback": [],
+            }
+        )
+    try:
+        payload = json.loads(base64.b64decode(encoded, validate=True).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReporterError(f"invalid detector payload: {exc}") from exc
+    return _validate_result(payload)
 
 
 def main() -> int:
