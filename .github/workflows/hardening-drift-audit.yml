@@ -4,17 +4,6 @@ on:
   schedule:
     - cron: "41 4 * * 2"
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Audit mode; synthetic modes validate reporting without changing policy"
-        required: true
-        type: choice
-        default: live
-        options:
-          - live
-          - clean
-          - policy-drift
-          - infrastructure-failure
 
 permissions:
   contents: read
@@ -41,9 +30,8 @@ jobs:
 
       - name: Run read-only hardening drift detection
         env:
-          AUDIT_MODE: ${{ inputs.mode || 'live' }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 tools/ci/hardening_drift_audit.py --mode "$AUDIT_MODE" --output "$RUNNER_TEMP/hardening-drift.json"
+        run: python3 tools/ci/hardening_drift_audit.py --mode live --output "$RUNNER_TEMP/hardening-drift.json"
 
       - name: Publish trusted detector result
         id: result
