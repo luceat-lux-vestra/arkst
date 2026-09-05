@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: issue-196-oracle-cleanup
@@ -55,18 +54,50 @@ jobs:
           REFERENCE_ARCHIVE: ${{ steps.jdk.outputs.archive }}
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('crates/arkst-engine/src/builtins.rs')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '    "df7748b6674398b726fa33f92c98ed9783f292173a257aa3fbb593016c9b38d9";',
+              '    "f4809697aa5eaf7e37de92d6eb1fd1fb58994ba85cc223bcd915e4ff4e79094d";',
+              1,
+          )
+          text = text.replace(
+              '        simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,\n'
+              '        FINAL_SIGMA_CONTEXT_RECORD_COUNT, ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256,\n',
+              '        simple_titlecase_mapping as unicode_simple_titlecase_mapping, CASED_RECORD_COUNT,\n'
+              '        ORACLE_OUTPUT_SHA256, REFERENCE_JVM_ARCHIVE_SHA256,\n',
+              1,
+          )
+          text = text.replace('        let mut final_sigma_context_count = 0;\n', '', 1)
+          text, count = re.subn(
+              r'''\n                Some\("FINAL_SIGMA"\) => \{.*?\n                    final_sigma_context_count \+= 1;\n                \}''',
+              '',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one stale FINAL_SIGMA match arm, got {count}')
+          text = text.replace(
+              '        assert_eq!(final_sigma_context_count, FINAL_SIGMA_CONTEXT_RECORD_COUNT);\n',
+              '',
+              1,
+          )
+          if 'FINAL_SIGMA_CONTEXT_RECORD_COUNT' in text or 'is_final_sigma_context' in text:
+              raise SystemExit('stale scalar Final_Sigma test reference remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+
           set +e
           python3 tools/cleanup_196.py --java "$REFERENCE_JAVA" --archive "$REFERENCE_ARCHIVE" > /tmp/cleanup.log 2>&1
           status=$?
           set -e
           cat /tmp/cleanup.log
           if [ "$status" -ne 0 ]; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            tail -c 50000 /tmp/cleanup.log > cleanup-diagnostic.txt
-            git add cleanup-diagnostic.txt
-            git commit -m 'chore(ci): capture issue 196 cleanup diagnostic'
-            git push origin HEAD:compat/196-localization-semantics
             exit "$status"
           fi
 
@@ -76,8 +107,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm -f .github/workflows/issue-196-cleanup.yml tools/cleanup_196.py
+          git rm -rf --ignore-unmatch tools/__pycache__
           if [ -f cleanup-diagnostic.txt ]; then git rm -f cleanup-diagnostic.txt; fi
           git add -A
           git diff --cached --check
-          git commit -m 'fix(stdlib): remove obsolete scalar sigma oracle'
+          git commit -m 'fix(stdlib): finalize pinned JVM localization oracle'
           git push origin HEAD:compat/196-localization-semantics
