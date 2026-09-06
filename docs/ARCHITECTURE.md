@@ -310,10 +310,12 @@ are not subject to that requirement.
 
 `VirtualProject` is the in-memory compilation project model. The native CLI or
 another native host loads filesystem, configuration, and resource data and
-constructs it. WASM and embedded hosts construct it directly from in-memory
-inputs. `arkst-core` consumes an already constructed `VirtualProject`.
-Project ownership does not prevent the core facade from accepting
-`&VirtualProject`.
+constructs it. Platform-neutral and WASM-capable callers can construct the same
+model from explicitly supplied in-memory inputs, but the repository does not
+currently expose a public WASM project/resource-ingestion binding; #191 owns
+that embedder boundary and its end-to-end evidence. `arkst-core` consumes an
+already constructed `VirtualProject`. Project ownership does not prevent the
+core facade from accepting `&VirtualProject`.
 
 ```rust
 pub struct VirtualProject {
@@ -378,12 +380,16 @@ project model itself.
 The native CLI loads the bounded project tree into sources/assets at the host
 boundary and does not import symlink targets outside the canonical project
 root; the native Typst mirror rejects such an escape if the source context is
-used. WASM and embedded hosts provide the same logical source/resource data
-directly in memory. This is a read-only project capability: there is no
-evaluator write, directory-listing, or network-fetch API.
+used. The platform-neutral compiler model can receive equivalent logical
+source/resource data directly in memory from an embedder. That capability is
+WASM-compilable, but it is not a shipped public Arkst WASM project/resource
+binding; #191 owns that binding and native/WASM end-to-end evidence. This is a
+read-only project capability: there is no evaluator write, directory-listing,
+or network-fetch API.
 
 - CLI builds `VirtualProject` from disk
-- WASM builds `VirtualProject` from in-memory sources
+- In-memory hosts can build `VirtualProject` from explicitly supplied sources/assets
+- Public WASM project/resource binding is not currently shipped; it is tracked by #191
 - Core never touches filesystem
 - SourceId assignment is deterministic (sources sorted by path before insertion)
 - Front matter at document start is parsed and merged with project metadata
@@ -465,7 +471,7 @@ The CLI adapter enforces a strict symlink containment policy:
 
 This design ensures:
 
-* A WASM frontend (which has no filesystem access) is inherently immune to symlink escape attacks.
+* An in-memory WASM/embedder host that supplies only a `VirtualProject` has no compiler-side filesystem or symlink-traversal surface; Arkst does not currently ship the public WASM project/resource binding for that model (#191).
 * Native CLI users are protected from accidental or malicious symlink escapes.
 * The `VirtualProject` abstraction remains purely logical, with no OS path leakage.
 
@@ -532,14 +538,17 @@ decision.
 
 | Edition | Scope | Status |
 |---------|-------|--------|
-| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine (including `arkst-html` HTML normalization) → normalized IR → pure Typst lowering | Guaranteed target |
+| Compiler/library WASM | In-memory `VirtualProject` → frontend → engine (including `arkst-html` HTML normalization) → normalized IR → pure Typst lowering | Buildability/capability target; public resource binding not shipped |
 | Full browser compile | Above + Typst compiler running in WASM → PDF/output | M7+ feasibility gate |
 
-The guaranteed compiler/library path includes pure `arkst-typst` lowering;
+The compiler/library WASM path describes `wasm32-unknown-unknown` buildability
+and an in-memory API capability. It is not evidence of a browser-facing or
+public WASM project/resource binding; #191 owns that binding and its
+end-to-end native/WASM fixture. The path includes pure `arkst-typst` lowering;
 it does not include `arkst-typst-subprocess`. Subprocess execution is
 native-only. Running the Typst compiler in a browser remains a later
 feasibility decision; this architecture does not introduce a browser adapter
-or an in-process backend.
+or a WASM compiler backend.
 
 ## Source Span Model
 

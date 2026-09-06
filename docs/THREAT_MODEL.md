@@ -51,11 +51,14 @@ adapter translates VirtualPath → `PathBuf` at the boundary, applying:
 - Canonicalization (no `..` segments)
 - Symlink resolution (which VirtualPath itself does not model)
 
-A WASM frontend does not perform this translation at all — there is no
-filesystem to traverse. This eliminates the T1/T2 attack surface entirely
-for browser targets. Resource-backed evaluator builtins use the same
-source-relative logical paths in WASM and native builds; native loading is the
-only stage that reads the host tree.
+The in-memory WASM/embedder model does not require this translation. When a
+host supplies only an already constructed `VirtualProject`, the compiler
+boundary has no host-filesystem traversal or symlink surface for T1/T2. The
+repository does not currently ship a public WASM project/resource-ingestion
+binding or native/WASM end-to-end parity fixture; #191 owns that boundary.
+Resource-backed evaluator builtins themselves operate only on source-relative
+logical paths, while the current native CLI is the shipped host path that
+loads the project tree.
 
 For the native Typst subprocess path, the explicit source root is copied into
 an isolated temporary mirror. The generated entry file is created in that
