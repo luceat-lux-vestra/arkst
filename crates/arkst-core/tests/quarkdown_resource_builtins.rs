@@ -540,3 +540,86 @@ fn includeall_nested_sources_keep_their_own_relative_resource_base() {
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(paragraph_text(&result), "first-data\nsecond-data");
 }
+
+#[test]
+fn subdocument_uses_logical_source_resolution_without_host_path_leakage() {
+    let project = project(
+        "docs/main.qd",
+        &[
+            (
+                "docs/main.qd",
+                ".subdocument {parts/tmp/../child} {Child} anchor:{intro}\n",
+            ),
+            ("docs/parts/child", "target body"),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+        panic!("expected one link paragraph: {:?}", result.ir.nodes);
+    };
+    let [IrInline::Link { destination, .. }] = content.as_slice() else {
+        panic!("expected one subdocument link: {content:?}");
+    };
+    assert_eq!(destination, "parts/tmp/../child#intro");
+    assert!(!destination.contains("/Users/"));
+}
+
+#[test]
+fn subdocument_rejects_missing_absolute_uri_and_boundary_targets() {
+    for reference in [
+        "missing.qd",
+        "/etc/passwd",
+        "https://example.com/child.qd",
+        "../../outside.qd",
+    ] {
+        let source = format!(".subdocument {{{reference}}} {{Child}}\n");
+        let project = project("docs/main.qd", &[("docs/main.qd", &source)], &[]);
+        let result = compile_project(&project);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "{reference}: {:?}",
+            result.diagnostics
+        );
+        assert!(matches!(result.diagnostics[0].severity, Severity::Error));
+        assert_eq!(
+            result.diagnostics[0]
+                .primary
+                .as_ref()
+                .map(|span| span.source_id.0),
+            Some(1)
+        );
+        assert!(!result.diagnostics[0].message.contains("/Users/"));
+    }
+}
+
+#[test]
+fn unlabeled_subdocument_keeps_the_empty_link_after_real_project_resolution() {
+    let project = project(
+        "main.qd",
+        &[("main.qd", ".subdocument {child}\n"), ("child", "target")],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let [IrNode::Paragraph { content, .. }] = result.ir.nodes.as_slice() else {
+        panic!(
+            "expected one empty-label link paragraph: {:?}",
+            result.ir.nodes
+        );
+    };
+    let [IrInline::Link {
+        content: label,
+        destination,
+        title,
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one subdocument link: {content:?}");
+    };
+    assert!(label.is_empty(), "{label:?}");
+    assert_eq!(destination, "child");
+    assert!(title.is_none());
+}

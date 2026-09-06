@@ -55,15 +55,14 @@ row has a source URL containing the exact target SHA.
 
 The owned evaluator/data result is deliberately narrow:
 
-- `.read`, `.json`, `.include`, `.includeall`, and `.pathtoroot` are `PARTIAL`. Their local,
+- `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and `.subdocument` are `PARTIAL`. Their local,
   source-relative, in-memory subsets are evidenced, including strict text
   decoding, JSON conversion, nested source identity, active-stack cycle
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
   and logical project/subdocument root projection. Absolute/global FileSystem semantics,
   loadable libraries, complete upstream permission and diagnostic behavior, public WASM
   resource ingestion, and the full nested graph contract remain open.
-- `.listfiles`, `.filename`, `.csv`, `.bibliography`, `.subdocument`, and `.env`
-  remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
+- `.listfiles`, `.filename`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
@@ -102,7 +101,10 @@ Arkst's current model is one in-memory logical resource model:
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider`. `.read` and `.json` read text; `.include` reads a source
-   while retaining its target `SourceId`, path, source stack, and nested base.
+   while retaining its target `SourceId`, path, source stack, and nested base;
+   `.subdocument` validates a target source through the same `read_source`
+   authority without parsing/evaluating it or registering a graph edge, while
+   retaining an ordinary link node even when its optional label is empty.
 4. The evaluator remains filesystem-, process-, and network-free. IR carries
    source identity/provenance; it does not introduce a backend-specific raw
    resource escape.
@@ -135,9 +137,11 @@ Current `.include` evaluation uses the post-resolution target source identity,
 an active source stack for cycle detection, and a per-target nested base. A
 repeated include is allowed when it is not active. Nested `.read` evidence
 proves that the included source's identity, rather than the entry document or
-process cwd, controls relative lookup. Ordinary subdocument links and graph
-registration do not yet share this complete model; that gap is assigned to
-#188 before #154 graph/output reconciliation.
+process cwd, controls relative lookup. Dynamic `.subdocument` target validation
+now uses the same defining-source `read_source` base, but it does not parse or
+register the target. Static Markdown subdocument recognition and graph
+registration still do not share the complete model; those remaining #188
+resource-resolution edges precede #199 graph/output work coordinated with #181.
 
 ## Boundary and security findings
 

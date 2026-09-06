@@ -535,3 +535,243 @@ fn includeall_binding_collision_is_rejected_before_body_resource_access() {
     assert_eq!(diagnostics[0].code, "E3001");
     assert!(resources.source_requests.borrow().is_empty());
 }
+
+#[test]
+fn subdocument_resolves_extensionless_target_and_preserves_visible_link_arguments() {
+    let main = SourceId(71);
+    let target = SourceId(72);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "docs/main.qd".into());
+    resources.paths.insert(target, "docs/chapters/intro".into());
+    resources.sources.insert(
+        (main, "chapters/intro".into()),
+        IncludedSource {
+            path: "docs/chapters/intro".into(),
+            source_id: target,
+            text: "target body".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(
+        ".subdocument path:{chapters/intro} label:{Introduction} anchor:{start}",
+        main,
+        &resources,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "chapters/intro".into())]
+    );
+    let [IrNode::Paragraph { content, .. }] = result.nodes.as_slice() else {
+        panic!("expected one visible link paragraph: {:?}", result.nodes);
+    };
+    let [IrInline::Link {
+        content: label,
+        destination,
+        title,
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one subdocument link: {content:?}");
+    };
+    assert_eq!(destination, "chapters/intro#start");
+    assert!(title.is_none());
+    assert!(matches!(
+        label.as_slice(),
+        [IrInline::Text { content, .. }] if content == "Introduction"
+    ));
+}
+
+#[test]
+fn unlabeled_subdocument_resolves_target_and_emits_empty_label_link() {
+    let main = SourceId(73);
+    let target = SourceId(74);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.paths.insert(target, "child.qd".into());
+    resources.sources.insert(
+        (main, "child.qd".into()),
+        IncludedSource {
+            path: "child.qd".into(),
+            source_id: target,
+            text: "child".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(".subdocument {child.qd}", main, &resources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "child.qd".into())]
+    );
+    let [IrNode::Paragraph { content, .. }] = result.nodes.as_slice() else {
+        panic!(
+            "expected one empty-label link paragraph: {:?}",
+            result.nodes
+        );
+    };
+    let [IrInline::Link {
+        content: label,
+        destination,
+        title,
+        ..
+    }] = content.as_slice()
+    else {
+        panic!("expected one subdocument link: {content:?}");
+    };
+    assert!(label.is_empty(), "{label:?}");
+    assert_eq!(destination, "child.qd");
+    assert!(title.is_none());
+}
+
+#[test]
+fn nested_subdocument_resolution_uses_current_included_source_as_base() {
+    let main = SourceId(75);
+    let included = SourceId(76);
+    let target = SourceId(77);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "docs/main.qd".into());
+    resources.paths.insert(included, "docs/parts/one.qd".into());
+    resources.paths.insert(target, "docs/parts/child".into());
+    resources.sources.insert(
+        (main, "parts/one.qd".into()),
+        IncludedSource {
+            path: "docs/parts/one.qd".into(),
+            source_id: included,
+            text: ".subdocument {child} {Child}".into(),
+        },
+    );
+    resources.sources.insert(
+        (included, "child".into()),
+        IncludedSource {
+            path: "docs/parts/child".into(),
+            source_id: target,
+            text: "target".into(),
+        },
+    );
+
+    let (_, diagnostics) = evaluate(".include {parts/one.qd}", main, &resources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "parts/one.qd".into()), (included, "child".into())]
+    );
+}
+
+#[test]
+fn subdocument_resource_failures_are_source_backed_and_fail_closed() {
+    let main = SourceId(78);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.sources.insert(
+        (main, "remote".into()),
+        IncludedSource {
+            path: "unused".into(),
+            source_id: SourceId(79),
+            text: String::new(),
+        },
+    );
+
+    let (_, missing) = evaluate(".subdocument {missing}", main, &resources);
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert_eq!(missing[0].code, "E3001");
+    assert!(missing[0].message.contains("`.subdocument`"));
+    assert!(missing[0].message.contains("missing"));
+    assert_eq!(missing[0].primary.map(|span| span.source_id), Some(main));
+}
+
+#[test]
+fn subdocument_composes_inline_with_surrounding_text() {
+    let main = SourceId(81);
+    let target = SourceId(82);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(main, "main.qd".into());
+    resources.paths.insert(target, "child.qd".into());
+    resources.sources.insert(
+        (main, "child.qd".into()),
+        IncludedSource {
+            path: "child.qd".into(),
+            source_id: target,
+            text: "child".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(
+        "The link is: .subdocument {child.qd} {Child} after",
+        main,
+        &resources,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        resources.source_requests.borrow().as_slice(),
+        &[(main, "child.qd".into())]
+    );
+    let [IrNode::Paragraph { content, .. }] = result.nodes.as_slice() else {
+        panic!("expected one composed paragraph: {:?}", result.nodes);
+    };
+    assert!(
+        matches!(
+            content.as_slice(),
+            [
+                IrInline::Text { content: before, .. },
+                IrInline::Link {
+                    content: label,
+                    destination,
+                    ..
+                },
+                IrInline::Text { content: after, .. }
+            ] if before == "The link is: "
+                && matches!(label.as_slice(), [IrInline::Text { content, .. }] if content == "Child")
+                && destination == "child.qd"
+                && after == " after"
+        ),
+        "unexpected inline composition: {content:?}"
+    );
+}
+
+#[test]
+fn source_defined_subdocument_shadows_native_without_resource_access() {
+    let main = SourceId(83);
+    let resources = FakeResources {
+        paths: [(main, "main.qd".into())].into_iter().collect(),
+        ..FakeResources::default()
+    };
+
+    let (result, diagnostics) = evaluate(
+        ".function {subdocument}\n    path:\n    .path\n\n.subdocument {shadow-value}",
+        main,
+        &resources,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(
+        resources.source_requests.borrow().is_empty(),
+        "source-defined callable must not invoke the resource provider"
+    );
+    let [IrNode::Paragraph { content, .. }] = result.nodes.as_slice() else {
+        panic!(
+            "expected source-defined function output: {:?}",
+            result.nodes
+        );
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [IrInline::Text { content, .. }] if content == "shadow-value"
+    ));
+}
+
+#[test]
+fn subdocument_rejects_body_before_requesting_provider() {
+    let main = SourceId(80);
+    let resources = FakeResources {
+        paths: [(main, "main.qd".into())].into_iter().collect(),
+        ..FakeResources::default()
+    };
+
+    let (_, diagnostics) = evaluate(
+        ".subdocument {child.qd}\n    body is not accepted",
+        main,
+        &resources,
+    );
+    assert!(!diagnostics.is_empty());
+    assert!(resources.source_requests.borrow().is_empty());
+}

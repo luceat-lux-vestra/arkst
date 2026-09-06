@@ -3178,7 +3178,13 @@ impl Evaluator {
             );
         }
 
-        if is_resource(name) {
+        // Adding a native resource name must not steal a source-defined callable
+        // that was valid before the compatibility builtin existed. Keep the
+        // bounded `.subdocument` addition shadowable without changing the
+        // established precedence of older resource natives.
+        let source_defined_shadowable_resource =
+            name == "subdocument" && context.get_function(name).is_some();
+        if is_resource(name) && !source_defined_shadowable_resource {
             return self.evaluate_resource_builtin(
                 name,
                 positional_args,
@@ -6550,6 +6556,14 @@ impl Evaluator {
         };
 
         match name {
+            "subdocument" => self.evaluate_subdocument(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
             "pathtoroot" => self.evaluate_path_to_root(
                 &evaluated_positional,
                 &evaluated_named,
@@ -6593,6 +6607,99 @@ impl Evaluator {
             ),
             _ => CallOutcome::Failed,
         }
+    }
+
+    /// Resolves a Quarkdown subdocument target through the same logical source
+    /// authority as `.include`, without constructing the graph owned by #199.
+    /// The target is read for canonical source identity/provenance, but is not
+    /// parsed or evaluated here. A missing label still performs resolution and
+    /// produces the upstream-compatible empty-label link node.
+    fn evaluate_subdocument(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let mut slots = bound.slots.into_iter();
+        let Some(BoundSlot::Explicit {
+            value: path_value,
+            span: path_span,
+        }) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let Some(path) = builtins::adapt_string_argument(&path_value) else {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.subdocument` `path` must adapt to String".to_string(),
+                path_span,
+                "Use a scalar or plain-text logical source path.",
+            ));
+            return CallOutcome::Failed;
+        };
+
+        let label = match slots.next() {
+            Some(BoundSlot::Explicit { value, span }) => {
+                match subdocument_label_inlines(value, span, diagnostics) {
+                    Ok(label) => label,
+                    Err(outcome) => return outcome,
+                }
+            }
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        };
+        let anchor = match slots.next() {
+            Some(BoundSlot::Explicit { value, span }) => {
+                if matches!(value, IrValue::None) {
+                    None
+                } else {
+                    let Some(anchor) = builtins::adapt_string_argument(&value) else {
+                        diagnostics.push(resource_diagnostic(
+                            "E3003",
+                            "`.subdocument` `anchor` must adapt to String".to_string(),
+                            span,
+                            "Pass a plain-text anchor without the leading `#`, or omit it.",
+                        ));
+                        return CallOutcome::Failed;
+                    };
+                    Some(anchor)
+                }
+            }
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        };
+
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        if let Err(error) = provider.read_source(source_id, &path) {
+            diagnostics.push(resource_access_diagnostic("subdocument", error, *span));
+            return CallOutcome::Failed;
+        }
+
+        let content = label.unwrap_or_default();
+        let destination = match anchor {
+            Some(anchor) => format!("{path}#{anchor}"),
+            None => path,
+        };
+        CallOutcome::Value(IrValue::Content(vec![IrNode::Paragraph {
+            content: vec![IrInline::Link {
+                content,
+                destination,
+                title: None,
+                span: *span,
+            }],
+            span: *span,
+        }]))
     }
 
     fn evaluate_path_to_root(
@@ -11382,7 +11489,14 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
-const RESOURCE_NATIVE_NAMES: &[&str] = &["read", "json", "include", "includeall", "pathtoroot"];
+const RESOURCE_NATIVE_NAMES: &[&str] = &[
+    "read",
+    "json",
+    "include",
+    "includeall",
+    "pathtoroot",
+    "subdocument",
+];
 const LET_NATIVE_NAMES: &[&str] = &["let"];
 const FOREACH_NATIVE_NAMES: &[&str] = &["foreach"];
 const REPEAT_NATIVE_NAMES: &[&str] = &["repeat"];
@@ -12540,6 +12654,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![ParameterMetadata::defaulted("granularity")],
             BodyPolicy::Reject,
         ),
+        "subdocument" => (
+            vec![
+                ParameterMetadata::required("path"),
+                ParameterMetadata::optional("label"),
+                ParameterMetadata::optional("anchor"),
+            ],
+            BodyPolicy::Reject,
+        ),
         "var" => (
             vec![
                 ParameterMetadata::required("name"),
@@ -13460,6 +13582,33 @@ fn resource_lines_argument(
     };
     let _ = span;
     Ok(Some(range.clone()))
+}
+
+fn subdocument_label_inlines(
+    value: IrValue,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Option<Vec<IrInline>>, CallOutcome> {
+    match value {
+        IrValue::None => Ok(None),
+        IrValue::Content(nodes) => match nodes.as_slice() {
+            [] => Ok(Some(Vec::new())),
+            [IrNode::Paragraph { content, .. }] => Ok(Some(content.clone())),
+            _ => {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.subdocument` `label` must be inline Markdown content".to_string(),
+                    span,
+                    "Use scalar text or content that evaluates to exactly one paragraph.",
+                ));
+                Err(CallOutcome::Failed)
+            }
+        },
+        scalar => match scalar_to_text(&scalar, span, diagnostics) {
+            Ok(content) => Ok(Some(vec![IrInline::Text { content, span }])),
+            Err(outcome) => Err(outcome),
+        },
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
