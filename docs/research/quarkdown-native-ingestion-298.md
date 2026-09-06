@@ -102,7 +102,7 @@ reads host paths. No implicit installation-layout or current-directory library
 probe is introduced.
 
 This closes the executable native ingestion gap identified by #298 while
-preserving the separate #296 and #191 ownership boundaries. Canonical #155
+preserving the completed #296 global-read policy boundary and the separate #191 ownership boundary. Canonical #155
 status/ownership reconciliation now records #298 as completed without promoting
 the still-partial resource compatibility rows.
 
@@ -141,8 +141,8 @@ The native CLI implementation uses this contract:
 ## Ownership boundaries
 
 - #298 owns this native host discovery/ingestion surface.
-- #296 owns the accepted upstream `ProjectRead` / `GlobalRead` compatibility
-  divergence and must not be used to authorize arbitrary host paths here.
+- Completed #296/#300 records the accepted upstream `ProjectRead` / `GlobalRead`
+  security divergence and must not be used to authorize arbitrary host paths here.
 - #191 owns public WASM/embedder resource and library binding/parity.
 - #189 owns additional project data-file consumers.
 - #199/#181 own subdocument graph registration/output.

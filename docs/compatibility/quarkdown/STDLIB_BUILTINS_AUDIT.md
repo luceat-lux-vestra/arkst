@@ -388,8 +388,7 @@ localization names are now a bounded `SUPPORTED_SEMANTICS` evaluator slice;
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) owns library
 inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
 owns logger/diagnostic behavior. The common resolver prerequisite completed under #188 and native host ingestion
-completed under #298/#302; residual host/resource policy is coordinated through
-#190/#191/#296.
+completed under #298/#302; residual host/resource implementation is coordinated through #190/#191, while the global-read incompatibility is an accepted fail-closed policy divergence recorded under completed #296/#300.
 
 ### Bounded #196 localization contract
 

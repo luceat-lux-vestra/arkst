@@ -76,13 +76,16 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
 #[test]
 fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     for (surface, follow_up) in [
-        ("builtin:.read", "#296;#191"),
-        ("builtin:.json", "#296;#191;#149"),
-        ("builtin:.include", "#296;#191;#199"),
-        ("builtin:.includeall", "#296;#191"),
+        ("builtin:.read", "POLICY_DIVERGENCE:global-read;#191"),
+        ("builtin:.json", "POLICY_DIVERGENCE:global-read;#191;#149"),
+        (
+            "builtin:.include",
+            "POLICY_DIVERGENCE:global-read;#191;#199",
+        ),
+        ("builtin:.includeall", "POLICY_DIVERGENCE:global-read;#191"),
         (
             "contract:resource-diagnostics-provenance",
-            "#296;#189;#182;#191",
+            "POLICY_DIVERGENCE:global-read;#189;#182;#191",
         ),
     ] {
         let row = resource_row(surface);
@@ -94,8 +97,8 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
             (21, "follow-up"),
         ] {
             assert!(
-                !row[index].contains("#298"),
-                "completed #298 leaked into unresolved {label} for {surface}: {}",
+                !row[index].contains("#298") && !row[index].contains("#296"),
+                "completed ownership leaked into unresolved {label} for {surface}: {}",
                 row[index]
             );
         }
@@ -213,6 +216,9 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
     assert!(RECONCILIATION.contains("#296"));
     assert!(RECONCILIATION.contains("#298 native host-ingestion prerequisite is **complete**"));
     assert!(RECONCILIATION.contains("af2f409c3c9050abdd369798e1ddb7ad9c23435b"));
+    assert!(RECONCILIATION.contains("#296 global-read policy reconciliation is **complete**"));
+    assert!(RECONCILIATION.contains("e7da0718439ecf396fbfeceb133da872a940341a"));
+    assert!(RECONCILIATION.contains("POLICY_DIVERGENCE:global-read"));
     assert!(RECONCILIATION.contains("#190 is a parallel"));
     assert!(RECONCILIATION.contains("#191 is **deferred/milestone-blocked**"));
     assert!(RECONCILIATION
@@ -223,14 +229,14 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
 fn reconciliation_covers_open_followups_and_historical_trackers() {
     for issue in [
         157, 158, 159, 160, 162, 163, 164, 165, 166, 167, 169, 172, 173, 175, 176, 177, 178, 180,
-        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199, 296,
+        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199,
     ] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing issue #{issue}"
         );
     }
-    for issue in [24, 56, 60, 61, 62, 63, 188, 298] {
+    for issue in [24, 56, 60, 61, 62, 63, 188, 296, 298] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing historical issue #{issue}"
@@ -239,4 +245,27 @@ fn reconciliation_covers_open_followups_and_historical_trackers() {
     assert!(RECONCILIATION.contains("#147 remains open"));
     assert!(!RECONCILIATION.contains("frozen until #156"));
     assert!(!RECONCILIATION.contains("must remain Post-#156"));
+}
+
+#[test]
+fn reconciliation_rejects_completed_296_in_any_unresolved_resource_column() {
+    for line in RESOURCE_MANIFEST
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 24, "wrong #155 manifest column count: {line}");
+        for (index, label) in [
+            (19, "remaining gap"),
+            (20, "blocker dependency"),
+            (21, "follow-up"),
+        ] {
+            assert!(
+                !fields[index].contains("#296"),
+                "completed #296 leaked into unresolved {label} for {}: {}",
+                fields[1],
+                fields[index]
+            );
+        }
+    }
 }
