@@ -74,6 +74,15 @@ impl SourceStore {
         Ok(id)
     }
 
+    /// Reserves a deterministic SourceId for semantic source provenance that is
+    /// intentionally not addressable through the project path namespace.
+    ///
+    /// The caller owns lookup for the detached source. The reserved ID is never
+    /// reused by a later path-backed source.
+    pub(crate) fn allocate_detached_id(&mut self) -> Result<SourceId, SourceStoreError> {
+        self.allocate_id()
+    }
+
     /// Adds a source to the store, assigning a new SourceId.
     ///
     /// Returns the assigned SourceId.
