@@ -61,8 +61,8 @@ The owned evaluator/data result is deliberately narrow:
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
   exact case-sensitive loadable-library dispatch before file fallback with caller-context
   and caller-resource-base retention, and logical project/subdocument root projection.
-  Absolute/global FileSystem semantics and complete upstream permission/diagnostic behavior
-  remain #296 work. Native CLI project/library ingestion is explicitly bounded and
+  Absolute/global FileSystem semantics and upstream permission/diagnostic parity remain an
+  accepted fail-closed security divergence recorded under completed #296/#300. Native CLI project/library ingestion is explicitly bounded and
   evidenced under completed #298/#302; public WASM host resource/library binding and
   the full nested graph contract remain open under #191 and #199/#181.
 - `.listfiles`, `.filename`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
@@ -263,7 +263,7 @@ contracts.
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
 common resolver prerequisite completed under #188 and native host ingestion
-completed under #298/#302; the manifest routes residual work to #189/#190/#191/#296
+completed under #298/#302; the manifest routes residual implementation work to #189/#190/#191, while the global-read incompatibility is the accepted fail-closed policy divergence recorded under completed #296/#300
 without adding direct `std::fs`, cwd lookup, temp-dependent evaluator behavior,
 or network access.
 
@@ -274,8 +274,7 @@ or network access.
   resolution, library dispatch, callable lexical resource bases, and bounded
   `.read`/`.json`/`.include` family resolution; completion does not promote the
   canonical `PARTIAL` rows;
-- [#296](https://github.com/luceat-lux-vestra/arkst/issues/296): residual upstream
-  absolute/global `ProjectRead`/`GlobalRead` permission and diagnostic divergence;
+- [#296](https://github.com/luceat-lux-vestra/arkst/issues/296): **completed policy reconciliation** for the accepted fail-closed absolute/global `ProjectRead`/`GlobalRead` security divergence; #300 merged at `e7da0718439ecf396fbfeceb133da872a940341a`;
 - [#298](https://github.com/luceat-lux-vestra/arkst/issues/298): **completed native host-ingestion owner**; #302 merged at `af2f409c3c9050abdd369798e1ddb7ad9c23435b`, with explicit public native project/resource and bounded loadable-library discovery/ingestion evidence;
 - [#189](https://github.com/luceat-lux-vestra/arkst/issues/189): bounded
   project data-file and file-identity loaders (`.listfiles`, `.filename`,

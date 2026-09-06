@@ -9,7 +9,8 @@ intentional compatibility/security divergence after the common logical
 - Arkst issue: #296
 - Quarkdown compatibility target: v2.5.1
 - Pinned upstream revision: `107ec3a9482f10d6f90d7580f8409b46a719d18e`
-- This is evidence and policy analysis only. It does not authorize host
+- Evidence merge: `e7da0718439ecf396fbfeceb133da872a940341a` (#300).
+- The canonical #155 audit has consumed this policy decision. It does not authorize host
   filesystem access in `arkst-project`, `arkst-engine`, `arkst-core`, IR, or
   other platform-neutral compiler code.
 
@@ -92,7 +93,7 @@ capability inside platform-neutral compiler code.
 | Source-relative/project-local resource access | Represented by the caller-supplied `VirtualProject` / `ResourceProvider` logical project model. |
 | Absolute host paths or paths that escape the logical project | Intentional security divergence. They fail closed; document input cannot mint `global-read` authority. |
 | Upstream `ProjectRead` / `GlobalRead` permission selection and exit-72 CLI failure | Recorded compatibility divergence, not a second evaluator permission system. Arkst keeps its deterministic typed project-resource diagnostics. |
-| Native host resource/loadable-library discovery and ingestion | Separate host-adapter work owned by #298. Supplying data into a `VirtualProject` is not equivalent to allowing arbitrary absolute document paths. |
+| Native host resource/loadable-library discovery and ingestion | Completed separately under #298/#302. Supplying data into a `VirtualProject` is not equivalent to allowing arbitrary absolute document paths. |
 | Public WASM/embedder resource binding and native/WASM parity | Deferred to #191; no browser URL, cwd, host path, or implicit filesystem fallback is introduced here. |
 | Project data-file consumers such as `.listfiles`, `.filename`, `.csv`, bibliography | Remain #189-owned and must reuse the accepted logical/capability boundaries. |
 | Process/environment access | Remains #190-owned and is not implied by filesystem permissions. |
@@ -108,17 +109,16 @@ Documenting the divergence does not promote `.read`, `.json`, `.include`,
 2. Absolute/global filesystem authority cannot be encoded by document input,
    callable capture, or serialized IR.
 3. Existing host-path rejection and project-boundary checks remain fail-closed.
-4. Native ingestion (#298) and WASM binding (#191) must inject explicit data or
-   capabilities at their host boundaries; neither may silently weaken the
-   logical resolver.
+4. Completed native ingestion (#298/#302) and future WASM binding (#191) use explicit
+   host/embedder boundaries; neither may silently weaken the logical resolver.
 5. Compatibility status remains evidence-based: an intentional divergence is
    still a remaining compatibility gap even when its security policy is
    accepted.
 
-## Follow-up reconciliation
+## Canonical reconciliation
 
-This note is the pinned upstream evidence slice for #296. The canonical #155
-resource audit/manifest and cross-audit reconciliation must consume this
-record in a subsequent bounded slice before #296 can close. Until that
-reconciliation lands, existing `PARTIAL` rows and their #296 follow-up links
-remain intentionally unchanged.
+The canonical #155 resource audit/manifest and cross-audit reconciliation now consume
+this record. Affected rows remain `PARTIAL`; `POLICY_DIVERGENCE:global-read` records the accepted
+fail-closed global-read incompatibility without leaving completed #296 as an actionable
+owner. #296/#300 remain historical policy/evidence provenance, while independently
+owned gaps such as #189, #190, and #191 remain actionable where applicable.
