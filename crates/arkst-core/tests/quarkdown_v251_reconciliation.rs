@@ -76,9 +76,9 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
 #[test]
 fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     for (surface, follow_up) in [
-        ("builtin:.read", "#188"),
-        ("builtin:.json", "#188;#149"),
-        ("builtin:.include", "#188"),
+        ("builtin:.read", "#296;#298;#191"),
+        ("builtin:.json", "#296;#298;#191;#149"),
+        ("builtin:.include", "#296;#298;#191;#199"),
     ] {
         let row = resource_row(surface);
         assert_eq!(row[17], "PARTIAL", "wrong canonical status for {surface}");
@@ -180,8 +180,9 @@ fn reconciliation_assigns_actionable_content_gaps_without_closed_owner_links() {
 
     let graph = content_row("primitive:subdocumentgraph");
     assert_eq!(graph[26], "BLOCKED");
-    assert_eq!(graph[27], "#188;#199");
+    assert_eq!(graph[27], "#199");
     assert!(graph[28].contains("#199"));
+    assert!(!graph[27].contains("#188"));
     assert!(!graph[27].contains("#155"));
     assert!(!graph[27].contains("#156"));
 }
@@ -191,8 +192,10 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
     assert!(RECONCILIATION.contains("#187's strategy decision is complete"));
     assert!(RECONCILIATION.contains("#200 is the explicit-selection follow-up"));
     assert!(RECONCILIATION.contains("not a prerequisite to start #187"));
-    assert!(RECONCILIATION.contains("#188 is **after #187**"));
-    assert!(RECONCILIATION.contains("#189 is **after #188**"));
+    assert!(RECONCILIATION.contains("#188 common logical resolver prerequisite is **complete**"));
+    assert!(RECONCILIATION.contains("#189 may proceed on its data-file scope"));
+    assert!(RECONCILIATION.contains("#296"));
+    assert!(RECONCILIATION.contains("#298"));
     assert!(RECONCILIATION.contains("#190 is a parallel"));
     assert!(RECONCILIATION.contains("#191 is **deferred/milestone-blocked**"));
     assert!(RECONCILIATION
@@ -203,14 +206,14 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
 fn reconciliation_covers_open_followups_and_historical_trackers() {
     for issue in [
         157, 158, 159, 160, 162, 163, 164, 165, 166, 167, 169, 172, 173, 175, 176, 177, 178, 180,
-        181, 182, 183, 184, 185, 187, 188, 189, 190, 191, 194, 195, 196, 197, 198, 199,
+        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199, 296, 298,
     ] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing issue #{issue}"
         );
     }
-    for issue in [24, 56, 60, 61, 62, 63] {
+    for issue in [24, 56, 60, 61, 62, 63, 188] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing historical issue #{issue}"
