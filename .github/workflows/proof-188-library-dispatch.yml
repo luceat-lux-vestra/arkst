@@ -35,7 +35,7 @@ jobs:
           PY
           cargo fmt --all
           git diff --check
-          git rm .github/workflows/proof-188-library-dispatch.yml .github/proof-188-library-dispatch.py
+          git rm -f .github/workflows/proof-188-library-dispatch.yml .github/proof-188-library-dispatch.py
       - name: Validate exact patched tree
         run: |
           cargo test --locked -p arkst-project --test loadable_library_registry
