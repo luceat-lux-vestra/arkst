@@ -3,9 +3,9 @@ use arkst_engine::{
     IncludedSource, LoadableLibraryProvider, LoadableLibrarySource, ResourceAccessError,
     ResourceProvider, ResourceText,
 };
-use arkst_ir::{IrDocument, IrInline, IrNode};
+use arkst_ir::{IrCallable, IrCallableCapture, IrDocument, IrInline, IrNode, IrValue};
 use arkst_markdown::Mode;
-use arkst_source::SourceId;
+use arkst_source::{SourceId, SourceSpan};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
@@ -398,4 +398,200 @@ fn loadable_library_recursion_is_bounded_by_evaluation_depth() {
     let diagnostics = evaluate_recursive_library(".include {a}", main, &mutual);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert!(mutual.library_requests.borrow().len() <= 8);
+}
+
+#[test]
+fn included_file_functions_keep_their_definition_resource_base() {
+    let main = SourceId(51);
+    let definitions = SourceId(52);
+    let child = SourceId(53);
+    let mut env = FakeEnvironment::default();
+    env.paths.insert(main, "docs/main.qd".into());
+    env.paths.insert(definitions, "docs/parts/defs.qd".into());
+    env.paths.insert(child, "docs/parts/child.qd".into());
+    env.sources.insert(
+        (main, "parts/defs.qd".into()),
+        IncludedSource {
+            path: "docs/parts/defs.qd".into(),
+            source_id: definitions,
+            text: ".function {readlater}\n    .read {data.txt}\n\n.function {linklater}\n    [Child](child.qd#intro)\n\n.function {broken}\n    [Missing](missing.qd)".into(),
+        },
+    );
+    env.sources.insert(
+        (definitions, "child.qd".into()),
+        IncludedSource {
+            path: "docs/parts/child.qd".into(),
+            source_id: child,
+            text: "target".into(),
+        },
+    );
+    env.text.insert(
+        (definitions, "data.txt".into()),
+        Ok(ResourceText {
+            path: "docs/parts/data.txt".into(),
+            text: "definition data".into(),
+        }),
+    );
+
+    let (result, diagnostics) = evaluate(
+        ".include {parts/defs.qd}\n.readlater\n.linklater",
+        main,
+        &env,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        env.text_requests.borrow().as_slice(),
+        &[(definitions, "data.txt".into())]
+    );
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[
+            (main, "parts/defs.qd".into()),
+            (definitions, "child.qd".into())
+        ]
+    );
+    assert!(paragraph_text(&result).contains("definition data"));
+    assert_eq!(link_destinations(&result), vec!["child.qd#intro"]);
+
+    env.source_requests.borrow_mut().clear();
+    env.text_requests.borrow_mut().clear();
+    let (_, diagnostics) = evaluate(".include {parts/defs.qd}\n.broken", main, &env);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[
+            (main, "parts/defs.qd".into()),
+            (definitions, "missing.qd".into())
+        ]
+    );
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(definitions)
+    );
+}
+
+#[test]
+fn library_functions_keep_includer_resource_base_and_detached_provenance() {
+    let main = SourceId(61);
+    let child = SourceId(62);
+    let library = SourceId(160);
+    let mut env = FakeEnvironment::default();
+    env.paths.insert(main, "docs/main.qd".into());
+    env.paths.insert(child, "docs/child.qd".into());
+    env.sources.insert(
+        (main, "child.qd".into()),
+        IncludedSource {
+            path: "docs/child.qd".into(),
+            source_id: child,
+            text: "target".into(),
+        },
+    );
+    env.text.insert(
+        (main, "data.txt".into()),
+        Ok(ResourceText {
+            path: "docs/data.txt".into(),
+            text: "includer data".into(),
+        }),
+    );
+    env.libraries.insert(
+        "reader".into(),
+        LoadableLibrarySource {
+            name: "reader".into(),
+            source_id: library,
+            text: ".function {readlater}\n    .read {data.txt}\n\n.function {linklater}\n    [Child](child.qd#intro)\n\n.function {broken}\n    [Missing](missing.qd)".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(".include {reader}\n.readlater\n.linklater", main, &env);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        env.text_requests.borrow().as_slice(),
+        &[(main, "data.txt".into())]
+    );
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[(main, "child.qd".into())]
+    );
+    assert!(!env
+        .source_requests
+        .borrow()
+        .iter()
+        .any(|(source_id, _)| *source_id == library));
+    assert!(paragraph_text(&result).contains("includer data"));
+    assert_eq!(link_destinations(&result), vec!["child.qd#intro"]);
+
+    env.source_requests.borrow_mut().clear();
+    env.text_requests.borrow_mut().clear();
+    env.library_requests.borrow_mut().clear();
+    let (_, diagnostics) = evaluate(".include {reader}\n.broken", main, &env);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[(main, "missing.qd".into())]
+    );
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(library)
+    );
+}
+
+#[test]
+fn legacy_callable_capture_cannot_gain_caller_resource_capability() {
+    let main = SourceId(71);
+    let span = SourceSpan::new(main, 0, 1);
+    let mut env = FakeEnvironment::default();
+    env.paths.insert(main, "main.qd".into());
+    env.text.insert(
+        (main, "secret.txt".into()),
+        Ok(ResourceText {
+            path: "secret.txt".into(),
+            text: "must not be read".into(),
+        }),
+    );
+    let callback = IrCallable {
+        parameters: None,
+        body: vec![IrNode::FunctionCall {
+            name: "read".into(),
+            positional_args: vec![IrValue::String("secret.txt".into())],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span,
+        }],
+        span,
+        capture: Some(Box::new(IrCallableCapture {
+            variables: Vec::new(),
+            functions: Vec::new(),
+            resource_context: None,
+        })),
+    };
+    let input = IrDocument {
+        nodes: vec![IrNode::FunctionCall {
+            name: "ifpresent".into(),
+            positional_args: vec![IrValue::String("value".into()), IrValue::Callable(callback)],
+            named_args: Vec::new(),
+            ordered_args: None,
+            lambda_parameters: None,
+            body: None,
+            raw_body: None,
+            span,
+        }],
+        metadata: Default::default(),
+    };
+    let (_, diagnostics) = arkst_engine::evaluator::Evaluator::new()
+        .evaluate_with_resources_and_libraries_for_mode(
+            &env,
+            &env,
+            main,
+            Mode::Quarkdown,
+            &input,
+            &DocumentMetadataDefaults::default(),
+        );
+    assert!(
+        !diagnostics.is_empty(),
+        "a resource-less capture must fail closed"
+    );
+    assert!(env.text_requests.borrow().is_empty());
 }

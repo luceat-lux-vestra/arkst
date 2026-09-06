@@ -1983,6 +1983,7 @@ fn callable_capture_from_wire(
                 })
             })
             .collect::<Result<_, String>>()?,
+        resource_context: None,
     })
 }
 
@@ -2310,11 +2311,26 @@ pub struct IrInlineBody {
     pub span: SourceSpan,
 }
 
+/// Evaluator-runtime lexical resource identity retained by a callable.
+///
+/// This is deliberately not a resource provider or serialized capability token.
+/// It exists only for an in-memory callable materialized while resource access is
+/// active; IR serialization drops it so decoded or legacy captures fail closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrCallableResourceContext {
+    pub current_source: SourceId,
+    pub subdocument_root: Option<SourceId>,
+    pub loadable_libraries: bool,
+}
+
 /// Immutable lexical bindings captured by a first-class callable.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrCallableCapture {
     pub variables: Vec<IrCapturedVariable>,
     pub functions: Vec<IrCapturedFunction>,
+    /// Evaluator-only lexical resource state. This must never cross the IR wire boundary.
+    #[serde(skip)]
+    pub resource_context: Option<IrCallableResourceContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2399,12 +2415,13 @@ pub enum IrValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        IrCaptionPosition, IrCaptionPositionInfo, IrComponent, IrContainerAlignment,
-        IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor,
-        IrDocumentLocale, IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline,
-        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody,
-        IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
-        SourceTable, TargetSpecificContent,
+        IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
+        IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
+        IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
+        IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline, IrLandscapeComponent,
+        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
+        TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -2416,6 +2433,63 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
             IrValue::None
+        );
+    }
+
+    #[test]
+    fn callable_resource_context_is_runtime_only_and_fails_closed_after_wire_roundtrip() {
+        let resource_context = IrCallableResourceContext {
+            current_source: SourceId(91),
+            subdocument_root: Some(SourceId(92)),
+            loadable_libraries: true,
+        };
+        let callable = IrCallable {
+            parameters: None,
+            body: Vec::new(),
+            span: SourceSpan::new(SourceId(93), 0, 0),
+            capture: Some(Box::new(IrCallableCapture {
+                variables: Vec::new(),
+                functions: Vec::new(),
+                resource_context: Some(resource_context),
+            })),
+        };
+        let document = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "sink".to_string(),
+                positional_args: vec![IrValue::Callable(callable)],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: SourceSpan::new(SourceId(93), 0, 0),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_value(&document).expect("document serializes");
+        assert!(
+            !encoded.to_string().contains("resource_context"),
+            "runtime resource identity must not become a wire capability marker"
+        );
+
+        let decoded = serde_json::from_value::<IrDocument>(encoded).expect("document deserializes");
+        let IrNode::FunctionCall {
+            positional_args, ..
+        } = &decoded.nodes[0]
+        else {
+            panic!("expected function call")
+        };
+        let IrValue::Callable(callable) = &positional_args[0] else {
+            panic!("expected callable argument")
+        };
+        assert_eq!(
+            callable
+                .capture
+                .as_deref()
+                .and_then(|capture| capture.resource_context),
+            None,
+            "decoded callables must fail closed rather than recover resource authority from wire data"
         );
     }
 
