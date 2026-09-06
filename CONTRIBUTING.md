@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- Rust 1.97+ with `rust-toolchain.toml` for pinned version
+- Rust 1.98.0 for the pinned development/CI toolchain (`rust-toolchain.toml`)
+- Rust 1.92.0 is the workspace MSRV (`workspace.package.rust-version` in `Cargo.toml`)
 - Typst 0.15+ (optional for compile tests)
 - Git with conventional commits
 
@@ -11,8 +12,8 @@
 ```bash
 git clone https://github.com/luceat-lux-vestra/arkst.git
 cd arkst
-cargo build
-cargo test
+cargo build --locked
+cargo test --locked
 ```
 
 ## Issue-First Workflow
@@ -121,8 +122,8 @@ docs(adr): decide Typst backend strategy
 
 ## Code Style
 
-- `cargo fmt` before committing
-- `cargo clippy` must pass with `-D warnings`
+- Run `cargo fmt --all --check` before committing
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` must pass
 - Public API items must have doc comments
 - Tests required for new functionality
 - Errors are structured with diagnostic codes
