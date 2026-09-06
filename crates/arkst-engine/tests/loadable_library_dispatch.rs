@@ -1,7 +1,7 @@
 use arkst_engine::{
-    ast_to_ir::ast_to_ir_with_diagnostics_for_mode, DocumentMetadataDefaults, IncludedSource,
-    LoadableLibraryProvider, LoadableLibrarySource, ResourceAccessError, ResourceProvider,
-    ResourceText,
+    ast_to_ir::ast_to_ir_with_diagnostics_for_mode, DocumentMetadataDefaults, EvaluationLimits,
+    IncludedSource, LoadableLibraryProvider, LoadableLibrarySource, ResourceAccessError,
+    ResourceProvider, ResourceText,
 };
 use arkst_ir::{IrDocument, IrInline, IrNode};
 use arkst_markdown::Mode;
@@ -258,4 +258,144 @@ fn includeall_uses_library_dispatch_per_element_then_file_fallback() {
         &[(main, "local.qd".into())]
     );
     assert!(paragraph_text(&result).contains("library"));
+}
+
+fn link_destinations(document: &IrDocument) -> Vec<String> {
+    document
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Paragraph { content, .. } => Some(content),
+            _ => None,
+        })
+        .flat_map(|content| content.iter())
+        .filter_map(|inline| match inline {
+            IrInline::Link { destination, .. } => Some(destination.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn library_static_subdocument_links_use_caller_base_and_keep_library_provenance() {
+    let main = SourceId(31);
+    let child = SourceId(32);
+    let reader = SourceId(130);
+    let broken = SourceId(131);
+    let mut env = FakeEnvironment::default();
+    env.paths.insert(main, "docs/main.qd".into());
+    env.paths.insert(child, "docs/child.qd".into());
+    env.sources.insert(
+        (main, "child.qd".into()),
+        IncludedSource {
+            path: "docs/child.qd".into(),
+            source_id: child,
+            text: "target".into(),
+        },
+    );
+    env.libraries.insert(
+        "reader".into(),
+        LoadableLibrarySource {
+            name: "reader".into(),
+            source_id: reader,
+            text: "[Child](child.qd#intro)".into(),
+        },
+    );
+    env.libraries.insert(
+        "broken".into(),
+        LoadableLibrarySource {
+            name: "broken".into(),
+            source_id: broken,
+            text: "[Missing](missing.qd)".into(),
+        },
+    );
+
+    let (result, diagnostics) = evaluate(".include {reader}", main, &env);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[(main, "child.qd".into())]
+    );
+    assert!(!env
+        .source_requests
+        .borrow()
+        .iter()
+        .any(|(source_id, _)| *source_id == reader));
+    assert_eq!(link_destinations(&result), vec!["child.qd#intro"]);
+
+    env.source_requests.borrow_mut().clear();
+    let (_, diagnostics) = evaluate(".include {broken}", main, &env);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        env.source_requests.borrow().as_slice(),
+        &[(main, "missing.qd".into())]
+    );
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(broken)
+    );
+}
+
+fn evaluate_recursive_library(
+    source: &str,
+    main: SourceId,
+    env: &FakeEnvironment,
+) -> Vec<arkst_diagnostics::Diagnostic> {
+    let limits = EvaluationLimits {
+        max_materialized_elements: 1_024,
+        max_evaluation_depth: 8,
+    };
+    let (_, diagnostics) = arkst_engine::evaluator::Evaluator::with_limits(limits)
+        .evaluate_with_resources_and_libraries_for_mode(
+            env,
+            env,
+            main,
+            Mode::Quarkdown,
+            &document(source, main),
+            &DocumentMetadataDefaults::default(),
+        );
+    diagnostics
+}
+
+#[test]
+fn loadable_library_recursion_is_bounded_by_evaluation_depth() {
+    let main = SourceId(41);
+    let a = SourceId(140);
+    let b = SourceId(141);
+
+    let mut self_recursive = FakeEnvironment::default();
+    self_recursive.paths.insert(main, "main.qd".into());
+    self_recursive.libraries.insert(
+        "a".into(),
+        LoadableLibrarySource {
+            name: "a".into(),
+            source_id: a,
+            text: ".include {a}".into(),
+        },
+    );
+    let diagnostics = evaluate_recursive_library(".include {a}", main, &self_recursive);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(self_recursive.library_requests.borrow().len() <= 8);
+
+    let mut mutual = FakeEnvironment::default();
+    mutual.paths.insert(main, "main.qd".into());
+    mutual.libraries.insert(
+        "a".into(),
+        LoadableLibrarySource {
+            name: "a".into(),
+            source_id: a,
+            text: ".include {b}".into(),
+        },
+    );
+    mutual.libraries.insert(
+        "b".into(),
+        LoadableLibrarySource {
+            name: "b".into(),
+            source_id: b,
+            text: ".include {a}".into(),
+        },
+    );
+    let diagnostics = evaluate_recursive_library(".include {a}", main, &mutual);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(mutual.library_requests.borrow().len() <= 8);
 }

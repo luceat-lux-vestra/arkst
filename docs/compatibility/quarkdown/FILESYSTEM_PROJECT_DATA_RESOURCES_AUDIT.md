@@ -160,10 +160,11 @@ proves that the included source's identity, rather than the entry document or
 process cwd, controls relative lookup. Dynamic `.subdocument` target validation
 now uses the same defining-source `read_source` base. Static Markdown
 subdocument recognition closes the bounded #188 resource-validation edge:
-Quarkdown-mode literal `.qd`/`.md` destinations use their defining
-`SourceSpan.source_id`, consult evaluator-retained parser-mode provenance, strip
-only the anchor for lookup, preserve output spelling, and never parse/evaluate
-or register the target. Graph identity, target evaluation, and destination
+Quarkdown-mode literal `.qd`/`.md` destinations retain their defining
+`SourceSpan.source_id` for parser-mode and diagnostic provenance, but resolve
+through the evaluator's active `current_source` resource base; they strip only
+the anchor for lookup, preserve output spelling, and never parse/evaluate or
+register the target. Graph identity, target evaluation, and destination
 rewriting remain #199/#181 work. Pinned upstream execution of Quarkdown calls
 inside `.include` targets named `*.md` is now represented by the same nested
 Quarkdown parser/evaluator path; top-level `.md` entry isolation remains a

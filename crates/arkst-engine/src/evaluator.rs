@@ -2600,12 +2600,12 @@ impl Evaluator {
             } => {
                 if let Some(reference) = markdown_subdocument_link_reference(destination) {
                     if let Some(provider) = context.resources {
-                        let source_id = span.source_id;
-                        let Some(source_mode) = context.source_mode(source_id) else {
+                        let provenance_source_id = span.source_id;
+                        let Some(source_mode) = context.source_mode(provenance_source_id) else {
                             diagnostics.push(resource_diagnostic(
                                 "E9001",
                                 format!(
-                                    "Markdown subdocument link has no parser-mode provenance for source identity {source_id:?}"
+                                    "Markdown subdocument link has no parser-mode provenance for source identity {provenance_source_id:?}"
                                 ),
                                 *span,
                                 "Resource-backed evaluation must register the actual parser mode for every source identity before consuming source-backed links.",
@@ -2613,6 +2613,15 @@ impl Evaluator {
                             return Vec::new();
                         };
                         if source_mode == Mode::Quarkdown {
+                            let Some(resource_base_source_id) = context.current_source else {
+                                diagnostics.push(resource_diagnostic(
+                                    "E9001",
+                                    "Markdown subdocument link has no active resource-base source identity",
+                                    *span,
+                                    "Resource-backed Quarkdown link validation requires an active logical source base; diagnostic provenance may use a distinct source identity.",
+                                ));
+                                return Vec::new();
+                            };
                             if reject_host_filesystem_reference_for_subject(
                                 "Markdown subdocument link",
                                 reference,
@@ -2621,7 +2630,9 @@ impl Evaluator {
                             ) {
                                 return Vec::new();
                             }
-                            if let Err(error) = provider.read_source(source_id, reference) {
+                            if let Err(error) =
+                                provider.read_source(resource_base_source_id, reference)
+                            {
                                 diagnostics.push(resource_access_diagnostic_for_subject(
                                     "Markdown subdocument link",
                                     error,

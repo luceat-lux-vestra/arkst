@@ -54,3 +54,36 @@ fn compile_library_reads_from_the_includer_resource_base() {
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(paragraph_text(&result.ir), "caller data");
 }
+
+fn link_destinations(document: &arkst_core::ir::IrDocument) -> Vec<String> {
+    document
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            IrNode::Paragraph { content, .. } => Some(content),
+            _ => None,
+        })
+        .flat_map(|content| content.iter())
+        .filter_map(|inline| match inline {
+            IrInline::Link { destination, .. } => Some(destination.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn compile_library_static_subdocument_link_uses_includer_base() {
+    let project = VirtualProjectBuilder::new()
+        .entry("docs/main.qd")
+        .unwrap()
+        .add_source("docs/main.qd", ".include {reader}")
+        .unwrap()
+        .add_source("docs/child.qd", "target")
+        .unwrap()
+        .add_loadable_library("reader", "[Child](child.qd#intro)")
+        .build()
+        .unwrap();
+    let result = compile(&project, &CompileOptions::default());
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(link_destinations(&result.ir), vec!["child.qd#intro"]);
+}
