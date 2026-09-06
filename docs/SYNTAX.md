@@ -759,8 +759,8 @@ compiler does not access the host filesystem or network from this boundary.
 
 The three builtin rows are canonical `PARTIAL` resource support, not complete
 Quarkdown compatibility. Their common logical resolver prerequisite completed
-under #188; residual upstream permission behavior is #296, native host ingestion
-is #298, and public WASM binding/parity is #191. The
+under #188; native host ingestion completed under #298/#302, while residual upstream
+permission behavior is #296 and public WASM binding/parity is #191. The
 VirtualProject/ResourceProvider contract is a separate `SUPPORTED_SEMANTICS`
 row, and Typst source context is `PARTIAL` pending #187. See the cross-audit
 decision in [`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).

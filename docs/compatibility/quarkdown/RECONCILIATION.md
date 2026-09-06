@@ -98,10 +98,10 @@ status recorded by its owner.
 | Remaining document-wide layout/configuration (`.numbering`, `.pageformat`, `.font`, page counters, navigation, `.slides`, and related rows) | #153; 19 `PARSED_ONLY` rows | #154 component/content consumers; #175–#178 | Parser/retention evidence does not establish state, IR, or output support. Follow-up ownership remains grouped by contract. |
 | Bounded ordinary Markdown block/inline/table/fence/link behavior | #154; `SUPPORTED_END_TO_END` rows | Rushdown frontend and Typst output | Existing parser/IR/Typst/PDF evidence is for the bounded Markdown contract, not Quarkdown callable producers. |
 | Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185, with `.match` in #198, `.subdocumentgraph` in #199 after the completed #188 resolver prerequisite, and `.keybinding`/`.loremipsum` explicitly in #184. CSS rows remain an explicit HTML-backend/product defer. No backend escape hatch is introduced. |
-| `.read` | #155; `PARTIAL` | completed #188 logical resolver; residual #296/#298/#191 | Source-relative in-memory text and bounded line selection work. Absolute/global permission behavior remains #296, native host ingestion is #298, and public WASM binding/parity is #191. |
-| `.json` | #155; `PARTIAL` | completed #188 resolver; #149 conversion; residual #296/#298/#191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global permission, native ingestion, and public WASM parity remain #296/#298/#191. |
-| `.include` | #155; `PARTIAL` | completed #188 resolver/nested identity; residual #296/#298/#191/#199 | Nested source identity, cycles/repeats, library dispatch, and caller-relative callable resource bases are evidenced. Global permission, native host ingestion, public WASM binding, and graph/output remain separate residual owners. |
-| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188 resolver prerequisite; #187/#189/#190/#191/#296/#298 consumers | In-memory logical paths, source identity, project boundaries, and deterministic provider contracts are evidenced; language-facing breadth and host/binding parity remain bounded by their explicit owners. |
+| `.read` | #155; `PARTIAL` | completed #188 logical resolver; completed #298 native host ingestion; residual #296/#191 | Source-relative in-memory text and bounded line selection work. Absolute/global permission behavior remains #296, public WASM binding/parity is #191. |
+| `.json` | #155; `PARTIAL` | completed #188 resolver and #298 native host ingestion; #149 conversion; residual #296/#191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global permission and public WASM parity remain #296/#191. |
+| `.include` | #155; `PARTIAL` | completed #188 resolver/nested identity and #298 native host ingestion; residual #296/#191/#199 | Nested source identity, cycles/repeats, library dispatch, caller-relative callable resource bases, and explicit native `-l`/`--libs` ingestion are evidenced. Global permission, public WASM binding, and graph/output remain separate residual owners. |
+| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188 resolver and #298 native-ingestion prerequisites; #187/#189/#190/#191/#296 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; language-facing breadth and WASM/backend parity remain bounded by their explicit owners. |
 | Typst entry/source-context contract | #155; `PARTIAL` | #187 strategy; #200 explicit selection; #201 parity | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; broader cross-platform parity remains in #201. |
 | WASM resource boundary | #155; `DEFERRED` | #191 M6/embedder boundary | Core/provider ideas are portable, but no public WASM resource API or native/WASM end-to-end equivalence exists. |
 
@@ -111,8 +111,8 @@ The common logical resolver prerequisite tracked by #188 is complete. This is
 not a compatibility-status promotion: the canonical resource rows remain
 `PARTIAL`, `BLOCKED`, or `DEFERRED` exactly where their end-to-end contracts are
 incomplete. Residual ownership is explicit: #296 owns upstream absolute/global
-permission and diagnostic divergence; #298 owns public native host
-resource/loadable-library ingestion; #191 owns the deferred public WASM/embedder
+permission and diagnostic divergence; native host resource/loadable-library
+ingestion is complete under #298/#302; #191 owns the deferred public WASM/embedder
 binding and native/WASM parity; #149 owns recursive value conversion; #189 owns
 data-file consumers; and #199/#181 own subdocument graph/reference output.
 
@@ -283,6 +283,23 @@ The graph distinguishes three relationships:
   band; #190 can proceed alongside the resolver after #187, while #191 is
   deferred by the M6 platform milestone.
 
+### #298 native host-ingestion close-out
+
+The explicit native host-ingestion boundary tracked by #298 is **complete** at
+#302 / `af2f409c3c9050abdd369798e1ddb7ad9c23435b`. Native `build`, `check`, and `inspect` expose the same
+explicit `-l` / `--libs` authority, ingest only deterministic direct lowercase
+`.qd` children, eagerly validate UTF-8, reject selected symlink escapes, and
+construct the in-memory provider before platform-neutral evaluation. Existing
+project-resource ingestion remains explicit and bounded at the same trusted CLI
+adapter.
+
+This close-out is not a compatibility-status promotion. The canonical
+`.read`, `.json`, `.include`, `.includeall`, and resource-diagnostic rows remain
+`PARTIAL`; their unresolved follow-ups are now only the separately owned
+#296/#191/#149/#199/#189/#182 gaps applicable to each row. #298 remains in the
+audit as completed historical/evidence ownership rather than an unresolved
+blocker or follow-up.
+
 ### Backend strategy closure: #187 → #200
 
 **STATUS:** #187's strategy decision is complete; #200 is the production
@@ -341,7 +358,7 @@ freeze wording is no longer a complete status. After
   engine/backend/content prerequisites**, with parallel work only where the
   graph permits it; completed bounded slices such as #159 remain recorded as
   evidence rather than being reopened by this sequence;
-- #188 common logical resolver prerequisite is **complete**; #189 may proceed on its data-file scope, #190 is a parallel capability-contract band, and residual resource compatibility is split to #296 (global permission/diagnostics) and #298 (native host ingestion);
+- #188 common logical resolver prerequisite is **complete**; #298 native host-ingestion prerequisite is **complete** under #302; #189 may proceed on its data-file scope, #190 is a parallel capability-contract band, and residual native permission/diagnostic compatibility is #296;
 - #191 is **deferred/milestone-blocked** to M6/WASM; and
 - no issue is authorized to bypass the architecture, evidence, or host
   boundaries recorded here.

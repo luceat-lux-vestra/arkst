@@ -61,8 +61,10 @@ The owned evaluator/data result is deliberately narrow:
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
   exact case-sensitive loadable-library dispatch before file fallback with caller-context
   and caller-resource-base retention, and logical project/subdocument root projection.
-  Absolute/global FileSystem semantics, complete upstream permission and diagnostic behavior,
-  public CLI/WASM host library/resource ingestion, and the full nested graph contract remain open.
+  Absolute/global FileSystem semantics and complete upstream permission/diagnostic behavior
+  remain #296 work. Native CLI project/library ingestion is explicitly bounded and
+  evidenced under completed #298/#302; public WASM host resource/library binding and
+  the full nested graph contract remain open under #191 and #199/#181.
 - `.listfiles`, `.filename`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
@@ -95,7 +97,9 @@ is a separate URL/media path and is gated by network permission.
 Arkst's current model is one in-memory logical resource model:
 
 1. The host CLI establishes an explicit project root and builds a
-   `VirtualProject` containing sorted source and asset stores.
+   `VirtualProject` containing sorted source and asset stores. When explicitly
+   supplied, `-l` / `--libs` adds a separately bounded, sorted, eager UTF-8
+   loadable-library ingestion authority before `VirtualProject::build`.
 2. `VirtualProject::resolve_resource_path` resolves a local reference from the
    calling source's logical parent. It rejects URI references and host absolute
    or Windows path forms, canonicalizes logical separators/components, and
@@ -182,7 +186,10 @@ syntax); those remain fail-closed and are owned by #182 rather than #188.
 The logical path implementation and native staging evidence cover the relevant
 adversarial classes: `..` traversal, absolute paths, Windows drive/backslash
 forms, repeated separators, `.` normalization, project-root escape, and native
-symlink escape. The project provider returns typed boundary/not-found/invalid
+symlink escape. The #298 native library adapter additionally canonicalizes the
+explicit library root, sorts direct lowercase `.qd` children, eagerly reads UTF-8,
+and rejects selected symlink escapes before evaluation. The project provider
+returns typed boundary/not-found/invalid
 reference errors, while the subprocess adapter rejects canonical/symlink paths
 outside its explicit project root.
 
@@ -246,16 +253,17 @@ conformance. Current code and tests confirm a bounded `.read`, `.json`, and
 typed provider errors, cycle detection, repeated includes, strict UTF-8 behavior,
 and exact case-sensitive in-memory loadable-library dispatch before file fallback.
 Library hits ignore the requested sandbox, evaluate in the caller context, and keep the
-includer's resource base. They do not confirm upstream absolute/global permission semantics,
-host library-directory discovery/ingestion, `.listfiles`, `.filename`, `.csv`, `.bibliography`,
-or `.subdocument` graph behavior. Current `.includeall` and `.pathtoroot` evidence is bounded
-to deterministic logical-project semantics and does not claim the remaining host-ingestion/WASM
+includer's resource base. They do not by themselves confirm upstream absolute/global permission semantics,
+`.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.
+Native host library-directory discovery/ingestion is separately evidenced as
+completed under #298/#302. Current `.includeall` and `.pathtoroot` evidence is bounded
+to deterministic logical-project semantics and does not claim the remaining global-permission/WASM
 contracts.
 
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
-common resolver prerequisite completed under #188; the manifest routes residual
-work to #189/#190/#191/#296/#298
+common resolver prerequisite completed under #188 and native host ingestion
+completed under #298/#302; the manifest routes residual work to #189/#190/#191/#296
 without adding direct `std::fs`, cwd lookup, temp-dependent evaluator behavior,
 or network access.
 
@@ -268,8 +276,7 @@ or network access.
   canonical `PARTIAL` rows;
 - [#296](https://github.com/luceat-lux-vestra/arkst/issues/296): residual upstream
   absolute/global `ProjectRead`/`GlobalRead` permission and diagnostic divergence;
-- [#298](https://github.com/luceat-lux-vestra/arkst/issues/298): explicit public
-  native host resource/loadable-library discovery and ingestion boundary;
+- [#298](https://github.com/luceat-lux-vestra/arkst/issues/298): **completed native host-ingestion owner**; #302 merged at `af2f409c3c9050abdd369798e1ddb7ad9c23435b`, with explicit public native project/resource and bounded loadable-library discovery/ingestion evidence;
 - [#189](https://github.com/luceat-lux-vestra/arkst/issues/189): bounded
   project data-file and file-identity loaders (`.listfiles`, `.filename`,
   `.csv`, `.bibliography`), coordinated with #181/#183 consumers;

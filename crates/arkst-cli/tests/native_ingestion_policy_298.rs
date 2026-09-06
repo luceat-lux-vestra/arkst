@@ -5,6 +5,7 @@ const CLI_MAIN: &str = include_str!("../src/main.rs");
 const CLI_COMMANDS: &str = include_str!("../src/commands.rs");
 const VIRTUAL_PROJECT: &str = include_str!("../../arkst-project/src/virtual_project.rs");
 const TARGET_SHA: &str = "107ec3a9482f10d6f90d7580f8409b46a719d18e";
+const IMPLEMENTATION_MERGE_SHA: &str = "af2f409c3c9050abdd369798e1ddb7ad9c23435b";
 
 fn normalized_research() -> String {
     RESEARCH.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -13,6 +14,7 @@ fn normalized_research() -> String {
 #[test]
 fn pinned_upstream_native_ingestion_contract_is_explicit() {
     assert!(RESEARCH.contains(TARGET_SHA));
+    assert!(RESEARCH.contains(IMPLEMENTATION_MERGE_SHA));
     for source in [
         "ExecuteCommand.kt",
         "Execute.kt",
@@ -100,5 +102,6 @@ fn implemented_native_library_policy_matches_the_accepted_boundary() {
             "missing accepted policy: {policy}"
         );
     }
-    assert!(research.contains("Canonical #155 audit ownership/status remains #298"));
+    assert!(research.contains("#155 audit ownership/status has been reconciled"));
+    assert!(research.contains("#298 is retained as completed evidence"));
 }

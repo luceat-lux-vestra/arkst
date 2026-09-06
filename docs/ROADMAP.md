@@ -84,8 +84,9 @@ Public Quarkdown features not yet implemented are tracked compatibility debt;
 they are not permanent product exclusions. The VirtualProject/ResourceProvider
 model has `SUPPORTED_SEMANTICS` evidence, while `.read`, `.json`, and `.include`
 remain `PARTIAL` source-relative bounded builtin rows owned by #155. The common
-resolver prerequisite completed under #188; residual upstream permission behavior is #296,
-native host resource/library ingestion is #298, and public WASM binding/parity is #191.
+resolver prerequisite completed under #188; native host resource/library ingestion completed
+under #298/#302; residual upstream permission behavior is #296, and public WASM
+binding/parity is #191.
 Remaining data-loading families require separate host/resource evidence;
 the complete status and order are in
 [`RECONCILIATION.md`](compatibility/quarkdown/RECONCILIATION.md).
