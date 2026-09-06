@@ -1,4 +1,4 @@
-//! Executable evidence guard for Issue #298's pinned native-ingestion research slice.
+//! Executable evidence guard for Issue #298's pinned native-ingestion contract.
 
 const RESEARCH: &str = include_str!("../../../docs/research/quarkdown-native-ingestion-298.md");
 const CLI_MAIN: &str = include_str!("../src/main.rs");
@@ -13,7 +13,6 @@ fn normalized_research() -> String {
 #[test]
 fn pinned_upstream_native_ingestion_contract_is_explicit() {
     assert!(RESEARCH.contains(TARGET_SHA));
-
     for source in [
         "ExecuteCommand.kt",
         "Execute.kt",
@@ -24,7 +23,6 @@ fn pinned_upstream_native_ingestion_contract_is_explicit() {
     ] {
         assert!(RESEARCH.contains(source), "missing pinned source: {source}");
     }
-
     for contract in [
         "`-l <dir>` / `--libs <dir>`",
         "`<install directory>/lib/qd`",
@@ -42,24 +40,33 @@ fn pinned_upstream_native_ingestion_contract_is_explicit() {
 }
 
 #[test]
-fn current_cli_project_ingestion_is_explicit_and_deterministic() {
+fn native_project_and_library_ingestion_stay_explicit_and_deterministic() {
     for contract in [
-        "fn load_single_file_project(input: &Path)",
+        "fn load_single_file_project_with_libraries(",
         "collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)",
         "entries.sort_by_key(|entry| entry.file_name());",
-        "fs::symlink_metadata(&path)",
-        "if !physical_entry.starts_with(&canonical_project_root)",
         "VirtualProjectBuilder::new().entry(virtual_entry.as_str())?",
         "builder = builder.add_source(path.as_str(), source)?;",
         "builder = builder.add_asset(path.as_str(), bytes)?;",
-        "compile_project(&loaded.project)",
+        "collect_loadable_libraries(libraries_dir)?",
+        "builder = builder.add_loadable_library(name, source);",
+        "path.extension() != Some(std::ffi::OsStr::new(\"qd\"))",
+        "if !canonical.starts_with(&root)",
+        "fs::read_to_string(&path)",
     ] {
         assert!(
             CLI_COMMANDS.contains(contract),
             "missing CLI contract: {contract}"
         );
     }
-
+    for surface in [
+        "libs: Option<PathBuf>",
+        "build_with_backend_and_libraries",
+        "check_with_libraries",
+        "inspect_with_libraries",
+    ] {
+        assert!(CLI_MAIN.contains(surface), "missing CLI surface: {surface}");
+    }
     for builder_contract in [
         "pub fn add_loadable_library(",
         "libraries.sort_by(|a, b| a.0.cmp(&b.0));",
@@ -68,16 +75,13 @@ fn current_cli_project_ingestion_is_explicit_and_deterministic() {
     ] {
         assert!(
             VIRTUAL_PROJECT.contains(builder_contract),
-            "missing VirtualProject contract: {builder_contract}"
+            "missing builder contract: {builder_contract}"
         );
     }
 }
 
 #[test]
-fn evidence_slice_keeps_native_library_ingestion_gap_explicit() {
-    assert!(!CLI_MAIN.contains("--libs"));
-    assert!(!CLI_COMMANDS.contains(".add_loadable_library("));
-
+fn implemented_native_library_policy_matches_the_accepted_boundary() {
     let research = normalized_research();
     for policy in [
         "explicit trusted-CLI authority",
@@ -89,13 +93,12 @@ fn evidence_slice_keeps_native_library_ingestion_gap_explicit() {
         "symlink outside the explicitly supplied library directory is rejected",
         "`build`, `check`, and `inspect`",
         "Document content cannot select or widen the host library directory",
+        "native CLI now connects an explicitly supplied `-l` / `--libs` directory",
     ] {
         assert!(
             research.contains(policy),
             "missing accepted policy: {policy}"
         );
     }
-
-    assert!(research.contains("The next bounded #298 slice should implement"));
-    assert!(research.contains("Canonical #155 audit ownership remains #298"));
+    assert!(research.contains("Canonical #155 audit ownership/status remains #298"));
 }

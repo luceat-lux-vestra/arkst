@@ -72,7 +72,7 @@ reader is outside the language-level library registry.
 Arkst already has a substantial explicit native project-ingestion boundary in
 `crates/arkst-cli/src/commands.rs`.
 
-`load_single_file_project`:
+`load_single_file_project_with_libraries`:
 
 - validates the requested entry extension;
 - canonicalizes the requested entry and logical project root;
@@ -91,24 +91,22 @@ before construction, allocates deterministic source IDs, and already supports
 `add_loadable_library(name, source)`. Library names are exact case-sensitive
 semantic keys; empty and duplicate names fail atomically during `build`.
 
-## Current gap
+## Implemented Arkst native library ingestion
 
-The native CLI does not yet connect a host library directory to
-`VirtualProjectBuilder::add_loadable_library`:
+The native CLI now connects an explicitly supplied `-l` / `--libs` directory
+to `VirtualProjectBuilder::add_loadable_library` before compiler evaluation.
+`build`, `check`, and `inspect` all use the same adapter. The platform-neutral
+project/provider layer remains I/O-free; only the trusted CLI resolves and
+reads host paths. No implicit installation-layout or current-directory library
+probe is introduced.
 
-- `crates/arkst-cli/src/main.rs` exposes no `-l` / `--libs` option;
-- `crates/arkst-cli/src/commands.rs` has no native library-directory discovery
-  or `add_loadable_library` call;
-- consequently a CLI compilation cannot currently populate the in-memory
-  loadable-library registry from external `.qd` files, even though the
-  platform-neutral registry and evaluator dispatch already exist.
-
-This is the bounded #298 implementation gap. It is not #188 resolver work and
-it is not evidence that `VirtualProject` itself should gain filesystem access.
+This closes the executable native ingestion gap identified by #298 while
+preserving the separate #296 and #191 ownership boundaries. Canonical #155
+status/ownership reconciliation remains a follow-up to this executable proof.
 
 ## Accepted Arkst native-ingestion contract for the implementation slice
 
-The follow-up implementation should use this contract:
+The native CLI implementation uses this contract:
 
 1. `-l <dir>` / `--libs <dir>` is an explicit trusted-CLI authority. Arkst does
    **not** implicitly probe a global installation library directory until an
@@ -157,12 +155,12 @@ The follow-up implementation should use this contract:
    not follow escaping symlinks.
 4. No implicit current-directory, environment-variable, installation-layout,
    or network fallback is introduced by #298.
-5. This evidence slice does not promote any canonical compatibility status.
+5. This implementation slice does not by itself promote any canonical compatibility status.
 
 ## Follow-up
 
-The next bounded #298 slice should implement the accepted CLI ingestion
-contract with adversarial native-host fixtures for deterministic ordering,
-non-recursion, exact extension/name handling, missing/non-directory inputs,
-invalid UTF-8, and symlink escape. Canonical #155 audit ownership remains #298
-until that executable host behavior is merged and reconciled.
+Adversarial native-host fixtures now cover shared `build`/`check`/`inspect`
+ingestion, non-recursion, exact extension/name handling, missing and
+non-directory inputs, eager invalid-UTF-8 failure, and symlink escape. Canonical
+#155 audit ownership/status remains #298 until that executable behavior is
+reconciled into the canonical audit views.

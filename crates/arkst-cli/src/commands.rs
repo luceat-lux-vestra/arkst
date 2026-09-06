@@ -137,7 +137,10 @@ fn validate_input_extension(input: &Path) -> anyhow::Result<()> {
 /// Loads the bounded project tree rooted at the entry's logical directory into
 /// a VirtualProject. Filesystem access stays at this native host boundary;
 /// compiler and evaluator code only see the resulting logical sources/assets.
-fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
+fn load_single_file_project_with_libraries(
+    input: &Path,
+    libraries_dir: Option<&Path>,
+) -> anyhow::Result<LoadedProject> {
     validate_input_extension(input)?;
     // Store the user-requested path for output naming
     let requested_entry = input.to_path_buf();
@@ -214,6 +217,11 @@ fn load_single_file_project(input: &Path) -> anyhow::Result<LoadedProject> {
         }
         builder = builder.add_asset(path.as_str(), bytes)?;
     }
+    if let Some(libraries_dir) = libraries_dir {
+        for (name, source) in collect_loadable_libraries(libraries_dir)? {
+            builder = builder.add_loadable_library(name, source);
+        }
+    }
     let project = builder.build()?;
 
     Ok(LoadedProject {
@@ -283,6 +291,86 @@ fn collect_project_files(
     Ok(())
 }
 
+/// Discovers and eagerly ingests loadable libraries from an explicit native host directory.
+///
+/// Discovery is intentionally non-recursive and accepts only direct children with an
+/// exact lowercase `.qd` extension. Candidate filenames are sorted before ingestion.
+/// The directory is host authority supplied by the CLI; document content cannot widen it.
+fn collect_loadable_libraries(directory: &Path) -> anyhow::Result<Vec<(String, String)>> {
+    let root = directory.canonicalize().with_context(|| {
+        format!(
+            "cannot resolve loadable library directory {}",
+            directory.display()
+        )
+    })?;
+    if !root.is_dir() {
+        anyhow::bail!(
+            "loadable library path is not a directory: {}",
+            directory.display()
+        );
+    }
+
+    let mut entries = fs::read_dir(&root)
+        .with_context(|| {
+            format!(
+                "cannot read loadable library directory {}",
+                directory.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| {
+            format!(
+                "cannot enumerate loadable library directory {}",
+                directory.display()
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut libraries = Vec::new();
+    for entry in entries {
+        let path = entry.path();
+        if path.extension() != Some(std::ffi::OsStr::new("qd")) {
+            continue;
+        }
+
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("cannot resolve loadable library entry {}", path.display()))?;
+        if !canonical.starts_with(&root) {
+            anyhow::bail!(
+                "loadable library '{}' resolves outside library root '{}' (symlink escape)",
+                path.display(),
+                root.display()
+            );
+        }
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("cannot inspect loadable library entry {}", path.display()))?;
+        if !metadata.is_file() {
+            anyhow::bail!("loadable library entry is not a file: {}", path.display());
+        }
+
+        let name = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "loadable library name is not valid UTF-8: {}",
+                    path.display()
+                )
+            })?;
+        if name.is_empty() {
+            anyhow::bail!(
+                "loadable library name must not be empty: {}",
+                path.display()
+            );
+        }
+        let source = fs::read_to_string(&path)
+            .with_context(|| format!("cannot read loadable library {} as UTF-8", path.display()))?;
+        libraries.push((name.to_string(), source));
+    }
+    Ok(libraries)
+}
+
 /// Compiles a pre-loaded VirtualProject.
 fn compile_project(project: &VirtualProject) -> anyhow::Result<arkst_core::CompileResult> {
     let options = arkst_core::CompileOptions::default();
@@ -322,12 +410,25 @@ fn build(
 }
 
 /// Execute the `build` command with an explicitly selected native backend.
+#[cfg(test)]
 pub fn build_with_backend(
     input: &str,
     formats: &[String],
     output: Option<&Path>,
     typst_path: &Path,
     backend: BackendSelection,
+) -> anyhow::Result<()> {
+    build_with_backend_and_libraries(input, formats, output, typst_path, backend, None)
+}
+
+/// Execute the `build` command with explicit native loadable-library ingestion.
+pub fn build_with_backend_and_libraries(
+    input: &str,
+    formats: &[String],
+    output: Option<&Path>,
+    typst_path: &Path,
+    backend: BackendSelection,
+    libraries_dir: Option<&Path>,
 ) -> anyhow::Result<()> {
     const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
 
@@ -352,7 +453,7 @@ pub fn build_with_backend(
     }
 
     let input_path = Path::new(input);
-    let loaded = load_single_file_project(input_path)?;
+    let loaded = load_single_file_project_with_libraries(input_path, libraries_dir)?;
 
     let result = compile_project(&loaded.project)?;
 
@@ -913,9 +1014,15 @@ fn canonical_parent(path: &Path) -> Option<PathBuf> {
 }
 
 /// Execute the `check` command: validate input without producing output.
+#[cfg(test)]
 pub fn check(input: &str) -> anyhow::Result<()> {
+    check_with_libraries(input, None)
+}
+
+/// Execute `check` with explicit native loadable-library ingestion.
+pub fn check_with_libraries(input: &str, libraries_dir: Option<&Path>) -> anyhow::Result<()> {
     let input = Path::new(input);
-    let loaded = load_single_file_project(input)?;
+    let loaded = load_single_file_project_with_libraries(input, libraries_dir)?;
     let result = compile_project(&loaded.project)?;
 
     for diag in &result.diagnostics {
@@ -928,9 +1035,19 @@ pub fn check(input: &str) -> anyhow::Result<()> {
 }
 
 /// Execute the `inspect` command: show intermediate representation(s).
+#[cfg(test)]
 pub fn inspect(input: &str, emit: &str) -> anyhow::Result<()> {
+    inspect_with_libraries(input, emit, None)
+}
+
+/// Execute `inspect` with explicit native loadable-library ingestion.
+pub fn inspect_with_libraries(
+    input: &str,
+    emit: &str,
+    libraries_dir: Option<&Path>,
+) -> anyhow::Result<()> {
     let input = Path::new(input);
-    let loaded = load_single_file_project(input)?;
+    let loaded = load_single_file_project_with_libraries(input, libraries_dir)?;
     let result = compile_project(&loaded.project)?;
 
     // Fail on error diagnostics
@@ -989,7 +1106,7 @@ mod tests {
         assert!(result.is_ok(), "Build failed: {:?}", result);
 
         // Verify VirtualProject entry is logical path
-        let loaded = load_single_file_project(&link_file).unwrap();
+        let loaded = load_single_file_project_with_libraries(&link_file, None).unwrap();
         assert_eq!(loaded.project.entry().as_str(), "link.qd");
 
         // Verify source store entry
