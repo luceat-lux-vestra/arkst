@@ -177,18 +177,24 @@ validation cost. A green CI result is necessary evidence, but it is not by
 itself a strict-review PASS; relevant targeted local evidence remains required
 for changes that need it.
 
+The workspace MSRV is Rust 1.92.0. Repository development and CI use the
+pinned Rust 1.98.0 toolchain from `rust-toolchain.toml`; do not conflate the
+minimum supported compiler with the toolchain used for authoritative current
+validation. Dependency-resolving Cargo validation uses the checked-in
+`Cargo.lock` and must run with `--locked`.
+
 The following commands are repository-wide validation examples. Run them when
 the change risk requires them or when reproducing the authoritative CI gate;
 they are not a mandatory local baseline for every task:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo test -p arkst-core
-cargo run -p arkst-cli -- build examples/hello/main.qd
-cargo run -p arkst-cli -- build examples/hello/main.qd --format pdf
-cargo run -p arkst-cli -- inspect examples/hello/main.qd --emit typst
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+cargo test --locked -p arkst-core
+cargo run --locked -p arkst-cli -- build examples/hello/main.qd
+cargo run --locked -p arkst-cli -- build examples/hello/main.qd --format pdf
+cargo run --locked -p arkst-cli -- inspect examples/hello/main.qd --emit typst
 ```
 
 Run relevant targeted checks proportional to risk and report checks that could
