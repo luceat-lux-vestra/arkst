@@ -790,6 +790,10 @@ struct EvaluationContext<'a> {
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
     active_sources: Vec<SourceId>,
+    /// Parser mode provenance keyed by the source identity carried in IR spans.
+    /// Shared across child scopes so source-backed callable bodies keep their
+    /// defining parser mode even when invoked after an include returns.
+    source_modes: Rc<RefCell<BTreeMap<u32, Mode>>>,
     document_state: Rc<RefCell<DocumentState>>,
     limits: EvaluationLimits,
     runtime: Rc<RefCell<EvaluationRuntime>>,
@@ -1122,6 +1126,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: None,
             subdocument_root: None,
             active_sources: Vec::new(),
+            source_modes: Rc::new(RefCell::new(BTreeMap::new())),
             document_state: Rc::new(RefCell::new(DocumentState::default())),
             limits,
             runtime: Rc::new(RefCell::new(EvaluationRuntime::default())),
@@ -1163,6 +1168,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
+            source_modes: Rc::clone(&self.source_modes),
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
@@ -1180,16 +1186,36 @@ impl<'a> EvaluationContext<'a> {
     fn with_resources(
         resources: &'a dyn ResourceProvider,
         source_id: SourceId,
+        source_mode: Mode,
         metadata_defaults: &crate::DocumentMetadataDefaults,
         limits: EvaluationLimits,
     ) -> Self {
+        let mut source_modes = BTreeMap::new();
+        source_modes.insert(source_id.0, source_mode);
         Self {
             resources: Some(resources),
             metadata_defaults: metadata_defaults.clone(),
             current_source: Some(source_id),
             subdocument_root: None,
             active_sources: vec![source_id],
+            source_modes: Rc::new(RefCell::new(source_modes)),
             ..Self::with_limits(limits)
+        }
+    }
+
+    fn source_mode(&self, source_id: SourceId) -> Option<Mode> {
+        self.source_modes.borrow().get(&source_id.0).copied()
+    }
+
+    fn register_source_mode(&self, source_id: SourceId, mode: Mode) -> Result<(), Mode> {
+        let mut modes = self.source_modes.borrow_mut();
+        match modes.get(&source_id.0).copied() {
+            Some(existing) if existing != mode => Err(existing),
+            Some(_) => Ok(()),
+            None => {
+                modes.insert(source_id.0, mode);
+                Ok(())
+            }
         }
     }
 
@@ -1250,6 +1276,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
             active_sources: self.active_sources.clone(),
+            source_modes: Rc::clone(&self.source_modes),
             document_state: Rc::clone(&self.document_state),
             limits: self.limits,
             runtime: Rc::clone(&self.runtime),
@@ -1774,6 +1801,7 @@ impl<'a> EvaluationContext<'a> {
             current_source: None,
             subdocument_root: None,
             active_sources: Vec::new(),
+            source_modes: Rc::clone(&caller_context.source_modes),
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
             runtime: Rc::clone(&caller_context.runtime),
@@ -2239,25 +2267,26 @@ impl Evaluator {
     }
 
     /// Evaluates an IR document with access to an explicit semantic resource
-    /// provider. The provider is retained only for this evaluation; the
-    /// engine performs no filesystem or network I/O.
+    /// provider. This legacy entry point preserves the historical Quarkdown
+    /// evaluator assumption; callers that parsed another mode must use
+    /// `evaluate_with_resources_for_mode`.
     pub fn evaluate_project<R: ResourceProvider>(
         &self,
         resources: &R,
         source_id: SourceId,
         document: &IrDocument,
     ) -> (IrDocument, Vec<Diagnostic>) {
-        let mut diagnostics = Vec::new();
-        let mut context = EvaluationContext::with_resources(
+        self.evaluate_with_resources_for_mode(
             resources,
             source_id,
+            Mode::Quarkdown,
+            document,
             &crate::DocumentMetadataDefaults::default(),
-            self.limits,
-        );
-        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+        )
     }
 
-    /// Alias naming the engine-neutral input boundary explicitly.
+    /// Alias naming the engine-neutral input boundary explicitly. The legacy
+    /// signature remains Quarkdown-compatible for existing engine callers.
     pub fn evaluate_with_resources<R: ResourceProvider>(
         &self,
         resources: &R,
@@ -2265,9 +2294,34 @@ impl Evaluator {
         document: &IrDocument,
         metadata_defaults: &crate::DocumentMetadataDefaults,
     ) -> (IrDocument, Vec<Diagnostic>) {
+        self.evaluate_with_resources_for_mode(
+            resources,
+            source_id,
+            Mode::Quarkdown,
+            document,
+            metadata_defaults,
+        )
+    }
+
+    /// Evaluates resource-backed IR with the actual parser mode that produced
+    /// the entry source. Mode is provenance, not a property reconstructed from
+    /// a resource path at the consumer site.
+    pub fn evaluate_with_resources_for_mode<R: ResourceProvider>(
+        &self,
+        resources: &R,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
-        let mut context =
-            EvaluationContext::with_resources(resources, source_id, metadata_defaults, self.limits);
+        let mut context = EvaluationContext::with_resources(
+            resources,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
@@ -2499,12 +2553,40 @@ impl Evaluator {
                 destination,
                 title,
                 span,
-            } => vec![IrInline::Link {
-                content: self.evaluate_inlines(content, diagnostics, context),
-                destination: destination.clone(),
-                title: title.clone(),
-                span: *span,
-            }],
+            } => {
+                if let Some(reference) = markdown_subdocument_link_reference(destination) {
+                    if let Some(provider) = context.resources {
+                        let source_id = span.source_id;
+                        let Some(source_mode) = context.source_mode(source_id) else {
+                            diagnostics.push(resource_diagnostic(
+                                "E9001",
+                                format!(
+                                    "Markdown subdocument link has no parser-mode provenance for source identity {source_id:?}"
+                                ),
+                                *span,
+                                "Resource-backed evaluation must register the actual parser mode for every source identity before consuming source-backed links.",
+                            ));
+                            return Vec::new();
+                        };
+                        if source_mode == Mode::Quarkdown {
+                            if let Err(error) = provider.read_source(source_id, reference) {
+                                diagnostics.push(resource_access_diagnostic_for_subject(
+                                    "Markdown subdocument link",
+                                    error,
+                                    *span,
+                                ));
+                                return Vec::new();
+                            }
+                        }
+                    }
+                }
+                vec![IrInline::Link {
+                    content: self.evaluate_inlines(content, diagnostics, context),
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    span: *span,
+                }]
+            }
             IrInline::DirectiveCall {
                 name,
                 positional_args,
@@ -7017,6 +7099,17 @@ impl Evaluator {
         }
 
         let mode = source_mode_for_resource_path(&path);
+        if let Err(existing_mode) = context.register_source_mode(target_id, mode) {
+            diagnostics.push(resource_diagnostic(
+                "E9001",
+                format!(
+                    "`.include` parser-mode provenance conflict for source identity {target_id:?}: {existing_mode:?} vs {mode:?}"
+                ),
+                *span,
+                "A ResourceProvider must map one SourceId to one canonical source identity and parser mode within an evaluation.",
+            ));
+            return CallOutcome::Failed;
+        }
         let include_diagnostics_start = diagnostics.len();
         let parsed = arkst_markdown::parse_with_mode(&source, mode);
         for diagnostic in parsed.diagnostics {
@@ -13462,34 +13555,42 @@ fn resource_access_diagnostic(
     error: ResourceAccessError,
     span: SourceSpan,
 ) -> Diagnostic {
+    resource_access_diagnostic_for_subject(&format!("`.{builtin}`"), error, span)
+}
+
+fn resource_access_diagnostic_for_subject(
+    subject: &str,
+    error: ResourceAccessError,
+    span: SourceSpan,
+) -> Diagnostic {
     match error {
         ResourceAccessError::UnsupportedReference { reference } => resource_diagnostic(
             "E8001",
-            format!("`.{builtin}` does not support non-local resource reference `{reference}`"),
+            format!("{subject} does not support non-local resource reference `{reference}`"),
             span,
             "Only source-relative paths inside the supplied VirtualProject are available; network fetching is disabled.",
         ),
         ResourceAccessError::UnknownSource { source_id } => resource_diagnostic(
             "E9001",
-            format!("`.{builtin}` cannot resolve the current source identity {source_id:?}"),
+            format!("{subject} cannot resolve the current source identity {source_id:?}"),
             span,
             "The host must provide the calling source through the VirtualProject SourceStore.",
         ),
         ResourceAccessError::Boundary { message } => resource_diagnostic(
             "E8001",
-            format!("`.{builtin}` resource path is outside the project boundary: {message}"),
+            format!("{subject} resource path is outside the project boundary: {message}"),
             span,
             "Use a source-relative path that remains inside the supplied VirtualProject.",
         ),
         ResourceAccessError::NotFound { path } => resource_diagnostic(
             "E3001",
-            format!("`.{builtin}` resource not found: `{path}`"),
+            format!("{subject} resource not found: `{path}`"),
             span,
             "Add the logical resource to the VirtualProject supplied by the host.",
         ),
         ResourceAccessError::InvalidUtf8 { path, message } => resource_diagnostic(
             "E3001",
-            format!("`.{builtin}` resource `{path}` is not valid UTF-8: {message}"),
+            format!("{subject} resource `{path}` is not valid UTF-8: {message}"),
             span,
             "Text resource builtins require valid UTF-8 and do not perform lossy decoding.",
         ),
@@ -13789,6 +13890,14 @@ fn json_number_to_ir(value: &serde_json::Number) -> Result<IrValue, String> {
         return Err("JSON number is not finite".to_string());
     }
     Ok(IrValue::Number(value))
+}
+
+fn markdown_subdocument_link_reference(destination: &str) -> Option<&str> {
+    let path = destination
+        .split_once('#')
+        .map_or(destination, |(path, _)| path);
+    let suffix = path.get(path.len().saturating_sub(3)..)?;
+    (suffix.eq_ignore_ascii_case(".qd") || suffix.eq_ignore_ascii_case(".md")).then_some(path)
 }
 
 fn source_mode_for_resource_path(path: &str) -> Mode {
