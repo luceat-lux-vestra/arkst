@@ -1,8 +1,8 @@
 //! Adapters from the in-memory project model to engine-neutral inputs.
 
 use arkst_engine::{
-    DocumentMetadataDefaults, IncludedSource, ResourceAccessError, ResourceProvider,
-    ResourceRoot as EngineResourceRoot, ResourceText,
+    DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
+    ResourceAccessError, ResourceProvider, ResourceRoot as EngineResourceRoot, ResourceText,
 };
 use arkst_project::{
     ProjectMetadata, ResourceAccessError as ProjectResourceAccessError,
@@ -38,6 +38,11 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
             .sources()
             .path_by_id(source_id)
             .map(ToString::to_string)
+            .or_else(|| {
+                self.project
+                    .loadable_library_name_by_source_id(source_id)
+                    .map(|name| format!("@library/{name}"))
+            })
     }
 
     fn relative_path_to_root(
@@ -87,6 +92,17 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
             path: path.to_string(),
             source_id: target_id,
             text: text.to_string(),
+        })
+    }
+}
+
+impl LoadableLibraryProvider for VirtualProjectResourceProvider<'_> {
+    fn loadable_library(&self, name: &str) -> Option<LoadableLibrarySource> {
+        let library = self.project.loadable_library(name)?;
+        Some(LoadableLibrarySource {
+            name: library.name().to_string(),
+            source_id: library.source_id(),
+            text: library.source().to_string(),
         })
     }
 }

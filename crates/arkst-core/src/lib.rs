@@ -95,7 +95,9 @@ pub mod evaluator {
             )
         }
 
-        pub(crate) fn evaluate_with_resources<R: arkst_engine::ResourceProvider>(
+        pub(crate) fn evaluate_with_resources<
+            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
+        >(
             &self,
             resources: &R,
             source_id: SourceId,
@@ -107,7 +109,8 @@ pub mod evaluator {
                 SourceMode::Markdown => arkst_markdown::Mode::Markdown,
                 SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
             };
-            self.inner.evaluate_with_resources_for_mode(
+            self.inner.evaluate_with_resources_and_libraries_for_mode(
+                resources,
                 resources,
                 source_id,
                 source_mode,

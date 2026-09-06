@@ -59,9 +59,10 @@ The owned evaluator/data result is deliberately narrow:
   source-relative, in-memory subsets are evidenced, including strict text
   decoding, JSON conversion, nested source identity, active-stack cycle
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
-  and logical project/subdocument root projection. Absolute/global FileSystem semantics,
-  loadable libraries, complete upstream permission and diagnostic behavior, public WASM
-  resource ingestion, and the full nested graph contract remain open.
+  exact case-sensitive loadable-library dispatch before file fallback with caller-context
+  and caller-resource-base retention, and logical project/subdocument root projection.
+  Absolute/global FileSystem semantics, complete upstream permission and diagnostic behavior,
+  public CLI/WASM host library/resource ingestion, and the full nested graph contract remain open.
 - `.listfiles`, `.filename`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
@@ -100,8 +101,13 @@ Arkst's current model is one in-memory logical resource model:
    or Windows path forms, canonicalizes logical separators/components, and
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
-   `ResourceProvider`. `.read` and `.json` read text; `.include` reads a source
-   while retaining its target `SourceId`, path, source stack, and nested base;
+   `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
+   read text; `.include` first performs exact case-sensitive lookup in the explicit
+   in-memory library registry, then falls back to source lookup. A library hit is parsed
+   as Quarkdown with a deterministic detached provenance `SourceId`, evaluated directly
+   in the caller context regardless of requested sandbox, and keeps the caller's source
+   identity as the base for nested resource reads. File includes retain their target
+   `SourceId`, path, source stack, and nested base;
    `.subdocument` and literal links in Quarkdown sources whose fragment-stripped
    destination ends in `.qd` or `.md` validate a target source through the same
    defining-source `read_source` authority. The evaluator records the actual
@@ -136,11 +142,16 @@ The audit distinguishes the following bases and identities:
 | Source root | The parent of the calling source's canonical logical path. |
 | Entry document | The explicit entry `SourceId` and project-relative `VirtualPath`. |
 | Nested document | A target `SourceId` plus canonical logical path returned by `read_source`; its source parent is the next relative base. |
-| Resource identity | Source content is identified by `SourceId` and logical path; assets use canonical logical paths. Host canonical paths are adapter-only. |
+| Loadable library | Exact semantic registry name plus a deterministic detached `SourceId`; it is not path-addressable, and its resource reads keep the includer's source-relative base. |
+| Resource identity | Path-backed source content is identified by `SourceId` and logical path; loadable library source uses its detached `SourceId` plus registry name; assets use canonical logical paths. Host canonical paths are adapter-only. |
 | Backend entry | `TypstInput.entry_path` is logical/project-relative; the native adapter's mirror path is not evaluator resource identity. |
 
-Current `.include` evaluation uses the post-resolution target source identity,
-an active source stack for cycle detection, and a per-target nested base. Included
+Current `.include` evaluation checks the explicit loadable-library registry before
+path resolution. Exact case-sensitive library hits evaluate directly in the caller context,
+ignore the requested include sandbox like upstream `loadLibrary`, preserve declarations in
+the caller, and keep the caller source identity for nested resource access while retaining a
+detached library `SourceId` for spans/diagnostics. File includes use the post-resolution target
+source identity, an active source stack for cycle detection, and a per-target nested base. Included
 source text is parsed/evaluated in Quarkdown mode regardless of the target file
 extension, matching pinned `Ecosystem.includeResource`; this does not change
 Arkst's separate Markdown-only policy for a top-level `.md` entry. A
@@ -149,10 +160,11 @@ proves that the included source's identity, rather than the entry document or
 process cwd, controls relative lookup. Dynamic `.subdocument` target validation
 now uses the same defining-source `read_source` base. Static Markdown
 subdocument recognition closes the bounded #188 resource-validation edge:
-Quarkdown-mode literal `.qd`/`.md` destinations use their defining
-`SourceSpan.source_id`, consult evaluator-retained parser-mode provenance, strip
-only the anchor for lookup, preserve output spelling, and never parse/evaluate
-or register the target. Graph identity, target evaluation, and destination
+Quarkdown-mode literal `.qd`/`.md` destinations retain their defining
+`SourceSpan.source_id` for parser-mode and diagnostic provenance, but resolve
+through the evaluator's active `current_source` resource base; they strip only
+the anchor for lookup, preserve output spelling, and never parse/evaluate or
+register the target. Graph identity, target evaluation, and destination
 rewriting remain #199/#181 work. Pinned upstream execution of Quarkdown calls
 inside `.include` targets named `*.md` is now represented by the same nested
 Quarkdown parser/evaluator path; top-level `.md` entry isolation remains a
@@ -226,11 +238,14 @@ The ordered redesign/re-evaluation remains #187; no #187 work is started here.
 #62's closed implementation is not treated as proof of complete v2.5.1
 conformance. Current code and tests confirm a bounded `.read`, `.json`, and
 `.include` source-relative VirtualProject slice with nested source identity,
-typed provider errors, cycle detection, repeated includes, and strict UTF-8
-behavior. They do not confirm upstream absolute/global permission semantics, loadable library
-names, `.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.
-Current `.includeall` and `.pathtoroot` evidence is bounded to deterministic logical-project
-semantics and does not claim those remaining host/library/WASM contracts.
+typed provider errors, cycle detection, repeated includes, strict UTF-8 behavior,
+and exact case-sensitive in-memory loadable-library dispatch before file fallback.
+Library hits ignore the requested sandbox, evaluate in the caller context, and keep the
+includer's resource base. They do not confirm upstream absolute/global permission semantics,
+host library-directory discovery/ingestion, `.listfiles`, `.filename`, `.csv`, `.bibliography`,
+or `.subdocument` graph behavior. Current `.includeall` and `.pathtoroot` evidence is bounded
+to deterministic logical-project semantics and does not claim the remaining host-ingestion/WASM
+contracts.
 
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
