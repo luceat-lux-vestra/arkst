@@ -21,7 +21,18 @@ jobs:
           components: rustfmt, clippy
       - name: Apply bounded product patch
         run: |
+          sed -i '0,/expected=2,/s//expected=1,/' .github/proof-188-library-dispatch.py
           python3 .github/proof-188-library-dispatch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("crates/arkst-engine/src/evaluator.rs")
+          text = p.read_text()
+          old = "            resources: None,\n            metadata_defaults: Default::default(),\n"
+          new = "            resources: None,\n            loadable_libraries: None,\n            metadata_defaults: Default::default(),\n"
+          if text.count(old) != 1:
+              raise SystemExit(f"lookup-only context anchor count={text.count(old)}")
+          p.write_text(text.replace(old, new))
+          PY
           cargo fmt --all
           git diff --check
           git rm .github/workflows/proof-188-library-dispatch.yml .github/proof-188-library-dispatch.py
