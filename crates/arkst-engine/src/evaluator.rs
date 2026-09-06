@@ -6760,6 +6760,9 @@ impl Evaluator {
             Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
         };
 
+        if reject_host_filesystem_reference("subdocument", &path, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -6845,6 +6848,9 @@ impl Evaluator {
             Ok(lines) => lines,
             Err(()) => return CallOutcome::Failed,
         };
+        if reject_host_filesystem_reference("read", &reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -6892,6 +6898,9 @@ impl Evaluator {
         ) else {
             return CallOutcome::Failed;
         };
+        if reject_host_filesystem_reference("json", &reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -7056,6 +7065,9 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        if reject_host_filesystem_reference("include", &reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
         let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
             return CallOutcome::Failed;
         };
@@ -13548,6 +13560,43 @@ fn resource_diagnostic(
         secondary: Vec::new(),
         hints: vec![hint.into()],
     }
+}
+
+/// Returns whether a source-language resource reference names a host/platform
+/// filesystem path rather than a logical VirtualProject path.
+///
+/// This deliberately mirrors the conservative syntax boundary in
+/// `arkst-project` without depending on the project/composition crate. It does
+/// not claim that every absolute path would require Quarkdown `global-read`:
+/// upstream resolves first and then checks project-root containment. Arkst has
+/// no host-path-to-VirtualProject mapping, so these references are
+/// unrepresentable and must fail before a ResourceProvider is consulted.
+fn is_host_filesystem_reference(reference: &str) -> bool {
+    reference.starts_with('/')
+        || reference.starts_with('\\')
+        || reference.contains('\\')
+        || (reference.len() >= 2
+            && reference.as_bytes()[1] == b':'
+            && reference.as_bytes()[0].is_ascii_alphabetic())
+}
+
+fn reject_host_filesystem_reference(
+    builtin: &str,
+    reference: &str,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    if !is_host_filesystem_reference(reference) {
+        return false;
+    }
+
+    diagnostics.push(resource_diagnostic(
+        "E8001",
+        format!("`.{builtin}` cannot access host filesystem paths"),
+        span,
+        "Use a source-relative logical project path; Arkst does not expose host filesystem access or a `global-read` capability.",
+    ));
+    true
 }
 
 fn resource_access_diagnostic(
