@@ -475,8 +475,11 @@ The bounded scope implementation keeps these layers explicit:
             ↓ highest precedence
     invocation parameters
 
-The caller overlay is a lookup-only invocation layer. It does not replace or
-mutate IrCallableCapture, or copy project/source/diagnostic runtime state.
+The caller overlay remains a lookup-only binding layer. It does not replace or
+mutate IrCallableCapture or copy host provider/diagnostic runtime objects. An in-memory
+callable may retain bounded lexical resource identity as evaluator-runtime metadata and
+reuse only the current compilation's injected provider; that metadata is deliberately
+omitted from serialized IR, so decoded and legacy captures do not acquire resource access.
 Invocation parameters and copied capture/overlay bindings are lookup bindings,
 not variable owners. A successful assignment to an existing caller-visible
 semantic owner is explicitly written back after callable completion; newly

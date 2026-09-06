@@ -55,13 +55,13 @@ use crate::{
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
-    IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCaptionPositionInfo,
-    IrCapturedFunction, IrCapturedVariable, IrComponent, IrContainerAlignment,
-    IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor,
-    IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
-    IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrRawBody, IrSize,
-    IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
-    IrValue, NativeTarget, TargetSpecificContent,
+    IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
+    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrComponent,
+    IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
+    IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent,
+    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrRawBody,
+    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -1738,6 +1738,15 @@ impl<'a> EvaluationContext<'a> {
                     callable: binding.as_callable(),
                 })
                 .collect(),
+            resource_context: self.current_source.and_then(|current_source| {
+                self.resources
+                    .is_some()
+                    .then_some(IrCallableResourceContext {
+                        current_source,
+                        subdocument_root: self.subdocument_root,
+                        loadable_libraries: self.loadable_libraries.is_some(),
+                    })
+            }),
         }
     }
 
@@ -1788,7 +1797,11 @@ impl<'a> EvaluationContext<'a> {
     /// at its call site. The definition context remains the parent layer, so
     /// caller-visible variables/functions supplement it without replacing the
     /// lexical capture or becoming part of that capture.
-    fn with_caller_overlay(definition_context: Self, caller_context: &Self) -> Self {
+    fn with_caller_overlay(
+        definition_context: Self,
+        caller_context: &Self,
+        resource_context: Option<IrCallableResourceContext>,
+    ) -> Self {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         let mut extension_targets = BTreeMap::new();
@@ -1800,6 +1813,7 @@ impl<'a> EvaluationContext<'a> {
             .transaction
             .borrow()
             .current_savepoint_index();
+        let has_resource_context = resource_context.is_some();
 
         Self {
             parent: Some(Box::new(definition_context)),
@@ -1811,15 +1825,27 @@ impl<'a> EvaluationContext<'a> {
             extension_targets,
             lambda_scope: caller_context.visible_lambda_scope(),
             extension_invocation: caller_context.extension_invocation.clone(),
-            // Runtime/compiler state is intentionally not copied into this
-            // lookup-only layer. Document state is the one explicit shared
-            // exception required by the document-state contract.
-            resources: None,
-            loadable_libraries: None,
-            metadata_defaults: Default::default(),
-            current_source: None,
-            subdocument_root: None,
-            active_sources: Vec::new(),
+            // Provider objects are never captured. A callable may reuse the current
+            // compilation's injected providers only when its immutable definition
+            // capture proves that resource capability existed there. The lexical
+            // source/subdocument identities come from that capture; the active source
+            // stack remains invocation-time runtime state.
+            resources: resource_context.and(caller_context.resources),
+            loadable_libraries: resource_context
+                .filter(|context| context.loadable_libraries)
+                .and(caller_context.loadable_libraries),
+            metadata_defaults: if has_resource_context {
+                caller_context.metadata_defaults.clone()
+            } else {
+                Default::default()
+            },
+            current_source: resource_context.map(|context| context.current_source),
+            subdocument_root: resource_context.and_then(|context| context.subdocument_root),
+            active_sources: if has_resource_context {
+                caller_context.active_sources.clone()
+            } else {
+                Vec::new()
+            },
             source_modes: Rc::clone(&caller_context.source_modes),
             document_state: Rc::clone(&caller_context.document_state),
             limits: caller_context.limits,
@@ -8767,6 +8793,10 @@ impl Evaluator {
         caller_context.begin_invocation();
         let checkpoint = InvocationCheckpoint::capture();
         let outcome = {
+            let resource_context = callable
+                .capture
+                .as_deref()
+                .and_then(|capture| capture.resource_context);
             let definition_context = callable
                 .capture
                 .as_deref()
@@ -8777,8 +8807,11 @@ impl Evaluator {
             // installed in the child below, after both layers, so they have
             // highest precedence. Document state is shared separately by the
             // overlay.
-            let invocation_base =
-                EvaluationContext::with_caller_overlay(definition_context, caller_context);
+            let invocation_base = EvaluationContext::with_caller_overlay(
+                definition_context,
+                caller_context,
+                resource_context,
+            );
             let mut child = invocation_base.child();
             child.extension_invocation =
                 extension_invocation.or_else(|| match extension_context_mode {
@@ -21656,6 +21689,7 @@ mod tests {
                 value: IrValue::String("definition".to_string()),
             }],
             functions: Vec::new(),
+            resource_context: None,
         };
         let callable = IrCallable {
             parameters: None,

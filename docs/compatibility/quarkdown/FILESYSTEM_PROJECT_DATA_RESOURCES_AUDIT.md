@@ -164,8 +164,13 @@ Quarkdown-mode literal `.qd`/`.md` destinations retain their defining
 `SourceSpan.source_id` for parser-mode and diagnostic provenance, but resolve
 through the evaluator's active `current_source` resource base; they strip only
 the anchor for lookup, preserve output spelling, and never parse/evaluate or
-register the target. Graph identity, target evaluation, and destination
-rewriting remain #199/#181 work. Pinned upstream execution of Quarkdown calls
+register the target. Source-defined callable captures retain the lexical
+resource-base `SourceId`, optional subdocument root, and loadable-library availability
+only as evaluator-runtime metadata; provider objects and transient active-source stacks
+are never captured, and the marker is deliberately omitted from serialized IR.
+Invocation may reuse the current compilation's injected providers only for an in-memory
+callable materialized under resource access; decoded and legacy captures fail closed.
+Graph identity, target evaluation, and destination rewriting remain #199/#181 work. Pinned upstream execution of Quarkdown calls
 inside `.include` targets named `*.md` is now represented by the same nested
 Quarkdown parser/evaluator path; top-level `.md` entry isolation remains a
 separate Arkst source-mode contract. This correction can expose currently
