@@ -138,6 +138,46 @@ fn host_filesystem_references_fail_before_resource_provider_access() {
 }
 
 #[test]
+fn static_markdown_subdocument_host_paths_fail_before_resource_provider_access() {
+    let source_id = SourceId(503);
+    let resources = CountingResources::default();
+
+    for secret_path in [
+        "/etc/private/child.qd",
+        "C:/Users/private/child.md",
+        r"safe\..\private\child.qd",
+    ] {
+        resources.clear_requests();
+        let source = format!("[Child]({secret_path})");
+        let diagnostics = evaluate(&source, source_id, &resources);
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "E8001", "{source}: {diagnostic:?}");
+        assert_eq!(
+            diagnostic.message,
+            "Markdown subdocument link cannot access host filesystem paths"
+        );
+        assert_eq!(
+            diagnostic.hints,
+            vec!["Use a source-relative logical project path; Arkst does not expose host filesystem access or a `global-read` capability.".to_string()]
+        );
+        let rendered = format!("{diagnostic:?}");
+        assert!(
+            !rendered.contains(secret_path),
+            "host path leaked through diagnostic: {rendered}"
+        );
+        assert!(
+            resources.text_requests.borrow().is_empty(),
+            "text provider was consulted for {source}"
+        );
+        assert!(
+            resources.source_requests.borrow().is_empty(),
+            "source provider was consulted for {source}"
+        );
+    }
+}
+
+#[test]
 fn logical_traversal_and_uri_references_still_reach_the_provider() {
     let source_id = SourceId(502);
     let resources = CountingResources::default();

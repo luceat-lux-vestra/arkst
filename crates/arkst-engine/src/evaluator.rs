@@ -2569,6 +2569,14 @@ impl Evaluator {
                             return Vec::new();
                         };
                         if source_mode == Mode::Quarkdown {
+                            if reject_host_filesystem_reference_for_subject(
+                                "Markdown subdocument link",
+                                reference,
+                                *span,
+                                diagnostics,
+                            ) {
+                                return Vec::new();
+                            }
                             if let Err(error) = provider.read_source(source_id, reference) {
                                 diagnostics.push(resource_access_diagnostic_for_subject(
                                     "Markdown subdocument link",
@@ -13586,13 +13594,27 @@ fn reject_host_filesystem_reference(
     span: SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
+    reject_host_filesystem_reference_for_subject(
+        &format!("`.{builtin}`"),
+        reference,
+        span,
+        diagnostics,
+    )
+}
+
+fn reject_host_filesystem_reference_for_subject(
+    subject: &str,
+    reference: &str,
+    span: SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
     if !is_host_filesystem_reference(reference) {
         return false;
     }
 
     diagnostics.push(resource_diagnostic(
         "E8001",
-        format!("`.{builtin}` cannot access host filesystem paths"),
+        format!("{subject} cannot access host filesystem paths"),
         span,
         "Use a source-relative logical project path; Arkst does not expose host filesystem access or a `global-read` capability.",
     ));
