@@ -211,9 +211,8 @@ network, process, or resource access to a platform-neutral crate.
 
 .read, .json, .csv, .include, .includeall, and .subdocument are explicit #155
 handoffs. #154 records the content/table consumer edge only. It does not
-duplicate a project/resource model. The `.subdocumentgraph` row is separately
-blocked by the completed resolver handoff now owned by #188 and has producer/
-output ownership in #199.
+duplicate a project/resource model. The `.subdocumentgraph` row has its resolver prerequisite completed under #188;
+it remains blocked on producer/content/output ownership in #199.
 
 ## Raw content and escape hatches
 

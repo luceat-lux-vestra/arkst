@@ -387,8 +387,8 @@ no approved equivalent native owner in the current engine and remain
 localization names are now a bounded `SUPPORTED_SEMANTICS` evaluator slice;
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) owns library
 inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
-owns logger/diagnostic behavior. Host/resource policy is coordinated through
-#188/#190.
+owns logger/diagnostic behavior. The common resolver prerequisite completed under #188; residual host/resource
+policy is coordinated through #190/#191/#296/#298.
 
 ### Bounded #196 localization contract
 

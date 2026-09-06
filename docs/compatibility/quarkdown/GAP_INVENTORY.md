@@ -99,8 +99,8 @@ The previously unresolved #154 rows now have explicit dispositions: `.match`
 is owned by [#198](https://github.com/luceat-lux-vestra/arkst/issues/198),
 `.loremipsum` and `.keybinding` are bounded under
 [#184](https://github.com/luceat-lux-vestra/arkst/issues/184), and
-`.subdocumentgraph` is blocked by [#188](https://github.com/luceat-lux-vestra/arkst/issues/188)
-with producer/output ownership in
+the common resolver prerequisite for `.subdocumentgraph` was completed under
+[#188](https://github.com/luceat-lux-vestra/arkst/issues/188); producer/content/output remains blocked on
 [#199](https://github.com/luceat-lux-vestra/arkst/issues/199). `.css` and
 `.cssproperties` remain `UNSUPPORTED` with an explicit product/backend defer;
 closed historical issue #58 is not their current owner.

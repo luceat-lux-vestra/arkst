@@ -97,13 +97,24 @@ status recorded by its owner.
 | `.captionposition` | #153; `PARTIAL` | #152 state snapshot; #154 caption-producing content | Typed evaluator/IR merge, serde, and bounded raw block-body conversion evidence exists; caption rendering and broader target coverage remain open. |
 | Remaining document-wide layout/configuration (`.numbering`, `.pageformat`, `.font`, page counters, navigation, `.slides`, and related rows) | #153; 19 `PARSED_ONLY` rows | #154 component/content consumers; #175–#178 | Parser/retention evidence does not establish state, IR, or output support. Follow-up ownership remains grouped by contract. |
 | Bounded ordinary Markdown block/inline/table/fence/link behavior | #154; `SUPPORTED_END_TO_END` rows | Rushdown frontend and Typst output | Existing parser/IR/Typst/PDF evidence is for the bounded Markdown contract, not Quarkdown callable producers. |
-| Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185, with `.match` in #198, `.subdocumentgraph` in #199 after #188, and `.keybinding`/`.loremipsum` explicitly in #184. CSS rows remain an explicit HTML-backend/product defer. No backend escape hatch is introduced. |
-| `.read` | #155; `PARTIAL` | #188 common logical resolver | Source-relative in-memory text and bounded line selection work. Absolute/global semantics, complete permissions, and full library/project behavior do not. |
-| `.json` | #155; `PARTIAL` | #188 resolver; #149 value conversion | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive/project/permission parity is absent. |
-| `.include` | #155; `PARTIAL` | #188 common resolver and nested identity | Nested source identity, cycle detection, and bounded share/scope behavior are evidenced. Absolute/global/library and complete graph parity are absent. |
-| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | #187 backend strategy; #188–#191 consumers | In-memory logical paths, source identity, project boundaries, and deterministic provider contracts are evidenced; language-facing breadth remains bounded. |
+| Quarkdown content producers, captions, references, tables, math, code, slides, media, and raw content | #154; exact manifest status | #149/#150 conversion and callbacks; #153 policy; #155 resources | Unsupported/partial rows retain exact producer issues #180–#185, with `.match` in #198, `.subdocumentgraph` in #199 after the completed #188 resolver prerequisite, and `.keybinding`/`.loremipsum` explicitly in #184. CSS rows remain an explicit HTML-backend/product defer. No backend escape hatch is introduced. |
+| `.read` | #155; `PARTIAL` | completed #188 logical resolver; residual #296/#298/#191 | Source-relative in-memory text and bounded line selection work. Absolute/global permission behavior remains #296, native host ingestion is #298, and public WASM binding/parity is #191. |
+| `.json` | #155; `PARTIAL` | completed #188 resolver; #149 conversion; residual #296/#298/#191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global permission, native ingestion, and public WASM parity remain #296/#298/#191. |
+| `.include` | #155; `PARTIAL` | completed #188 resolver/nested identity; residual #296/#298/#191/#199 | Nested source identity, cycles/repeats, library dispatch, and caller-relative callable resource bases are evidenced. Global permission, native host ingestion, public WASM binding, and graph/output remain separate residual owners. |
+| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188 resolver prerequisite; #187/#189/#190/#191/#296/#298 consumers | In-memory logical paths, source identity, project boundaries, and deterministic provider contracts are evidenced; language-facing breadth and host/binding parity remain bounded by their explicit owners. |
 | Typst entry/source-context contract | #155; `PARTIAL` | #187 strategy; #200 explicit selection; #201 parity | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; broader cross-platform parity remains in #201. |
 | WASM resource boundary | #155; `DEFERRED` | #191 M6/embedder boundary | Core/provider ideas are portable, but no public WASM resource API or native/WASM end-to-end equivalence exists. |
+
+### #188 resolver close-out
+
+The common logical resolver prerequisite tracked by #188 is complete. This is
+not a compatibility-status promotion: the canonical resource rows remain
+`PARTIAL`, `BLOCKED`, or `DEFERRED` exactly where their end-to-end contracts are
+incomplete. Residual ownership is explicit: #296 owns upstream absolute/global
+permission and diagnostic divergence; #298 owns public native host
+resource/loadable-library ingestion; #191 owns the deferred public WASM/embedder
+binding and native/WASM parity; #149 owns recursive value conversion; #189 owns
+data-file consumers; and #199/#181 own subdocument graph/reference output.
 
 Thus, for example, evaluator support for `.captionposition` does not make
 caption output supported, and a parsed `.pageformat` call does not make page
@@ -330,8 +341,7 @@ freeze wording is no longer a complete status. After
   engine/backend/content prerequisites**, with parallel work only where the
   graph permits it; completed bounded slices such as #159 remain recorded as
   evidence rather than being reopened by this sequence;
-- #188 is **after #187**, #189 is **after #188**, and #190 is a parallel
-  capability-contract band after #187;
+- #188 common logical resolver prerequisite is **complete**; #189 may proceed on its data-file scope, #190 is a parallel capability-contract band, and residual resource compatibility is split to #296 (global permission/diagnostics) and #298 (native host ingestion);
 - #191 is **deferred/milestone-blocked** to M6/WASM; and
 - no issue is authorized to bypass the architecture, evidence, or host
   boundaries recorded here.

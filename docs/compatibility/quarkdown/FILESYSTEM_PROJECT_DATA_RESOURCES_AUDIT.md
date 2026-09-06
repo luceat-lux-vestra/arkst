@@ -254,15 +254,22 @@ contracts.
 
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
-manifest records this distinction and routes implementation to #188/#189/#191
+common resolver prerequisite completed under #188; the manifest routes residual
+work to #189/#190/#191/#296/#298
 without adding direct `std::fs`, cwd lookup, temp-dependent evaluator behavior,
 or network access.
 
 ## Bounded follow-up ownership
 
-- [#188](https://github.com/luceat-lux-vestra/arkst/issues/188): common
+- [#188](https://github.com/luceat-lux-vestra/arkst/issues/188): **completed prerequisite** for common
   logical project resolution, nested loading, source identity, subdocument
-  resolution, and `.read`/`.json`/`.include` family closure;
+  resolution, library dispatch, callable lexical resource bases, and bounded
+  `.read`/`.json`/`.include` family resolution; completion does not promote the
+  canonical `PARTIAL` rows;
+- [#296](https://github.com/luceat-lux-vestra/arkst/issues/296): residual upstream
+  absolute/global `ProjectRead`/`GlobalRead` permission and diagnostic divergence;
+- [#298](https://github.com/luceat-lux-vestra/arkst/issues/298): explicit public
+  native host resource/loadable-library discovery and ingestion boundary;
 - [#189](https://github.com/luceat-lux-vestra/arkst/issues/189): bounded
   project data-file and file-identity loaders (`.listfiles`, `.filename`,
   `.csv`, `.bibliography`), coordinated with #181/#183 consumers;
