@@ -113,7 +113,7 @@ Issue #201's fixture-level semantic oracle is an independent test target:
 
 ~~~
 ARKST_REQUIRE_TYPST=1 \
-  cargo test -p arkst-typst-inprocess \
+  cargo test --locked -p arkst-typst-inprocess \
   --test backend_parity --all-features -- --nocapture
 ~~~
 
@@ -187,15 +187,15 @@ structure and source spans; no automatic golden-update mode is provided.
 | Check | What it runs | Gate |
 |-------|-------------|------|
 | fmt | `cargo fmt --all --check` | Merge |
-| clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Merge |
-| test (macos-latest) | `cargo test --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
+| clippy | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Merge |
+| test (macos-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
 | test (ubuntu-latest) | The same workspace, CLI, and parity checks, plus the CLI dependency-tree and public-example smoke checks | Merge |
-| test (windows-latest) | `cargo test --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
-| docs | `cargo doc --workspace --all-features --no-deps` | Merge |
+| test (windows-latest) | `cargo test --locked --workspace --all-targets --all-features`, plus the CLI feature-boundary and Typst backend parity checks | Merge |
+| docs | `cargo doc --locked --workspace --all-features --no-deps` | Merge |
 | license | `cargo deny check --all-features` through the repository's cargo-deny action | Merge |
 | compatibility | Markdown/Quarkdown differential campaign for relevant changes, explicit successful no-op otherwise | Merge |
 | msrv | `cargo +1.92.0 check --workspace --all-targets --all-features --locked` | Merge |
-| wasm | `cargo check -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge |
+| wasm | `cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features` | Merge |
 
 The WASM build check ensures core + lowering crates remain compatible with
 browser deployment targets. It only checks that compilation passes — no WASM
