@@ -7098,7 +7098,7 @@ impl Evaluator {
             return CallOutcome::Failed;
         }
 
-        let mode = source_mode_for_resource_path(&path);
+        let mode = Mode::Quarkdown;
         if let Err(existing_mode) = context.register_source_mode(target_id, mode) {
             diagnostics.push(resource_diagnostic(
                 "E9001",
@@ -13898,18 +13898,6 @@ fn markdown_subdocument_link_reference(destination: &str) -> Option<&str> {
         .map_or(destination, |(path, _)| path);
     let suffix = path.get(path.len().saturating_sub(3)..)?;
     (suffix.eq_ignore_ascii_case(".qd") || suffix.eq_ignore_ascii_case(".md")).then_some(path)
-}
-
-fn source_mode_for_resource_path(path: &str) -> Mode {
-    let file_name = path.rsplit('/').next().unwrap_or(path);
-    let is_markdown = file_name
-        .rsplit_once('.')
-        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("md"));
-    if is_markdown {
-        Mode::Markdown
-    } else {
-        Mode::Quarkdown
-    }
 }
 
 fn chain_evaluation_error(message: String, span: SourceSpan) -> Diagnostic {
