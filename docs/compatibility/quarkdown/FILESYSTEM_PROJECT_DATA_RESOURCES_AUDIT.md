@@ -140,7 +140,10 @@ The audit distinguishes the following bases and identities:
 | Backend entry | `TypstInput.entry_path` is logical/project-relative; the native adapter's mirror path is not evaluator resource identity. |
 
 Current `.include` evaluation uses the post-resolution target source identity,
-an active source stack for cycle detection, and a per-target nested base. A
+an active source stack for cycle detection, and a per-target nested base. Included
+source text is parsed/evaluated in Quarkdown mode regardless of the target file
+extension, matching pinned `Ecosystem.includeResource`; this does not change
+Arkst's separate Markdown-only policy for a top-level `.md` entry. A
 repeated include is allowed when it is not active. Nested `.read` evidence
 proves that the included source's identity, rather than the entry document or
 process cwd, controls relative lookup. Dynamic `.subdocument` target validation
@@ -150,10 +153,12 @@ Quarkdown-mode literal `.qd`/`.md` destinations use their defining
 `SourceSpan.source_id`, consult evaluator-retained parser-mode provenance, strip
 only the anchor for lookup, preserve output spelling, and never parse/evaluate
 or register the target. Graph identity, target evaluation, and destination
-rewriting remain #199/#181 work. Pinned upstream also executes Quarkdown calls
-inside `.include` targets named `*.md`, while Arkst currently selects Markdown
-mode for those included paths; that include-mode parity difference remains
-explicitly open and is not hidden by this source-mode provenance slice.
+rewriting remain #199/#181 work. Pinned upstream execution of Quarkdown calls
+inside `.include` targets named `*.md` is now represented by the same nested
+Quarkdown parser/evaluator path; top-level `.md` entry isolation remains a
+separate Arkst source-mode contract. This correction can expose currently
+unsupported Quarkdown-mode Markdown media/output consumers (for example image
+syntax); those remain fail-closed and are owned by #182 rather than #188.
 
 ## Boundary and security findings
 

@@ -1,5 +1,5 @@
 use arkst_core::ir::{IrInline, IrNode, IrValue, NativeTarget};
-use arkst_core::{compile, CompileOptions, Severity, VirtualProjectBuilder};
+use arkst_core::{compile, CompileOptions, Severity, VirtualPathBuf, VirtualProjectBuilder};
 
 fn project(
     entry: &str,
@@ -193,6 +193,25 @@ fn include_changes_the_base_for_nested_source_relative_read() {
 }
 
 #[test]
+fn included_markdown_source_executes_quarkdown_calls_and_shares_state() {
+    let project = project(
+        "main.qd",
+        &[
+            ("main.qd", ".include {partials/defs.md}\n.value\n"),
+            ("partials/defs.md", ".var {value} {from-markdown-include}\n"),
+        ],
+        &[],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), "from-markdown-include");
+}
+
+#[test]
 fn nested_include_reuses_function_lambda_and_resource_context() {
     let project = project(
         "docs/main.qd",
@@ -357,7 +376,7 @@ fn include_sandbox_modes_match_share_and_scope_visibility() {
 }
 
 #[test]
-fn included_markdown_preserves_source_identity_for_relative_images() {
+fn included_markdown_image_failure_keeps_included_source_identity() {
     let project = project(
         "main.qd",
         &[
@@ -366,28 +385,21 @@ fn included_markdown_preserves_source_identity_for_relative_images() {
         ],
         &[("docs/assets/x.svg", b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><rect width=\"4\" height=\"4\"/></svg>")],
     );
+    let included_source_id = project
+        .sources()
+        .get_id(&VirtualPathBuf::parse("docs/part.md").expect("valid logical path"))
+        .expect("included source exists");
     let result = compile_project(&project);
-    assert!(
-        result.diagnostics.is_empty(),
-        "unexpected: {:?}",
-        result.diagnostics
+
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "E8001");
+    assert!(result.diagnostics[0].message.contains("image"));
+    assert_eq!(
+        result.diagnostics[0].primary.map(|span| span.source_id),
+        Some(included_source_id)
     );
-    let images = result
-        .ir
-        .nodes
-        .iter()
-        .flat_map(|node| match node {
-            IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => content,
-            _ => &[] as &[IrInline],
-        })
-        .filter_map(|inline| match inline {
-            IrInline::Image {
-                destination, span, ..
-            } => Some((destination.as_str(), span.source_id.0)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(images, vec![("assets/x.svg", 1)]);
+    assert!(!result.diagnostics[0].message.contains("/Users/"));
+    assert!(!result.diagnostics[0].message.contains(r"\Users\"));
 }
 
 #[test]

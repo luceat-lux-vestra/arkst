@@ -255,45 +255,40 @@ fn nested_include_uses_literal_link_defining_source_for_resolution() {
 }
 
 #[test]
-fn conflicting_parser_modes_for_one_source_id_fail_closed() {
+fn included_markdown_source_uses_quarkdown_mode_for_static_subdocument_links() {
     let main = SourceId(1);
-    let shared = SourceId(2);
+    let included = SourceId(2);
+    let target = SourceId(3);
     let mut resources = FakeResources::default();
     resources.paths.insert(main, "main.qd".into());
-    resources.paths.insert(shared, "canonical".into());
+    resources.paths.insert(included, "docs/part.md".into());
+    resources.paths.insert(target, "docs/child.qd".into());
     resources.sources.insert(
-        (main, "first.md".into()),
+        (main, "docs/part.md".into()),
         IncludedSource {
-            path: "first.md".into(),
-            source_id: shared,
-            text: "first".into(),
+            path: "docs/part.md".into(),
+            source_id: included,
+            text: "[Child](child.qd#intro)".into(),
         },
     );
     resources.sources.insert(
-        (main, "second.qd".into()),
+        (included, "child.qd".into()),
         IncludedSource {
-            path: "second.qd".into(),
-            source_id: shared,
-            text: "second".into(),
+            path: "docs/child.qd".into(),
+            source_id: target,
+            text: "not evaluated".into(),
         },
     );
 
-    let (_, diagnostics) = evaluate(
-        ".include {first.md}\n.include {second.qd}\n",
-        main,
-        Mode::Quarkdown,
-        &resources,
-    );
+    let (result, diagnostics) =
+        evaluate(".include {docs/part.md}", main, Mode::Quarkdown, &resources);
 
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].code, "E9001");
-    assert!(diagnostics[0]
-        .message
-        .contains("parser-mode provenance conflict"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(
         resources.source_requests.borrow().as_slice(),
-        &[(main, "first.md".into()), (main, "second.qd".into())]
+        &[(main, "docs/part.md".into()), (included, "child.qd".into())]
     );
+    assert_eq!(link_destinations(&result), vec!["child.qd#intro"]);
 }
 
 #[test]

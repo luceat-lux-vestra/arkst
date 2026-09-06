@@ -1,5 +1,5 @@
 use arkst_core::ir::{IrInline, IrNode};
-use arkst_core::{compile, CompileOptions, Severity, VirtualProjectBuilder};
+use arkst_core::{compile, CompileOptions, Severity, VirtualPathBuf, VirtualProjectBuilder};
 
 fn project(entry: &str, sources: &[(&str, &str)]) -> arkst_core::VirtualProject {
     let mut builder = VirtualProjectBuilder::new()
@@ -156,20 +156,27 @@ fn included_function_link_resolves_from_its_defining_source_when_called_later() 
 }
 
 #[test]
-fn included_markdown_source_keeps_document_links_ordinary() {
+fn included_markdown_source_validates_static_subdocument_links_as_quarkdown() {
     let project = project(
         "main.qd",
         &[
             ("main.qd", ".include {docs/part.md}\n"),
-            ("docs/part.md", "[QD](missing.qd) [MD](missing.md#x)"),
+            ("docs/part.md", "[Missing](missing.qd#intro)"),
         ],
     );
 
+    let included_source_id = project
+        .sources()
+        .get_id(&VirtualPathBuf::parse("docs/part.md").expect("valid logical path"))
+        .expect("included source exists");
     let result = compile_project(&project);
 
-    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "E3001");
     assert_eq!(
-        link_destinations(&result),
-        vec!["missing.qd", "missing.md#x"]
+        result.diagnostics[0].primary.map(|span| span.source_id),
+        Some(included_source_id)
     );
+    assert!(result.diagnostics[0].message.contains("missing.qd"));
+    assert!(link_destinations(&result).is_empty());
 }
