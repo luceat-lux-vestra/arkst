@@ -1,0 +1,110 @@
+name: proof-188-library-evidence
+
+on:
+  push:
+    branches:
+      - proof/188-library-dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Reconcile bounded compatibility evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          audit = Path("docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md")
+          text = audit.read_text()
+          replacements = [
+              (
+                  "  checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,\n  and logical project/subdocument root projection. Absolute/global FileSystem semantics,\n  loadable libraries, complete upstream permission and diagnostic behavior, public WASM\n  resource ingestion, and the full nested graph contract remain open.\n",
+                  "  checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,\n  exact case-sensitive loadable-library dispatch before file fallback with caller-context\n  and caller-resource-base retention, and logical project/subdocument root projection.\n  Absolute/global FileSystem semantics, complete upstream permission and diagnostic behavior,\n  public CLI/WASM host library/resource ingestion, and the full nested graph contract remain open.\n",
+              ),
+              (
+                  "   `ResourceProvider`. `.read` and `.json` read text; `.include` reads a source\n   while retaining its target `SourceId`, path, source stack, and nested base;\n",
+                  "   `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`\n   read text; `.include` first performs exact case-sensitive lookup in the explicit\n   in-memory library registry, then falls back to source lookup. A library hit is parsed\n   as Quarkdown with a deterministic detached provenance `SourceId`, evaluated directly\n   in the caller context regardless of requested sandbox, and keeps the caller's source\n   identity as the base for nested resource reads. File includes retain their target\n   `SourceId`, path, source stack, and nested base;\n",
+              ),
+              (
+                  "| Nested document | A target `SourceId` plus canonical logical path returned by `read_source`; its source parent is the next relative base. |\n| Resource identity | Source content is identified by `SourceId` and logical path; assets use canonical logical paths. Host canonical paths are adapter-only. |\n",
+                  "| Nested document | A target `SourceId` plus canonical logical path returned by `read_source`; its source parent is the next relative base. |\n| Loadable library | Exact semantic registry name plus a deterministic detached `SourceId`; it is not path-addressable, and its resource reads keep the includer's source-relative base. |\n| Resource identity | Path-backed source content is identified by `SourceId` and logical path; loadable library source uses its detached `SourceId` plus registry name; assets use canonical logical paths. Host canonical paths are adapter-only. |\n",
+              ),
+              (
+                  "Current `.include` evaluation uses the post-resolution target source identity,\nan active source stack for cycle detection, and a per-target nested base. Included\n",
+                  "Current `.include` evaluation checks the explicit loadable-library registry before\npath resolution. Exact case-sensitive library hits evaluate directly in the caller context,\nignore the requested include sandbox like upstream `loadLibrary`, preserve declarations in\nthe caller, and keep the caller source identity for nested resource access while retaining a\ndetached library `SourceId` for spans/diagnostics. File includes use the post-resolution target\nsource identity, an active source stack for cycle detection, and a per-target nested base. Included\n",
+              ),
+              (
+                  "#62's closed implementation is not treated as proof of complete v2.5.1\nconformance. Current code and tests confirm a bounded `.read`, `.json`, and\n`.include` source-relative VirtualProject slice with nested source identity,\ntyped provider errors, cycle detection, repeated includes, and strict UTF-8\nbehavior. They do not confirm upstream absolute/global permission semantics, loadable library\nnames, `.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.\nCurrent `.includeall` and `.pathtoroot` evidence is bounded to deterministic logical-project\nsemantics and does not claim those remaining host/library/WASM contracts.\n",
+                  "#62's closed implementation is not treated as proof of complete v2.5.1\nconformance. Current code and tests confirm a bounded `.read`, `.json`, and\n`.include` source-relative VirtualProject slice with nested source identity,\ntyped provider errors, cycle detection, repeated includes, strict UTF-8 behavior,\nand exact case-sensitive in-memory loadable-library dispatch before file fallback.\nLibrary hits ignore the requested sandbox, evaluate in the caller context, and keep the\nincluder's resource base. They do not confirm upstream absolute/global permission semantics,\nhost library-directory discovery/ingestion, `.listfiles`, `.filename`, `.csv`, `.bibliography`,\nor `.subdocument` graph behavior. Current `.includeall` and `.pathtoroot` evidence is bounded\nto deterministic logical-project semantics and does not claim the remaining host-ingestion/WASM\ncontracts.\n",
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f"audit anchor count={text.count(old)} for {old[:80]!r}")
+              text = text.replace(old, new)
+          audit.write_text(text)
+
+          manifest = Path("docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv")
+          lines = []
+          seen = set()
+          for raw in manifest.read_text().splitlines():
+              if raw.startswith("owned\tbuiltin:.include\t"):
+                  cols = raw.split("\t")
+                  if len(cols) != 24:
+                      raise SystemExit(f"include column count={len(cols)}")
+                  cols[13] = "Parser call; binder handles sandbox; evaluator checks LoadableLibraryProvider by exact case-sensitive name before ResourceProvider::read_source; library source is parsed/evaluated in caller context with detached provenance SourceId and caller resource base; file fallback retains canonical target SourceId/path and active-source cycle checks; VirtualProject owns the explicit in-memory registry; no host I/O is added."
+                  cols[14] = "Path-backed entry/nested sources retain canonical VirtualPath plus SourceId; loadable libraries use exact registry name plus a deterministic detached SourceId that is not path-addressable, while nested resource reads retain the includer's current SourceId/base."
+                  cols[15] = "Library registration accepts only host-supplied in-memory source and introduces no filesystem/network capability; host-path file references still fail closed before ResourceProvider access; public host directory discovery/ingestion is not claimed."
+                  cols[16] = "crates/arkst-project/tests/loadable_library_registry.rs; crates/arkst-engine/tests/loadable_library_dispatch.rs; crates/arkst-core/tests/loadable_library_compile.rs; crates/arkst-engine/tests/resource_contract.rs; crates/arkst-core/tests/quarkdown_resource_builtins.rs."
+                  cols[18] = "Source-relative file includes plus exact case-sensitive in-memory loadable-library name dispatch are represented. Library hits precede file lookup, ignore requested sandbox, publish declarations into the caller context, retain caller-relative resource access, and preserve detached library span provenance; file fallback keeps nested identity/cycles/repeated include semantics."
+                  cols[19] = "The bounded semantic subset works, but upstream absolute/global host-path behavior, exact permission/diagnostic parity, host library-directory discovery/ingestion, public native/WASM ingestion parity, and complete subdocument graph identity remain open."
+                  cols[23] = "The common library/resource registry contract is in-memory and WASM-capable, but no public WASM library/resource binding or native/WASM ingestion parity proof exists."
+                  raw = "\t".join(cols)
+                  seen.add("include")
+              elif raw.startswith("owned\tbuiltin:.includeall\t"):
+                  cols = raw.split("\t")
+                  if len(cols) != 24:
+                      raise SystemExit(f"includeall column count={len(cols)}")
+                  cols[13] = "Parser call; evaluator coerces the iterable and delegates every element in order to the same shared include dispatch, which checks LoadableLibraryProvider before ResourceProvider file fallback; no batch provider, backend, or host I/O path is added."
+                  cols[16] = "crates/arkst-engine/tests/loadable_library_dispatch.rs per-item library/file ordering; crates/arkst-engine/tests/resource_contract.rs ordered share/fail-fast evidence; crates/arkst-core/tests/quarkdown_resource_builtins.rs real VirtualProject order, partial-effect, and nested-base cases."
+                  cols[18] = "Ordered local-source iterables plus exact case-sensitive loadable-library elements are represented through the same include dispatch. Each library hit precedes file fallback and evaluates in caller SHARE state; file elements retain canonical source identity, nested bases, fail-fast behavior, prior-item execution, and no partial output collection on failure."
+                  cols[19] = "The bounded semantic subset works, but upstream absolute/global host FileSystem behavior, exact permission diagnostics, host library-directory discovery/ingestion, and public WASM resource/library ingestion remain open."
+                  cols[23] = "A future WASM host API must populate the same in-memory library/resource contract and preserve per-item dispatch order/diagnostics; no binding-level parity proof exists yet."
+                  raw = "\t".join(cols)
+                  seen.add("includeall")
+              lines.append(raw)
+          if seen != {"include", "includeall"}:
+              raise SystemExit(f"manifest rows updated={seen}")
+          manifest.write_text("\n".join(lines) + "\n")
+          PY
+          cargo fmt --all
+          git diff --check
+          git rm .github/workflows/proof-188-library-evidence.yml
+      - name: Validate product and evidence together
+        run: |
+          cargo test --locked -p arkst-project --test loadable_library_registry
+          cargo test --locked -p arkst-engine --test loadable_library_dispatch
+          cargo test --locked -p arkst-engine --test resource_contract
+          cargo test --locked -p arkst-core --test loadable_library_compile
+          cargo test --locked -p arkst-core --test engine_facade
+          cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
+          cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
+          cargo clippy --locked -p arkst-project -p arkst-engine -p arkst-core --all-targets --all-features -- -D warnings
+          git diff --check
+      - name: Commit proven evidence tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs(compat): record loadable library dispatch evidence"
+          git push origin HEAD:proof/188-library-dispatch
