@@ -12,6 +12,33 @@ use crate::{
     SourceStoreError, VirtualPathBuf, VirtualPathError,
 };
 use arkst_source::SourceId;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+/// One loadable Quarkdown library supplied by the host as immutable in-memory source.
+///
+/// Library names are semantic registry keys, not virtual paths. Their source IDs
+/// are deterministic provenance identities allocated after ordinary project sources.
+#[derive(Debug, Clone)]
+pub struct LoadableLibrary {
+    name: String,
+    source_id: SourceId,
+    source: Arc<str>,
+}
+
+impl LoadableLibrary {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    pub fn source(&self) -> &str {
+        self.source.as_ref()
+    }
+}
 
 /// A compilation project with all sources and assets in memory.
 ///
@@ -27,6 +54,8 @@ pub struct VirtualProject {
     sources: SourceStore,
     assets: AssetStore,
     metadata: ProjectMetadata,
+    loadable_libraries: BTreeMap<String, LoadableLibrary>,
+    library_names_by_source_id: BTreeMap<u32, String>,
 }
 
 impl VirtualProject {
@@ -39,12 +68,16 @@ impl VirtualProject {
         sources: SourceStore,
         assets: AssetStore,
         metadata: ProjectMetadata,
+        loadable_libraries: BTreeMap<String, LoadableLibrary>,
+        library_names_by_source_id: BTreeMap<u32, String>,
     ) -> Self {
         Self {
             entry,
             sources,
             assets,
             metadata,
+            loadable_libraries,
+            library_names_by_source_id,
         }
     }
 
@@ -66,6 +99,18 @@ impl VirtualProject {
     /// Gets the project metadata.
     pub fn metadata(&self) -> &ProjectMetadata {
         &self.metadata
+    }
+
+    /// Looks up a host-supplied loadable library by its exact, case-sensitive name.
+    pub fn loadable_library(&self, name: &str) -> Option<&LoadableLibrary> {
+        self.loadable_libraries.get(name)
+    }
+
+    /// Returns the semantic library name associated with a detached provenance ID.
+    pub fn loadable_library_name_by_source_id(&self, source_id: SourceId) -> Option<&str> {
+        self.library_names_by_source_id
+            .get(&source_id.0)
+            .map(String::as_str)
     }
 
     /// Resolves a local logical resource relative to the source document that
@@ -214,6 +259,7 @@ pub struct VirtualProjectBuilder {
     sources: Vec<(VirtualPathBuf, String)>,
     assets: Vec<(VirtualPathBuf, Vec<u8>)>,
     metadata: ProjectMetadata,
+    loadable_libraries: Vec<(String, String)>,
 }
 
 impl VirtualProjectBuilder {
@@ -244,6 +290,19 @@ impl VirtualProjectBuilder {
         }
         self.sources.push((path, content.into()));
         Ok(self)
+    }
+
+    /// Adds a loadable Quarkdown library to the semantic registry.
+    ///
+    /// Names are matched exactly and case-sensitively by `.include` before file
+    /// lookup. Validation for empty or duplicate names happens atomically in `build`.
+    pub fn add_loadable_library(
+        mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        self.loadable_libraries.push((name.into(), content.into()));
+        self
     }
 
     /// Adds an asset (font, image, etc.).
@@ -305,6 +364,38 @@ impl VirtualProjectBuilder {
             return Err(BuildError::EntryNotFound(entry));
         }
 
+        // Allocate library provenance after all ordinary sources so adding a
+        // library never changes existing project SourceId assignments.
+        let mut libraries = self.loadable_libraries;
+        libraries.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut loadable_libraries = BTreeMap::new();
+        let mut library_names_by_source_id = BTreeMap::new();
+        for (name, source) in libraries {
+            if name.is_empty() {
+                return Err(BuildError::EmptyLoadableLibraryName);
+            }
+            if loadable_libraries.contains_key(&name) {
+                return Err(BuildError::DuplicateLoadableLibrary(name));
+            }
+            let source_id = source_store
+                .allocate_detached_id()
+                .map_err(|error| match error {
+                    SourceStoreError::SourceIdExhausted => BuildError::SourceIdExhausted,
+                    SourceStoreError::DuplicateSource(_) => {
+                        unreachable!("detached SourceId allocation does not insert a path")
+                    }
+                })?;
+            library_names_by_source_id.insert(source_id.0, name.clone());
+            loadable_libraries.insert(
+                name.clone(),
+                LoadableLibrary {
+                    name,
+                    source_id,
+                    source: Arc::from(source),
+                },
+            );
+        }
+
         // Sort assets by canonical path for deterministic iteration
         let mut assets = self.assets;
         assets.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
@@ -323,6 +414,8 @@ impl VirtualProjectBuilder {
             source_store,
             asset_store,
             self.metadata,
+            loadable_libraries,
+            library_names_by_source_id,
         ))
     }
 }
@@ -338,6 +431,10 @@ pub enum BuildError {
     DuplicateSource(VirtualPathBuf),
     #[error("duplicate asset: {0}")]
     DuplicateAsset(VirtualPathBuf),
+    #[error("loadable library name must not be empty")]
+    EmptyLoadableLibraryName,
+    #[error("duplicate loadable library: {0}")]
+    DuplicateLoadableLibrary(String),
     #[error("source id space exhausted")]
     SourceIdExhausted,
 }

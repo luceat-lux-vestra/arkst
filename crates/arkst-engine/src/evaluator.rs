@@ -50,8 +50,8 @@ use crate::value_conversion::{
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
-    Capabilities, Capability, EvaluationLimits, IncludedSource, ResourceAccessError,
-    ResourceProvider, ResourceRoot, ResourceText,
+    Capabilities, Capability, EvaluationLimits, IncludedSource, LoadableLibraryProvider,
+    LoadableLibrarySource, ResourceAccessError, ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -786,6 +786,7 @@ struct EvaluationContext<'a> {
     lambda_scope: Option<LambdaScope>,
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
+    loadable_libraries: Option<&'a dyn LoadableLibraryProvider>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
@@ -1122,6 +1123,7 @@ impl<'a> EvaluationContext<'a> {
             lambda_scope: None,
             extension_invocation: None,
             resources: None,
+            loadable_libraries: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
             subdocument_root: None,
@@ -1164,6 +1166,7 @@ impl<'a> EvaluationContext<'a> {
             lambda_scope: None,
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
+            loadable_libraries: self.loadable_libraries,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1201,6 +1204,20 @@ impl<'a> EvaluationContext<'a> {
             source_modes: Rc::new(RefCell::new(source_modes)),
             ..Self::with_limits(limits)
         }
+    }
+
+    fn with_resources_and_libraries(
+        resources: &'a dyn ResourceProvider,
+        loadable_libraries: &'a dyn LoadableLibraryProvider,
+        source_id: SourceId,
+        source_mode: Mode,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+        limits: EvaluationLimits,
+    ) -> Self {
+        let mut context =
+            Self::with_resources(resources, source_id, source_mode, metadata_defaults, limits);
+        context.loadable_libraries = Some(loadable_libraries);
+        context
     }
 
     fn source_mode(&self, source_id: SourceId) -> Option<Mode> {
@@ -1272,6 +1289,7 @@ impl<'a> EvaluationContext<'a> {
             lambda_scope: self.lambda_scope.clone(),
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
+            loadable_libraries: self.loadable_libraries,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1797,6 +1815,7 @@ impl<'a> EvaluationContext<'a> {
             // lookup-only layer. Document state is the one explicit shared
             // exception required by the document-state contract.
             resources: None,
+            loadable_libraries: None,
             metadata_defaults: Default::default(),
             current_source: None,
             subdocument_root: None,
@@ -2317,6 +2336,31 @@ impl Evaluator {
         let mut diagnostics = Vec::new();
         let mut context = EvaluationContext::with_resources(
             resources,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Evaluates resource-backed IR with an explicit, separate loadable-library registry.
+    pub fn evaluate_with_resources_and_libraries_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
             source_id,
             source_mode,
             metadata_defaults,
@@ -7065,6 +7109,78 @@ impl Evaluator {
         self.evaluate_include_reference(reference, sandbox, span, diagnostics, context)
     }
 
+    fn evaluate_loadable_library(
+        &self,
+        requested_name: &str,
+        library: LoadableLibrarySource,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        if library.name != requested_name {
+            diagnostics.push(resource_diagnostic(
+                "E9001",
+                format!(
+                    "loadable-library provider returned `{}` for requested name `{requested_name}`",
+                    library.name
+                ),
+                *span,
+                "A LoadableLibraryProvider must preserve exact, case-sensitive registry identity.",
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let mode = Mode::Quarkdown;
+        if let Err(existing_mode) = context.register_source_mode(library.source_id, mode) {
+            diagnostics.push(resource_diagnostic(
+                "E9001",
+                format!(
+                    "loadable library `{requested_name}` parser-mode provenance conflict for source identity {:?}: {existing_mode:?} vs {mode:?}",
+                    library.source_id
+                ),
+                *span,
+                "A LoadableLibraryProvider must map one library SourceId to one canonical Quarkdown source within an evaluation.",
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let diagnostics_start = diagnostics.len();
+        let parsed = arkst_markdown::parse_with_mode(&library.text, mode);
+        for diagnostic in parsed.diagnostics {
+            diagnostics.push(Diagnostic {
+                code: diagnostic.code.to_string(),
+                severity: Severity::Error,
+                message: diagnostic.message,
+                primary: Some(SourceSpan {
+                    source_id: library.source_id,
+                    start: diagnostic.span.start,
+                    end: diagnostic.span.end,
+                }),
+                secondary: Vec::new(),
+                hints: Vec::new(),
+            });
+        }
+        if diagnostics.len() != diagnostics_start {
+            return CallOutcome::Failed;
+        }
+        let (document, lowering_diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+            &parsed.document,
+            library.source_id,
+            &context.metadata_defaults,
+            mode,
+        );
+        diagnostics.extend(lowering_diagnostics);
+        if diagnostics.len() != diagnostics_start {
+            return CallOutcome::Failed;
+        }
+
+        let result = self.evaluate_nodes(&document.nodes, diagnostics, context);
+        if diagnostics.len() != diagnostics_start {
+            return CallOutcome::Failed;
+        }
+        CallOutcome::Value(IrValue::Content(result))
+    }
+
     fn evaluate_include_reference(
         &self,
         reference: String,
@@ -7073,6 +7189,17 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        if let Some(loadable_libraries) = context.loadable_libraries {
+            if let Some(library) = loadable_libraries.loadable_library(&reference) {
+                return self.evaluate_loadable_library(
+                    &reference,
+                    library,
+                    span,
+                    diagnostics,
+                    context,
+                );
+            }
+        }
         if reject_host_filesystem_reference("include", &reference, *span, diagnostics) {
             return CallOutcome::Failed;
         }

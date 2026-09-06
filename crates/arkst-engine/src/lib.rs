@@ -128,6 +128,23 @@ pub struct IncludedSource {
     pub text: String,
 }
 
+/// Immutable source returned by an explicit loadable-library registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadableLibrarySource {
+    pub name: String,
+    pub source_id: arkst_source::SourceId,
+    pub text: String,
+}
+
+/// Semantic lookup for host-supplied loadable libraries.
+///
+/// This is intentionally distinct from `ResourceProvider`: a bare `.include`
+/// argument is first matched exactly against this registry and only falls back
+/// to logical project-path resolution when no library exists.
+pub trait LoadableLibraryProvider {
+    fn loadable_library(&self, name: &str) -> Option<LoadableLibrarySource>;
+}
+
 /// Logical root requested by a resource-aware evaluator operation.
 ///
 /// The engine sees source identities only. Project composition remains
