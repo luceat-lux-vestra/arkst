@@ -1,0 +1,47 @@
+name: Temporary proof 188 host boundary
+
+on:
+  push:
+    branches:
+      - proof/188-host-path-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: proof/188-host-path-boundary
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+      - name: Apply and prove bounded host-path boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/_tmp_patch_188_static_link_boundary.py
+          cargo fmt --all
+          git diff --check
+          python3 - <<'PY'
+          import subprocess
+          names = subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()
+          expected = [
+              "crates/arkst-engine/src/evaluator.rs",
+              "crates/arkst-engine/tests/global_resource_boundary.rs",
+          ]
+          assert names == expected, (names, expected)
+          PY
+          cargo test --locked -p arkst-engine --test global_resource_boundary
+          cargo test --locked -p arkst-engine --test markdown_subdocument_links
+          cargo test --locked -p arkst-engine --test resource_contract
+          cargo clippy --locked -p arkst-engine --all-targets --all-features -- -D warnings
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/arkst-engine/src/evaluator.rs crates/arkst-engine/tests/global_resource_boundary.rs
+          git commit -m 'compat(resource): deny host filesystem references before provider access'
+          git push origin HEAD:proof/188-host-path-boundary
