@@ -76,13 +76,29 @@ fn reconciliation_enumerates_each_audit_artifact_and_corpus_boundary() {
 #[test]
 fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     for (surface, follow_up) in [
-        ("builtin:.read", "#296;#298;#191"),
-        ("builtin:.json", "#296;#298;#191;#149"),
-        ("builtin:.include", "#296;#298;#191;#199"),
+        ("builtin:.read", "#296;#191"),
+        ("builtin:.json", "#296;#191;#149"),
+        ("builtin:.include", "#296;#191;#199"),
+        ("builtin:.includeall", "#296;#191"),
+        (
+            "contract:resource-diagnostics-provenance",
+            "#296;#189;#182;#191",
+        ),
     ] {
         let row = resource_row(surface);
         assert_eq!(row[17], "PARTIAL", "wrong canonical status for {surface}");
         assert_eq!(row[21], follow_up, "wrong follow-up for {surface}");
+        for (index, label) in [
+            (19, "remaining gap"),
+            (20, "blocker dependency"),
+            (21, "follow-up"),
+        ] {
+            assert!(
+                !row[index].contains("#298"),
+                "completed #298 leaked into unresolved {label} for {surface}: {}",
+                row[index]
+            );
+        }
     }
 
     let virtual_project = resource_row("contract:virtual-project-resource-model");
@@ -195,7 +211,8 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
     assert!(RECONCILIATION.contains("#188 common logical resolver prerequisite is **complete**"));
     assert!(RECONCILIATION.contains("#189 may proceed on its data-file scope"));
     assert!(RECONCILIATION.contains("#296"));
-    assert!(RECONCILIATION.contains("#298"));
+    assert!(RECONCILIATION.contains("#298 native host-ingestion prerequisite is **complete**"));
+    assert!(RECONCILIATION.contains("af2f409c3c9050abdd369798e1ddb7ad9c23435b"));
     assert!(RECONCILIATION.contains("#190 is a parallel"));
     assert!(RECONCILIATION.contains("#191 is **deferred/milestone-blocked**"));
     assert!(RECONCILIATION
@@ -206,14 +223,14 @@ fn reconciliation_records_order_without_making_188_a_187_blocker() {
 fn reconciliation_covers_open_followups_and_historical_trackers() {
     for issue in [
         157, 158, 159, 160, 162, 163, 164, 165, 166, 167, 169, 172, 173, 175, 176, 177, 178, 180,
-        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199, 296, 298,
+        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199, 296,
     ] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing issue #{issue}"
         );
     }
-    for issue in [24, 56, 60, 61, 62, 63, 188] {
+    for issue in [24, 56, 60, 61, 62, 63, 188, 298] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing historical issue #{issue}"

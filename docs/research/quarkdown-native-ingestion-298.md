@@ -11,6 +11,7 @@ platform-neutral `VirtualProject` / `ResourceProvider` /
 - Pinned upstream revision: `107ec3a9482f10d6f90d7580f8409b46a719d18e`
 - Current Arkst baseline for this evidence slice:
   `e7da0718439ecf396fbfeceb133da872a940341a`
+- Native ingestion implementation merge: `af2f409c3c9050abdd369798e1ddb7ad9c23435b` (#302)
 - This slice records the host boundary only. It does not add filesystem,
   process, environment, cwd, or network access to `arkst-project`,
   `arkst-engine`, `arkst-core`, IR, or other platform-neutral crates.
@@ -102,7 +103,8 @@ probe is introduced.
 
 This closes the executable native ingestion gap identified by #298 while
 preserving the separate #296 and #191 ownership boundaries. Canonical #155
-status/ownership reconciliation remains a follow-up to this executable proof.
+status/ownership reconciliation now records #298 as completed without promoting
+the still-partial resource compatibility rows.
 
 ## Accepted Arkst native-ingestion contract for the implementation slice
 
@@ -162,5 +164,5 @@ The native CLI implementation uses this contract:
 Adversarial native-host fixtures now cover shared `build`/`check`/`inspect`
 ingestion, non-recursion, exact extension/name handling, missing and
 non-directory inputs, eager invalid-UTF-8 failure, and symlink escape. Canonical
-#155 audit ownership/status remains #298 until that executable behavior is
-reconciled into the canonical audit views.
+#155 audit ownership/status has been reconciled: #298 is retained as completed
+evidence and is no longer an unresolved native-ingestion follow-up.
