@@ -102,9 +102,15 @@ Arkst's current model is one in-memory logical resource model:
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider`. `.read` and `.json` read text; `.include` reads a source
    while retaining its target `SourceId`, path, source stack, and nested base;
-   `.subdocument` validates a target source through the same `read_source`
-   authority without parsing/evaluating it or registering a graph edge, while
-   retaining an ordinary link node even when its optional label is empty.
+   `.subdocument` and literal links in Quarkdown sources whose fragment-stripped
+   destination ends in `.qd` or `.md` validate a target source through the same
+   defining-source `read_source` authority. The evaluator records the actual
+   parser `Mode` for each `SourceId` and the static-link consumer reads that
+   provenance instead of re-deriving mode from the provider path. Static
+   matching is case-insensitive, preserves the original destination spelling,
+   and leaves pure Markdown, query-suffixed, extensionless, and other ordinary
+   links untouched. Neither path parses/evaluates the target or registers a
+   graph edge.
 4. The evaluator remains filesystem-, process-, and network-free. IR carries
    source identity/provenance; it does not introduce a backend-specific raw
    resource escape.
@@ -138,10 +144,16 @@ an active source stack for cycle detection, and a per-target nested base. A
 repeated include is allowed when it is not active. Nested `.read` evidence
 proves that the included source's identity, rather than the entry document or
 process cwd, controls relative lookup. Dynamic `.subdocument` target validation
-now uses the same defining-source `read_source` base, but it does not parse or
-register the target. Static Markdown subdocument recognition and graph
-registration still do not share the complete model; those remaining #188
-resource-resolution edges precede #199 graph/output work coordinated with #181.
+now uses the same defining-source `read_source` base. Static Markdown
+subdocument recognition closes the bounded #188 resource-validation edge:
+Quarkdown-mode literal `.qd`/`.md` destinations use their defining
+`SourceSpan.source_id`, consult evaluator-retained parser-mode provenance, strip
+only the anchor for lookup, preserve output spelling, and never parse/evaluate
+or register the target. Graph identity, target evaluation, and destination
+rewriting remain #199/#181 work. Pinned upstream also executes Quarkdown calls
+inside `.include` targets named `*.md`, while Arkst currently selects Markdown
+mode for those included paths; that include-mode parity difference remains
+explicitly open and is not hidden by this source-mode provenance slice.
 
 ## Boundary and security findings
 

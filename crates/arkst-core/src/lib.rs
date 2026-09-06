@@ -17,7 +17,7 @@ pub mod source_map;
 pub use arkst_engine::builtins;
 pub mod evaluator {
     use crate::engine_adapter::VirtualProjectResourceProvider;
-    use crate::{Capabilities, EvaluationLimits, VirtualProject};
+    use crate::{Capabilities, EvaluationLimits, SourceMode, VirtualProject};
     use arkst_diagnostics::Diagnostic;
     use arkst_engine::evaluator as engine_evaluator;
     use arkst_ir::IrDocument;
@@ -86,9 +86,10 @@ pub mod evaluator {
             document: &IrDocument,
         ) -> (IrDocument, Vec<Diagnostic>) {
             let resource_provider = VirtualProjectResourceProvider::new(project);
-            self.inner.evaluate_with_resources(
+            self.evaluate_with_resources(
                 &resource_provider,
                 source_id,
+                super::source_mode_for_entry(project.entry()),
                 document,
                 &arkst_engine::DocumentMetadataDefaults::default(),
             )
@@ -98,11 +99,21 @@ pub mod evaluator {
             &self,
             resources: &R,
             source_id: SourceId,
+            source_mode: SourceMode,
             document: &IrDocument,
             metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
         ) -> (IrDocument, Vec<Diagnostic>) {
-            self.inner
-                .evaluate_with_resources(resources, source_id, document, metadata_defaults)
+            let source_mode = match source_mode {
+                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+            };
+            self.inner.evaluate_with_resources_for_mode(
+                resources,
+                source_id,
+                source_mode,
+                document,
+                metadata_defaults,
+            )
         }
     }
 }
@@ -246,7 +257,13 @@ pub fn compile_with_capabilities(
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
     let (ir, evaluation_diagnostics) =
         evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits)
-            .evaluate_with_resources(&resource_provider, source_id, &ir, &metadata_defaults);
+            .evaluate_with_resources(
+                &resource_provider,
+                source_id,
+                source_mode,
+                &ir,
+                &metadata_defaults,
+            );
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()
