@@ -28,6 +28,9 @@ enum Commands {
     Build {
         /// Input file (.qd, .arkst, .md)
         input: String,
+        /// Explicit loadable-library directory (`-l` / `--libs`); direct lowercase `.qd` files only
+        #[arg(short = 'l', long = "libs", value_name = "DIR")]
+        libs: Option<PathBuf>,
         /// Output format(s): typst, pdf (html, svg, png are not yet implemented)
         #[arg(short, long, default_value = "typst")]
         format: Vec<String>,
@@ -45,11 +48,17 @@ enum Commands {
     Check {
         /// Input Arkst or Markdown file
         input: String,
+        /// Explicit loadable-library directory (`-l` / `--libs`); direct lowercase `.qd` files only
+        #[arg(short = 'l', long = "libs", value_name = "DIR")]
+        libs: Option<PathBuf>,
     },
     /// Show intermediate representation(s)
     Inspect {
         /// Input Arkst or Markdown file
         input: String,
+        /// Explicit loadable-library directory (`-l` / `--libs`); direct lowercase `.qd` files only
+        #[arg(short = 'l', long = "libs", value_name = "DIR")]
+        libs: Option<PathBuf>,
         /// What to emit: ast, semantic, ir, typst, source-map
         #[arg(long, default_value = "typst")]
         emit: String,
@@ -63,13 +72,23 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Build {
             input,
+            libs,
             format,
             output,
             backend,
             typst_path,
-        } => commands::build_with_backend(&input, &format, output.as_deref(), &typst_path, backend),
-        Commands::Check { input } => commands::check(&input),
-        Commands::Inspect { input, emit } => commands::inspect(&input, &emit),
+        } => commands::build_with_backend_and_libraries(
+            &input,
+            &format,
+            output.as_deref(),
+            &typst_path,
+            backend,
+            libs.as_deref(),
+        ),
+        Commands::Check { input, libs } => commands::check_with_libraries(&input, libs.as_deref()),
+        Commands::Inspect { input, libs, emit } => {
+            commands::inspect_with_libraries(&input, &emit, libs.as_deref())
+        }
     }
 }
 
