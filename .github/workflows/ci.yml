@@ -40,6 +40,10 @@ jobs:
         run: |
           python3 tools/ci/test_verify_workflow_shape.py
           python3 tools/ci/verify_workflow_shape.py
+      - name: Verify lockfile-fail-closed Cargo policy
+        run: |
+          python3 tools/ci/test_verify_locked_cargo_policy.py
+          python3 tools/ci/verify_locked_cargo_policy.py
       - name: Test merge-gate policy verifier
         run: python3 tools/ci/test_verify_gate_policy.py
       - name: Test upstream metadata-ingestion guards
@@ -107,7 +111,7 @@ jobs:
           toolchain: 1.98.0
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -130,13 +134,13 @@ jobs:
         with:
           typst-version: 0.15.1
       - name: Test default CLI feature boundary
-        run: cargo test -p arkst-cli --no-default-features
+        run: cargo test --locked -p arkst-cli --no-default-features
       - name: Test (Typst required)
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --locked --workspace --all-targets --all-features
         env:
           ARKST_REQUIRE_TYPST: "1"
       - name: Test Typst backend parity
-        run: cargo test -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
+        run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
         env:
           ARKST_REQUIRE_TYPST: "1"
       - name: Verify CLI dependency feature boundary
@@ -145,20 +149,20 @@ jobs:
         run: |
           default_tree="$(mktemp)"
           feature_tree="$(mktemp)"
-          cargo tree -p arkst-cli --no-default-features > "$default_tree"
+          cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
           if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
             echo "default arkst-cli unexpectedly contains the in-process Typst graph"
             sed -n '1,240p' "$default_tree"
             exit 1
           fi
-          cargo tree -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
+          cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
           grep -Eq 'arkst-typst-inprocess' "$feature_tree"
           grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
       - name: Smoke-test public examples
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          cargo build -p arkst-cli
+          cargo build --locked -p arkst-cli
           mkdir -p target/example-smoke
           for input in \
             examples/markdown/basic.md \
@@ -185,7 +189,7 @@ jobs:
           toolchain: 1.98.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo check -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features
+      - run: cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features
 
   doc:
     name: docs
@@ -199,7 +203,7 @@ jobs:
         with:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo doc --workspace --all-features --no-deps
+      - run: cargo doc --locked --workspace --all-features --no-deps
 
   deny:
     name: license
