@@ -800,6 +800,84 @@ fn listfiles_uses_nested_source_identity_as_directory_base() {
 }
 
 #[test]
+fn listfiles_name_sort_matches_pinned_ascii_alphanumeric_ordering_189() {
+    let project = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {1}\n.listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {2}\n.listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {3}\n.listfiles {data} directories:{false} fullpath:{false} sortby:{name} order:{descending}::getat {1}\n",
+        )],
+        &[
+            ("data/file10.txt", b"10"),
+            ("data/file2.txt", b"2"),
+            ("data/file1.txt", b"1"),
+        ],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        paragraph_text(&result),
+        "file1.txt\nfile2.txt\nfile10.txt\nfile10.txt"
+    );
+}
+
+#[test]
+fn listfiles_name_sort_matches_leading_zero_length_tiebreak_and_preserves_duplicates_189() {
+    let zeros = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {1}\n.listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {2}\n.listfiles {data} directories:{false} fullpath:{false} sortby:{name}::getat {3}\n",
+        )],
+        &[
+            ("data/x001.txt", b"001"),
+            ("data/x01.txt", b"01"),
+            ("data/x1.txt", b"1"),
+        ],
+    );
+    let zeros_result = compile_project(&zeros);
+    assert!(
+        zeros_result.diagnostics.is_empty(),
+        "{:?}",
+        zeros_result.diagnostics
+    );
+    assert_eq!(paragraph_text(&zeros_result), "x1.txt\nx01.txt\nx001.txt");
+
+    let duplicates = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} recursive:{true} fullpath:{false} sortby:{name}::size\n",
+        )],
+        &[("data/a/same.txt", b"a"), ("data/b/same.txt", b"b")],
+    );
+    let duplicate_result = compile_project(&duplicates);
+    assert!(
+        duplicate_result.diagnostics.is_empty(),
+        "{:?}",
+        duplicate_result.diagnostics
+    );
+    assert_eq!(paragraph_text(&duplicate_result), "2");
+}
+
+#[test]
+fn listfiles_name_sort_is_ascii_bounded_and_fail_closed_for_unicode_case_mapping_189() {
+    let project = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} fullpath:{false} sortby:{name}\n",
+        )],
+        &[("data/é2.txt", b"unicode")],
+    );
+    let result = compile_project(&project);
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "E3001");
+    assert!(result.diagnostics[0].message.contains("ASCII"));
+    assert!(result.ir.nodes.is_empty());
+}
+
+#[test]
 fn listfiles_rejects_unimplemented_or_host_specific_options_before_enumeration() {
     for (source, code, needle) in [
         (".listfiles {data}\n", "E8001", "fullpath:true"),
@@ -807,11 +885,6 @@ fn listfiles_rejects_unimplemented_or_host_specific_options_before_enumeration()
             ".listfiles {data} fullpath:{false} pattern:{a}\n",
             "E3001",
             "pattern",
-        ),
-        (
-            ".listfiles {data} fullpath:{false} sortby:{name}\n",
-            "E3001",
-            "sortby:name",
         ),
         (
             ".listfiles {data} fullpath:{false} sortby:{lastmodified}\n",
