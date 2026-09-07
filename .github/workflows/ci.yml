@@ -44,6 +44,10 @@ jobs:
         run: |
           python3 tools/ci/test_verify_locked_cargo_policy.py
           python3 tools/ci/verify_locked_cargo_policy.py
+      - name: Verify research Cargo containment
+        run: |
+          python3 tools/ci/test_verify_cargo_graph_ownership.py
+          python3 tools/ci/verify_cargo_graph_ownership.py
       - name: Test merge-gate policy verifier
         run: python3 tools/ci/test_verify_gate_policy.py
       - name: Test upstream metadata-ingestion guards
@@ -217,3 +221,9 @@ jobs:
         with:
           command: check
           arguments: --all-features
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: tools/spikes/typst-in-process/Cargo.toml
+          command: check
+          arguments: --all-features
+          command-arguments: advisories sources

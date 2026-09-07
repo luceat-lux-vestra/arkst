@@ -3,10 +3,18 @@ name = "typst-in-process"
 version = "0.1.0"
 edition = "2021"
 description = "Investigation spike for in-process Typst compilation"
+publish = false
 
 [dependencies]
-typst = "0.15.1"
-typst-layout = "0.15.1"
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
 
 [target.wasm32-unknown-unknown]
 dependencies = {}
+
+[patch.crates-io.citationberg]
+# This spike remains directly runnable from its checked-in research instructions.
+# Keep its citation graph on the same immutable quick-xml security fix as the
+# production workspace until #203 can remove the temporary patch.
+git = "https://github.com/typst/citationberg.git"
+rev = "06a591e2f237d25e1dfdedac3f3d1494c496c52d"
