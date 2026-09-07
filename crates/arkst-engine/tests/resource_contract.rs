@@ -775,3 +775,16 @@ fn subdocument_rejects_body_before_requesting_provider() {
     assert!(!diagnostics.is_empty());
     assert!(resources.source_requests.borrow().is_empty());
 }
+
+#[test]
+fn listfiles_requires_explicit_provider_directory_capability_189() {
+    let source_id = SourceId(77);
+    let mut resources = FakeResources::default();
+    resources.paths.insert(source_id, "main.qd".into());
+    let (_, diagnostics) = evaluate(".listfiles {data} fullpath:{false}", source_id, &resources);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "E9001");
+    assert!(diagnostics[0]
+        .message
+        .contains("unsupported resource-provider operation `list_directory`"));
+}

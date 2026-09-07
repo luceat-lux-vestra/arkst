@@ -5,6 +5,8 @@ const RECONCILIATION: &str =
 const RESOURCE_MANIFEST: &str = include_str!(
     "../../../docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv"
 );
+const COMPAT_README: &str = include_str!("../../../docs/compatibility/quarkdown/README.md");
+const GAP_INVENTORY: &str = include_str!("../../../docs/compatibility/quarkdown/GAP_INVENTORY.md");
 const STDLIB_AUDIT: &str =
     include_str!("../../../docs/compatibility/quarkdown/STDLIB_BUILTINS_AUDIT.md");
 const STDLIB_MANIFEST: &str =
@@ -103,6 +105,33 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
             );
         }
     }
+
+    for surface in ["builtin:.filename", "builtin:.listfiles"] {
+        let row = resource_row(surface);
+        assert_eq!(row[17], "PARTIAL", "wrong canonical status for {surface}");
+        assert!(row[21].contains("#189") || surface == "builtin:.filename");
+    }
+    let filename = resource_row("builtin:.filename");
+    assert!(!filename[22].contains(".listfiles/.csv/.bibliography remain"));
+    let listfiles = resource_row("builtin:.listfiles");
+    assert!(listfiles[18].contains("fullpath:false"));
+    assert!(listfiles[19].contains("empty-directory"));
+    assert!(listfiles[19].contains("regex"));
+    assert!(listfiles[19].contains("last-modified"));
+    assert_eq!(listfiles[21], "#189;POLICY_DIVERGENCE:global-read;#191");
+
+    assert!(COMPAT_README.contains("bounded #189 slices"));
+    assert!(!COMPAT_README
+        .contains("`.listfiles`, `.filename`) and `.llmstxt` are tracked as deferred"));
+    assert!(
+        GAP_INVENTORY.contains("bounded project data/file identity (`.filename`, `.listfiles`)")
+    );
+    assert!(GAP_INVENTORY.contains(
+        "`.includeall`, `.filename`, and `.listfiles` have bounded `PARTIAL` implementations"
+    ));
+    assert!(!GAP_INVENTORY.contains("`.csv`, `.listfiles`, and `.filename`"));
+    assert!(!GAP_INVENTORY
+        .contains("`.includeall`, `.csv`, `.listfiles`, and `.filename` remain deferred"));
 
     let virtual_project = resource_row("contract:virtual-project-resource-model");
     assert_eq!(virtual_project[17], "SUPPORTED_SEMANTICS");

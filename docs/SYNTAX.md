@@ -776,11 +776,12 @@ does not embed raw Typst source in backend-neutral IR and does not define a
 generic backend escape block. The current CLI rejects `.typ` input until the
 separate passthrough capability is implemented.
 
-### Data Loading (Partial; bounded `.read` / `.json` / `.include`)
+### Data Loading (Partial; bounded `.read` / `.json` / `.include` / `.filename` / `.listfiles`)
 
-The implemented resource model covers project-backed text, JSON, and nested
-document inclusion. Other data-loading families, including directory
-enumeration, CSV/list loading, and remote/package resources, remain deferred
+The implemented resource model covers project-backed text, JSON, nested
+document inclusion, logical filename identity, and a bounded non-empty logical
+directory listing subset (`fullpath:false`, `sortby:none`, no pattern). Other
+data-loading families, including CSV/list loading and remote/package resources, remain deferred
 until their separate compatibility and host-boundary contracts are reviewed.
 
 ## Reserved Syntax

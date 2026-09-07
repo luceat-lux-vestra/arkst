@@ -329,6 +329,14 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     let rows = rows();
     assert_eq!(row(&rows, "builtin:.read")[17], "PARTIAL");
     assert_eq!(row(&rows, "builtin:.include")[17], "PARTIAL");
+    let listfiles = row(&rows, "builtin:.listfiles");
+    assert_eq!(listfiles[17], "PARTIAL");
+    assert!(listfiles[16].contains("logical_directory_listing_189.rs"));
+    assert!(listfiles[18].contains("fullpath:false"));
+    assert!(listfiles[19].contains("empty-directory"));
+    assert!(listfiles[19].contains("last-modified"));
+    assert!(listfiles[21].contains("#189"));
+    assert!(listfiles[21].contains("#191"));
     let filename = row(&rows, "builtin:.filename");
     assert_eq!(filename[17], "PARTIAL");
     assert!(filename[16].contains("quarkdown-project-data-189.md"));

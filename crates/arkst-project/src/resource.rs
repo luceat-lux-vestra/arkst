@@ -22,12 +22,33 @@ pub enum ResourceAccessError {
     /// No source or asset exists at the normalized path.
     #[error("resource not found: {0}")]
     NotFound(VirtualPathBuf),
+    /// The normalized path identifies a file rather than a directory.
+    #[error("resource path is not a directory: {0}")]
+    NotDirectory(VirtualPathBuf),
+    /// Source/asset paths imply both file and directory identity at one path.
+    #[error("logical resource tree is inconsistent at: {0}")]
+    InconsistentDirectoryTree(VirtualPathBuf),
     /// A text-oriented builtin received bytes that are not valid UTF-8.
     #[error("resource is not valid UTF-8: {path}: {message}")]
     InvalidUtf8 {
         path: VirtualPathBuf,
         message: String,
     },
+}
+
+/// Kind of one entry in the inferred logical project directory tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceEntryKind {
+    File,
+    Directory,
+}
+
+/// One entry in a logical project directory listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceDirectoryEntry {
+    pub path: VirtualPathBuf,
+    pub name: String,
+    pub kind: ResourceEntryKind,
 }
 
 /// The semantic class of a source-language resource reference.

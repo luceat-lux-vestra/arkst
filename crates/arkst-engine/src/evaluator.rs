@@ -51,7 +51,8 @@ use crate::value_conversion::{
 use crate::{ast_to_ir, builtins};
 use crate::{
     Capabilities, Capability, EvaluationLimits, IncludedSource, LoadableLibraryProvider,
-    LoadableLibrarySource, ResourceAccessError, ResourceProvider, ResourceRoot, ResourceText,
+    LoadableLibrarySource, ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot,
+    ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -6759,6 +6760,14 @@ impl Evaluator {
                 context,
                 binding_plan,
             ),
+            "listfiles" => self.evaluate_listfiles(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
             "json" => self.evaluate_json(
                 &evaluated_positional,
                 &evaluated_named,
@@ -7021,6 +7030,101 @@ impl Evaluator {
             return CallOutcome::Failed;
         };
         CallOutcome::Value(IrValue::String(value.to_string()))
+    }
+
+    fn evaluate_listfiles(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let arguments =
+            match listfiles_arguments(positional_args, named_args, binding_plan, span, diagnostics)
+            {
+                Ok(arguments) => arguments,
+                Err(()) => return CallOutcome::Failed,
+            };
+
+        if arguments.pattern.is_some() {
+            diagnostics.push(resource_diagnostic(
+                "E3001",
+                "`.listfiles` `pattern` filtering is not implemented by the bounded logical-directory slice".to_string(),
+                *span,
+                "Omit `pattern`; #189 retains regex filtering as explicit compatibility debt.",
+            ));
+            return CallOutcome::Failed;
+        }
+        if arguments.full_path {
+            diagnostics.push(resource_diagnostic(
+                "E8001",
+                "`.listfiles` `fullpath:true` would expose a host absolute path".to_string(),
+                *span,
+                "Set `fullpath:false`; Arkst does not expose native filesystem paths to document evaluation.",
+            ));
+            return CallOutcome::Failed;
+        }
+        match arguments.sort_by {
+            ListFilesSort::None => {}
+            ListFilesSort::Name => {
+                diagnostics.push(resource_diagnostic(
+                    "E3001",
+                    "`.listfiles` `sortby:name` requires Quarkdown's exact alphanumeric comparator semantics".to_string(),
+                    *span,
+                    "Use `sortby:none`; exact name sorting remains bounded #189 compatibility debt.",
+                ));
+                return CallOutcome::Failed;
+            }
+            ListFilesSort::LastModified => {
+                diagnostics.push(resource_diagnostic(
+                    "E8001",
+                    "`.listfiles` `sortby:lastmodified` requires host filesystem timestamps".to_string(),
+                    *span,
+                    "Use `sortby:none`; deterministic VirtualProject evaluation does not expose host timestamps.",
+                ));
+                return CallOutcome::Failed;
+            }
+        }
+        let _ = arguments.order;
+
+        if reject_host_filesystem_reference("listfiles", &arguments.reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let entries =
+            match provider.list_directory(source_id, &arguments.reference, arguments.recursive) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    diagnostics.push(resource_access_diagnostic("listfiles", error, *span));
+                    return CallOutcome::Failed;
+                }
+            };
+        if let Err(outcome) =
+            self.check_materialized_elements_len(entries.len(), *span, diagnostics)
+        {
+            return outcome;
+        }
+
+        // Upstream FileSorting.NONE returns an unordered Set after mapping
+        // to the requested presentation. For the supported fullpath:false
+        // slice, deduplicate bare names and choose a deterministic internal
+        // order without claiming observable upstream enumeration order.
+        let names = entries
+            .into_iter()
+            .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
+            .map(|entry| entry.name)
+            .collect::<BTreeSet<_>>();
+        if let Err(outcome) = self.check_materialized_elements_len(names.len(), *span, diagnostics)
+        {
+            return outcome;
+        }
+        CallOutcome::Value(IrValue::Collection(
+            names.into_iter().map(IrValue::String).collect(),
+        ))
     }
 
     fn evaluate_json(
@@ -11831,6 +11935,7 @@ const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &[
     "read",
     "filename",
+    "listfiles",
     "json",
     "include",
     "includeall",
@@ -12982,6 +13087,18 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             ],
             BodyPolicy::Reject,
         ),
+        "listfiles" => (
+            vec![
+                ParameterMetadata::required("path"),
+                ParameterMetadata::defaulted("directories"),
+                ParameterMetadata::defaulted("recursive"),
+                ParameterMetadata::optional("pattern"),
+                ParameterMetadata::defaulted("fullpath"),
+                ParameterMetadata::defaulted("sortby"),
+                ParameterMetadata::defaulted("order"),
+            ],
+            BodyPolicy::Reject,
+        ),
         "json" => (
             vec![ParameterMetadata::required("path").named(false)],
             BodyPolicy::Reject,
@@ -13894,12 +14011,25 @@ fn resource_access_diagnostic_for_subject(
             "Use a source-relative path that remains inside the supplied VirtualProject.",
         ),
         ResourceAccessError::NotFound { path } => resource_diagnostic(
-            "E3001",
-            format!("{subject} resource not found: `{path}`"),
-            span,
-            "Add the logical resource to the VirtualProject supplied by the host.",
-        ),
-        ResourceAccessError::InvalidUtf8 { path, message } => resource_diagnostic(
+        "E3001",
+        format!("{subject} resource not found: `{path}`"),
+        span,
+        "Add the logical resource to the VirtualProject supplied by the host.",
+    ),
+    ResourceAccessError::NotDirectory { path } => resource_diagnostic(
+        "E3001",
+        format!("{subject} resource is not a directory: `{path}`"),
+        span,
+        "Pass a logical directory represented by one or more project resources.",
+    ),
+    ResourceAccessError::InconsistentDirectoryTree { path } => resource_diagnostic(
+        "E9001",
+        format!("{subject} encountered inconsistent file/directory identity at `{path}`"),
+        span,
+        "The supplied logical project must not represent the same path as both a file and a directory.",
+    ),
+    ResourceAccessError::InvalidUtf8 { path, message } => resource_diagnostic(
+
             "E3001",
             format!("{subject} resource `{path}` is not valid UTF-8: {message}"),
             span,
@@ -13972,6 +14102,200 @@ fn resource_path_argument(
         return None;
     };
     Some(path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListFilesSort {
+    None,
+    Name,
+    LastModified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListFilesOrder {
+    Ascending,
+    Descending,
+}
+
+struct ListFilesArguments {
+    reference: String,
+    list_directories: bool,
+    recursive: bool,
+    pattern: Option<String>,
+    full_path: bool,
+    sort_by: ListFilesSort,
+    order: ListFilesOrder,
+}
+
+fn listfiles_arguments(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<ListFilesArguments, ()> {
+    let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
+        .map_err(|error| {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                error.message,
+                error.primary,
+                "Pass a logical directory path followed only by documented `.listfiles` options.",
+            ));
+        })?;
+    let mut slots = bound.slots.into_iter();
+
+    let Some(BoundSlot::Explicit {
+        value,
+        span: value_span,
+    }) = slots.next()
+    else {
+        return Err(());
+    };
+    let Some(reference) = builtins::adapt_string_argument(&value) else {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            "`.listfiles` resource path must adapt to String".to_string(),
+            value_span,
+            "Use a scalar or plain-text logical directory path.",
+        ));
+        return Err(());
+    };
+
+    let list_directories = match slots.next() {
+        Some(BoundSlot::Explicit {
+            value: IrValue::Boolean(value),
+            ..
+        }) => value,
+        Some(BoundSlot::Explicit { span, .. }) => {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.listfiles` `directories` must be a Boolean".to_string(),
+                span,
+                "Use `true` or `false`.",
+            ));
+            return Err(());
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => true,
+    };
+    let recursive = match slots.next() {
+        Some(BoundSlot::Explicit {
+            value: IrValue::Boolean(value),
+            ..
+        }) => value,
+        Some(BoundSlot::Explicit { span, .. }) => {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.listfiles` `recursive` must be a Boolean".to_string(),
+                span,
+                "Use `true` or `false`.",
+            ));
+            return Err(());
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => false,
+    };
+    let pattern = match slots.next() {
+        Some(BoundSlot::Explicit {
+            value: IrValue::None,
+            ..
+        }) => None,
+        Some(BoundSlot::Explicit { value, span }) => {
+            let Some(value) = builtins::adapt_string_argument(&value) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.listfiles` `pattern` must be a String or None".to_string(),
+                    span,
+                    "Use a plain-text pattern or omit the argument.",
+                ));
+                return Err(());
+            };
+            Some(value)
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => None,
+    };
+    let full_path = match slots.next() {
+        Some(BoundSlot::Explicit {
+            value: IrValue::Boolean(value),
+            ..
+        }) => value,
+        Some(BoundSlot::Explicit { span, .. }) => {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.listfiles` `fullpath` must be a Boolean".to_string(),
+                span,
+                "Use `true` or `false`.",
+            ));
+            return Err(());
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => true,
+    };
+    let sort_by = match slots.next() {
+        Some(BoundSlot::Explicit { value, span }) => {
+            let Some(value) = builtins::adapt_string_argument(&value) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.listfiles` `sortby` must be a String".to_string(),
+                    span,
+                    "Use `none`, `name`, or `lastmodified`.",
+                ));
+                return Err(());
+            };
+            match value.to_ascii_lowercase().as_str() {
+                "none" => ListFilesSort::None,
+                "name" => ListFilesSort::Name,
+                "lastmodified" | "last_modified" | "last-modified" => ListFilesSort::LastModified,
+                _ => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3003",
+                        format!("unsupported `.listfiles` sort criterion `{value}`"),
+                        span,
+                        "Use `none`, `name`, or `lastmodified`.",
+                    ));
+                    return Err(());
+                }
+            }
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => ListFilesSort::None,
+    };
+    let order = match slots.next() {
+        Some(BoundSlot::Explicit { value, span }) => {
+            let Some(value) = builtins::adapt_string_argument(&value) else {
+                diagnostics.push(resource_diagnostic(
+                    "E3003",
+                    "`.listfiles` `order` must be a String".to_string(),
+                    span,
+                    "Use `ascending` or `descending`.",
+                ));
+                return Err(());
+            };
+            match value.to_ascii_lowercase().as_str() {
+                "ascending" => ListFilesOrder::Ascending,
+                "descending" => ListFilesOrder::Descending,
+                _ => {
+                    diagnostics.push(resource_diagnostic(
+                        "E3003",
+                        format!("unsupported `.listfiles` order `{value}`"),
+                        span,
+                        "Use `ascending` or `descending`.",
+                    ));
+                    return Err(());
+                }
+            }
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => ListFilesOrder::Ascending,
+    };
+
+    Ok(ListFilesArguments {
+        reference,
+        list_directories,
+        recursive,
+        pattern,
+        full_path,
+        sort_by,
+        order,
+    })
 }
 
 fn filename_arguments(
