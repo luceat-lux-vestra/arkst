@@ -60,11 +60,14 @@ The owned evaluator/data result is deliberately narrow:
   decoding, JSON conversion, nested source identity, active-stack cycle
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
   exact case-sensitive loadable-library dispatch before file fallback with caller-context
-  and caller-resource-base retention, and logical project/subdocument root projection.
-  Absolute/global FileSystem semantics and upstream permission/diagnostic parity remain an
-  accepted fail-closed security divergence recorded under completed #296/#300. Native CLI project/library ingestion is explicitly bounded and
-  evidenced under completed #298/#302; public WASM host resource/library binding and
-  the full nested graph contract remain open under #191 and #199/#181.
+  and caller-resource-base retention, logical project/subdocument root projection,
+  and bounded logical directory listing with deterministic NONE plus ASCII
+  `sortby:name` ordering. Absolute/global FileSystem semantics and upstream
+  permission/diagnostic parity remain an accepted fail-closed security
+  divergence recorded under completed #296/#300. Native CLI project/library
+  ingestion is explicitly bounded and evidenced under completed #298/#302;
+  public WASM host resource/library binding and the full nested graph contract
+  remain open under #191 and #199/#181.
 - `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`; `.filename` and `.listfiles` are bounded `PARTIAL` file-identity/directory-listing slices. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
@@ -108,12 +111,17 @@ Arkst's current model is one in-memory logical resource model:
    `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
    read text; `.filename` resolves existing source/asset logical metadata without
    reading resource bytes; `.listfiles` enumerates only inferred non-empty logical
-   directories and exposes bare names in its bounded mode; `.include` first performs exact case-sensitive lookup in the explicit
-   in-memory library registry, then falls back to source lookup. A library hit is parsed
-   as Quarkdown with a deterministic detached provenance `SourceId`, evaluated directly
-   in the caller context regardless of requested sandbox, and keeps the caller's source
-   identity as the base for nested resource reads. File includes retain their target
-   `SourceId`, path, source stack, and nested base;
+   directories and exposes bare names in its bounded `fullpath:false` modes:
+   `sortby:none` retains deterministic set-like presentation and ASCII
+   `sortby:name` applies the pinned lowercase-before-alphanumeric ordering while
+   preserving duplicate bare names; non-ASCII NAME sorting fails closed until
+   Kotlin/JVM Unicode lowercase/comparator parity is proven. `.include` first
+   performs exact case-sensitive lookup in the explicit in-memory library
+   registry, then falls back to source lookup. A library hit is parsed as
+   Quarkdown with a deterministic detached provenance `SourceId`, evaluated
+   directly in the caller context regardless of requested sandbox, and keeps
+   the caller's source identity as the base for nested resource reads. File
+   includes retain their target `SourceId`, path, source stack, and nested base;
    `.subdocument` and literal links in Quarkdown sources whose fragment-stripped
    destination ends in `.qd` or `.md` validate a target source through the same
    defining-source `read_source` authority. The evaluator records the actual
@@ -200,12 +208,15 @@ contracts: upstream can resolve absolute/global paths under permission rules,
 and upstream host path behavior has platform-specific details. Arkst's
 fail-closed logical policy is an intentional architecture boundary, so rows
 requiring full v2.5.1 absolute/global semantics remain partial or unsupported.
-Unimplemented directory-listing options (regex filtering, native full paths, exact
-alphanumeric name sorting, and last-modified sorting), data-format errors, and
-inaccessible-host-file distinctions are not silently borrowed from the host;
-they remain bounded follow-up work. The `.filename` and `.listfiles` subsets
-represent only project-bounded logical identity/enumeration and deliberately
-expose no host filename, native path, or timestamp state.
+Unimplemented directory-listing options now consist of regex filtering, native
+full paths, last-modified sorting, empty-directory identity, and exact
+non-ASCII Kotlin/JVM lowercase/alphanumeric comparator parity. The ASCII
+`sortby:name` slice is implemented and evidenced under #307; broader Unicode
+NAME parity remains fail-closed rather than approximated. Data-format errors
+and inaccessible-host-file distinctions are likewise not silently borrowed
+from the host and remain bounded follow-up work. The `.filename` and
+`.listfiles` subsets represent only project-bounded logical identity/enumeration
+and deliberately expose no host filename, native path, or timestamp state.
 
 ## Deterministic external inputs
 
@@ -258,12 +269,14 @@ conformance. Current code and tests confirm a bounded `.read`, `.json`, and
 typed provider errors, cycle detection, repeated includes, strict UTF-8 behavior,
 and exact case-sensitive in-memory loadable-library dispatch before file fallback.
 Library hits ignore the requested sandbox, evaluate in the caller context, and keep the
-includer's resource base. They do not by themselves confirm upstream absolute/global permission semantics,
-`.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument` graph behavior.
-Native host library-directory discovery/ingestion is separately evidenced as
-completed under #298/#302. Current `.includeall` and `.pathtoroot` evidence is bounded
-to deterministic logical-project semantics and does not claim the remaining global-permission/WASM
-contracts.
+includer's resource base. That historical #62 evidence does not by itself
+establish `.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument`
+graph behavior; `.filename` and the bounded `.listfiles` NONE/ASCII-NAME slices
+are separately evidenced under #189, including #307 for name sorting. Native
+host library-directory discovery/ingestion is separately evidenced as completed
+under #298/#302. Current `.includeall` and `.pathtoroot` evidence is bounded to
+deterministic logical-project semantics and does not claim the remaining
+global-permission/WASM contracts.
 
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
@@ -283,7 +296,9 @@ or network access.
 - [#298](https://github.com/luceat-lux-vestra/arkst/issues/298): **completed native host-ingestion owner**; #302 merged at `af2f409c3c9050abdd369798e1ddb7ad9c23435b`, with explicit public native project/resource and bounded loadable-library discovery/ingestion evidence;
 - [#189](https://github.com/luceat-lux-vestra/arkst/issues/189): bounded
   project data-file and file-identity loaders (`.listfiles`, `.filename`,
-  `.csv`, `.bibliography`), coordinated with #181/#183 consumers;
+  `.csv`, `.bibliography`), with the ASCII `.listfiles sortby:name` slice
+  completed under #307 while Unicode comparator parity and the other declared
+  residuals remain; coordinated with #181/#183 consumers;
 - [#190](https://github.com/luceat-lux-vestra/arkst/issues/190): explicit,
   deterministic `.env` capability/injection or rejection;
 - [#191](https://github.com/luceat-lux-vestra/arkst/issues/191): deferred
