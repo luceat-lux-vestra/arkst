@@ -22,17 +22,24 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          from textwrap import dedent, indent
+
+          def block(value: str, spaces: int = 0) -> str:
+              value = dedent(value).lstrip('\n')
+              return indent(value, ' ' * spaces) if spaces else value
 
           evaluator = Path('crates/arkst-engine/src/evaluator.rs')
           text = evaluator.read_text()
 
-          old_enum = '''#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          old_enum = block('''
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
           enum ListFilesOrder {
               Ascending,
               Descending,
           }
-          '''.replace('          ', '')
-          new_enum = '''#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          ''')
+          new_enum = block('''
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
           enum ListFilesOrder {
               Ascending,
               Descending,
@@ -111,12 +118,13 @@ jobs:
               }
               left.len().cmp(&right.len())
           }
-          '''.replace('          ', '')
+          ''')
           if text.count(old_enum) != 1:
               raise SystemExit(f'expected one ListFilesOrder enum anchor, got {text.count(old_enum)}')
           text = text.replace(old_enum, new_enum)
 
-          old_gate = '''        match arguments.sort_by {
+          old_gate = block('''
+          match arguments.sort_by {
               ListFilesSort::None => {}
               ListFilesSort::Name => {
                   diagnostics.push(resource_diagnostic(
@@ -138,8 +146,9 @@ jobs:
               }
           }
           let _ = arguments.order;
-          '''
-          new_gate = '''        if arguments.sort_by == ListFilesSort::LastModified {
+          ''', 8)
+          new_gate = block('''
+          if arguments.sort_by == ListFilesSort::LastModified {
               diagnostics.push(resource_diagnostic(
                   "E8001",
                   "`.listfiles` `sortby:lastmodified` requires host filesystem timestamps".to_string(),
@@ -148,12 +157,13 @@ jobs:
               ));
               return CallOutcome::Failed;
           }
-          '''
+          ''', 8)
           if text.count(old_gate) != 1:
               raise SystemExit(f'expected one listfiles sort gate anchor, got {text.count(old_gate)}')
           text = text.replace(old_gate, new_gate)
 
-          old_present = '''        // Upstream FileSorting.NONE returns an unordered Set after mapping
+          old_present = block('''
+          // Upstream FileSorting.NONE returns an unordered Set after mapping
           // to the requested presentation. For the supported fullpath:false
           // slice, deduplicate bare names and choose a deterministic internal
           // order without claiming observable upstream enumeration order.
@@ -169,8 +179,9 @@ jobs:
           CallOutcome::Value(IrValue::Collection(
               names.into_iter().map(IrValue::String).collect(),
           ))
-          '''
-          new_present = '''        let mut entries = entries
+          ''', 8)
+          new_present = block('''
+          let mut entries = entries
               .into_iter()
               .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
               .collect::<Vec<_>>();
@@ -232,7 +243,7 @@ jobs:
               }
               ListFilesSort::LastModified => unreachable!("rejected before provider access"),
           }
-          '''
+          ''', 8)
           if text.count(old_present) != 1:
               raise SystemExit(f'expected one listfiles presentation anchor, got {text.count(old_present)}')
           text = text.replace(old_present, new_present)
@@ -240,22 +251,25 @@ jobs:
 
           tests = Path('crates/arkst-core/tests/quarkdown_resource_builtins.rs')
           text = tests.read_text()
-          old_reject = '''        (
-              ".listfiles {data} fullpath:{false} sortby:{name}\\n",
+          old_reject = block(r'''
+          (
+              ".listfiles {data} fullpath:{false} sortby:{name}\n",
               "E3001",
               "sortby:name",
           ),
-          '''
+          ''', 8)
           if text.count(old_reject) != 1:
               raise SystemExit(f'expected one old name-sort rejection case, got {text.count(old_reject)}')
           text = text.replace(old_reject, '')
 
-          anchor = '''#[test]
+          anchor = block('''
+          #[test]
           fn listfiles_rejects_unimplemented_or_host_specific_options_before_enumeration() {
-          '''.replace('          ', '')
+          ''')
           if text.count(anchor) != 1:
               raise SystemExit(f'expected one listfiles rejection test anchor, got {text.count(anchor)}')
-          added = r'''#[test]
+          added = block(r'''
+          #[test]
           fn listfiles_name_sort_matches_pinned_ascii_alphanumeric_ordering_189() {
               let project = project(
                   "main.qd",
@@ -333,7 +347,7 @@ jobs:
               assert!(result.ir.nodes.is_empty());
           }
 
-          '''.replace('          ', '')
+          ''')
           text = text.replace(anchor, added + anchor)
           tests.write_text(text)
           PY
