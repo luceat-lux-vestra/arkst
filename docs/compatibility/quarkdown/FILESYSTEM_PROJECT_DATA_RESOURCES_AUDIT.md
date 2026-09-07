@@ -55,7 +55,7 @@ row has a source URL containing the exact target SHA.
 
 The owned evaluator/data result is deliberately narrow:
 
-- `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and `.subdocument` are `PARTIAL`. Their local,
+- `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, `.filename`, and `.subdocument` are `PARTIAL`. Their local,
   source-relative, in-memory subsets are evidenced, including strict text
   decoding, JSON conversion, nested source identity, active-stack cycle
   checks, repeated/shared bulk includes, fail-fast partial effects, include sandbox behavior,
@@ -65,7 +65,7 @@ The owned evaluator/data result is deliberately narrow:
   accepted fail-closed security divergence recorded under completed #296/#300. Native CLI project/library ingestion is explicitly bounded and
   evidenced under completed #298/#302; public WASM host resource/library binding and
   the full nested graph contract remain open under #191 and #199/#181.
-- `.listfiles`, `.filename`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`. The manifest states each absent contract and assigns its bounded
+- `.listfiles`, `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`; `.filename` is now a bounded `PARTIAL` logical file-identity slice. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
@@ -106,7 +106,8 @@ Arkst's current model is one in-memory logical resource model:
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
-   read text; `.include` first performs exact case-sensitive lookup in the explicit
+   read text; `.filename` resolves existing source/asset logical metadata without
+   reading resource bytes; `.include` first performs exact case-sensitive lookup in the explicit
    in-memory library registry, then falls back to source lookup. A library hit is parsed
    as Quarkdown with a deterministic detached provenance `SourceId`, evaluated directly
    in the caller context regardless of requested sandbox, and keeps the caller's source
@@ -198,9 +199,11 @@ contracts: upstream can resolve absolute/global paths under permission rules,
 and upstream host path behavior has platform-specific details. Arkst's
 fail-closed logical policy is an intentional architecture boundary, so rows
 requiring full v2.5.1 absolute/global semantics remain partial or unsupported.
-Directory traversal, metadata sorting, filename identity, data-format errors,
-and inaccessible-host-file distinctions are not silently borrowed from the
-host; they remain bounded follow-up work.
+Directory listing/traversal, metadata sorting, data-format errors, and
+inaccessible-host-file distinctions are not silently borrowed from the host;
+they remain bounded follow-up work. The `.filename` subset represents only
+project-bounded logical file identity and deliberately exposes no host filename
+or native path.
 
 ## Deterministic external inputs
 

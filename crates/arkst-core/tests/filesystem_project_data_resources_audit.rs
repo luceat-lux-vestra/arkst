@@ -329,6 +329,13 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     let rows = rows();
     assert_eq!(row(&rows, "builtin:.read")[17], "PARTIAL");
     assert_eq!(row(&rows, "builtin:.include")[17], "PARTIAL");
+    let filename = row(&rows, "builtin:.filename");
+    assert_eq!(filename[17], "PARTIAL");
+    assert!(filename[16].contains("quarkdown-project-data-189.md"));
+    assert!(filename[18].contains("binary assets"));
+    assert!(filename[19].contains("global-read"));
+    assert_eq!(filename[21], "POLICY_DIVERGENCE:global-read;#191");
+    assert!(!filename[9].contains("may still return a name"));
     assert_eq!(
         row(&rows, "contract:virtual-project-resource-model")[17],
         "SUPPORTED_SEMANTICS"

@@ -747,9 +747,9 @@ functions. Dynamic
 bounds are evaluated normally and truncated to signed integer endpoints using
 the verified upstream Number-to-Int behavior.
 
-### Include / Read (Partial; bounded VirtualProject subset)
+### Include / Read / Filename (Partial; bounded VirtualProject subset)
 
-`.include`, `.read`, and `.json` are evaluated by `arkst-engine` through its
+`.include`, `.read`, `.json`, and `.filename` are evaluated by `arkst-engine` through its
 engine-neutral `ResourceProvider` interface. `arkst-core` owns the adapter
 that backs that interface with `VirtualProject`; the engine does not own or
 depend directly on the project model. Paths are logical and source-relative;
@@ -757,7 +757,7 @@ normalization rejects traversal outside the project boundary, and nested
 includes retain source identity for subsequent relative resources. The
 compiler does not access the host filesystem or network from this boundary.
 
-The three builtin rows are canonical `PARTIAL` resource support, not complete
+These builtin rows are canonical `PARTIAL` resource support, not complete
 Quarkdown compatibility. Their common logical resolver prerequisite completed
 under #188; native host ingestion completed under #298/#302, while upstream global-read behavior is an accepted fail-closed policy divergence recorded under completed #296/#300 and public WASM binding/parity is #191. The
 VirtualProject/ResourceProvider contract is a separate `SUPPORTED_SEMANTICS`

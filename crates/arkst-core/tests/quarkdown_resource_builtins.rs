@@ -635,3 +635,100 @@ fn unlabeled_subdocument_keeps_the_empty_link_after_real_project_resolution() {
     assert_eq!(destination, "child");
     assert!(title.is_none());
 }
+
+#[test]
+fn filename_uses_existing_logical_source_or_binary_asset_without_reading_text() {
+    let project = project(
+        "docs/main.qd",
+        &[(
+            "docs/main.qd",
+            ".filename {data/report.tar.gz}\n.filename {data/report.tar.gz} extension:{false}\n.filename {assets/raw.bin}\n",
+        )],
+        &[
+            ("docs/data/report.tar.gz", b"payload"),
+            ("docs/assets/raw.bin", &[0xff, 0xfe, 0xfd]),
+        ],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        paragraph_text(&result),
+        "report.tar.gz\nreport.tar\nraw.bin"
+    );
+}
+
+#[test]
+fn filename_preserves_kotlin_name_without_extension_edge_semantics() {
+    for (name, expected) in [
+        ("plain", "plain"),
+        ("archive.tar.gz", "archive.tar"),
+        ("trailing.", "trailing"),
+    ] {
+        let source = format!(".filename {{data/{name}}} extension:{{false}}\n");
+        let asset = format!("docs/data/{name}");
+        let project = project(
+            "docs/main.qd",
+            &[("docs/main.qd", &source)],
+            &[(asset.as_str(), b"x")],
+        );
+        let result = compile_project(&project);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{name}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(paragraph_text(&result), expected, "{name}");
+    }
+}
+
+#[test]
+fn filename_uses_the_calling_source_base_and_canonical_normalization() {
+    let project = project(
+        "docs/main.qd",
+        &[
+            ("docs/main.qd", ".include {parts/child.qd}\n"),
+            (
+                "docs/parts/child.qd",
+                ".filename {../assets/tmp/../value.dat} extension:{false}\n",
+            ),
+        ],
+        &[("docs/assets/value.dat", b"value")],
+    );
+    let result = compile_project(&project);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(paragraph_text(&result), "value");
+}
+
+#[test]
+fn filename_fails_closed_for_missing_host_uri_boundary_and_non_boolean_extension() {
+    for source in [
+        ".filename {missing.txt}\n",
+        ".filename {/etc/passwd}\n",
+        ".filename {https://example.test/file.txt}\n",
+        ".filename {../../outside.txt}\n",
+        ".filename {data/file.txt} extension:{not-a-bool}\n",
+    ] {
+        let project = project(
+            "docs/main.qd",
+            &[("docs/main.qd", source)],
+            &[("docs/data/file.txt", b"x")],
+        );
+        let result = compile_project(&project);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        assert!(matches!(result.diagnostics[0].severity, Severity::Error));
+        assert!(result.ir.nodes.is_empty(), "{source}");
+    }
+}

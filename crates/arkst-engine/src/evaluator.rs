@@ -6751,6 +6751,14 @@ impl Evaluator {
                 context,
                 binding_plan,
             ),
+            "filename" => self.evaluate_filename(
+                &evaluated_positional,
+                &evaluated_named,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+            ),
             "json" => self.evaluate_json(
                 &evaluated_positional,
                 &evaluated_named,
@@ -6966,6 +6974,53 @@ impl Evaluator {
             },
         };
         CallOutcome::Value(IrValue::String(value))
+    }
+
+    fn evaluate_filename(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &EvaluationContext<'_>,
+        binding_plan: &BindingPlan,
+    ) -> CallOutcome {
+        let (reference, include_extension) = match filename_arguments(
+            positional_args,
+            named_args,
+            binding_plan,
+            span,
+            diagnostics,
+        ) {
+            Ok(arguments) => arguments,
+            Err(()) => return CallOutcome::Failed,
+        };
+        if reject_host_filesystem_reference("filename", &reference, *span, diagnostics) {
+            return CallOutcome::Failed;
+        }
+        let Some((provider, source_id)) = resource_context(context, span, diagnostics) else {
+            return CallOutcome::Failed;
+        };
+        let metadata = match provider.resource_metadata(source_id, &reference) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                diagnostics.push(resource_access_diagnostic("filename", error, *span));
+                return CallOutcome::Failed;
+            }
+        };
+        let Some(value) = logical_filename(&metadata.path, include_extension) else {
+            diagnostics.push(resource_diagnostic(
+                "E9001",
+                format!(
+                    "`.filename` provider returned an invalid logical resource path `{}`",
+                    metadata.path
+                ),
+                *span,
+                "Resource metadata must identify one existing non-root VirtualProject resource.",
+            ));
+            return CallOutcome::Failed;
+        };
+        CallOutcome::Value(IrValue::String(value.to_string()))
     }
 
     fn evaluate_json(
@@ -11775,6 +11830,7 @@ const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &[
     "read",
+    "filename",
     "json",
     "include",
     "includeall",
@@ -12919,6 +12975,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             ],
             BodyPolicy::Reject,
         ),
+        "filename" => (
+            vec![
+                ParameterMetadata::required("path"),
+                ParameterMetadata::defaulted("extension"),
+            ],
+            BodyPolicy::Reject,
+        ),
         "json" => (
             vec![ParameterMetadata::required("path").named(false)],
             BodyPolicy::Reject,
@@ -13806,6 +13869,12 @@ fn resource_access_diagnostic_for_subject(
     span: SourceSpan,
 ) -> Diagnostic {
     match error {
+        ResourceAccessError::UnsupportedOperation { operation } => resource_diagnostic(
+            "E9001",
+            format!("{subject} requires unsupported resource-provider operation `{operation}`"),
+            span,
+            "The host must explicitly implement the semantic resource operation before this builtin can observe it.",
+        ),
         ResourceAccessError::UnsupportedReference { reference } => resource_diagnostic(
             "E8001",
             format!("{subject} does not support non-local resource reference `{reference}`"),
@@ -13903,6 +13972,90 @@ fn resource_path_argument(
         return None;
     };
     Some(path)
+}
+
+fn filename_arguments(
+    positional_args: &[IrValue],
+    named_args: &[IrNamedArg],
+    binding_plan: &BindingPlan,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(String, bool), ()> {
+    let candidates = raw_invocation_candidates(positional_args, named_args, *span);
+    let bound = binding_plan.bind(&candidates, None, *span).map_err(|error| {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            error.message,
+            error.primary,
+            "Pass one source-relative logical resource path and an optional Boolean `extension` flag.",
+        ));
+    })?;
+    let mut slots = bound.slots.into_iter();
+    let Some(BoundSlot::Explicit {
+        value,
+        span: value_span,
+    }) = slots.next()
+    else {
+        return Err(());
+    };
+    let Some(path) = builtins::adapt_string_argument(&value) else {
+        diagnostics.push(resource_diagnostic(
+            "E3003",
+            "`.filename` resource path must adapt to String".to_string(),
+            value_span,
+            "Use a scalar or plain-text logical resource path.",
+        ));
+        return Err(());
+    };
+    let include_extension = match slots.next() {
+        Some(BoundSlot::Explicit {
+            value: IrValue::Boolean(value),
+            ..
+        }) => value,
+        Some(BoundSlot::Explicit { span, .. }) => {
+            diagnostics.push(resource_diagnostic(
+                "E3003",
+                "`.filename` `extension` must be a Boolean".to_string(),
+                span,
+                "Use `true` or `false`.",
+            ));
+            return Err(());
+        }
+        Some(BoundSlot::Defaulted | BoundSlot::Omitted) | None => true,
+    };
+    Ok((path, include_extension))
+}
+
+fn logical_filename(path: &str, include_extension: bool) -> Option<&str> {
+    let name = path.rsplit('/').next().filter(|name| !name.is_empty())?;
+    Some(if include_extension {
+        name
+    } else {
+        name.rsplit_once('.').map_or(name, |(stem, _)| stem)
+    })
+}
+
+#[cfg(test)]
+mod filename_semantics_tests {
+    use super::logical_filename;
+
+    #[test]
+    fn logical_filename_matches_kotlin_last_dot_edge_semantics() {
+        for (path, expected) in [
+            ("docs/plain", "plain"),
+            ("docs/archive.tar.gz", "archive.tar"),
+            ("docs/.hidden", ""),
+            ("docs/trailing.", "trailing"),
+        ] {
+            assert_eq!(logical_filename(path, false), Some(expected), "{path}");
+        }
+        assert_eq!(
+            logical_filename("docs/archive.tar.gz", true),
+            Some("archive.tar.gz")
+        );
+        assert_eq!(logical_filename("", true), None);
+        assert_eq!(logical_filename("docs/", true), None);
+    }
 }
 
 fn resource_lines_argument(
