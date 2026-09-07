@@ -124,6 +124,24 @@ pub struct ResourceMetadata {
     pub path: String,
 }
 
+/// Kind of one logical directory entry returned by a resource provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceEntryKind {
+    File,
+    Directory,
+}
+
+/// One platform-neutral logical directory entry.
+///
+/// The entry exposes only its bare logical name and kind. Native paths,
+/// timestamps, permissions, and other host filesystem metadata are not part
+/// of this semantic boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceDirectoryEntry {
+    pub name: String,
+    pub kind: ResourceEntryKind,
+}
+
 /// A successfully resolved and read logical project source.
 ///
 /// The source identity is part of the resource contract. `.include` uses it
@@ -182,6 +200,10 @@ pub enum ResourceAccessError {
     Boundary { message: String },
     #[error("resource not found: {path}")]
     NotFound { path: String },
+    #[error("resource path is not a directory: {path}")]
+    NotDirectory { path: String },
+    #[error("logical resource tree is inconsistent at: {path}")]
+    InconsistentDirectoryTree { path: String },
     #[error("resource is not valid UTF-8: {path}: {message}")]
     InvalidUtf8 { path: String, message: String },
 }
@@ -219,6 +241,23 @@ pub trait ResourceProvider {
         let _ = reference;
         Err(ResourceAccessError::UnsupportedOperation {
             operation: "resource_metadata",
+        })
+    }
+
+    /// Enumerates an existing logical project directory.
+    ///
+    /// Providers opt in explicitly. The engine owns filtering and presentation;
+    /// this operation only returns bare logical names/kinds for direct or
+    /// recursive descendants and never exposes host filesystem metadata.
+    fn list_directory(
+        &self,
+        _source_id: arkst_source::SourceId,
+        reference: &str,
+        _recursive: bool,
+    ) -> Result<Vec<ResourceDirectoryEntry>, ResourceAccessError> {
+        let _ = reference;
+        Err(ResourceAccessError::UnsupportedOperation {
+            operation: "list_directory",
         })
     }
 

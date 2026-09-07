@@ -732,3 +732,188 @@ fn filename_fails_closed_for_missing_host_uri_boundary_and_non_boolean_extension
         assert!(result.ir.nodes.is_empty(), "{source}");
     }
 }
+
+#[test]
+fn listfiles_bounded_logical_directory_semantics_189() {
+    let cases = [
+        (
+            ".listfiles {data} directories:{false} fullpath:{false}::size\n",
+            "1",
+        ),
+        (".listfiles {data} fullpath:{false}::size\n", "2"),
+        (
+            ".listfiles {data} directories:{false} recursive:{true} fullpath:{false}::size\n",
+            "2",
+        ),
+        (
+            ".listfiles {data} recursive:{true} fullpath:{false}::size\n",
+            "3",
+        ),
+    ];
+    for (source, expected) in cases {
+        let project = project(
+            "main.qd",
+            &[("main.qd", source)],
+            &[("data/a.txt", b"a"), ("data/nested/b.txt", b"b")],
+        );
+        let result = compile_project(&project);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(paragraph_text(&result), expected, "{source}");
+    }
+}
+
+#[test]
+fn listfiles_recursive_fullpath_false_deduplicates_bare_names_like_upstream_none_set() {
+    let project = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} recursive:{true} fullpath:{false}::size\n",
+        )],
+        &[("data/a/same.txt", b"a"), ("data/b/same.txt", b"b")],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(paragraph_text(&result), "1");
+}
+
+#[test]
+fn listfiles_uses_nested_source_identity_as_directory_base() {
+    let project = project(
+        "main.qd",
+        &[
+            ("main.qd", ".include {nested/child.qd}\n"),
+            (
+                "nested/child.qd",
+                ".listfiles {data} directories:{false} fullpath:{false}::size\n",
+            ),
+        ],
+        &[("nested/data/a.txt", b"a"), ("nested/data/b.txt", b"b")],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(paragraph_text(&result), "2");
+}
+
+#[test]
+fn listfiles_rejects_unimplemented_or_host_specific_options_before_enumeration() {
+    for (source, code, needle) in [
+        (".listfiles {data}\n", "E8001", "fullpath:true"),
+        (
+            ".listfiles {data} fullpath:{false} pattern:{a}\n",
+            "E3001",
+            "pattern",
+        ),
+        (
+            ".listfiles {data} fullpath:{false} sortby:{name}\n",
+            "E3001",
+            "sortby:name",
+        ),
+        (
+            ".listfiles {data} fullpath:{false} sortby:{lastmodified}\n",
+            "E8001",
+            "lastmodified",
+        ),
+    ] {
+        let project = project("main.qd", &[("main.qd", source)], &[("data/a.txt", b"a")]);
+        let result = compile_project(&project);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.diagnostics[0].code, code, "{source}");
+        assert!(
+            result.diagnostics[0].message.contains(needle),
+            "{source}: {:?}",
+            result.diagnostics[0]
+        );
+    }
+}
+
+#[test]
+fn listfiles_rejects_file_missing_host_paths_and_invalid_argument_types() {
+    for (source, code, needle) in [
+        (
+            ".listfiles {data/a.txt} fullpath:{false}\n",
+            "E3001",
+            "not a directory",
+        ),
+        (
+            ".listfiles {missing} fullpath:{false}\n",
+            "E3001",
+            "not found",
+        ),
+        (
+            ".listfiles {/tmp} fullpath:{false}\n",
+            "E8001",
+            "host filesystem",
+        ),
+        (
+            ".listfiles {data} directories:{nope} fullpath:{false}\n",
+            "E3003",
+            "directories",
+        ),
+        (
+            ".listfiles {data} fullpath:{false} sortby:{bogus}\n",
+            "E3003",
+            "sort criterion",
+        ),
+        (
+            ".listfiles {data} fullpath:{false} order:{bogus}\n",
+            "E3003",
+            "order",
+        ),
+    ] {
+        let project = project("main.qd", &[("main.qd", source)], &[("data/a.txt", b"a")]);
+        let result = compile_project(&project);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.diagnostics[0].code, code, "{source}");
+        assert!(
+            result.diagnostics[0].message.contains(needle),
+            "{source}: {:?}",
+            result.diagnostics[0]
+        );
+    }
+}
+
+#[test]
+fn listfiles_none_accepts_descending_order_and_empty_post_filter_collection_189() {
+    let project = project(
+        "main.qd",
+        &[(
+            "main.qd",
+            ".listfiles {data} directories:{false} fullpath:{false} sortby:{none} order:{descending}::size\n",
+        )],
+        &[("data/nested/only.bin", b"x")],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(paragraph_text(&result), "0");
+}
+
+#[test]
+fn listfiles_dot_is_relative_to_the_calling_source_directory_189() {
+    let project = project(
+        "docs/main.qd",
+        &[(
+            "docs/main.qd",
+            ".listfiles {.} directories:{false} fullpath:{false}::size\n",
+        )],
+        &[("docs/data.bin", b"x"), ("elsewhere/outside.bin", b"y")],
+    );
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    // main.qd itself and data.bin are direct files in docs/; elsewhere is outside this base.
+    assert_eq!(paragraph_text(&result), "2");
+}

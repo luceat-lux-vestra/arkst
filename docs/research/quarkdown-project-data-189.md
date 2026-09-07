@@ -1,10 +1,9 @@
 # Quarkdown v2.5.1 project data/file identity evidence (#189)
 
-## Current bounded slice: `.filename`
+## Implemented bounded slices: `.filename` and `.listfiles`
 
 This record pins the first #189 implementation slice against Quarkdown v2.5.1 at
-`107ec3a9482f10d6f90d7580f8409b46a719d18e`. The remaining #189 families
-`.listfiles`, `.csv`, and `.bibliography` are intentionally not claimed here.
+`107ec3a9482f10d6f90d7580f8409b46a719d18e`. The remaining #189 families `.csv` and `.bibliography` are intentionally not claimed here.
 
 Pinned `quarkdown-stdlib/.../Data.kt` uses the shared `file(context, path,
 requireExistence = true)` helper. Observable ordering is resolve -> read
@@ -31,3 +30,37 @@ The upstream `GlobalRead` behavior remains the accepted
 WASM resource binding/parity remains #191-owned. No `std::fs`, cwd, process,
 environment, network, timestamp, permission, or native-path capability is
 added to platform-neutral compiler code by this slice.
+
+
+## Bounded `.listfiles` contract
+
+Pinned `Data.kt` defines `directories=true`, `recursive=false`, optional
+regex `pattern`, `fullpath=true`, `sortby=NONE`, and `order=ASCENDING`.
+`NONE` returns an unordered set after presentation mapping; `NAME` uses
+lowercase human-friendly alphanumeric comparison, while `LAST_MODIFIED`
+depends on host timestamps. `fullpath=true` returns native absolute paths.
+
+Arkst implements only the deterministic project-bounded subset whose inputs
+already exist in `VirtualProject`: non-empty directories inferred from source
+and asset path prefixes, direct/recursive enumeration, directory inclusion or
+exclusion, `fullpath:false`, and `sortby:none`. Bare names are deduplicated
+after filtering, matching upstream's NONE/set return shape; their internal
+order is deterministic but is not claimed as upstream enumeration-order parity.
+`order` is accepted for `sortby:none` and has no effect, as upstream NONE does
+not sort.
+
+Empty directory identity is not present in `VirtualProject` and therefore
+remains unrepresentable. `pattern`, exact alphanumeric `sortby:name`, native
+absolute `fullpath:true`, and timestamp-backed `sortby:lastmodified` fail
+closed instead of being approximated. A file passed as the directory target
+fails as not-a-directory; an absent/inferred-empty target fails as not found.
+Impossible in-memory trees that imply the same logical path is both a file and
+directory fail as an internal provider-contract error rather than choosing one
+interpretation.
+
+`ResourceProvider::list_directory` is opt-in and defaults to
+`UnsupportedOperation`, so existing/custom providers gain no directory
+observation capability implicitly. The production provider enumerates only
+immutable `SourceStore`/`AssetStore` paths. No `std::fs`, cwd, native path,
+timestamp, permission, environment, process, or network state enters the
+evaluator/project boundary.

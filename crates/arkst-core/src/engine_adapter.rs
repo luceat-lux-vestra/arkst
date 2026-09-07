@@ -2,12 +2,13 @@
 
 use arkst_engine::{
     DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
-    ResourceAccessError, ResourceMetadata, ResourceProvider, ResourceRoot as EngineResourceRoot,
-    ResourceText,
+    ResourceAccessError, ResourceDirectoryEntry as EngineDirectoryEntry,
+    ResourceEntryKind as EngineEntryKind, ResourceMetadata, ResourceProvider,
+    ResourceRoot as EngineResourceRoot, ResourceText,
 };
 use arkst_project::{
     ProjectMetadata, ResourceAccessError as ProjectResourceAccessError,
-    ResourceRoot as ProjectResourceRoot, VirtualProject,
+    ResourceEntryKind as ProjectEntryKind, ResourceRoot as ProjectResourceRoot, VirtualProject,
 };
 use arkst_source::SourceId;
 
@@ -79,6 +80,29 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
         })
     }
 
+    fn list_directory(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+        recursive: bool,
+    ) -> Result<Vec<EngineDirectoryEntry>, ResourceAccessError> {
+        self.project
+            .list_resource_directory(source_id, reference, recursive)
+            .map_err(map_resource_error)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| EngineDirectoryEntry {
+                        name: entry.name,
+                        kind: match entry.kind {
+                            ProjectEntryKind::File => EngineEntryKind::File,
+                            ProjectEntryKind::Directory => EngineEntryKind::Directory,
+                        },
+                    })
+                    .collect()
+            })
+    }
+
     fn read_text(
         &self,
         source_id: SourceId,
@@ -141,6 +165,14 @@ fn map_resource_error(error: ProjectResourceAccessError) -> ResourceAccessError 
         ProjectResourceAccessError::NotFound(path) => ResourceAccessError::NotFound {
             path: path.to_string(),
         },
+        ProjectResourceAccessError::NotDirectory(path) => ResourceAccessError::NotDirectory {
+            path: path.to_string(),
+        },
+        ProjectResourceAccessError::InconsistentDirectoryTree(path) => {
+            ResourceAccessError::InconsistentDirectoryTree {
+                path: path.to_string(),
+            }
+        }
         ProjectResourceAccessError::InvalidUtf8 { path, message } => {
             ResourceAccessError::InvalidUtf8 {
                 path: path.to_string(),

@@ -8,11 +8,11 @@
 //! - CLI and WASM builds from same core
 
 use crate::{
-    AssetStore, AssetStoreError, ResourceAccessError, ResourceReference, SourceStore,
-    SourceStoreError, VirtualPathBuf, VirtualPathError,
+    AssetStore, AssetStoreError, ResourceAccessError, ResourceDirectoryEntry, ResourceEntryKind,
+    ResourceReference, SourceStore, SourceStoreError, VirtualPathBuf, VirtualPathError,
 };
 use arkst_source::SourceId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 /// One loadable Quarkdown library supplied by the host as immutable in-memory source.
@@ -133,6 +133,85 @@ impl VirtualProject {
         base.join(reference).map_err(ResourceAccessError::Boundary)
     }
 
+    /// Lists a source-relative logical directory using only immutable project paths.
+    ///
+    /// Directory identity is inferred from source/asset path prefixes, so empty
+    /// directories are intentionally not representable. Results are canonical-path
+    /// ordered and contain no native path or host metadata.
+    pub fn list_resource_directory(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+        recursive: bool,
+    ) -> Result<Vec<ResourceDirectoryEntry>, ResourceAccessError> {
+        let directory = self.resolve_resource_path(source_id, reference)?;
+        if self.sources.contains(&directory) || self.assets.contains(&directory) {
+            return Err(ResourceAccessError::NotDirectory(directory));
+        }
+
+        let mut files = BTreeSet::new();
+        for (_, path, _) in self.sources.iter() {
+            files.insert(path.clone());
+        }
+        for (path, _) in self.assets.iter() {
+            files.insert(path.clone());
+        }
+
+        let prefix = (!directory.is_root()).then(|| format!("{}/", directory.as_str()));
+        let mut found_descendant = false;
+        let mut entries = BTreeMap::<VirtualPathBuf, ResourceEntryKind>::new();
+
+        for path in files {
+            let relative = if let Some(prefix) = &prefix {
+                let Some(relative) = path.as_str().strip_prefix(prefix) else {
+                    continue;
+                };
+                relative
+            } else {
+                path.as_str()
+            };
+            if relative.is_empty() {
+                continue;
+            }
+            found_descendant = true;
+            let components = relative.split('/').collect::<Vec<_>>();
+
+            if recursive {
+                for depth in 1..components.len() {
+                    let relative_directory = components[..depth].join("/");
+                    let path = directory
+                        .join(&relative_directory)
+                        .map_err(ResourceAccessError::Boundary)?;
+                    insert_directory_entry(&mut entries, path, ResourceEntryKind::Directory)?;
+                }
+                insert_directory_entry(&mut entries, path, ResourceEntryKind::File)?;
+            } else if components.len() == 1 {
+                insert_directory_entry(&mut entries, path, ResourceEntryKind::File)?;
+            } else {
+                let path = directory
+                    .join(components[0])
+                    .map_err(ResourceAccessError::Boundary)?;
+                insert_directory_entry(&mut entries, path, ResourceEntryKind::Directory)?;
+            }
+        }
+
+        if !found_descendant {
+            return Err(ResourceAccessError::NotFound(directory));
+        }
+
+        Ok(entries
+            .into_iter()
+            .map(|(path, kind)| ResourceDirectoryEntry {
+                name: path
+                    .file_name()
+                    .expect("directory entries are never the logical root")
+                    .to_string(),
+                path,
+                kind,
+            })
+            .collect())
+    }
+
     /// Reads a project resource as bytes after source-relative resolution.
     pub fn read_resource_bytes(
         &self,
@@ -162,6 +241,21 @@ impl VirtualProject {
             message: error.utf8_error().to_string(),
         })?;
         Ok((path, text))
+    }
+}
+
+fn insert_directory_entry(
+    entries: &mut BTreeMap<VirtualPathBuf, ResourceEntryKind>,
+    path: VirtualPathBuf,
+    kind: ResourceEntryKind,
+) -> Result<(), ResourceAccessError> {
+    match entries.get(&path).copied() {
+        None => {
+            entries.insert(path, kind);
+            Ok(())
+        }
+        Some(existing) if existing == kind => Ok(()),
+        Some(_) => Err(ResourceAccessError::InconsistentDirectoryTree(path)),
     }
 }
 
