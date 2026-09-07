@@ -7066,28 +7066,15 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
-        match arguments.sort_by {
-            ListFilesSort::None => {}
-            ListFilesSort::Name => {
-                diagnostics.push(resource_diagnostic(
-                    "E3001",
-                    "`.listfiles` `sortby:name` requires Quarkdown's exact alphanumeric comparator semantics".to_string(),
-                    *span,
-                    "Use `sortby:none`; exact name sorting remains bounded #189 compatibility debt.",
-                ));
-                return CallOutcome::Failed;
-            }
-            ListFilesSort::LastModified => {
-                diagnostics.push(resource_diagnostic(
-                    "E8001",
-                    "`.listfiles` `sortby:lastmodified` requires host filesystem timestamps".to_string(),
-                    *span,
-                    "Use `sortby:none`; deterministic VirtualProject evaluation does not expose host timestamps.",
-                ));
-                return CallOutcome::Failed;
-            }
+        if arguments.sort_by == ListFilesSort::LastModified {
+            diagnostics.push(resource_diagnostic(
+                "E8001",
+                "`.listfiles` `sortby:lastmodified` requires host filesystem timestamps".to_string(),
+                *span,
+                "Use `sortby:none` or the bounded ASCII `sortby:name` slice; deterministic VirtualProject evaluation does not expose host timestamps.",
+            ));
+            return CallOutcome::Failed;
         }
-        let _ = arguments.order;
 
         if reject_host_filesystem_reference("listfiles", &arguments.reference, *span, diagnostics) {
             return CallOutcome::Failed;
@@ -7109,22 +7096,67 @@ impl Evaluator {
             return outcome;
         }
 
-        // Upstream FileSorting.NONE returns an unordered Set after mapping
-        // to the requested presentation. For the supported fullpath:false
-        // slice, deduplicate bare names and choose a deterministic internal
-        // order without claiming observable upstream enumeration order.
-        let names = entries
+        let mut entries = entries
             .into_iter()
             .filter(|entry| arguments.list_directories || entry.kind == ResourceEntryKind::File)
-            .map(|entry| entry.name)
-            .collect::<BTreeSet<_>>();
-        if let Err(outcome) = self.check_materialized_elements_len(names.len(), *span, diagnostics)
-        {
-            return outcome;
+            .collect::<Vec<_>>();
+
+        match arguments.sort_by {
+            ListFilesSort::None => {
+                // Upstream FileSorting.NONE returns an unordered Set after mapping
+                // to the requested presentation. For the supported fullpath:false
+                // slice, deduplicate bare names and choose a deterministic internal
+                // order without claiming observable upstream enumeration order.
+                let names = entries
+                    .into_iter()
+                    .map(|entry| entry.name)
+                    .collect::<BTreeSet<_>>();
+                if let Err(outcome) =
+                    self.check_materialized_elements_len(names.len(), *span, diagnostics)
+                {
+                    return outcome;
+                }
+                CallOutcome::Value(IrValue::Collection(
+                    names.into_iter().map(IrValue::String).collect(),
+                ))
+            }
+            ListFilesSort::Name => {
+                if let Some(entry) = entries.iter().find(|entry| !entry.name.is_ascii()) {
+                    diagnostics.push(resource_diagnostic(
+                        "E3001",
+                        format!(
+                            "`.listfiles` `sortby:name` exact comparator parity is bounded to ASCII names; `{}` is non-ASCII",
+                            entry.name
+                        ),
+                        *span,
+                        "Use `sortby:none` for non-ASCII logical names; #189 retains Unicode lowercase/comparator parity as explicit debt.",
+                    ));
+                    return CallOutcome::Failed;
+                }
+                entries.sort_by(|left, right| {
+                    let ordering = compare_quarkdown_ascii_alphanumeric(&left.name, &right.name);
+                    match arguments.order {
+                        ListFilesOrder::Ascending => ordering,
+                        ListFilesOrder::Descending => ordering.reverse(),
+                    }
+                });
+                if let Err(outcome) =
+                    self.check_materialized_elements_len(entries.len(), *span, diagnostics)
+                {
+                    return outcome;
+                }
+                // Unlike FileSorting.NONE, upstream NAME returns an ordered
+                // list after filename projection, so equal bare names are not
+                // deduplicated.
+                CallOutcome::Value(IrValue::Collection(
+                    entries
+                        .into_iter()
+                        .map(|entry| IrValue::String(entry.name))
+                        .collect(),
+                ))
+            }
+            ListFilesSort::LastModified => unreachable!("rejected before provider access"),
         }
-        CallOutcome::Value(IrValue::Collection(
-            names.into_iter().map(IrValue::String).collect(),
-        ))
     }
 
     fn evaluate_json(
@@ -14115,6 +14147,78 @@ enum ListFilesSort {
 enum ListFilesOrder {
     Ascending,
     Descending,
+}
+
+/// Compares the ASCII subset of Quarkdown's pinned
+/// `se.sawano.java.text.AlphanumericComparator` 2.0.0 input after
+/// Kotlin's filename `lowercase()` selector. The supported slice is
+/// deliberately ASCII-only so Unicode-version/case-mapping drift
+/// cannot be mistaken for exact JVM compatibility.
+fn compare_quarkdown_ascii_alphanumeric(left: &str, right: &str) -> Ordering {
+    debug_assert!(left.is_ascii() && right.is_ascii());
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut left_index = 0;
+    let mut right_index = 0;
+
+    while left_index < left.len() && right_index < right.len() {
+        let left_numeric = left[left_index].is_ascii_digit();
+        let right_numeric = right[right_index].is_ascii_digit();
+        let left_end = alphanumeric_window_end(left, left_index, left_numeric);
+        let right_end = alphanumeric_window_end(right, right_index, right_numeric);
+
+        let ordering = if left_numeric && right_numeric {
+            let left_significant = numeric_significant_start(left, left_index, left_end);
+            let right_significant = numeric_significant_start(right, right_index, right_end);
+            (left_end - left_significant)
+                .cmp(&(right_end - right_significant))
+                .then_with(|| {
+                    left[left_significant..left_end].cmp(&right[right_significant..right_end])
+                })
+        } else {
+            compare_ascii_case_folded_windows(
+                &left[left_index..left_end],
+                &right[right_index..right_end],
+            )
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+
+        left_index = left_end;
+        right_index = right_end;
+    }
+
+    // The pinned Java comparator breaks otherwise-equal window
+    // sequences by the original CharSequence length. For ASCII,
+    // byte length is exactly Java UTF-16 length.
+    left.len().cmp(&right.len())
+}
+
+fn alphanumeric_window_end(bytes: &[u8], start: usize, numeric: bool) -> usize {
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_digit() == numeric {
+        end += 1;
+    }
+    end
+}
+
+fn numeric_significant_start(bytes: &[u8], start: usize, end: usize) -> usize {
+    let mut significant = start;
+    while significant + 1 < end && bytes[significant] == b'0' {
+        significant += 1;
+    }
+    significant
+}
+
+fn compare_ascii_case_folded_windows(left: &[u8], right: &[u8]) -> Ordering {
+    for (left, right) in left.iter().zip(right) {
+        let ordering = left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase());
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
 }
 
 struct ListFilesArguments {
