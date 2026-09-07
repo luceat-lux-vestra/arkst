@@ -2,7 +2,8 @@
 
 use arkst_engine::{
     DocumentMetadataDefaults, IncludedSource, LoadableLibraryProvider, LoadableLibrarySource,
-    ResourceAccessError, ResourceProvider, ResourceRoot as EngineResourceRoot, ResourceText,
+    ResourceAccessError, ResourceMetadata, ResourceProvider, ResourceRoot as EngineResourceRoot,
+    ResourceText,
 };
 use arkst_project::{
     ProjectMetadata, ResourceAccessError as ProjectResourceAccessError,
@@ -57,6 +58,25 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
         self.project
             .relative_path_to_resource_root(source_id, root)
             .map_err(map_resource_error)
+    }
+
+    fn resource_metadata(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+    ) -> Result<ResourceMetadata, ResourceAccessError> {
+        let path = self
+            .project
+            .resolve_resource_path(source_id, reference)
+            .map_err(map_resource_error)?;
+        if !self.project.sources().contains(&path) && !self.project.assets().contains(&path) {
+            return Err(ResourceAccessError::NotFound {
+                path: path.to_string(),
+            });
+        }
+        Ok(ResourceMetadata {
+            path: path.to_string(),
+        })
     }
 
     fn read_text(

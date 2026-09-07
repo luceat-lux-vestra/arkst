@@ -115,6 +115,15 @@ pub struct ResourceText {
     pub text: String,
 }
 
+/// Metadata for an existing logical project resource.
+///
+/// This carries canonical logical identity only. It deliberately exposes no
+/// bytes, native path, timestamps, permissions, or other host filesystem state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceMetadata {
+    pub path: String,
+}
+
 /// A successfully resolved and read logical project source.
 ///
 /// The source identity is part of the resource contract. `.include` uses it
@@ -163,6 +172,8 @@ pub enum ResourceRoot {
 /// no project path, store, filesystem, or host error types.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResourceAccessError {
+    #[error("resource provider does not support operation: {operation}")]
+    UnsupportedOperation { operation: &'static str },
     #[error("resource reference is not a local project path: {reference}")]
     UnsupportedReference { reference: String },
     #[error("source identity is not present in the project: {source_id:?}")]
@@ -194,6 +205,21 @@ pub trait ResourceProvider {
     ) -> Result<String, ResourceAccessError> {
         let _ = root;
         Err(ResourceAccessError::UnknownSource { source_id })
+    }
+
+    /// Resolves an existing logical project resource without reading its bytes.
+    ///
+    /// Providers that do not support metadata lookup fail closed by default;
+    /// they must opt in explicitly before `.filename` can observe resource identity.
+    fn resource_metadata(
+        &self,
+        _source_id: arkst_source::SourceId,
+        reference: &str,
+    ) -> Result<ResourceMetadata, ResourceAccessError> {
+        let _ = reference;
+        Err(ResourceAccessError::UnsupportedOperation {
+            operation: "resource_metadata",
+        })
     }
 
     /// Reads any project resource as validated UTF-8 text.
