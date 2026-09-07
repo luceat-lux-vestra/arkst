@@ -780,9 +780,13 @@ separate passthrough capability is implemented.
 
 The implemented resource model covers project-backed text, JSON, nested
 document inclusion, logical filename identity, and a bounded non-empty logical
-directory listing subset (`fullpath:false`, `sortby:none`, no pattern). Other
-data-loading families, including CSV/list loading and remote/package resources, remain deferred
-until their separate compatibility and host-boundary contracts are reviewed.
+directory listing subset with `fullpath:false`, `sortby:none`, and ASCII
+`sortby:name`; NAME covers pinned lowercase/alphanumeric ascending/descending
+ordering and duplicate preservation, while non-ASCII Unicode comparator parity,
+regex pattern filtering, native full paths, and timestamp sorting remain
+fail-closed. Other data-loading families, including CSV/list loading and
+remote/package resources, remain deferred until their separate compatibility
+and host-boundary contracts are reviewed.
 
 ## Reserved Syntax
 

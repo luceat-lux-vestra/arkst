@@ -7,6 +7,8 @@ const RESOURCE_MANIFEST: &str = include_str!(
 );
 const COMPAT_README: &str = include_str!("../../../docs/compatibility/quarkdown/README.md");
 const GAP_INVENTORY: &str = include_str!("../../../docs/compatibility/quarkdown/GAP_INVENTORY.md");
+const PROJECT_DATA_RESEARCH: &str =
+    include_str!("../../../docs/research/quarkdown-project-data-189.md");
 const STDLIB_AUDIT: &str =
     include_str!("../../../docs/compatibility/quarkdown/STDLIB_BUILTINS_AUDIT.md");
 const STDLIB_MANIFEST: &str =
@@ -16,6 +18,7 @@ const CONTENT_MANIFEST: &str = include_str!(
 );
 const TARGET_SHA: &str = "107ec3a9482f10d6f90d7580f8409b46a719d18e";
 const BASE_SHA: &str = "4875fb1210f0f9f3fdadc47bf48197b2bdaa17ec";
+const LISTFILES_NAME_SORT_MERGE_SHA: &str = "f1b2b969f98f95d5961513fc37f802a0e94d2ad7";
 
 fn manifest_row<'a>(manifest: &'a str, column: usize, value: &str, label: &str) -> Vec<&'a str> {
     manifest
@@ -114,13 +117,23 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     let filename = resource_row("builtin:.filename");
     assert!(!filename[22].contains(".listfiles/.csv/.bibliography remain"));
     let listfiles = resource_row("builtin:.listfiles");
+    assert!(listfiles[16].contains("quarkdown_listfiles_name_sort_189.rs"));
     assert!(listfiles[18].contains("fullpath:false"));
+    assert!(listfiles[18].contains("sortby:name"));
+    assert!(listfiles[18].contains("ASCII"));
     assert!(listfiles[19].contains("empty-directory"));
     assert!(listfiles[19].contains("regex"));
     assert!(listfiles[19].contains("last-modified"));
+    assert!(listfiles[19].contains("Unicode"));
+    assert!(!listfiles[19].contains("exact alphanumeric name sorting"));
     assert_eq!(listfiles[21], "#189;POLICY_DIVERGENCE:global-read;#191");
 
+    assert!(PROJECT_DATA_RESEARCH.contains(LISTFILES_NAME_SORT_MERGE_SHA));
+    assert!(PROJECT_DATA_RESEARCH.contains("ASCII-bounded `sortby:name`"));
+    assert!(PROJECT_DATA_RESEARCH.contains("Non-ASCII `sortby:name` also fails closed"));
+
     assert!(COMPAT_README.contains("bounded #189 slices"));
+    assert!(COMPAT_README.contains("ASCII `sortby:name`"));
     assert!(!COMPAT_README
         .contains("`.listfiles`, `.filename`) and `.llmstxt` are tracked as deferred"));
     assert!(

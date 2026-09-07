@@ -2,7 +2,7 @@
 
 ## Implemented bounded slices: `.filename` and `.listfiles`
 
-This record pins the first #189 implementation slice against Quarkdown v2.5.1 at
+This record pins the bounded #189 implementation slices against Quarkdown v2.5.1 at
 `107ec3a9482f10d6f90d7580f8409b46a719d18e`. The remaining #189 families `.csv` and `.bibliography` are intentionally not claimed here.
 
 Pinned `quarkdown-stdlib/.../Data.kt` uses the shared `file(context, path,
@@ -29,34 +29,46 @@ The upstream `GlobalRead` behavior remains the accepted
 `POLICY_DIVERGENCE:global-read` recorded by completed #296/#300/#304. Public
 WASM resource binding/parity remains #191-owned. No `std::fs`, cwd, process,
 environment, network, timestamp, permission, or native-path capability is
-added to platform-neutral compiler code by this slice.
-
+added to platform-neutral compiler code by these slices.
 
 ## Bounded `.listfiles` contract
 
 Pinned `Data.kt` defines `directories=true`, `recursive=false`, optional
 regex `pattern`, `fullpath=true`, `sortby=NONE`, and `order=ASCENDING`.
-`NONE` returns an unordered set after presentation mapping; `NAME` uses
-lowercase human-friendly alphanumeric comparison, while `LAST_MODIFIED`
-depends on host timestamps. `fullpath=true` returns native absolute paths.
+`NONE` returns an unordered set after presentation mapping; `NAME` lowercases
+filenames before applying the pinned human-friendly alphanumeric comparator,
+while `LAST_MODIFIED` depends on host timestamps. `fullpath=true` returns
+native absolute paths.
 
-Arkst implements only the deterministic project-bounded subset whose inputs
-already exist in `VirtualProject`: non-empty directories inferred from source
-and asset path prefixes, direct/recursive enumeration, directory inclusion or
-exclusion, `fullpath:false`, and `sortby:none`. Bare names are deduplicated
-after filtering, matching upstream's NONE/set return shape; their internal
-order is deterministic but is not claimed as upstream enumeration-order parity.
-`order` is accepted for `sortby:none` and has no effect, as upstream NONE does
-not sort.
+Arkst implements the deterministic project-bounded subset whose inputs already
+exist in `VirtualProject`: non-empty directories inferred from source and asset
+path prefixes, direct/recursive enumeration, directory inclusion or exclusion,
+`fullpath:false`, `sortby:none`, and an ASCII-bounded `sortby:name` mode.
+`sortby:none` preserves the existing set-like bare-name deduplication behavior;
+its internal order is deterministic but is not claimed as upstream enumeration-
+order parity. `order` has no effect for `sortby:none`, matching upstream NONE.
+For `sortby:name`, Arkst applies ASCII lowercase-before-compare semantics,
+numeric chunks, leading-zero length tie-breaking, and ascending/descending
+ordering; the ordered NAME result preserves duplicate bare names rather than
+collapsing them as NONE does. This bounded comparator slice merged in #307 at
+`f1b2b969f98f95d5961513fc37f802a0e94d2ad7`.
 
 Empty directory identity is not present in `VirtualProject` and therefore
-remains unrepresentable. `pattern`, exact alphanumeric `sortby:name`, native
-absolute `fullpath:true`, and timestamp-backed `sortby:lastmodified` fail
-closed instead of being approximated. A file passed as the directory target
-fails as not-a-directory; an absent/inferred-empty target fails as not found.
+remains unrepresentable. `pattern`, native absolute `fullpath:true`, and
+timestamp-backed `sortby:lastmodified` still fail closed instead of being
+approximated. Non-ASCII `sortby:name` also fails closed: exact Kotlin/JVM
+Unicode `lowercase()` plus comparator parity has not been proven and remains
+explicit #189 compatibility debt. A file passed as the directory target fails
+as not-a-directory; an absent/inferred-empty target fails as not found.
 Impossible in-memory trees that imply the same logical path is both a file and
 directory fail as an internal provider-contract error rather than choosing one
 interpretation.
+
+The name-sorting regression evidence covers ordinary numeric ordering,
+leading-zero ties, descending order, duplicate-name preservation, mixed ASCII
+case, and non-ASCII fail-closed behavior in
+`crates/arkst-core/tests/quarkdown_resource_builtins.rs` and
+`crates/arkst-core/tests/quarkdown_listfiles_name_sort_189.rs`.
 
 `ResourceProvider::list_directory` is opt-in and defaults to
 `UnsupportedOperation`, so existing/custom providers gain no directory
