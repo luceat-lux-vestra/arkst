@@ -104,8 +104,8 @@ path = Path("docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDI
 text = path.read_text()
 text = replace_once(
     text,
-    "a `VirtualProject` containing sorted source and asset stores. When explicitly\n",
-    "a `VirtualProject` containing sorted source/asset stores and explicit logical\n   directory identities. When explicitly\n",
+    "   `VirtualProject` containing sorted source and asset stores. When explicitly\n",
+    "   `VirtualProject` containing sorted source/asset stores and explicit logical\n   directory identities. When explicitly\n",
     "audit project model wording",
 )
 text = replace_once(
