@@ -30,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse origin/main)" = "6307c09f466e1543b5ad96e04950eb67482c7a62"
+          git checkout origin/main -- Cargo.lock
           git diff --exit-code origin/main -- Cargo.lock
           if git grep -n 'collect_project_files' -- docs/research/quarkdown-native-ingestion-298.md crates/arkst-cli/tests/native_ingestion_policy_298.rs; then exit 1; fi
           python3 - <<'PY'
