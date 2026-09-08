@@ -1,0 +1,263 @@
+name: tmp-189-empty-directory-finalize
+
+on:
+  push:
+    branches:
+      - compat/189-empty-directory-identity-proof
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-and-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: compat/189-empty-directory-identity-proof
+          fetch-depth: 0
+
+      - name: Apply final reconciliation and adversarial proof
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, got {count}")
+              return text.replace(old, new)
+
+          # Native directory symlink aliases must stay outside logical directory identity.
+          path = Path('crates/arkst-cli/src/commands.rs')
+          text = path.read_text()
+          anchor = '''    #[test]\n    #[cfg(unix)]\n    fn symlink_input_preserves_logical_output_path() {\n'''
+          added = r'''    #[test]
+    #[cfg(unix)]
+    fn native_project_ingestion_does_not_register_directory_symlink_alias_189() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        let real = project_root.join("real");
+        fs::create_dir_all(real.join("empty")).unwrap();
+        let input = project_root.join("main.qd");
+        fs::write(&input, "# Main\n").unwrap();
+        symlink(&real, project_root.join("alias")).unwrap();
+
+        let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+        let source = loaded
+            .project
+            .sources()
+            .get_id(loaded.project.entry())
+            .expect("entry source");
+        let root = loaded
+            .project
+            .list_resource_directory(source, ".", false)
+            .expect("project root listing");
+        assert!(root.iter().any(|entry| entry.name == "real"));
+        assert!(!root.iter().any(|entry| entry.name == "alias"));
+        assert!(loaded
+            .project
+            .list_resource_directory(source, "alias", false)
+            .is_err());
+    }
+
+'''
+          text = replace_once(text, anchor, added + anchor, 'symlink alias test anchor')
+          path.write_text(text)
+
+          # Research evidence: empty-directory identity is now represented, while host-only options stay gaps.
+          path = Path('docs/research/quarkdown-project-data-189.md')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '''Arkst implements the deterministic project-bounded subset whose inputs already\nexist in `VirtualProject`: non-empty directories inferred from source and asset\npath prefixes, direct/recursive enumeration, directory inclusion or exclusion,\n''',
+              '''Arkst implements the deterministic project-bounded subset whose inputs already\nexist in `VirtualProject`: directories inferred from source and asset path\nprefixes plus explicit host-supplied empty-directory identity, direct/recursive\nenumeration, directory inclusion or exclusion,\n''',
+              'project-data supported directory scope',
+          )
+          text = replace_once(
+              text,
+              '''Empty directory identity is not present in `VirtualProject` and therefore\nremains unrepresentable. `pattern`, native absolute `fullpath:true`, and\n''',
+              '''Explicit empty-directory identity is represented in `VirtualProject` and the\nnative CLI project-ingestion boundary. `pattern`, native absolute `fullpath:true`, and\n''',
+              'project-data empty directory gap',
+          )
+          text = replace_once(
+              text,
+              'an absent/inferred-empty target fails as not found.',
+              'an absent or unregistered target fails as not found.',
+              'project-data missing target wording',
+          )
+          text = replace_once(
+              text,
+              'The production provider enumerates only\nimmutable `SourceStore`/`AssetStore` paths.',
+              'The production provider enumerates only immutable project source/asset paths and\nexplicit logical-directory identities.',
+              'project-data provider scope',
+          )
+          path.write_text(text)
+
+          # Native ingestion evidence follows the renamed collector and records directory metadata.
+          path = Path('docs/research/quarkdown-native-ingestion-298.md')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '- recursively enumerates the project root through `collect_project_files`;\n',
+              '- recursively enumerates the project root through `collect_project_entries`;\n',
+              'native ingestion collector name',
+          )
+          text = replace_once(
+              text,
+              '- sorts every directory\'s entries by filename before traversal;\n',
+              '- sorts every directory\'s entries by filename before traversal;\n- records physical directories as bounded logical directory identities, including empty directories;\n',
+              'native ingestion directory identity',
+          )
+          text = replace_once(
+              text,
+              'The project builder itself remains I/O-free. It sorts logical sources/assets\nbefore construction, allocates deterministic source IDs, and already supports\n',
+              'The project builder itself remains I/O-free. It sorts logical sources/assets,\nvalidates explicit directory identities before construction, allocates deterministic\nsource IDs, and already supports\n',
+              'native ingestion builder wording',
+          )
+          path.write_text(text)
+
+          # Canonical narrative no longer lists empty-directory identity as unresolved.
+          path = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              'a `VirtualProject` containing sorted source and asset stores. When explicitly\n',
+              'a `VirtualProject` containing sorted source/asset stores and explicit logical\n   directory identities. When explicitly\n',
+              'audit project model wording',
+          )
+          text = replace_once(
+              text,
+              '`.listfiles` enumerates only inferred non-empty logical\n   directories and exposes bare names in its bounded `fullpath:false` modes:\n',
+              '`.listfiles` enumerates inferred and explicit logical directories, including\n   explicit empty directories, and exposes bare names in its bounded `fullpath:false` modes:\n',
+              'audit listfiles directory wording',
+          )
+          text = replace_once(
+              text,
+              'full paths, last-modified sorting, empty-directory identity, and exact\n',
+              'full paths, last-modified sorting, and exact\n',
+              'audit remaining gaps',
+          )
+          path.write_text(text)
+
+          path = Path('docs/SYNTAX.md')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              'logical filename identity, and a bounded non-empty logical\ndirectory listing subset with `fullpath:false`, `sortby:none`, and ASCII\n',
+              'logical filename identity, and a bounded logical-directory listing subset with\nexplicit empty-directory identity, `fullpath:false`, `sortby:none`, and ASCII\n',
+              'syntax data-loading scope',
+          )
+          path.write_text(text)
+
+          # Canonical manifest: keep PARTIAL, remove only the completed empty-directory gap.
+          path = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv')
+          lines = path.read_text().splitlines()
+          found = 0
+          out = []
+          for line in lines:
+              if not line.startswith('owned\tbuiltin:.listfiles\t'):
+                  out.append(line)
+                  continue
+              found += 1
+              row = line.split('\t')
+              if len(row) != 24:
+                  raise SystemExit(f'listfiles manifest width drift: {len(row)}')
+              if row[17] != 'PARTIAL':
+                  raise SystemExit(f'listfiles status drift: {row[17]}')
+              if 'empty-directory' not in row[19]:
+                  raise SystemExit('listfiles remaining gap no longer contains expected empty-directory marker')
+              row[13] = row[13].replace(
+                  'source/asset-backed non-empty logical directories',
+                  'source/asset-inferred and explicit logical directories, including empty directories',
+              )
+              row[16] += '; crates/arkst-cli/src/commands.rs native empty-directory ingestion and directory-symlink alias regression'
+              row[18] += ' Explicit empty-directory identity is preserved by VirtualProject and native CLI ingestion without adding host metadata to the evaluator boundary.'
+              for phrase in [
+                  'empty-directory identity, ',
+                  'empty-directory identity and ',
+                  ', empty-directory identity',
+                  'empty-directory identity',
+              ]:
+                  row[19] = row[19].replace(phrase, '')
+              row[19] = row[19].replace('  ', ' ').replace(',,', ',')
+              if 'empty-directory' in row[19]:
+                  raise SystemExit(f'empty-directory still unresolved: {row[19]}')
+              if '#189' not in row[21] or '#191' not in row[21] or 'POLICY_DIVERGENCE:global-read' not in row[21]:
+                  raise SystemExit(f'listfiles ownership/follow-up drift: {row[21]}')
+              out.append('\t'.join(row))
+          if found != 1:
+              raise SystemExit(f'expected one listfiles row, got {found}')
+          path.write_text('\n'.join(out) + '\n')
+
+          # Permanent canonical guards now require empty-directory to be supported, not unresolved.
+          for file in [
+              'crates/arkst-core/tests/quarkdown_v251_reconciliation.rs',
+              'crates/arkst-core/tests/filesystem_project_data_resources_audit.rs',
+          ]:
+              path = Path(file)
+              text = path.read_text()
+              old = '    assert!(listfiles[19].contains("empty-directory"));\n'
+              new = (
+                  '    assert!(!listfiles[19].contains("empty-directory"));\n'
+                  '    assert!(listfiles[18].contains("empty-directory"));\n'
+              )
+              text = replace_once(text, old, new, f'{file} empty-directory guard')
+              path.write_text(text)
+          PY
+
+      - name: Format and targeted proof
+        shell: bash
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo test --locked -p arkst-project --test logical_directory_listing_189
+          cargo test --locked -p arkst-core --test quarkdown_resource_builtins
+          cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
+          cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
+          cargo test --locked -p arkst-cli --lib native_project_ingestion
+          cargo test --locked -p arkst-cli --no-default-features --test native_ingestion_policy_298
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          git diff --check
+
+      - name: Verify scope and collapse staging tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "6307c09f466e1543b5ad96e04950eb67482c7a62"
+          git diff --exit-code origin/main -- Cargo.lock
+          ! git grep -n 'collect_project_files' -- docs/research/quarkdown-native-ingestion-298.md crates/arkst-cli/tests/native_ingestion_policy_298.rs
+          python3 <<'PY'
+          from pathlib import Path
+          manifest = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv').read_text()
+          row = next(line.split('\t') for line in manifest.splitlines() if line.startswith('owned\tbuiltin:.listfiles\t'))
+          assert row[17] == 'PARTIAL'
+          assert 'empty-directory' in row[18]
+          assert 'empty-directory' not in row[19]
+          assert '#189' in row[21] and '#191' in row[21] and 'POLICY_DIVERGENCE:global-read' in row[21]
+          assert 'empty-directory identity is not present' not in Path('docs/research/quarkdown-project-data-189.md').read_text().lower()
+          assert 'empty-directory identity' not in Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md').read_text().split('Unimplemented directory-listing options',1)[-1].split('Data-format errors',1)[0]
+          PY
+          git rm .github/workflows/tmp-189-empty-directory-finalize.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/arkst-cli/src/commands.rs \
+                  crates/arkst-cli/tests/native_ingestion_policy_298.rs \
+                  crates/arkst-core/src/engine_adapter.rs \
+                  crates/arkst-core/tests/quarkdown_resource_builtins.rs \
+                  crates/arkst-core/tests/quarkdown_v251_reconciliation.rs \
+                  crates/arkst-core/tests/filesystem_project_data_resources_audit.rs \
+                  crates/arkst-project/src/virtual_project.rs \
+                  crates/arkst-project/tests/logical_directory_listing_189.rs \
+                  docs/SYNTAX.md \
+                  docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md \
+                  docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv \
+                  docs/research/quarkdown-native-ingestion-298.md \
+                  docs/research/quarkdown-project-data-189.md \
+                  .github/workflows/tmp-189-empty-directory-finalize.yml
+          git commit -m 'compat(resource): preserve empty directory identity' -m 'Refs #189'
+          git push origin HEAD:compat/189-empty-directory-identity-proof
