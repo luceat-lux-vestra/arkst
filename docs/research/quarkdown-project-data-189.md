@@ -19,9 +19,9 @@ frontend grammar merely to manufacture a filename fixture.
 
 Arkst represents only the project-bounded subset. `ResourceProvider::resource_metadata`
 returns canonical logical identity for an existing resource without reading
-bytes. `VirtualProjectResourceProvider` accepts both source and asset stores, so
-a binary asset remains a valid file identity and no UTF-8 conversion is
-performed merely to obtain its name. Resolution remains relative to the active
+bytes. `VirtualProjectResourceProvider` accepts source, asset, and logical-directory
+identity, so binary assets and explicit or inferred directories remain valid
+identity targets without UTF-8 conversion merely to obtain a name. Resolution remains relative to the active
 `SourceId`, including nested includes, and all host absolute/Windows/URI/project
 escape references remain fail-closed.
 
@@ -41,8 +41,9 @@ while `LAST_MODIFIED` depends on host timestamps. `fullpath=true` returns
 native absolute paths.
 
 Arkst implements the deterministic project-bounded subset whose inputs already
-exist in `VirtualProject`: non-empty directories inferred from source and asset
-path prefixes, direct/recursive enumeration, directory inclusion or exclusion,
+exist in `VirtualProject`: directories inferred from source and asset path
+prefixes plus explicit host-supplied empty-directory identity, direct/recursive
+enumeration, directory inclusion or exclusion,
 `fullpath:false`, `sortby:none`, and an ASCII-bounded `sortby:name` mode.
 `sortby:none` preserves the existing set-like bare-name deduplication behavior;
 its internal order is deterministic but is not claimed as upstream enumeration-
@@ -53,13 +54,13 @@ ordering; the ordered NAME result preserves duplicate bare names rather than
 collapsing them as NONE does. This bounded comparator slice merged in #307 at
 `f1b2b969f98f95d5961513fc37f802a0e94d2ad7`.
 
-Empty directory identity is not present in `VirtualProject` and therefore
-remains unrepresentable. `pattern`, native absolute `fullpath:true`, and
+Explicit empty-directory identity is represented in `VirtualProject` and the
+native CLI project-ingestion boundary. `pattern`, native absolute `fullpath:true`, and
 timestamp-backed `sortby:lastmodified` still fail closed instead of being
 approximated. Non-ASCII `sortby:name` also fails closed: exact Kotlin/JVM
 Unicode `lowercase()` plus comparator parity has not been proven and remains
 explicit #189 compatibility debt. A file passed as the directory target fails
-as not-a-directory; an absent/inferred-empty target fails as not found.
+as not-a-directory; an absent or unregistered target fails as not found.
 Impossible in-memory trees that imply the same logical path is both a file and
 directory fail as an internal provider-contract error rather than choosing one
 interpretation.
@@ -72,7 +73,7 @@ case, and non-ASCII fail-closed behavior in
 
 `ResourceProvider::list_directory` is opt-in and defaults to
 `UnsupportedOperation`, so existing/custom providers gain no directory
-observation capability implicitly. The production provider enumerates only
-immutable `SourceStore`/`AssetStore` paths. No `std::fs`, cwd, native path,
+observation capability implicitly. The production provider enumerates only immutable project source/asset paths and
+explicit logical-directory identities. No `std::fs`, cwd, native path,
 timestamp, permission, environment, process, or network state enters the
 evaluator/project boundary.

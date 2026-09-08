@@ -100,7 +100,8 @@ is a separate URL/media path and is gated by network permission.
 Arkst's current model is one in-memory logical resource model:
 
 1. The host CLI establishes an explicit project root and builds a
-   `VirtualProject` containing sorted source and asset stores. When explicitly
+   `VirtualProject` containing sorted source/asset stores and explicit logical
+   directory identities. When explicitly
    supplied, `-l` / `--libs` adds a separately bounded, sorted, eager UTF-8
    loadable-library ingestion authority before `VirtualProject::build`.
 2. `VirtualProject::resolve_resource_path` resolves a local reference from the
@@ -109,9 +110,9 @@ Arkst's current model is one in-memory logical resource model:
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
-   read text; `.filename` resolves existing source/asset logical metadata without
-   reading resource bytes; `.listfiles` enumerates only inferred non-empty logical
-   directories and exposes bare names in its bounded `fullpath:false` modes:
+   read text; `.filename` resolves existing source/asset/directory logical metadata without
+   reading resource bytes; `.listfiles` enumerates inferred and explicit logical directories, including
+   explicit empty directories, and exposes bare names in its bounded `fullpath:false` modes:
    `sortby:none` retains deterministic set-like presentation and ASCII
    `sortby:name` applies the pinned lowercase-before-alphanumeric ordering while
    preserving duplicate bare names; non-ASCII NAME sorting fails closed until
@@ -209,7 +210,7 @@ and upstream host path behavior has platform-specific details. Arkst's
 fail-closed logical policy is an intentional architecture boundary, so rows
 requiring full v2.5.1 absolute/global semantics remain partial or unsupported.
 Unimplemented directory-listing options now consist of regex filtering, native
-full paths, last-modified sorting, empty-directory identity, and exact
+full paths, last-modified sorting, and exact
 non-ASCII Kotlin/JVM lowercase/alphanumeric comparator parity. The ASCII
 `sortby:name` slice is implemented and evidenced under #307; broader Unicode
 NAME parity remains fail-closed rather than approximated. Data-format errors
