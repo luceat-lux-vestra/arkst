@@ -75,10 +75,7 @@ fn loader_uses_only_the_injected_provider_and_preserves_raw_ordered_cells() {
     );
     assert_eq!(csv.path, "docs/data/table.csv");
     assert_eq!(csv.headers, [" name ", "note"]);
-    assert_eq!(
-        csv.rows,
-        [vec![" alice ".to_string(), " two ".to_string()]]
-    );
+    assert_eq!(csv.rows, [vec![" alice ".to_string(), " two ".to_string()]]);
 }
 
 #[test]
@@ -177,10 +174,7 @@ fn malformed_quote_classes_fail_closed_without_partial_rows() {
     );
     assert_eq!(
         malformed("a\n\"value\"x\n"),
-        (
-            2,
-            CsvMalformedKind::UnexpectedAfterQuote { character: 'x' }
-        )
+        (2, CsvMalformedKind::UnexpectedAfterQuote { character: 'x' })
     );
 }
 

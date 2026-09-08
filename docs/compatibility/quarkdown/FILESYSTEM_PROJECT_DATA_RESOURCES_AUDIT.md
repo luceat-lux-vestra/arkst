@@ -68,7 +68,7 @@ The owned evaluator/data result is deliberately narrow:
   ingestion is explicitly bounded and evidenced under completed #298/#302;
   public WASM host resource/library binding and the full nested graph contract
   remain open under #191 and #199/#181.
-- `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`; `.filename` and `.listfiles` are bounded `PARTIAL` file-identity/directory-listing slices. The manifest states each absent contract and assigns its bounded
+- `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`; `.filename` and `.listfiles` are bounded `PARTIAL` file-identity/directory-listing slices. `.csv` now has a #189-owned internal source-relative CSV resource/parser prerequisite, but no evaluator dispatch, mode/caption/ref consumption, Table node, or output claim; those language/table layers remain absent under #183. The manifest states each absent contract and assigns its bounded
   follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
@@ -109,7 +109,7 @@ Arkst's current model is one in-memory logical resource model:
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
-   read text; `.filename` resolves existing source/asset logical metadata without
+   read text; the internal #189 CSV prerequisite reuses the same `read_text` authority and parses raw ordered headers/rows without constructing a Table; `.filename` resolves existing source/asset logical metadata without
    reading resource bytes; `.listfiles` enumerates only inferred non-empty logical
    directories and exposes bare names in its bounded `fullpath:false` modes:
    `sortby:none` retains deterministic set-like presentation and ASCII
@@ -212,8 +212,7 @@ Unimplemented directory-listing options now consist of regex filtering, native
 full paths, last-modified sorting, empty-directory identity, and exact
 non-ASCII Kotlin/JVM lowercase/alphanumeric comparator parity. The ASCII
 `sortby:name` slice is implemented and evidenced under #307; broader Unicode
-NAME parity remains fail-closed rather than approximated. Data-format errors
-and inaccessible-host-file distinctions are likewise not silently borrowed
+NAME parity remains fail-closed rather than approximated. The internal CSV prerequisite now gives malformed quotes, duplicate headers, and row-width mismatches deterministic typed failures over validated UTF-8 provider text; exact upstream exception text, Java decoder replacement behavior, and malformed-edge bug-for-bug parity remain bounded #189 work. Inaccessible-host-file distinctions are likewise not silently borrowed
 from the host and remain bounded follow-up work. The `.filename` and
 `.listfiles` subsets represent only project-bounded logical identity/enumeration
 and deliberately expose no host filename, native path, or timestamp state.

@@ -301,4 +301,56 @@ mod tests {
             Err(ResourceAccessError::NotFound { path }) if path == "docs/guide/Theme"
         ));
     }
+
+    #[test]
+    fn csv_resource_loader_reuses_virtual_project_source_relative_text_and_boundaries() {
+        let project = VirtualProjectBuilder::new()
+            .entry("docs/main.qd")
+            .expect("valid entry")
+            .add_source("docs/main.qd", "root")
+            .expect("valid source")
+            .add_source("docs/parts/child.qd", "child")
+            .expect("valid source")
+            .add_asset(
+                "docs/parts/data/table.csv",
+                b"name,note\r\nalpha,\"one,two\"\r\n".to_vec(),
+            )
+            .expect("valid CSV asset")
+            .add_asset("docs/parts/data/invalid.csv", vec![0xff, 0xfe])
+            .expect("valid binary asset")
+            .build()
+            .expect("valid project");
+        let child = source_id(&project, "docs/parts/child.qd");
+        let provider = VirtualProjectResourceProvider::new(&project);
+
+        let csv =
+            arkst_engine::csv_resource::load_csv_resource(&provider, child, "data/./table.csv")
+                .expect("nested source-relative CSV resolves");
+        assert_eq!(csv.path, "docs/parts/data/table.csv");
+        assert_eq!(csv.headers, ["name", "note"]);
+        assert_eq!(csv.rows, [vec!["alpha".to_string(), "one,two".to_string()]]);
+
+        assert!(matches!(
+            arkst_engine::csv_resource::load_csv_resource(
+                &provider,
+                child,
+                "data/invalid.csv"
+            ),
+            Err(arkst_engine::csv_resource::CsvResourceError::Resource(
+                ResourceAccessError::InvalidUtf8 { path, .. }
+            )) if path == "docs/parts/data/invalid.csv"
+        ));
+        assert!(matches!(
+            arkst_engine::csv_resource::load_csv_resource(&provider, child, "/tmp/x.csv"),
+            Err(arkst_engine::csv_resource::CsvResourceError::Resource(
+                ResourceAccessError::UnsupportedReference { .. }
+            ))
+        ));
+        assert!(matches!(
+            arkst_engine::csv_resource::load_csv_resource(&provider, child, "../../../outside.csv"),
+            Err(arkst_engine::csv_resource::CsvResourceError::Resource(
+                ResourceAccessError::Boundary { .. }
+            ))
+        ));
+    }
 }

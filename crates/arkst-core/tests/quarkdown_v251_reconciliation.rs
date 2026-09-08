@@ -128,6 +128,17 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(!listfiles[19].contains("exact alphanumeric name sorting"));
     assert_eq!(listfiles[21], "#189;POLICY_DIVERGENCE:global-read;#191");
 
+    let csv = resource_row("builtin:.csv");
+    assert_eq!(csv[17], "UNSUPPORTED");
+    assert!(csv[13].contains("csv_resource::load_csv_resource"));
+    assert!(csv[16].contains("csv_resource_contract.rs"));
+    assert!(csv[18].contains("internal #189 resource prerequisite"));
+    assert!(csv[19].contains("No public .csv evaluator dispatch"));
+    assert_eq!(csv[21], "#189;#183");
+    assert!(PROJECT_DATA_RESEARCH.contains("Bounded CSV resource/parser prerequisite"));
+    assert!(PROJECT_DATA_RESEARCH.contains("kotlin-csv-jvm:1.10.0"));
+    assert!(PROJECT_DATA_RESEARCH.contains("does **not** trim headers"));
+
     assert!(PROJECT_DATA_RESEARCH.contains(LISTFILES_NAME_SORT_MERGE_SHA));
     assert!(PROJECT_DATA_RESEARCH.contains("ASCII-bounded `sortby:name`"));
     assert!(PROJECT_DATA_RESEARCH.contains("Non-ASCII `sortby:name` also fails closed"));

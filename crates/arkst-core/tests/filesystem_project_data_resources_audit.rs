@@ -344,6 +344,18 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     assert!(filename[19].contains("global-read"));
     assert_eq!(filename[21], "POLICY_DIVERGENCE:global-read;#191");
     assert!(!filename[9].contains("may still return a name"));
+    let csv = row(&rows, "builtin:.csv");
+    assert_eq!(csv[17], "UNSUPPORTED");
+    assert!(csv[13].contains("csv_resource::load_csv_resource"));
+    assert!(csv[14].contains("raw ordered header/cell"));
+    assert!(csv[16].contains("csv_resource_contract.rs"));
+    assert!(csv[18].contains("internal #189 resource prerequisite"));
+    assert!(csv[18].contains("No public .csv callable/table behavior"));
+    assert!(csv[19].contains("No public .csv evaluator dispatch"));
+    assert!(csv[19].contains("Java UTF-8 replacement parity"));
+    assert!(csv[20].contains("#189"));
+    assert!(csv[20].contains("#183"));
+    assert_eq!(csv[21], "#189;#183");
     assert_eq!(
         row(&rows, "contract:virtual-project-resource-model")[17],
         "SUPPORTED_SEMANTICS"
