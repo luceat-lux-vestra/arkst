@@ -53,6 +53,7 @@ pub struct VirtualProject {
     entry: VirtualPathBuf,
     sources: SourceStore,
     assets: AssetStore,
+    directories: BTreeSet<VirtualPathBuf>,
     metadata: ProjectMetadata,
     loadable_libraries: BTreeMap<String, LoadableLibrary>,
     library_names_by_source_id: BTreeMap<u32, String>,
@@ -67,6 +68,7 @@ impl VirtualProject {
         entry: VirtualPathBuf,
         sources: SourceStore,
         assets: AssetStore,
+        directories: BTreeSet<VirtualPathBuf>,
         metadata: ProjectMetadata,
         loadable_libraries: BTreeMap<String, LoadableLibrary>,
         library_names_by_source_id: BTreeMap<u32, String>,
@@ -75,6 +77,7 @@ impl VirtualProject {
             entry,
             sources,
             assets,
+            directories,
             metadata,
             loadable_libraries,
             library_names_by_source_id,
@@ -133,10 +136,49 @@ impl VirtualProject {
         base.join(reference).map_err(ResourceAccessError::Boundary)
     }
 
+    /// Resolves a source-relative logical resource and requires that a file or
+    /// directory identity exists in the immutable project model.
+    ///
+    /// Directory identity includes explicit empty directories and directories
+    /// implied by descendant source/asset/directory paths. No host metadata is
+    /// consulted or exposed.
+    pub fn resolve_existing_resource_path(
+        &self,
+        source_id: SourceId,
+        reference: &str,
+    ) -> Result<VirtualPathBuf, ResourceAccessError> {
+        let path = self.resolve_resource_path(source_id, reference)?;
+        if self.sources.contains(&path)
+            || self.assets.contains(&path)
+            || self.logical_directory_exists(&path)
+        {
+            return Ok(path);
+        }
+        Err(ResourceAccessError::NotFound(path))
+    }
+
+    fn logical_directory_exists(&self, directory: &VirtualPathBuf) -> bool {
+        if directory.is_root() || self.directories.contains(directory) {
+            return true;
+        }
+        let prefix = format!("{}/", directory.as_str());
+        self.sources
+            .iter()
+            .any(|(_, path, _)| path.as_str().starts_with(&prefix))
+            || self
+                .assets
+                .iter()
+                .any(|(path, _)| path.as_str().starts_with(&prefix))
+            || self
+                .directories
+                .iter()
+                .any(|path| path.as_str().starts_with(&prefix))
+    }
+
     /// Lists a source-relative logical directory using only immutable project paths.
     ///
-    /// Directory identity is inferred from source/asset path prefixes, so empty
-    /// directories are intentionally not representable. Results are canonical-path
+    /// Hosts may register empty directories explicitly. Non-empty directory identity is
+    /// also inferred from source/asset/directory path prefixes. Results are canonical-path
     /// ordered and contain no native path or host metadata.
     pub fn list_resource_directory(
         &self,
@@ -148,20 +190,24 @@ impl VirtualProject {
         if self.sources.contains(&directory) || self.assets.contains(&directory) {
             return Err(ResourceAccessError::NotDirectory(directory));
         }
+        if !self.logical_directory_exists(&directory) {
+            return Err(ResourceAccessError::NotFound(directory));
+        }
 
-        let mut files = BTreeSet::new();
+        let mut resources = BTreeMap::<VirtualPathBuf, ResourceEntryKind>::new();
         for (_, path, _) in self.sources.iter() {
-            files.insert(path.clone());
+            insert_directory_entry(&mut resources, path.clone(), ResourceEntryKind::File)?;
         }
         for (path, _) in self.assets.iter() {
-            files.insert(path.clone());
+            insert_directory_entry(&mut resources, path.clone(), ResourceEntryKind::File)?;
+        }
+        for path in &self.directories {
+            insert_directory_entry(&mut resources, path.clone(), ResourceEntryKind::Directory)?;
         }
 
         let prefix = (!directory.is_root()).then(|| format!("{}/", directory.as_str()));
-        let mut found_descendant = false;
         let mut entries = BTreeMap::<VirtualPathBuf, ResourceEntryKind>::new();
-
-        for path in files {
+        for (path, leaf_kind) in resources {
             let relative = if let Some(prefix) = &prefix {
                 let Some(relative) = path.as_str().strip_prefix(prefix) else {
                     continue;
@@ -173,7 +219,6 @@ impl VirtualProject {
             if relative.is_empty() {
                 continue;
             }
-            found_descendant = true;
             let components = relative.split('/').collect::<Vec<_>>();
 
             if recursive {
@@ -184,19 +229,15 @@ impl VirtualProject {
                         .map_err(ResourceAccessError::Boundary)?;
                     insert_directory_entry(&mut entries, path, ResourceEntryKind::Directory)?;
                 }
-                insert_directory_entry(&mut entries, path, ResourceEntryKind::File)?;
+                insert_directory_entry(&mut entries, path, leaf_kind)?;
             } else if components.len() == 1 {
-                insert_directory_entry(&mut entries, path, ResourceEntryKind::File)?;
+                insert_directory_entry(&mut entries, path, leaf_kind)?;
             } else {
                 let path = directory
                     .join(components[0])
                     .map_err(ResourceAccessError::Boundary)?;
                 insert_directory_entry(&mut entries, path, ResourceEntryKind::Directory)?;
             }
-        }
-
-        if !found_descendant {
-            return Err(ResourceAccessError::NotFound(directory));
         }
 
         Ok(entries
@@ -352,6 +393,7 @@ pub struct VirtualProjectBuilder {
     entry: Option<VirtualPathBuf>,
     sources: Vec<(VirtualPathBuf, String)>,
     assets: Vec<(VirtualPathBuf, Vec<u8>)>,
+    directories: Vec<VirtualPathBuf>,
     metadata: ProjectMetadata,
     loadable_libraries: Vec<(String, String)>,
 }
@@ -397,6 +439,19 @@ impl VirtualProjectBuilder {
     ) -> Self {
         self.loadable_libraries.push((name.into(), content.into()));
         self
+    }
+
+    /// Adds an explicit logical directory identity.
+    ///
+    /// The directory is immutable project metadata. It grants no filesystem
+    /// authority and carries no host path, permission, timestamp, or network state.
+    pub fn add_directory(mut self, path: impl AsRef<str>) -> Result<Self, VirtualPathError> {
+        let path = VirtualPathBuf::parse(path)?;
+        if path.is_root() {
+            return Err(VirtualPathError::RootPathNotAllowed);
+        }
+        self.directories.push(path);
+        Ok(self)
     }
 
     /// Adds an asset (font, image, etc.).
@@ -503,10 +558,33 @@ impl VirtualProjectBuilder {
                 })?;
         }
 
+        let mut directories = self.directories;
+        directories.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut directory_set = BTreeSet::new();
+        for directory in directories {
+            if !directory_set.insert(directory.clone()) {
+                return Err(BuildError::DuplicateDirectory(directory));
+            }
+            if source_store.contains(&directory) || asset_store.contains(&directory) {
+                return Err(BuildError::FileDirectoryConflict(directory));
+            }
+            let mut ancestor = directory.parent();
+            while let Some(parent) = ancestor {
+                if parent.is_root() {
+                    break;
+                }
+                if source_store.contains(&parent) || asset_store.contains(&parent) {
+                    return Err(BuildError::FileDirectoryConflict(parent));
+                }
+                ancestor = parent.parent();
+            }
+        }
+
         Ok(VirtualProject::from_builder(
             entry,
             source_store,
             asset_store,
+            directory_set,
             self.metadata,
             loadable_libraries,
             library_names_by_source_id,
@@ -525,6 +603,10 @@ pub enum BuildError {
     DuplicateSource(VirtualPathBuf),
     #[error("duplicate asset: {0}")]
     DuplicateAsset(VirtualPathBuf),
+    #[error("duplicate directory: {0}")]
+    DuplicateDirectory(VirtualPathBuf),
+    #[error("file/directory identity conflict: {0}")]
+    FileDirectoryConflict(VirtualPathBuf),
     #[error("loadable library name must not be empty")]
     EmptyLoadableLibraryName,
     #[error("duplicate loadable library: {0}")]
