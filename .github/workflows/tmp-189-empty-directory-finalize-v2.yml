@@ -1,0 +1,58 @@
+name: tmp-189-empty-directory-finalize-v2
+on:
+  push:
+    branches: [compat/189-empty-directory-identity-proof]
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: compat/189-empty-directory-identity-proof
+          fetch-depth: 0
+      - name: Apply finalizer
+        run: python3 tools/tmp_finalize_189.py
+      - name: Format and prove
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo test --locked -p arkst-project --test logical_directory_listing_189
+          cargo test --locked -p arkst-core --test quarkdown_resource_builtins
+          cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
+          cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
+          cargo test --locked -p arkst-cli --lib native_project_ingestion
+          cargo test --locked -p arkst-cli --no-default-features --test native_ingestion_policy_298
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          git diff --check
+      - name: Verify and collapse staging tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "6307c09f466e1543b5ad96e04950eb67482c7a62"
+          git diff --exit-code origin/main -- Cargo.lock
+          if git grep -n 'collect_project_files' -- docs/research/quarkdown-native-ingestion-298.md crates/arkst-cli/tests/native_ingestion_policy_298.rs; then exit 1; fi
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv').read_text()
+          row = next(line.split('\t') for line in manifest.splitlines() if line.startswith('owned\tbuiltin:.listfiles\t'))
+          assert len(row) == 24
+          assert row[17] == 'PARTIAL'
+          assert 'empty-directory' in row[18]
+          assert 'empty-directory' not in row[19]
+          assert '#189' in row[21]
+          assert '#191' in row[21]
+          assert 'POLICY_DIVERGENCE:global-read' in row[21]
+          assert 'empty directory identity is not present' not in Path('docs/research/quarkdown-project-data-189.md').read_text().lower()
+          section = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md').read_text().split('Unimplemented directory-listing options', 1)[-1].split('Data-format errors', 1)[0]
+          assert 'empty-directory identity' not in section
+          PY
+          git rm .github/workflows/tmp-189-empty-directory-finalize.yml
+          git rm .github/workflows/tmp-189-empty-directory-finalize-v2.yml
+          git rm tools/tmp_finalize_189.py
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'compat(resource): preserve empty directory identity' -m 'Refs #189'
+          git push origin HEAD:compat/189-empty-directory-identity-proof
