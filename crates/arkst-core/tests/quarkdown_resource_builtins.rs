@@ -734,6 +734,25 @@ fn filename_fails_closed_for_missing_host_uri_boundary_and_non_boolean_extension
 }
 
 #[test]
+fn filename_and_listfiles_share_explicit_empty_directory_identity_189() {
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("valid entry")
+        .add_source(
+            "main.qd",
+            ".filename {data}\n.filename {data/empty}\n.listfiles {data/empty} fullpath:{false}::size\n.listfiles {data} fullpath:{false}::size\n.listfiles {data} directories:{false} fullpath:{false}::size\n",
+        )
+        .expect("valid source")
+        .add_directory("data/empty")
+        .expect("valid empty directory")
+        .build()
+        .expect("valid project");
+    let result = compile_project(&project);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(paragraph_text(&result), "data\nempty\n0\n1\n0");
+}
+
+#[test]
 fn listfiles_bounded_logical_directory_semantics_189() {
     let cases = [
         (

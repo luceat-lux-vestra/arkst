@@ -68,13 +68,8 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
     ) -> Result<ResourceMetadata, ResourceAccessError> {
         let path = self
             .project
-            .resolve_resource_path(source_id, reference)
+            .resolve_existing_resource_path(source_id, reference)
             .map_err(map_resource_error)?;
-        if !self.project.sources().contains(&path) && !self.project.assets().contains(&path) {
-            return Err(ResourceAccessError::NotFound {
-                path: path.to_string(),
-            });
-        }
         Ok(ResourceMetadata {
             path: path.to_string(),
         })
