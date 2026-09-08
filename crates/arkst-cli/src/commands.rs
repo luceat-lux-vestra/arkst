@@ -1128,6 +1128,37 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn native_project_ingestion_does_not_register_directory_symlink_alias_189() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        let real = project_root.join("real");
+        fs::create_dir_all(real.join("empty")).unwrap();
+        let input = project_root.join("main.qd");
+        fs::write(&input, "# Main\n").unwrap();
+        symlink(&real, project_root.join("alias")).unwrap();
+
+        let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+        let source = loaded
+            .project
+            .sources()
+            .get_id(loaded.project.entry())
+            .expect("entry source");
+        let root = loaded
+            .project
+            .list_resource_directory(source, ".", false)
+            .expect("project root listing");
+        assert!(root.iter().any(|entry| entry.name == "real"));
+        assert!(!root.iter().any(|entry| entry.name == "alias"));
+        assert!(loaded
+            .project
+            .list_resource_directory(source, "alias", false)
+            .is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn symlink_input_preserves_logical_output_path() {
         use std::os::unix::fs::symlink;
         let dir = tempdir().unwrap();

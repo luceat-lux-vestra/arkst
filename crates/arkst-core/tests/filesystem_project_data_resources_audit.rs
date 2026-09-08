@@ -333,7 +333,8 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     assert_eq!(listfiles[17], "PARTIAL");
     assert!(listfiles[16].contains("logical_directory_listing_189.rs"));
     assert!(listfiles[18].contains("fullpath:false"));
-    assert!(listfiles[19].contains("empty-directory"));
+    assert!(!listfiles[19].contains("empty-directory"));
+    assert!(listfiles[18].contains("empty-directory"));
     assert!(listfiles[19].contains("last-modified"));
     assert!(listfiles[21].contains("#189"));
     assert!(listfiles[21].contains("#191"));

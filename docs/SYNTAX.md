@@ -779,8 +779,8 @@ separate passthrough capability is implemented.
 ### Data Loading (Partial; bounded `.read` / `.json` / `.include` / `.filename` / `.listfiles`)
 
 The implemented resource model covers project-backed text, JSON, nested
-document inclusion, logical filename identity, and a bounded non-empty logical
-directory listing subset with `fullpath:false`, `sortby:none`, and ASCII
+document inclusion, logical filename identity, and a bounded logical-directory listing subset with
+explicit empty-directory identity, `fullpath:false`, `sortby:none`, and ASCII
 `sortby:name`; NAME covers pinned lowercase/alphanumeric ascending/descending
 ordering and duplicate preservation, while non-ASCII Unicode comparator parity,
 regex pattern filtering, native full paths, and timestamp sorting remain
