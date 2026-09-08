@@ -22,7 +22,7 @@ jobs:
           cargo test --locked -p arkst-core --test quarkdown_resource_builtins
           cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
           cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
-          cargo test --locked -p arkst-cli --lib native_project_ingestion
+          cargo test --locked -p arkst-cli --bin arkst native_project_ingestion
           cargo test --locked -p arkst-cli --no-default-features --test native_ingestion_policy_298
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           git diff --check
