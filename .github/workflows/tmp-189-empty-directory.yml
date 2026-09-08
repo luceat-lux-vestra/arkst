@@ -1,0 +1,675 @@
+name: tmp-189-empty-directory
+
+on:
+  push:
+    branches:
+      - compat/189-empty-directory-identity-proof
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: compat/189-empty-directory-identity-proof
+          fetch-depth: 0
+
+      - name: Apply fail-closed product patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from textwrap import dedent, indent
+
+          def block(value: str, spaces: int = 0) -> str:
+              value = dedent(value).lstrip('\n')
+              return indent(value, ' ' * spaces) if spaces else value
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one anchor, got {count}')
+              return text.replace(old, new)
+
+          # ---- VirtualProject explicit directory identity ----
+          path = Path('crates/arkst-project/src/virtual_project.rs')
+          text = path.read_text()
+
+          text = replace_once(
+              text,
+              block('''
+              pub struct VirtualProject {
+                  entry: VirtualPathBuf,
+                  sources: SourceStore,
+                  assets: AssetStore,
+                  metadata: ProjectMetadata,
+              '''),
+              block('''
+              pub struct VirtualProject {
+                  entry: VirtualPathBuf,
+                  sources: SourceStore,
+                  assets: AssetStore,
+                  directories: BTreeSet<VirtualPathBuf>,
+                  metadata: ProjectMetadata,
+              '''),
+              'VirtualProject fields',
+          )
+
+          text = replace_once(
+              text,
+              block('''
+                  pub(crate) fn from_builder(
+                      entry: VirtualPathBuf,
+                      sources: SourceStore,
+                      assets: AssetStore,
+                      metadata: ProjectMetadata,
+                      loadable_libraries: BTreeMap<String, LoadableLibrary>,
+                      library_names_by_source_id: BTreeMap<u32, String>,
+                  ) -> Self {
+                      Self {
+                          entry,
+                          sources,
+                          assets,
+                          metadata,
+              '''),
+              block('''
+                  pub(crate) fn from_builder(
+                      entry: VirtualPathBuf,
+                      sources: SourceStore,
+                      assets: AssetStore,
+                      directories: BTreeSet<VirtualPathBuf>,
+                      metadata: ProjectMetadata,
+                      loadable_libraries: BTreeMap<String, LoadableLibrary>,
+                      library_names_by_source_id: BTreeMap<u32, String>,
+                  ) -> Self {
+                      Self {
+                          entry,
+                          sources,
+                          assets,
+                          directories,
+                          metadata,
+              '''),
+              'from_builder directories',
+          )
+
+          start = text.index('    /// Lists a source-relative logical directory using only immutable project paths.\n')
+          end = text.index('    /// Reads a project resource as bytes after source-relative resolution.\n', start)
+          old_listing = text[start:end]
+          new_listing = block('''
+              /// Lists a source-relative logical directory using only immutable project paths.
+              ///
+              /// Hosts may register empty directories explicitly. Non-empty directory identity is
+              /// still inferred from source/asset/directory path prefixes. Results are canonical-path
+              /// ordered and contain no native path or host metadata.
+              pub fn list_resource_directory(
+                  &self,
+                  source_id: SourceId,
+                  reference: &str,
+                  recursive: bool,
+              ) -> Result<Vec<ResourceDirectoryEntry>, ResourceAccessError> {
+                  let directory = self.resolve_resource_path(source_id, reference)?;
+                  if self.sources.contains(&directory) || self.assets.contains(&directory) {
+                      return Err(ResourceAccessError::NotDirectory(directory));
+                  }
+
+                  let mut resources = BTreeMap::<VirtualPathBuf, ResourceEntryKind>::new();
+                  for (_, path, _) in self.sources.iter() {
+                      insert_directory_entry(&mut resources, path.clone(), ResourceEntryKind::File)?;
+                  }
+                  for (path, _) in self.assets.iter() {
+                      insert_directory_entry(&mut resources, path.clone(), ResourceEntryKind::File)?;
+                  }
+                  for path in &self.directories {
+                      insert_directory_entry(
+                          &mut resources,
+                          path.clone(),
+                          ResourceEntryKind::Directory,
+                      )?;
+                  }
+
+                  let prefix = (!directory.is_root()).then(|| format!("{}/", directory.as_str()));
+                  let mut directory_exists = directory.is_root() || self.directories.contains(&directory);
+                  let mut entries = BTreeMap::<VirtualPathBuf, ResourceEntryKind>::new();
+
+                  for (path, leaf_kind) in resources {
+                      let relative = if let Some(prefix) = &prefix {
+                          let Some(relative) = path.as_str().strip_prefix(prefix) else {
+                              continue;
+                          };
+                          relative
+                      } else {
+                          path.as_str()
+                      };
+                      if relative.is_empty() {
+                          if leaf_kind == ResourceEntryKind::Directory {
+                              directory_exists = true;
+                          }
+                          continue;
+                      }
+                      directory_exists = true;
+                      let components = relative.split('/').collect::<Vec<_>>();
+
+                      if recursive {
+                          for depth in 1..components.len() {
+                              let relative_directory = components[..depth].join("/");
+                              let path = directory
+                                  .join(&relative_directory)
+                                  .map_err(ResourceAccessError::Boundary)?;
+                              insert_directory_entry(
+                                  &mut entries,
+                                  path,
+                                  ResourceEntryKind::Directory,
+                              )?;
+                          }
+                          insert_directory_entry(&mut entries, path, leaf_kind)?;
+                      } else if components.len() == 1 {
+                          insert_directory_entry(&mut entries, path, leaf_kind)?;
+                      } else {
+                          let path = directory
+                              .join(components[0])
+                              .map_err(ResourceAccessError::Boundary)?;
+                          insert_directory_entry(
+                              &mut entries,
+                              path,
+                              ResourceEntryKind::Directory,
+                          )?;
+                      }
+                  }
+
+                  if !directory_exists {
+                      return Err(ResourceAccessError::NotFound(directory));
+                  }
+
+                  Ok(entries
+                      .into_iter()
+                      .map(|(path, kind)| ResourceDirectoryEntry {
+                          name: path
+                              .file_name()
+                              .expect("directory entries are never the logical root")
+                              .to_string(),
+                          path,
+                          kind,
+                      })
+                      .collect())
+              }
+
+          ''', 4)
+          text = text[:start] + new_listing + text[end:]
+
+          text = replace_once(
+              text,
+              block('''
+              pub struct VirtualProjectBuilder {
+                  entry: Option<VirtualPathBuf>,
+                  sources: Vec<(VirtualPathBuf, String)>,
+                  assets: Vec<(VirtualPathBuf, Vec<u8>)>,
+                  metadata: ProjectMetadata,
+              '''),
+              block('''
+              pub struct VirtualProjectBuilder {
+                  entry: Option<VirtualPathBuf>,
+                  sources: Vec<(VirtualPathBuf, String)>,
+                  assets: Vec<(VirtualPathBuf, Vec<u8>)>,
+                  directories: Vec<VirtualPathBuf>,
+                  metadata: ProjectMetadata,
+              '''),
+              'builder fields',
+          )
+
+          add_asset_anchor = block('''
+                  /// Adds an asset (font, image, etc.).
+                  pub fn add_asset(
+              ''', 4)
+          if text.count(add_asset_anchor) != 1:
+              raise SystemExit('add_asset anchor drift')
+          add_directory = block('''
+                  /// Adds an explicit logical directory identity.
+                  ///
+                  /// This is metadata supplied by the host alongside in-memory resources; it does
+                  /// not grant filesystem access or carry native path/timestamp/permission state.
+                  pub fn add_directory(
+                      mut self,
+                      path: impl AsRef<str>,
+                  ) -> Result<Self, VirtualPathError> {
+                      let path = VirtualPathBuf::parse(path)?;
+                      if path.is_root() {
+                          return Err(VirtualPathError::RootPathNotAllowed);
+                      }
+                      self.directories.push(path);
+                      Ok(self)
+                  }
+
+              ''', 4)
+          text = text.replace(add_asset_anchor, add_directory + add_asset_anchor)
+
+          asset_build = block('''
+                  let mut asset_store = AssetStore::new();
+                  for (path, data) in assets {
+                      asset_store
+                          .insert(path, std::sync::Arc::from(data.into_boxed_slice()))
+                          .map_err(|e| match e {
+                              AssetStoreError::DuplicateAsset(p) => BuildError::DuplicateAsset(p),
+                          })?;
+                  }
+
+                  Ok(VirtualProject::from_builder(
+                      entry,
+                      source_store,
+                      asset_store,
+                      self.metadata,
+              ''', 8)
+          directory_build = block('''
+                  let mut asset_store = AssetStore::new();
+                  for (path, data) in assets {
+                      asset_store
+                          .insert(path, std::sync::Arc::from(data.into_boxed_slice()))
+                          .map_err(|e| match e {
+                              AssetStoreError::DuplicateAsset(p) => BuildError::DuplicateAsset(p),
+                          })?;
+                  }
+
+                  let mut directories = self.directories;
+                  directories.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+                  let mut directory_set = BTreeSet::new();
+                  for directory in directories {
+                      if !directory_set.insert(directory.clone()) {
+                          return Err(BuildError::DuplicateDirectory(directory));
+                      }
+                      if source_store.contains(&directory) || asset_store.contains(&directory) {
+                          return Err(BuildError::FileDirectoryConflict(directory));
+                      }
+                      let mut ancestor = directory.parent();
+                      while let Some(parent) = ancestor {
+                          if parent.is_root() {
+                              break;
+                          }
+                          if source_store.contains(&parent) || asset_store.contains(&parent) {
+                              return Err(BuildError::FileDirectoryConflict(parent));
+                          }
+                          ancestor = parent.parent();
+                      }
+                  }
+
+                  Ok(VirtualProject::from_builder(
+                      entry,
+                      source_store,
+                      asset_store,
+                      directory_set,
+                      self.metadata,
+              ''', 8)
+          text = replace_once(text, asset_build, directory_build, 'directory build')
+
+          text = replace_once(
+              text,
+              block('''
+                  #[error("duplicate asset: {0}")]
+                  DuplicateAsset(VirtualPathBuf),
+                  #[error("loadable library name must not be empty")]
+              ''', 4),
+              block('''
+                  #[error("duplicate asset: {0}")]
+                  DuplicateAsset(VirtualPathBuf),
+                  #[error("duplicate directory: {0}")]
+                  DuplicateDirectory(VirtualPathBuf),
+                  #[error("file/directory identity conflict: {0}")]
+                  FileDirectoryConflict(VirtualPathBuf),
+                  #[error("loadable library name must not be empty")]
+              ''', 4),
+              'build errors',
+          )
+          path.write_text(text)
+
+          # ---- project-level regression/adversarial tests ----
+          path = Path('crates/arkst-project/tests/logical_directory_listing_189.rs')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '        .add_asset("docs/data/nested/deep/c.bin", vec![0x01])\n        .expect("valid asset")\n        .build()\n',
+              '        .add_asset("docs/data/nested/deep/c.bin", vec![0x01])\n        .expect("valid asset")\n        .add_directory("docs/empty")\n        .expect("valid empty directory")\n        .build()\n',
+              'project fixture empty directory',
+          )
+          old_test = block('''
+              #[test]
+              fn file_missing_escape_and_unrepresentable_empty_directory_fail_closed() {
+                  let project = project();
+                  let source = main_id(&project);
+                  assert!(matches!(
+                      project.list_resource_directory(source, "data/a.txt", false),
+                      Err(ResourceAccessError::NotDirectory(path)) if path.as_str() == "docs/data/a.txt"
+                  ));
+                  assert!(matches!(
+                      project.list_resource_directory(source, "empty", false),
+                      Err(ResourceAccessError::NotFound(path)) if path.as_str() == "docs/empty"
+                  ));
+                  assert!(matches!(
+                      project.list_resource_directory(source, "../../outside", false),
+                      Err(ResourceAccessError::Boundary(_))
+                  ));
+                  assert!(matches!(
+                      project.list_resource_directory(source, "/tmp", false),
+                      Err(ResourceAccessError::UnsupportedReference { .. })
+                  ));
+              }
+          ''')
+          new_test = block('''
+              #[test]
+              fn file_missing_escape_and_unregistered_directory_fail_closed() {
+                  let project = project();
+                  let source = main_id(&project);
+                  assert!(matches!(
+                      project.list_resource_directory(source, "data/a.txt", false),
+                      Err(ResourceAccessError::NotDirectory(path)) if path.as_str() == "docs/data/a.txt"
+                  ));
+                  assert!(project
+                      .list_resource_directory(source, "empty", false)
+                      .expect("explicit empty directory exists")
+                      .is_empty());
+                  assert!(matches!(
+                      project.list_resource_directory(source, "missing-empty", false),
+                      Err(ResourceAccessError::NotFound(path)) if path.as_str() == "docs/missing-empty"
+                  ));
+                  assert!(matches!(
+                      project.list_resource_directory(source, "../../outside", false),
+                      Err(ResourceAccessError::Boundary(_))
+                  ));
+                  assert!(matches!(
+                      project.list_resource_directory(source, "/tmp", false),
+                      Err(ResourceAccessError::UnsupportedReference { .. })
+                  ));
+              }
+
+              #[test]
+              fn explicit_empty_directories_participate_in_parent_and_recursive_listing_189() {
+                  let project = VirtualProjectBuilder::new()
+                      .entry("docs/main.qd")
+                      .unwrap()
+                      .add_source("docs/main.qd", "main")
+                      .unwrap()
+                      .add_directory("docs/data/empty/deep")
+                      .unwrap()
+                      .build()
+                      .unwrap();
+                  let source = main_id(&project);
+
+                  let direct = project.list_resource_directory(source, "data", false).unwrap();
+                  assert_eq!(direct.len(), 1);
+                  assert_eq!(direct[0].path.as_str(), "docs/data/empty");
+                  assert_eq!(direct[0].kind, ResourceEntryKind::Directory);
+
+                  let recursive = project.list_resource_directory(source, "data", true).unwrap();
+                  let observed = recursive
+                      .iter()
+                      .map(|entry| (entry.path.as_str(), entry.kind))
+                      .collect::<Vec<_>>();
+                  assert_eq!(
+                      observed,
+                      vec![
+                          ("docs/data/empty", ResourceEntryKind::Directory),
+                          ("docs/data/empty/deep", ResourceEntryKind::Directory),
+                      ]
+                  );
+                  assert!(project
+                      .list_resource_directory(source, "data/empty/deep", false)
+                      .unwrap()
+                      .is_empty());
+              }
+
+              #[test]
+              fn explicit_directory_builder_rejects_duplicates_and_file_ancestor_conflicts_189() {
+                  let duplicate = VirtualProjectBuilder::new()
+                      .entry("main.qd")
+                      .unwrap()
+                      .add_source("main.qd", "main")
+                      .unwrap()
+                      .add_directory("empty")
+                      .unwrap()
+                      .add_directory("empty")
+                      .unwrap()
+                      .build();
+                  assert!(matches!(
+                      duplicate,
+                      Err(arkst_project::BuildError::DuplicateDirectory(path)) if path.as_str() == "empty"
+                  ));
+
+                  let exact_conflict = VirtualProjectBuilder::new()
+                      .entry("main.qd")
+                      .unwrap()
+                      .add_source("main.qd", "main")
+                      .unwrap()
+                      .add_asset("data", vec![1])
+                      .unwrap()
+                      .add_directory("data")
+                      .unwrap()
+                      .build();
+                  assert!(matches!(
+                      exact_conflict,
+                      Err(arkst_project::BuildError::FileDirectoryConflict(path)) if path.as_str() == "data"
+                  ));
+
+                  let ancestor_conflict = VirtualProjectBuilder::new()
+                      .entry("main.qd")
+                      .unwrap()
+                      .add_source("main.qd", "main")
+                      .unwrap()
+                      .add_asset("data", vec![1])
+                      .unwrap()
+                      .add_directory("data/empty")
+                      .unwrap()
+                      .build();
+                  assert!(matches!(
+                      ancestor_conflict,
+                      Err(arkst_project::BuildError::FileDirectoryConflict(path)) if path.as_str() == "data"
+                  ));
+              }
+          ''')
+          text = replace_once(text, old_test, new_test, 'directory tests')
+          path.write_text(text)
+
+          # ---- evaluator/core proof ----
+          path = Path('crates/arkst-core/tests/quarkdown_resource_builtins.rs')
+          text = path.read_text()
+          anchor = block('''
+              #[test]
+              fn listfiles_bounded_logical_directory_semantics_189() {
+          ''')
+          if text.count(anchor) != 1:
+              raise SystemExit('core listfiles anchor drift')
+          added = block(r'''
+              #[test]
+              fn listfiles_accepts_explicit_empty_directory_identity_189() {
+                  let project = VirtualProjectBuilder::new()
+                      .entry("main.qd")
+                      .expect("valid entry")
+                      .add_source(
+                          "main.qd",
+                          ".listfiles {data/empty} fullpath:{false}::size\n.listfiles {data} fullpath:{false}::size\n.listfiles {data} directories:{false} fullpath:{false}::size\n",
+                      )
+                      .expect("valid source")
+                      .add_directory("data/empty")
+                      .expect("valid empty directory")
+                      .build()
+                      .expect("valid project");
+                  let result = compile_project(&project);
+                  assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+                  assert_eq!(paragraph_text(&result), "0\n1\n0");
+              }
+
+          ''')
+          text = text.replace(anchor, added + anchor)
+          path.write_text(text)
+
+          # ---- native CLI project ingestion carries physical empty directories ----
+          path = Path('crates/arkst-cli/src/commands.rs')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              block('''
+                  let mut files = Vec::new();
+                  collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)?;
+
+                  let mut builder = VirtualProjectBuilder::new().entry(virtual_entry.as_str())?;
+                  for (path, bytes) in files {
+              ''', 4),
+              block('''
+                  let mut files = Vec::new();
+                  let mut directories = Vec::new();
+                  collect_project_entries(
+                      &canonical_project_root,
+                      &canonical_project_root,
+                      &mut files,
+                      &mut directories,
+                  )?;
+
+                  let mut builder = VirtualProjectBuilder::new().entry(virtual_entry.as_str())?;
+                  for directory in directories {
+                      let directory = os_relative_path_to_virtual(&directory)?;
+                      builder = builder.add_directory(directory.as_str())?;
+                  }
+                  for (path, bytes) in files {
+              ''', 4),
+              'native collection call',
+          )
+          text = replace_once(
+              text,
+              block('''
+              fn collect_project_files(
+                  root: &Path,
+                  current: &Path,
+                  files: &mut Vec<(PathBuf, Vec<u8>)>,
+              ) -> anyhow::Result<()> {
+              '''),
+              block('''
+              fn collect_project_entries(
+                  root: &Path,
+                  current: &Path,
+                  files: &mut Vec<(PathBuf, Vec<u8>)>,
+                  directories: &mut Vec<PathBuf>,
+              ) -> anyhow::Result<()> {
+              '''),
+              'collector signature',
+          )
+          text = replace_once(
+              text,
+              block('''
+                      if metadata.is_dir() {
+                          collect_project_files(root, &path, files)?;
+                      } else if metadata.is_file() || metadata.file_type().is_symlink() {
+              ''', 8),
+              block('''
+                      if metadata.is_dir() {
+                          let relative = path
+                              .strip_prefix(root)
+                              .map_err(|_| {
+                                  anyhow::anyhow!(
+                                      "project directory is outside root: {}",
+                                      path.display()
+                                  )
+                              })?
+                              .to_path_buf();
+                          directories.push(relative);
+                          collect_project_entries(root, &path, files, directories)?;
+                      } else if metadata.is_file() || metadata.file_type().is_symlink() {
+              ''', 8),
+              'collector recursion',
+          )
+
+          test_anchor = block('''
+                  #[test]
+                  #[cfg(unix)]
+                  fn symlink_input_preserves_logical_output_path() {
+              ''', 4)
+          if text.count(test_anchor) != 1:
+              raise SystemExit('CLI test anchor drift')
+          test_added = block(r'''
+                  #[test]
+                  fn native_project_ingestion_preserves_empty_directory_identity_189() {
+                      let dir = tempdir().unwrap();
+                      let project_root = dir.path().join("project");
+                      fs::create_dir(&project_root).unwrap();
+                      fs::create_dir(project_root.join("empty")).unwrap();
+                      let input = project_root.join("main.qd");
+                      fs::write(
+                          &input,
+                          ".listfiles {empty} fullpath:{false}::size\n",
+                      )
+                      .unwrap();
+
+                      let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+                      let source = loaded
+                          .project
+                          .sources()
+                          .get_id(loaded.project.entry())
+                          .expect("entry source");
+                      assert!(loaded
+                          .project
+                          .list_resource_directory(source, "empty", false)
+                          .expect("native empty directory identity")
+                          .is_empty());
+                      assert!(check(&input.to_string_lossy()).is_ok());
+                  }
+
+          ''', 4)
+          text = text.replace(test_anchor, test_added + test_anchor)
+          path.write_text(text)
+
+          # ---- policy guard follows renamed native collector + directory metadata ----
+          path = Path('crates/arkst-cli/tests/native_ingestion_policy_298.rs')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '        "collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)",\n',
+              '        "collect_project_entries(",\n        "&mut directories,",\n        "builder = builder.add_directory(directory.as_str())?;",\n',
+              'native policy collector guard',
+          )
+          text = replace_once(
+              text,
+              '        "pub fn add_loadable_library(",\n',
+              '        "pub fn add_directory(",\n        "pub fn add_loadable_library(",\n',
+              'builder policy guard',
+          )
+          path.write_text(text)
+          PY
+
+      - name: Format product patch
+        run: cargo fmt --all
+
+      - name: Prove project directory contract
+        run: cargo test --locked -p arkst-project --test logical_directory_listing_189
+
+      - name: Prove core listfiles contract
+        run: cargo test --locked -p arkst-core --test quarkdown_resource_builtins
+
+      - name: Prove native ingestion policy and CLI unit contract
+        run: |
+          cargo test --locked -p arkst-cli --no-default-features --test native_ingestion_policy_298
+          cargo test --locked -p arkst-cli --no-default-features native_project_ingestion_preserves_empty_directory_identity_189
+
+      - name: Prove resource and reconciliation regression suites
+        run: |
+          cargo test --locked -p arkst-engine --test resource_contract
+          cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
+          cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
+          cargo test --locked -p arkst-core --test resource_permission_policy_296
+
+      - name: Prove workspace clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Verify product delta and commit proof result
+        shell: bash
+        run: |
+          test -z "$(git diff -- Cargo.lock)"
+          rm .github/workflows/tmp-189-empty-directory.yml
+          git add crates/arkst-project/src/virtual_project.rs \
+                  crates/arkst-project/tests/logical_directory_listing_189.rs \
+                  crates/arkst-core/tests/quarkdown_resource_builtins.rs \
+                  crates/arkst-cli/src/commands.rs \
+                  crates/arkst-cli/tests/native_ingestion_policy_298.rs \
+                  .github/workflows/tmp-189-empty-directory.yml
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'compat(resource): preserve empty directory identity' -m 'Refs #189'
+          git push origin HEAD:compat/189-empty-directory-identity-proof
