@@ -18,4 +18,15 @@ jobs:
           fetch-depth: 0
       - name: Patch, prove, and collapse proof tree
         shell: bash
-        run: bash .github/tmp/189-csv-resource-loader.sh
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/tmp/189-csv-resource-loader.sh')
+          text = path.read_text()
+          old = "research.write_text(text.rstrip() + appendix + '\\n')"
+          new = "research.write_text(text.rstrip() + appendix.rstrip() + '\\n')"
+          if text.count(old) != 1:
+              raise SystemExit('proof hygiene anchor changed')
+          path.write_text(text.replace(old, new))
+          PY
+          bash .github/tmp/189-csv-resource-loader.sh
