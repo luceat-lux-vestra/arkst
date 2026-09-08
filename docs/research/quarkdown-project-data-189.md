@@ -19,9 +19,9 @@ frontend grammar merely to manufacture a filename fixture.
 
 Arkst represents only the project-bounded subset. `ResourceProvider::resource_metadata`
 returns canonical logical identity for an existing resource without reading
-bytes. `VirtualProjectResourceProvider` accepts both source and asset stores, so
-a binary asset remains a valid file identity and no UTF-8 conversion is
-performed merely to obtain its name. Resolution remains relative to the active
+bytes. `VirtualProjectResourceProvider` accepts source, asset, and logical-directory
+identity, so binary assets and explicit or inferred directories remain valid
+identity targets without UTF-8 conversion merely to obtain a name. Resolution remains relative to the active
 `SourceId`, including nested includes, and all host absolute/Windows/URI/project
 escape references remain fail-closed.
 

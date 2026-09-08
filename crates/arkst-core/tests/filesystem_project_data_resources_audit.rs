@@ -335,6 +335,10 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     assert!(listfiles[18].contains("fullpath:false"));
     assert!(!listfiles[19].contains("empty-directory"));
     assert!(listfiles[18].contains("empty-directory"));
+    assert!(!listfiles[8].contains("non-empty"));
+    assert!(!listfiles[9].contains("not representable"));
+    assert!(!listfiles[14].contains("non-empty"));
+    assert!(!listfiles[18].contains("non-empty"));
     assert!(listfiles[19].contains("last-modified"));
     assert!(listfiles[21].contains("#189"));
     assert!(listfiles[21].contains("#191"));
@@ -342,6 +346,8 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     assert_eq!(filename[17], "PARTIAL");
     assert!(filename[16].contains("quarkdown-project-data-189.md"));
     assert!(filename[18].contains("binary assets"));
+    assert!(filename[13].contains("directory"));
+    assert!(filename[18].contains("logical-directory"));
     assert!(filename[19].contains("global-read"));
     assert_eq!(filename[21], "POLICY_DIVERGENCE:global-read;#191");
     assert!(!filename[9].contains("may still return a name"));

@@ -110,7 +110,7 @@ Arkst's current model is one in-memory logical resource model:
    rejects project-root escape.
 3. `VirtualProjectResourceProvider` maps the project to the engine's
    `ResourceProvider` plus the separate `LoadableLibraryProvider`. `.read` and `.json`
-   read text; `.filename` resolves existing source/asset logical metadata without
+   read text; `.filename` resolves existing source/asset/directory logical metadata without
    reading resource bytes; `.listfiles` enumerates inferred and explicit logical directories, including
    explicit empty directories, and exposes bare names in its bounded `fullpath:false` modes:
    `sortby:none` retains deterministic set-like presentation and ASCII
