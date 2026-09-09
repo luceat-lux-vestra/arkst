@@ -1,0 +1,207 @@
+name: tmp-316-project-state-reconcile
+
+on:
+  push:
+    branches:
+      - chore/316-project-state-reconciliation-proof
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile-and-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chore/316-project-state-reconciliation-proof
+          fetch-depth: 0
+
+      - name: Reconcile canonical project state
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, got {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          manifest = Path('docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv')
+          lines = manifest.read_text().splitlines()
+          rows = {}
+          for i, line in enumerate(lines):
+              if line and not line.startswith('#'):
+                  fields = line.split('\t')
+                  if len(fields) != 24:
+                      raise SystemExit(f'wrong manifest columns at {fields[1] if len(fields) > 1 else i}: {len(fields)}')
+                  rows[fields[1]] = (i, fields)
+
+          def set_fields(name, changes):
+              i, fields = rows[name]
+              for index, value in changes.items():
+                  fields[index] = value
+              lines[i] = '\t'.join(fields)
+              rows[name] = (i, fields)
+
+          set_fields('builtin:.json', {
+              18: 'Source-relative local UTF-8 JSON recursively maps objects, arrays, scalars, null, booleans, strings, and bounded exact numeric values through VirtualProject. Native project/resource ingestion is explicit at the trusted CLI boundary and recorded under completed #298.',
+              19: 'The local source-relative recursive value subset works, but upstream global/absolute permission behavior remains the accepted fail-closed global-read policy divergence and public WASM binding/parity remains #191.',
+              20: 'Common logical resolver prerequisite completed under #188; recursive typed JSON mapping is evidenced in the current evaluator, while residual upstream permission/diagnostic behavior is the accepted fail-closed global-read policy divergence and public WASM binding/parity is #191.',
+              21: 'POLICY_DIVERGENCE:global-read;#191',
+              22: 'Owned resource loader; recursive typed mapping is current implementation evidence, while #149 is completed canonical value-model audit provenance. Native host ingestion completed under #298/#302; global-read divergence completed under #296/#300.',
+          })
+
+          set_fields('contract:virtual-project-resource-model', {
+              19: 'The model is represented semantically, but remaining language-facing media/resource consumers and public WASM/end-to-end output equivalence remain not represented or rendered.',
+              20: '#182 owns remaining media/resource consumer closure; optional native backend strategy/selection/parity completed under #187/#200/#201, while public WASM binding/output parity remains #191.',
+              21: '#182;#191',
+              22: 'Canonical architecture finding; optional native backend strategy/selection/parity completed under #187/#200/#201. Remaining actionable owners are #182 and #191.',
+          })
+
+          set_fields('contract:logical-path-normalization', {
+              19: 'Normalization and language-facing relative bases are represented semantically; upstream absolute/global path compatibility is not represented under the accepted fail-closed global-read policy divergence, media consumer parity remains #182, and public WASM/output parity remains #191.',
+              20: 'Language-facing relative-base rules are evidenced by completed #188; optional native backend strategy/selection/parity completed under #187/#200/#201; residual owners are #182, #191, and the accepted global-read policy divergence.',
+              21: 'POLICY_DIVERGENCE:global-read;#182;#191',
+              22: 'Canonical path policy; native backend strategy/selection/parity are completed historical evidence under #187/#200/#201 rather than actionable ownership.',
+          })
+
+          set_fields('contract:project-boundary-enforcement', {
+              19: 'Boundary policy is represented, but Quarkdown media existence/output (#182), remaining data consumers (#189), and public WASM/end-to-end output parity (#191) remain not represented or rendered.',
+              20: '#182, #189, and #191 own the remaining consumer/binding closure; optional native backend strategy/selection/parity completed under #187/#200/#201 and is not a blocker.',
+              21: '#182;#189;#191',
+              22: 'Security boundary finding; no broadening of host access. Native backend strategy/selection/parity completed under #187/#200/#201.',
+          })
+
+          typst_i, typst = rows['contract:typst-entry-source-context']
+          evidence = typst[16]
+          for extra in ['docs/research/typst-inprocess-187.md', 'docs/compatibility/typst/README.md']:
+              if extra not in evidence:
+                  evidence += '; ' + extra
+          set_fields('contract:typst-entry-source-context', {
+              16: evidence,
+              18: '#24 source-context intent is represented by explicit entry_path/project root, bounded subprocess mirror/--root/symlink checks, plus the optional VirtualProject-backed in-process adapter and Linux/macOS/Windows native parity completed under #187/#200/#201. Subprocess remains the default/fallback.',
+              19: 'The native subprocess and optional in-process source-context contracts are represented, but browser/public WASM rendering and end-to-end resource/output parity remain not represented; public WASM/backend ownership remains #191.',
+              20: 'Optional in-process strategy, explicit selection, and cross-platform native parity completed under #187/#200/#201; public WASM/backend rendering parity remains #191.',
+              21: '#191',
+              22: 'Historical #24 reconciliation; #187/#200/#201 are completed native backend evidence and are not actionable follow-up owners. Remaining public WASM/backend parity is #191.',
+          })
+
+          set_fields('contract:host-determinism-isolation', {
+              19: 'The isolation boundary is represented, but `.env` controlled injection (#190) and public WASM binding equivalence (#191) remain not represented or rendered; native backend strategy/selection/parity is complete.',
+              20: '#190 controls environment input and #191 controls public WASM exposure; optional native backend strategy/selection/parity completed under #187/#200/#201.',
+              21: '#190;#191',
+              22: 'Determinism audit finding; no host-access implementation. Native backend strategy/selection/parity completed under #187/#200/#201.',
+          })
+
+          manifest.write_text('\n'.join(lines) + '\n')
+
+          replace_once(
+              'docs/compatibility/quarkdown/RECONCILIATION.md',
+              '| `.json` | #155; `PARTIAL` | completed #188 resolver and #298 native host ingestion; #149 conversion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global-read behavior is the accepted policy divergence and public WASM parity remains #191. |',
+              '| `.json` | #155; `PARTIAL` | completed #188 resolver and #298 native host ingestion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative recursive in-memory JSON object/array/scalar behavior is evidenced, including nested typed values and numeric-precision rejection. Global-read behavior is the accepted policy divergence and public WASM parity remains #191. |',
+              'reconciliation json row',
+          )
+          replace_once(
+              'docs/compatibility/quarkdown/RECONCILIATION.md',
+              '| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188/#298 prerequisites; completed #296 policy record; #187/#189/#190/#191 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while language-facing breadth and WASM/backend parity remain bounded by their explicit owners. |',
+              '| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #187/#188/#200/#201/#298 prerequisites/evidence; completed #296 policy record; current #182/#189/#190/#191 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, explicit native project/library ingestion, and optional native backend strategy/parity are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while remaining language-facing breadth and public WASM/output parity stay with their explicit open owners. |',
+              'reconciliation virtual project row',
+          )
+          replace_once(
+              'docs/compatibility/quarkdown/RECONCILIATION.md',
+              '| Typst entry/source-context contract | #155; `PARTIAL` | #187 strategy; #200 explicit selection; #201 parity | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; broader cross-platform parity remains in #201. |',
+              '| Typst entry/source-context contract | #155; `PARTIAL` | completed #187 strategy, #200 explicit selection, and #201 native cross-platform parity; residual #191 | The subprocess path remains the default/fallback and the optional native in-process adapter maps the same `VirtualProject` boundary with Linux/macOS/Windows parity evidence. Browser/public WASM rendering and end-to-end resource/output parity remain #191-owned. |',
+              'reconciliation typst row',
+          )
+          replace_once(
+              'docs/compatibility/quarkdown/RECONCILIATION.md',
+              '#298/#302; #191 owns the deferred public WASM/embedder binding and native/WASM parity;\n#149 owns recursive value conversion; #189 owns data-file consumers; and #199/#181 own\nsubdocument graph/reference output.',
+              '#298/#302; #191 owns the deferred public WASM/embedder binding and native/WASM parity;\nrecursive JSON value mapping is already evidenced by the evaluator; #189 owns remaining data-file consumers; and #199/#181 own\nsubdocument graph/reference output.',
+              'reconciliation resource summary',
+          )
+
+          replace_once(
+              'docs/ROADMAP.md',
+              'implementation ordering, including #187 as the next technical work, is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)',
+              'implementation ordering is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md); #187/#200/#201 backend strategy and native parity are complete, so current M3 work follows the live owner/dependency graph in #263',
+              'roadmap stale #187 sequencing',
+          )
+
+          replace_once(
+              'docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md',
+              'The ordered redesign/re-evaluation remains #187; no #187 work is started here.',
+              'The #187 re-evaluation and #200/#201 optional native in-process selection/parity work are complete; public WASM/backend parity remains #191-owned.',
+              'resource audit stale #187 sequencing',
+          )
+
+          path = Path('crates/arkst-core/tests/quarkdown_v251_reconciliation.rs')
+          text = path.read_text()
+          text = text.replace(
+              '("builtin:.json", "POLICY_DIVERGENCE:global-read;#191;#149"),',
+              '("builtin:.json", "POLICY_DIVERGENCE:global-read;#191"),',
+              1,
+          )
+          text = text.replace(
+              '    let virtual_project = resource_row("contract:virtual-project-resource-model");\n    assert_eq!(virtual_project[17], "SUPPORTED_SEMANTICS");\n\n    let typst_context = resource_row("contract:typst-entry-source-context");\n    assert_eq!(typst_context[17], "PARTIAL");\n    assert_eq!(typst_context[21], "#187");\n',
+              '    let virtual_project = resource_row("contract:virtual-project-resource-model");\n    assert_eq!(virtual_project[17], "SUPPORTED_SEMANTICS");\n    assert_eq!(virtual_project[21], "#182;#191");\n\n    let json = resource_row("builtin:.json");\n    assert_eq!(json[17], "PARTIAL");\n    assert!(json[18].contains("recursively"));\n    assert_eq!(json[21], "POLICY_DIVERGENCE:global-read;#191");\n    assert!(!json[19].contains("#149"));\n\n    let typst_context = resource_row("contract:typst-entry-source-context");\n    assert_eq!(typst_context[17], "PARTIAL");\n    assert_eq!(typst_context[21], "#191");\n    assert!(typst_context[20].contains("#187/#200/#201"));\n',
+              1,
+          )
+          text = text.replace(
+              '    assert_eq!(virtual_project[21], "#182;#187");',
+              '    assert_eq!(virtual_project[21], "#182;#191");',
+              1,
+          )
+          old_guard = '''#[test]\nfn reconciliation_rejects_completed_296_in_any_unresolved_resource_column() {\n    for line in RESOURCE_MANIFEST\n        .lines()\n        .filter(|line| !line.is_empty() && !line.starts_with('#'))\n    {\n        let fields = line.split('\\t').collect::<Vec<_>>();\n        assert_eq!(fields.len(), 24, "wrong #155 manifest column count: {line}");\n        for (index, label) in [\n            (19, "remaining gap"),\n            (20, "blocker dependency"),\n            (21, "follow-up"),\n        ] {\n            assert!(\n                !fields[index].contains("#296"),\n                "completed #296 leaked into unresolved {label} for {}: {}",\n                fields[1],\n                fields[index]\n            );\n        }\n    }\n}\n'''
+          new_guard = '''#[test]\nfn reconciliation_rejects_completed_prerequisites_in_unresolved_resource_columns() {\n    const COMPLETED_ACTIONABLE_IDS: &[&str] = &["#149", "#187", "#200", "#201", "#296", "#298"];\n    for line in RESOURCE_MANIFEST\n        .lines()\n        .filter(|line| !line.is_empty() && !line.starts_with('#'))\n    {\n        let fields = line.split('\\t').collect::<Vec<_>>();\n        assert_eq!(fields.len(), 24, "wrong #155 manifest column count: {line}");\n        for (index, label) in [\n            (19, "remaining gap"),\n            (20, "blocker dependency"),\n            (21, "follow-up"),\n        ] {\n            for issue in COMPLETED_ACTIONABLE_IDS {\n                assert!(\n                    !fields[index].contains(issue),\n                    "completed {issue} leaked into unresolved {label} for {}: {}",\n                    fields[1],\n                    fields[index]\n                );\n            }\n        }\n    }\n}\n'''
+          if old_guard not in text:
+              raise SystemExit('completed prerequisite guard anchor drift')
+          text = text.replace(old_guard, new_guard, 1)
+          path.write_text(text)
+
+          path = Path('crates/arkst-core/tests/filesystem_project_data_resources_audit.rs')
+          text = path.read_text()
+          anchor = '    assert_eq!(row(&rows, "builtin:.read")[17], "PARTIAL");\n    assert_eq!(row(&rows, "builtin:.include")[17], "PARTIAL");\n'
+          replacement = anchor + '    let json = row(&rows, "builtin:.json");\n    assert_eq!(json[17], "PARTIAL");\n    assert!(json[18].contains("recursively"));\n    assert_eq!(json[21], "POLICY_DIVERGENCE:global-read;#191");\n    assert!(!json[19].contains("#149"));\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('filesystem audit json anchor drift')
+          text = text.replace(anchor, replacement, 1)
+          anchor = '''    assert_eq!(\n        row(&rows, "contract:virtual-project-resource-model")[17],\n        "SUPPORTED_SEMANTICS"\n    );\n    assert_eq!(\n        row(&rows, "contract:typst-entry-source-context")[17],\n        "PARTIAL"\n    );\n'''
+          replacement = '''    let virtual_project = row(&rows, "contract:virtual-project-resource-model");\n    assert_eq!(virtual_project[17], "SUPPORTED_SEMANTICS");\n    assert_eq!(virtual_project[21], "#182;#191");\n    let typst_context = row(&rows, "contract:typst-entry-source-context");\n    assert_eq!(typst_context[17], "PARTIAL");\n    assert_eq!(typst_context[21], "#191");\n    assert!(typst_context[20].contains("#187/#200/#201"));\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('filesystem audit typst anchor drift')
+          text = text.replace(anchor, replacement, 1)
+          path.write_text(text)
+          PY
+
+      - name: Canonical reconciliation proof
+        shell: bash
+        run: |
+          cargo fmt --all --check
+          git diff --check
+          cargo test --locked -p arkst-core --test filesystem_project_data_resources_audit
+          cargo test --locked -p arkst-core --test quarkdown_v251_reconciliation
+          cargo test --locked -p arkst-core --test quarkdown_resource_builtins json_
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          git diff --exit-code -- Cargo.lock
+
+      - name: Commit proved reconciliation and self-remove harness
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/ROADMAP.md \
+            docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT.md \
+            docs/compatibility/quarkdown/FILESYSTEM_PROJECT_DATA_RESOURCES_AUDIT_MANIFEST.tsv \
+            docs/compatibility/quarkdown/RECONCILIATION.md \
+            crates/arkst-core/tests/filesystem_project_data_resources_audit.rs \
+            crates/arkst-core/tests/quarkdown_v251_reconciliation.rs
+          git rm .github/workflows/tmp-316-project-state-reconcile.yml
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only | grep '^Cargo.lock$' || true)"
+          git commit -m 'docs(compat): reconcile completed prerequisite ownership' -m 'Refs #316'
+          git push origin HEAD:chore/316-project-state-reconciliation-proof
