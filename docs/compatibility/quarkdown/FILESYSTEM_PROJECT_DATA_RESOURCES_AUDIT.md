@@ -260,7 +260,9 @@ explicit canonical `TypstSourceContext.project_root`, staging mirrors the
 project under an isolated temp root, and Typst receives `--root`. The current
 gap is that backend asset/import resolution is tied to the native mirror rather
 than the evaluator's VirtualProject provider, and no WASM backend path exists.
-The ordered redesign/re-evaluation remains #187; no #187 work is started here.
+The #187 backend re-evaluation is completed historical work; these remaining
+resource/backend limitations are tracked by their active resource, WASM, and
+output owners rather than by #187.
 
 ## Historical #62 reconciliation
 
@@ -306,11 +308,11 @@ or network access.
   WASM project/resource binding;
 - [#175](https://github.com/luceat-lux-vestra/arkst/issues/175),
   [#181](https://github.com/luceat-lux-vestra/arkst/issues/181),
-  [#182](https://github.com/luceat-lux-vestra/arkst/issues/182),
-  [#183](https://github.com/luceat-lux-vestra/arkst/issues/183), and
-  [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) retain their
-  established layout, structural/reference, media, table, and Typst/backend
-  ownership boundaries; and
+  [#182](https://github.com/luceat-lux-vestra/arkst/issues/182), and
+  [#183](https://github.com/luceat-lux-vestra/arkst/issues/183) retain their
+  established layout, structural/reference, media, and table ownership
+  boundaries;
+- [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) is **completed historical backend re-evaluation**, not an actionable follow-up owner; and
 - [#156](https://github.com/luceat-lux-vestra/arkst/issues/156) is the
   completed cross-audit reconciliation record; implementation sequencing now
   follows its canonical dependency graph.

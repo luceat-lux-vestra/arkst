@@ -130,7 +130,7 @@ and later programmable-document convergence beyond the evidenced M2 slices.
 | Bounded Quarkdown v2.5.1 `.extend` / `.super` evaluator semantics (#169) | Completed (source-defined and regular scalar-native targets; specialized native owners and renderer/output compatibility deferred) |
 | Quarkdown v2.5.1 layout/document-configuration audit (#153) | Completed (20-row canonical inventory; #175–#178 follow the dependency bands in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
 | Quarkdown v2.5.1 content/media/Markdown-extension audit (#154) | Completed (83-row canonical inventory; #181–#185 and the bounded #198–#199 follow the shared engine/backend/content prerequisites in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md)) |
-| Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface; implementation ordering, including #187 as the next technical work, is defined by [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md) |
+| Broader document metadata and programmable-document convergence | #152 audited the v2.5.1 document-state surface. The #187 backend re-evaluation, #200 explicit native selection, and #201 parity evidence are completed historical prerequisites; current implementation ordering is defined by the active owners in [#156 reconciliation](compatibility/quarkdown/RECONCILIATION.md), including #189/#190 and deferred #191 for the resource/platform boundary. |
 
 ## M4 — Developer Experience
 

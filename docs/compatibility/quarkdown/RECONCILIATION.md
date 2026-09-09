@@ -15,8 +15,9 @@ audit bases recorded in the individual records remain historical provenance;
 they are not silently rewritten. Issues [#148](https://github.com/luceat-lux-vestra/arkst/issues/148)
 through [#155](https://github.com/luceat-lux-vestra/arkst/issues/155) are
 closed, are all children of #147, and have their canonical audit artifacts
-listed below. #156 does not implement a compatibility feature and does not
-close #147.
+listed below. #156 does not implement a compatibility feature and did not
+close #147 as part of that reconciliation change; #147 has since completed and
+is retained here as historical parent provenance.
 
 ## Canonical status rule
 
@@ -101,8 +102,8 @@ status recorded by its owner.
 | `.read` | #155; `PARTIAL` | completed #188 logical resolver; completed #298 native host ingestion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative in-memory text and bounded line selection work. Absolute/global permission behavior is an accepted fail-closed divergence recorded under completed #296/#300; public WASM binding/parity is #191. |
 | `.json` | #155; `PARTIAL` | completed #188 resolver and #298 native host ingestion; #149 conversion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global-read behavior is the accepted policy divergence and public WASM parity remains #191. |
 | `.include` | #155; `PARTIAL` | completed #188 resolver/nested identity and #298 native host ingestion; `POLICY_DIVERGENCE:global-read`; residual #191/#199 | Nested source identity, cycles/repeats, library dispatch, caller-relative callable resource bases, and explicit native `-l`/`--libs` ingestion are evidenced. Global-read behavior is the accepted policy divergence; public WASM binding and graph/output remain separate residual owners. |
-| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188/#298 prerequisites; completed #296 policy record; #187/#189/#190/#191 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while language-facing breadth and WASM/backend parity remain bounded by their explicit owners. |
-| Typst entry/source-context contract | #155; `PARTIAL` | #187 strategy; #200 explicit selection; #201 parity | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; broader cross-platform parity remains in #201. |
+| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188/#298 prerequisites; completed #296 policy record; #189/#190/#191 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while language-facing breadth and WASM parity remain bounded by their explicit active owners. |
+| Typst entry/source-context contract | #155; `PARTIAL` | completed #187 strategy; completed #200 explicit selection; completed #201 parity evidence | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; the #187/#200/#201 backend strategy/selection/parity chain is completed historical evidence, not current follow-up ownership. |
 | WASM resource boundary | #155; `DEFERRED` | #191 M6/embedder boundary | Core/provider ideas are portable, but no public WASM resource API or native/WASM end-to-end equivalence exists. |
 
 ### #188 resolver close-out
@@ -172,17 +173,18 @@ semantic or output compatibility.
 
 | Gap class | Current ownership |
 |---|---|
-| `PRODUCTION_GAP` | #165–#167, #169, #173–#185, #188, #189, and #195–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. |
+| `PRODUCTION_GAP` | #165–#167, #169, #173–#185, #189, and #195–#199 where the required parser, engine, content, layout, or resource behavior is absent or only bounded. Completed #188 is prerequisite evidence, not a current gap owner. |
 | `EVIDENCE_GAP` | Only where a bounded implementation exists but the correct layer’s independent conformance/output/provenance evidence is still missing; this does not downgrade a real missing semantic implementation to an evidence task. |
 | `DOCUMENTATION_GAP` | Stale family-level claims and stale #156 freeze text corrected by this reconciliation; detailed rows remain in the audit artifacts. |
-| `BACKEND_GAP` | #201 parity evidence and #154 producer/output rows whose semantics cannot be observed through the current backend contract. |
+| `BACKEND_GAP` | #154 producer/output rows whose semantics cannot yet be observed through the current backend contract. Completed #201 parity evidence is historical evidence, not a current gap owner. |
 | `PLATFORM_GAP` | #190 explicit host capability/injection boundary and the native/WASM/provider exposure portions of #191. |
 | `POLICY_DIVERGENCE` | `POLICY_DIVERGENCE:global-read` records the accepted fail-closed upstream `GlobalRead` incompatibility resolved by completed #296/#300; it is not an implementation owner. |
 | `DEFERRED_PRODUCT_SURFACE` | #191 WASM resource exposure, `.css`, and `.cssproperties`, plus audit rows explicitly deferred in the #151/#154/#155 manifests. |
 
-Every currently open implementation issue discovered during the audit window
-is represented below. Issue state was checked on 2026-08-26; the listed issue
-numbers are not inferred from a numeric sequence.
+The issue table below preserves the audit-window state checked on 2026-08-26;
+rows are not inferred from a numeric sequence. Where an issue subsequently
+completed, the row now says so explicitly and must not be interpreted as a
+current blocker or follow-up owner.
 
 | Issues | Origin / canonical owner | Scope and dependency decision | Recommended band |
 |---|---|---|---|
@@ -199,20 +201,20 @@ numbers are not inferred from a numeric sequence.
 | [#175](https://github.com/luceat-lux-vestra/arkst/issues/175), [#176](https://github.com/luceat-lux-vestra/arkst/issues/176), [#177](https://github.com/luceat-lux-vestra/arkst/issues/177), [#178](https://github.com/luceat-lux-vestra/arkst/issues/178) | #153 / document-wide configuration and layout policy | #175 owns document-wide state; #176 owns page margins/counters/heading/page policy; #177 owns navigation/markers/TOC; #178 owns slide configuration. Component-local content remains #154-owned. They consume #165–#167 and the backend strategy decision where output is involved. | Layout/configuration band after prerequisites. |
 | [#180](https://github.com/luceat-lux-vestra/arkst/issues/180) | #153 → #154 / `.texmacro` state and raw body | Distinct macro-map/raw-body/math-renderer contract. Depends on #166–#167 and is consumed by #185; it is not a generic backend escape hatch. | After raw-body/atomicity prerequisites. |
 | [#181](https://github.com/luceat-lux-vestra/arkst/issues/181) | #154 / structural content and shared identifiers/references/index | Shared caption, identifier, reference, and index infrastructure. It is consumed by #177, #183, and #185; it does not own their producer semantics. | Shared content infrastructure band. |
-| [#182](https://github.com/luceat-lux-vestra/arkst/issues/182) | #154 / media and image producers | Media sizing, icons, diagrams, and output contract. Hard dependency on #188 for project resources; consumes #160/#166–#167 and backend strategy. | After #188 and content prerequisites. |
+| [#182](https://github.com/luceat-lux-vestra/arkst/issues/182) | #154 / media and image producers | Media sizing, icons, diagrams, and output contract. Hard dependency on #188 for project resources; consumes #160/#166–#167 and backend strategy. | After completed #188 and content prerequisites. |
 | [#183](https://github.com/luceat-lux-vestra/arkst/issues/183) | #154 / table producers | Table generation/computation and output. Depends on #181 shared identifiers/captions, #165–#167 conversion, and #189 for CSV/data-file input where applicable. | After shared content and data-file prerequisites. |
 | [#184](https://github.com/luceat-lux-vestra/arkst/issues/184) | #154 / component and slide content | Component-local content, containers, slide content, plus `.keybinding` and `.loremipsum` content-producer review; no generalized style framework. Depends on #178 for slide configuration and #175 only for document-wide policy. | After layout/content prerequisites. |
 | [#185](https://github.com/luceat-lux-vestra/arkst/issues/185) | #154 / math, code, and explicit breaks | Math/code/break producers and output. Depends on #180 and #181 plus shared conversion/raw-body contracts. | After macro/shared-content prerequisites. |
 | [#194](https://github.com/luceat-lux-vestra/arkst/issues/194) | #151 / dictionary lookup | Implemented bounded `.get` lookup, key conversion, missing-key/`orelse` behavior, typed nested values, diagnostics, and atomicity. Uses #165–#167 and does not duplicate dictionary construction. No renderer/output-equivalence claim is made. | Bounded semantic slice complete; broader output evidence remains out of scope. |
-| [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) | #151 / library/runtime inspection | `.libexists`, `.functionexists`, `.libraries`, and `.libfunctions` under one deterministic registry view. Depends on #165–#167 and coordinates capability/resource policy with #188/#190; no plugin registry. | After shared engine and #187 strategy; capability/resource coordination band. |
+| [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) | #151 / library/runtime inspection | `.libexists`, `.functionexists`, `.libraries`, and `.libfunctions` under one deterministic registry view. Depends on #165–#167 and coordinates capability/resource policy with #188/#190; no plugin registry. | After shared engine prerequisites and the completed #187 strategy; capability/resource coordination band. |
 | [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) | #151 / localization table and lookup | Implemented bounded evaluator-native `.localization` mutation and `.localize` lookup (exact table/locale lookup, pinned whole-string Kotlin/JVM lowercase-first-then-original key lookup including contextual Final_Sigma), including seeded `std`, merge/replace, separators, typed values, diagnostics, source-defined shadowing, and #167 savepoint atomicity. It reuses #165–#167 and #173 without moving `.doclang`; no serialized IR or renderer/output claim is made. Independently authored black-box probe evidence against the pinned Quarkdown v2.5.1 release is recorded in [`LOCALIZATION_PROBES.md`](LOCALIZATION_PROBES.md). | Bounded semantic slice complete; exhaustive resource-data and locale-aware output remain out of scope. |
-| [#197](https://github.com/luceat-lux-vestra/arkst/issues/197) | #151 / logger and diagnostic builtins | `.log`, `.debug`, and `.error` severity/return behavior through an explicit sink/capability or deterministic rejection. Depends on #165–#167 and #190; no implicit process streams. | After shared engine and #187/#190 host-boundary decisions; semantic work can be parallel. |
-| [#198](https://github.com/luceat-lux-vestra/arkst/issues/198) | #154 → #150 / `.match` content transformation | Pattern/callback traversal and inline-content replacement; #181 remains shared infrastructure only. Depends on #165–#167 and coordinates output strategy with #187. | After #187 and shared binding/atomicity prerequisites; content/evaluator band. |
-| [#199](https://github.com/luceat-lux-vestra/arkst/issues/199) | #154 / subdocument graph producer/output | `.subdocumentgraph` graph/content semantics and output. Hard dependency on #188 logical resolution; coordinates shared identifiers/indexing with #181 and backend strategy with #187. | After #188 and backend/content prerequisites. |
-| [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) | #155 → backend strategy | Completed re-evaluation: native in-process Typst is accepted as an optional adapter over `VirtualProject`; subprocess remains the default. Issue #200 adds explicit native selection and #201 owns broader parity evidence. | #200 implemented; #201 remains the companion parity follow-up. |
-| [#188](https://github.com/luceat-lux-vestra/arkst/issues/188) | #155 / logical project resource resolution | Common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity. Hard prerequisite for #189, #199, and resource portions of #182/#183; not a prerequisite to start #187. | After #187; first resource implementation band. |
-| [#189](https://github.com/luceat-lux-vestra/arkst/issues/189) | #155 / project data and file identity | `.listfiles`, `.filename`, `.csv`, `.bibliography`; depends on #188 and coordinates with #181/#183. | After #188; data consumer band. |
-| [#190](https://github.com/luceat-lux-vestra/arkst/issues/190) | #155 / host capability boundary | Deterministic `.env` injection/denial and native/WASM contract; no `std::env`. It can be designed in parallel with #188/#189 after #187, but must precede any environment-dependent exposure. | Parallel platform-contract band after #187. |
+| [#197](https://github.com/luceat-lux-vestra/arkst/issues/197) | #151 / logger and diagnostic builtins | `.log`, `.debug`, and `.error` severity/return behavior through an explicit sink/capability or deterministic rejection. Depends on #165–#167 and #190; no implicit process streams. | After shared engine and completed #187 strategy plus the #190 host-boundary decision; semantic work can be parallel. |
+| [#198](https://github.com/luceat-lux-vestra/arkst/issues/198) | #154 → #150 / `.match` content transformation | Pattern/callback traversal and inline-content replacement; #181 remains shared infrastructure only. Depends on #165–#167 and coordinates output strategy with the completed #187 decision. | Completed #187 is no longer a blocker; proceed according to shared binding/atomicity and content/output prerequisites. |
+| [#199](https://github.com/luceat-lux-vestra/arkst/issues/199) | #154 / subdocument graph producer/output | `.subdocumentgraph` graph/content semantics and output. Hard dependency on #188 logical resolution; coordinates shared identifiers/indexing with #181 and the completed backend strategy with #187. | After completed #188 and the remaining content prerequisites; #187 is not an actionable blocker. |
+| [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) | #155 → backend strategy | Completed re-evaluation: native in-process Typst is accepted as an optional adapter over `VirtualProject`; subprocess remains the default. #200 explicit native selection and #201 cross-platform parity evidence are also completed historical follow-ups. | Completed backend-strategy chain (#187/#200/#201); no actionable owner remains here. |
+| [#188](https://github.com/luceat-lux-vestra/arkst/issues/188) | #155 / logical project resource resolution | Completed common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity prerequisite. | Completed first resource implementation band; current residual resource work is owned by #189/#190/#191 and the applicable content/output owners. |
+| [#189](https://github.com/luceat-lux-vestra/arkst/issues/189) | #155 / project data and file identity | `.listfiles`, `.filename`, `.csv`, `.bibliography`; depends on completed #188 and coordinates with #181/#183. | Active data consumer owner after completed #188; exact per-row status remains in the filesystem manifest. |
+| [#190](https://github.com/luceat-lux-vestra/arkst/issues/190) | #155 / host capability boundary | Deterministic `.env` injection/denial and native/WASM contract; no `std::env`. It can be designed alongside #189 now that #187/#188 are completed, but must precede any environment-dependent exposure. | Parallel platform-contract band. |
 | [#191](https://github.com/luceat-lux-vestra/arkst/issues/191) | #155 / M6 WASM/embedder | WASM VirtualProject/resource boundary, provider exposure, diagnostics, and parity. It remains deferred to the WASM milestone; it is not immediately eligible because #156 completed. | Deferred. |
 
 The remaining #154 rows that are not assigned an implementation issue have an
@@ -221,17 +223,18 @@ explicit product/backend disposition: `.css` and `.cssproperties` remain
 contract is accepted. Closed [#58](https://github.com/luceat-lux-vestra/arkst/issues/58)
 is retained as the historical raw-HTML-policy tracker only; it is not their
 current owner. The `subdocumentgraph` blocker is no longer #155: #188 is the
-logical-resource prerequisite and #199 owns the graph/content/output contract.
+completed logical-resource prerequisite and #199 owns the graph/content/output
+contract.
 
 No duplicate issue was created by #156. Historical trackers are retained with
 their historical meaning: [#24](https://github.com/luceat-lux-vestra/arkst/issues/24)
 is the closed Typst source-context tracker now split between #155 evidence and
-#187 strategy; [#56](https://github.com/luceat-lux-vestra/arkst/issues/56)
+completed #187 strategy; [#56](https://github.com/luceat-lux-vestra/arkst/issues/56)
 is the closed M2 aggregate; [#60](https://github.com/luceat-lux-vestra/arkst/issues/60)
 is the closed syntax tracker; [#61](https://github.com/luceat-lux-vestra/arkst/issues/61)
 is the closed programmable foundation; [#62](https://github.com/luceat-lux-vestra/arkst/issues/62)
 is the closed resource implementation tracker whose current bounded ownership
-is #188–#191; and [#63](https://github.com/luceat-lux-vestra/arkst/issues/63)
+is #189–#191 after completed #188; and [#63](https://github.com/luceat-lux-vestra/arkst/issues/63)
 is the closed conformance-corpus foundation. None is reopened, silently
 closed, or treated as proof of complete v2.5.1 compatibility.
 
@@ -240,13 +243,13 @@ closed, or treated as proof of complete v2.5.1 compatibility.
 ```text
                          ┌───────────────┐
                          │ #187 backend  │  completed strategy
-                         │ → #200/#201  │  selection and parity
+                         │ → #200/#201  │  completed selection/parity
                          └───────┬───────┘
-                                 │ sequencing preference; no hard #188 edge
+                                 │ historical sequencing evidence
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
   #164 (completed)          #188 resolver              #190 capability
-        │                        │                        │
+        │                     (completed)                 │
         ▼                        ▼                        │
       #163                    #189 data                 │
         │                        │                        │
@@ -265,7 +268,7 @@ closed, or treated as proof of complete v2.5.1 compatibility.
 
   #165/#166/#167 ──► #194 dictionary, #196 localization, #197 logger
        #190 capability ──► #195 library inspection
-       #188 resolver ──► #199 subdocumentgraph
+       completed #188 resolver ──► #199 subdocumentgraph
        #184 also owns the #154 keybinding/loremipsum producer review
 
   #191: deferred WASM/embedder milestone after logical provider/capability
@@ -275,14 +278,14 @@ closed, or treated as proof of complete v2.5.1 compatibility.
 The graph distinguishes three relationships:
 
 - **Hard dependency:** the consumer cannot implement its stated contract
-  without the producer/prerequisite (for example #189 after #188, #183’s
-  resource-backed CSV path after #189, and #182’s project media path after
-  #188).
+  without the producer/prerequisite (for example #189 after completed #188,
+  #183’s resource-backed CSV path after #189, and #182’s project media path
+  after completed #188).
 - **Sequencing preference:** shared engine, content, or backend decisions
-  should stabilize first, but the issue is not structurally impossible to
-  begin (for example #187 before most output work).
+  should stabilize first. The #187 backend strategy is a completed historical
+  sequencing prerequisite, not a current blocker.
 - **Parallelizable/deferred:** independent contracts can proceed in the same
-  band; #190 can proceed alongside the resolver after #187, while #191 is
+  band; #190 can proceed alongside current resource work, while #191 is
   deferred by the M6 platform milestone.
 
 ### #296 resource-permission close-out
@@ -313,24 +316,25 @@ divergence plus only the separately owned #191/#149/#199/#189/#182 gaps applicab
 audit as completed historical/evidence ownership rather than an unresolved
 blocker or follow-up.
 
-### Backend strategy closure: #187 → #200
+### Backend strategy and parity closure: #187 → #200 → #201
 
-**STATUS:** #187's strategy decision is complete; #200 is the production
-selection follow-up and #201 owns broader parity evidence.
+**STATUS:** #187's strategy decision, #200's explicit native selection, and
+#201's cross-platform parity evidence are all completed historical work.
 
-**OWNER ISSUE:** #200 owns explicit backend selection and adapter promotion;
-#201 owns cross-platform parity.
+**HISTORICAL OWNERSHIP:** #187 owned strategy, #200 owned explicit backend
+selection and adapter promotion, and #201 owned cross-platform parity. None of
+these three issues is a current blocker or follow-up owner.
 
-**WHY THAT ISSUE MUST PRECEDE #187:** not applicable; the strategy decision is
-complete and #200 is the explicit-selection follow-up.
+**SEQUENCING:** the strategy decision preceded its selection/parity follow-ups;
+that sequence is complete and must not be reused as a present dependency.
 
 **EVIDENCE:** #155 records the current VirtualProject/ResourceProvider logical
 model as `SUPPORTED_SEMANTICS` and the Typst source-context contract as
-`PARTIAL`; #187 evaluated in-process Typst against that current architecture,
-and #200 exposes the resulting adapter only through explicit native selection.
-The richer logical resolver in #188 is not needed for this bounded adapter. If
-a richer World/resource mapping is later required, that is a new
-evidence-backed dependency decision, not an assumption made by #156.
+`PARTIAL`; #187 evaluated in-process Typst against that architecture, #200
+exposed the resulting adapter only through explicit native selection, and #201
+completed the bounded cross-platform parity evidence for that chain. The richer
+logical resolver in #188 was not needed for the bounded adapter and is now also
+completed prerequisite evidence.
 
 The resulting backend direction is:
 
@@ -340,21 +344,21 @@ InProcessBackend  -> explicit native-only opt-in
 ```
 
 Removing subprocess execution or changing the default is not decided by #156,
-#187, or #200; it requires separate parity and migration evidence.
+#187, #200, or #201; any such change requires separate new parity and migration
+evidence rather than reopening a completed owner.
 
 ### Resource ordering: #188–#191
 
-- **#188** is the common logical resolver and nested-loading contract. It is
-  first among the resource follow-ups and is a prerequisite for #189 and for
-  resource-consuming portions of #182 and #183. It is not a hard prerequisite
-  for #187.
-- **#189** adds data-file and logical file-identity consumers after #188. CSV
-  output is coordinated with #183; bibliography/reference output is
-  coordinated with #181.
+- **#188** completed the common logical resolver and nested-loading contract.
+  It is prerequisite evidence for #189 and for resource-consuming portions of
+  #182 and #183; it is not an actionable follow-up owner.
+- **#189** owns the remaining data-file and logical file-identity consumers
+  after completed #188. CSV output is coordinated with #183;
+  bibliography/reference output is coordinated with #181.
 - **#190** defines an explicit, deterministic host capability. It has no
   permission to add `std::env` or implicit process state. Its contract can be
-  developed in parallel with #188/#189 after #187, and it must precede any
-  native/WASM environment exposure.
+  developed alongside current #189 work now that #187/#188 are completed, and
+  it must precede any native/WASM environment exposure.
 - **#191** remains `DEFERRED` to the M6/WASM/embedder milestone. It must reuse
   the logical provider/capability contracts and prove native/WASM parity; it is
   not a reason to add a temporary filesystem API now.
@@ -362,16 +366,15 @@ Removing subprocess execution or changing the default is not decided by #156,
 ## Freeze reconciliation
 
 The pre-reconciliation freeze is replaced by the order above. The earlier
-freeze wording is no longer a complete status. After
-#156 is merged, issues are eligible only in their dependency band:
+freeze wording is historical rather than current dependency state:
 
-- #187 is **completed as the backend-strategy re-evaluation** and #200 is the
-  explicit-selection follow-up;
+- #187 is **completed as the backend-strategy re-evaluation**; #200 explicit
+  selection and #201 parity evidence are also **completed historical work**;
 - Remaining work in #165–#185 is **sequenced after the relevant shared
   engine/backend/content prerequisites**, with parallel work only where the
   graph permits it; completed bounded slices such as #159 remain recorded as
   evidence rather than being reopened by this sequence;
-- #188 common logical resolver prerequisite is **complete**; #298 native host-ingestion prerequisite is **complete** under #302; #296 global-read policy reconciliation is **complete** under #300 and is represented by `POLICY_DIVERGENCE:global-read` rather than an actionable owner; #189 may proceed on its data-file scope, and #190 is a parallel capability-contract band;
+- #188 common logical resolver prerequisite is **complete**; #298 native host-ingestion prerequisite is **complete** under #302; #296 global-read policy reconciliation is **complete** under #300 and is represented by `POLICY_DIVERGENCE:global-read` rather than an actionable owner; #189 remains the data-file/file-identity owner, and #190 is a parallel capability-contract band;
 - #191 is **deferred/milestone-blocked** to M6/WASM; and
 - no issue is authorized to bypass the architecture, evidence, or host
   boundaries recorded here.
@@ -418,7 +421,7 @@ original scope/non-goals. No production implementation was started by #156.
 
 ## #147 completion readiness
 
-The reconciliation supplies evidence for each parent completion criterion:
+The reconciliation supplied evidence for each parent completion criterion:
 
 - all eight audit inventories and their row totals are enumerated;
 - each audit’s detailed row authority and exact canonical vocabulary are
@@ -435,6 +438,6 @@ The reconciliation supplies evidence for each parent completion criterion:
   revision and layer-specific claims; and
 - residual gaps and the dependency-aware order are explicit.
 
-This is **closure-ready evidence for #147 after this branch/PR is merged and
-its checks pass**. #147 remains open and is not automatically closed by this
-change.
+This was **closure-ready evidence for #147** at the time of #156. #147 has
+since completed and is retained here as historical parent/audit provenance;
+this document must not present it as an open current blocker.
