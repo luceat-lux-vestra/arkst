@@ -250,42 +250,56 @@ fn reconciliation_assigns_actionable_content_gaps_without_closed_owner_links() {
 }
 
 #[test]
-fn reconciliation_records_order_without_making_188_a_187_blocker() {
-    assert!(RECONCILIATION.contains("#187's strategy decision is complete"));
-    assert!(RECONCILIATION.contains("#200 is the explicit-selection follow-up"));
-    assert!(RECONCILIATION.contains("not a prerequisite to start #187"));
+fn reconciliation_records_completed_backend_chain_and_current_resource_order() {
+    assert!(RECONCILIATION.contains("### Backend strategy and parity closure: #187 → #200 → #201"));
+    assert!(RECONCILIATION
+        .contains("#201's cross-platform parity evidence are all completed historical work"));
+    assert!(RECONCILIATION.contains("#187 is **completed as the backend-strategy re-evaluation**"));
     assert!(RECONCILIATION.contains("#188 common logical resolver prerequisite is **complete**"));
-    assert!(RECONCILIATION.contains("#189 may proceed on its data-file scope"));
+    assert!(RECONCILIATION.contains("#189 remains the data-file/file-identity owner"));
     assert!(RECONCILIATION.contains("#296"));
     assert!(RECONCILIATION.contains("#298 native host-ingestion prerequisite is **complete**"));
     assert!(RECONCILIATION.contains("af2f409c3c9050abdd369798e1ddb7ad9c23435b"));
     assert!(RECONCILIATION.contains("#296 global-read policy reconciliation is **complete**"));
     assert!(RECONCILIATION.contains("e7da0718439ecf396fbfeceb133da872a940341a"));
     assert!(RECONCILIATION.contains("POLICY_DIVERGENCE:global-read"));
-    assert!(RECONCILIATION.contains("#190 is a parallel"));
+    assert!(RECONCILIATION.contains("#190 is a parallel capability-contract band"));
     assert!(RECONCILIATION.contains("#191 is **deferred/milestone-blocked**"));
     assert!(RECONCILIATION
         .contains("Removing subprocess execution or changing the default is not decided"));
+
+    for stale in [
+        "#187's strategy decision is complete",
+        "#200 is the explicit-selection follow-up",
+        "not a prerequisite to start #187",
+        "#189 may proceed on its data-file scope",
+    ] {
+        assert!(
+            !RECONCILIATION.contains(stale),
+            "stale current-state sequencing text remains: {stale}"
+        );
+    }
 }
 
 #[test]
-fn reconciliation_covers_open_followups_and_historical_trackers() {
+fn reconciliation_covers_referenced_issues_and_historical_completion_state() {
     for issue in [
         157, 158, 159, 160, 162, 163, 164, 165, 166, 167, 169, 172, 173, 175, 176, 177, 178, 180,
-        181, 182, 183, 184, 185, 187, 189, 190, 191, 194, 195, 196, 197, 198, 199,
+        181, 182, 183, 184, 185, 189, 190, 191, 194, 195, 196, 197, 198, 199,
     ] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
-            "missing issue #{issue}"
+            "missing referenced issue #{issue}"
         );
     }
-    for issue in [24, 56, 60, 61, 62, 63, 188, 296, 298] {
+    for issue in [24, 56, 60, 61, 62, 63, 147, 187, 188, 200, 201, 296, 298] {
         assert!(
             RECONCILIATION.contains(&format!("#{issue}")),
             "missing historical issue #{issue}"
         );
     }
-    assert!(RECONCILIATION.contains("#147 remains open"));
+    assert!(RECONCILIATION.contains("completed historical work"));
+    assert!(!RECONCILIATION.contains("#147 remains open"));
     assert!(!RECONCILIATION.contains("frozen until #156"));
     assert!(!RECONCILIATION.contains("must remain Post-#156"));
 }
