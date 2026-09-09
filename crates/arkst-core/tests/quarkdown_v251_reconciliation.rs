@@ -149,10 +149,11 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
 
     let virtual_project = resource_row("contract:virtual-project-resource-model");
     assert_eq!(virtual_project[17], "SUPPORTED_SEMANTICS");
+    assert_eq!(virtual_project[21], "#182;#191");
 
     let typst_context = resource_row("contract:typst-entry-source-context");
     assert_eq!(typst_context[17], "PARTIAL");
-    assert_eq!(typst_context[21], "#187");
+    assert_eq!(typst_context[21], "#182;#175;#191");
 
     let wasm_boundary = resource_row("contract:wasm-resource-boundary");
     assert_eq!(wasm_boundary[17], "DEFERRED");
@@ -160,7 +161,6 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(!wasm_boundary[19].contains("#156"));
     assert!(!wasm_boundary[20].contains("#156"));
 
-    assert_eq!(virtual_project[21], "#182;#187");
     assert!(!virtual_project[21].contains("#156"));
 }
 
@@ -305,7 +305,9 @@ fn reconciliation_covers_referenced_issues_and_historical_completion_state() {
 }
 
 #[test]
-fn reconciliation_rejects_completed_296_in_any_unresolved_resource_column() {
+fn reconciliation_rejects_completed_owners_in_unresolved_resource_columns() {
+    const COMPLETED_OWNERS: &[&str] = &["#187", "#200", "#201", "#296", "#298"];
+
     for line in RESOURCE_MANIFEST
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -317,12 +319,14 @@ fn reconciliation_rejects_completed_296_in_any_unresolved_resource_column() {
             (20, "blocker dependency"),
             (21, "follow-up"),
         ] {
-            assert!(
-                !fields[index].contains("#296"),
-                "completed #296 leaked into unresolved {label} for {}: {}",
-                fields[1],
-                fields[index]
-            );
+            for completed in COMPLETED_OWNERS {
+                assert!(
+                    !fields[index].contains(completed),
+                    "completed owner {completed} leaked into unresolved {label} for {}: {}",
+                    fields[1],
+                    fields[index]
+                );
+            }
         }
     }
 }
