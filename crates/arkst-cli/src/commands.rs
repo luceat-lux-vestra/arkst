@@ -195,9 +195,19 @@ fn load_single_file_project_with_libraries(
     let virtual_entry = os_relative_path_to_virtual(&requested_relative)?;
 
     let mut files = Vec::new();
-    collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)?;
+    let mut directories = Vec::new();
+    collect_project_entries(
+        &canonical_project_root,
+        &canonical_project_root,
+        &mut files,
+        &mut directories,
+    )?;
 
     let mut builder = VirtualProjectBuilder::new().entry(virtual_entry.as_str())?;
+    for directory in directories {
+        let directory = os_relative_path_to_virtual(&directory)?;
+        builder = builder.add_directory(directory.as_str())?;
+    }
     for (path, bytes) in files {
         let path = os_relative_path_to_virtual(&path)?;
         let source_extension = path
@@ -231,10 +241,11 @@ fn load_single_file_project_with_libraries(
     })
 }
 
-fn collect_project_files(
+fn collect_project_entries(
     root: &Path,
     current: &Path,
     files: &mut Vec<(PathBuf, Vec<u8>)>,
+    directories: &mut Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     let mut entries = fs::read_dir(current)
         .with_context(|| format!("cannot read project directory {}", current.display()))?
@@ -277,7 +288,14 @@ fn collect_project_files(
             );
         }
         if metadata.is_dir() {
-            collect_project_files(root, &path, files)?;
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| {
+                    anyhow::anyhow!("project directory is outside root: {}", path.display())
+                })?
+                .to_path_buf();
+            directories.push(relative);
+            collect_project_entries(root, &path, files, directories)?;
         } else if metadata.is_file() || metadata.file_type().is_symlink() {
             let relative = path
                 .strip_prefix(root)
@@ -1083,6 +1101,60 @@ mod tests {
     /// [`super::build`] directly so they can pass a fake executable path.
     fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
         super::build(input, formats, output, Path::new("typst"))
+    }
+
+    #[test]
+    fn native_project_ingestion_preserves_empty_directory_identity_189() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        fs::create_dir(&project_root).unwrap();
+        fs::create_dir(project_root.join("empty")).unwrap();
+        let input = project_root.join("main.qd");
+        fs::write(&input, ".listfiles {empty} fullpath:{false}::size\n").unwrap();
+
+        let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+        let source = loaded
+            .project
+            .sources()
+            .get_id(loaded.project.entry())
+            .expect("entry source");
+        assert!(loaded
+            .project
+            .list_resource_directory(source, "empty", false)
+            .expect("native empty directory identity")
+            .is_empty());
+        assert!(check(&input.to_string_lossy()).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn native_project_ingestion_does_not_register_directory_symlink_alias_189() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        let real = project_root.join("real");
+        fs::create_dir_all(real.join("empty")).unwrap();
+        let input = project_root.join("main.qd");
+        fs::write(&input, "# Main\n").unwrap();
+        symlink(&real, project_root.join("alias")).unwrap();
+
+        let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+        let source = loaded
+            .project
+            .sources()
+            .get_id(loaded.project.entry())
+            .expect("entry source");
+        let root = loaded
+            .project
+            .list_resource_directory(source, ".", false)
+            .expect("project root listing");
+        assert!(root.iter().any(|entry| entry.name == "real"));
+        assert!(!root.iter().any(|entry| entry.name == "alias"));
+        assert!(loaded
+            .project
+            .list_resource_directory(source, "alias", false)
+            .is_err());
     }
 
     #[test]

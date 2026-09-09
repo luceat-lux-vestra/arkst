@@ -121,7 +121,8 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(listfiles[18].contains("fullpath:false"));
     assert!(listfiles[18].contains("sortby:name"));
     assert!(listfiles[18].contains("ASCII"));
-    assert!(listfiles[19].contains("empty-directory"));
+    assert!(!listfiles[19].contains("empty-directory"));
+    assert!(listfiles[18].contains("empty-directory"));
     assert!(listfiles[19].contains("regex"));
     assert!(listfiles[19].contains("last-modified"));
     assert!(listfiles[19].contains("Unicode"));

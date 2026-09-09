@@ -78,8 +78,9 @@ Arkst already has a substantial explicit native project-ingestion boundary in
 - validates the requested entry extension;
 - canonicalizes the requested entry and logical project root;
 - rejects an entry whose canonical target escapes that root;
-- recursively enumerates the project root through `collect_project_files`;
+- recursively enumerates the project root through `collect_project_entries`;
 - sorts every directory's entries by filename before traversal;
+- records physical directories as bounded logical directory identities, including empty directories;
 - avoids recursive directory-symlink aliases and excludes symlink escapes;
 - eagerly reads project files at the CLI host boundary;
 - inserts recognized source files and all bytes as assets into a
@@ -87,8 +88,9 @@ Arkst already has a substantial explicit native project-ingestion boundary in
 - builds the complete in-memory `VirtualProject` before calling
   `arkst_core::compile`.
 
-The project builder itself remains I/O-free. It sorts logical sources/assets
-before construction, allocates deterministic source IDs, and already supports
+The project builder itself remains I/O-free. It sorts logical sources/assets,
+validates explicit directory identities before construction, allocates deterministic
+source IDs, and already supports
 `add_loadable_library(name, source)`. Library names are exact case-sensitive
 semantic keys; empty and duplicate names fail atomically during `build`.
 

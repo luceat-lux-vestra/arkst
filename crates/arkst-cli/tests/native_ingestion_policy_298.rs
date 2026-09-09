@@ -45,7 +45,9 @@ fn pinned_upstream_native_ingestion_contract_is_explicit() {
 fn native_project_and_library_ingestion_stay_explicit_and_deterministic() {
     for contract in [
         "fn load_single_file_project_with_libraries(",
-        "collect_project_files(&canonical_project_root, &canonical_project_root, &mut files)",
+        "collect_project_entries(",
+        "&mut directories,",
+        "builder = builder.add_directory(directory.as_str())?;",
         "entries.sort_by_key(|entry| entry.file_name());",
         "VirtualProjectBuilder::new().entry(virtual_entry.as_str())?",
         "builder = builder.add_source(path.as_str(), source)?;",
@@ -70,6 +72,7 @@ fn native_project_and_library_ingestion_stay_explicit_and_deterministic() {
         assert!(CLI_MAIN.contains(surface), "missing CLI surface: {surface}");
     }
     for builder_contract in [
+        "pub fn add_directory(",
         "pub fn add_loadable_library(",
         "libraries.sort_by(|a, b| a.0.cmp(&b.0));",
         "BuildError::DuplicateLoadableLibrary",
