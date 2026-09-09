@@ -106,10 +106,11 @@ images and fonts, repeated loads, missing/traversal failures, in-process
 package-capability denial (including a runtime-generated request), invalid
 entry paths, deterministic diagnostics, and source-map handoff. CLI selection
 tests cover the subprocess default, explicit values, invalid values, and an
-explicit in-process PDF build; cross-platform parity corpus expansion remains
-tracked by issue #201.
+explicit in-process PDF build. The cross-platform parity corpus and its CI
+coverage were completed under issue #201 and remain regression evidence.
 
-Issue #201's fixture-level semantic oracle is an independent test target:
+The fixture-level semantic oracle completed under #201 remains an independent
+test target:
 
 ~~~
 ARKST_REQUIRE_TYPST=1 \
