@@ -63,6 +63,8 @@ jobs:
           run_case chain_app '.values::appended {D}::last'
           run_case direct_pre '.prepended {.values} {A}::first'
           run_case direct_app '.appended {.values} {D}::last'
+          run_case named_to_value '.prepended to:{.values} value:{A}::first'
+          run_case named_to_value_app '.appended to:{.values} value:{D}::last'
           run_case named_from_value '.prepended from:{.values} value:{A}::first'
           run_case named_collection_value '.prepended collection:{.values} value:{A}::first'
           run_case named_iterable_value '.prepended iterable:{.values} value:{A}::first'
