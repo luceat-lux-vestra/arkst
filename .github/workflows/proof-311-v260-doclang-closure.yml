@@ -1,0 +1,54 @@
+name: Disposable #311 v2.6.0 locale closure oracle
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-iterable-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify exact v2.6.0 and observe existing independently-authored fixture
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset="quarkdown-linux-x64.zip"
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = "sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4"
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          for case in doclang-family doclang-locale-closure; do
+            project="$RUNNER_TEMP/$case"; mkdir -p "$project"
+            cp "fixtures/quarkdown-conformance/cases/$case/input.qd" "$project/main.qd"
+            (cd "$project" && "$q" c main.qd --clean)
+            python3 - "$case" "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+          case, root = sys.argv[1], Path(sys.argv[2])
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self, data): self.parts.append(data)
+          parts=[]
+          for p in root.rglob('*.html'):
+              t=T(); t.feed(p.read_text(encoding='utf-8')); parts.extend(t.parts)
+          print(f'{case}=' + ' | '.join(' '.join(parts).split()))
+          PY
+          done
