@@ -1,0 +1,171 @@
+name: Disposable #311 Quarkdown v2.6.0 oracle
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-iterable-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: black-box Quarkdown v2.6.0 doclang and iterable probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download exact official Quarkdown v2.6.0 distribution
+        id: quarkdown
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/quarkdown-release.json"
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 \
+            > "$release"
+
+          test "$(jq -r '.tag_name' "$release")" = "v2.6.0"
+          tag_sha="$(curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/iamgio/quarkdown/git/ref/tags/v2.6.0 | jq -r '.object.sha')"
+          printf 'tag_sha=%s\n' "$tag_sha"
+          test "$tag_sha" = "22f3c1169d0b1356fb51d8f43e1833d3d815aab1"
+
+          asset_name="quarkdown-linux-x64.zip"
+          asset_count="$(jq --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release")"
+          test "$asset_count" -eq 1
+          asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .browser_download_url' "$release")"
+          asset_digest="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest // empty' "$release")"
+          printf 'asset_name=%s\nasset_digest=%s\n' "$asset_name" "$asset_digest"
+          test "$asset_digest" = "sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4"
+
+          archive="$RUNNER_TEMP/$asset_name"
+          curl --fail --silent --show-error --location "$asset_url" --output "$archive"
+          printf '%s  %s\n' "${asset_digest#sha256:}" "$archive" | sha256sum --check --strict
+
+          install_root="$RUNNER_TEMP/quarkdown-v2.6.0"
+          mkdir -p "$install_root"
+          unzip -q "$archive" -d "$install_root"
+          binary="$(find "$install_root" -type f -path '*/bin/quarkdown' -print -quit)"
+          test -n "$binary"
+          chmod +x "$binary"
+          version="$($binary --version 2>&1)"
+          printf 'quarkdown_version=%s\n' "$version"
+          printf '%s\n' "$version" | grep -F '2.6.0'
+          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
+
+      - name: Observe doclang getter breaking delta
+        shell: bash
+        env:
+          QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/doclang-probe"
+          mkdir -p "$project"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+          D0-BEGIN [.doclang] D0-END
+          .doclang {de}
+          D1-BEGIN [.doclang] D1-END
+          .doclang {German}
+          D2-BEGIN [.doclang] D2-END
+          .doclang {es-MX}
+          D3-BEGIN [.doclang] D3-END
+          QD
+
+          (cd "$project" && "$QUARKDOWN" c main.qd --clean)
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re, sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.parts=[]
+              def handle_data(self, data):
+                  self.parts.append(data)
+
+          text=[]
+          for path in Path(sys.argv[1]).rglob('*.html'):
+              p=Text(); p.feed(path.read_text(encoding='utf-8')); text.extend(p.parts)
+          flat=' '.join(' '.join(text).split())
+          for key in ('D0','D1','D2','D3'):
+              m=re.search(rf'{key}-BEGIN\s*\[(.*?)\]\s*{key}-END', flat)
+              if not m:
+                  raise SystemExit(f'{key}: observation marker missing')
+              print(f'{key}={m.group(1)}')
+          PY
+
+      - name: Observe prepended and appended collection semantics
+        shell: bash
+        env:
+          QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/iterable-probe"
+          mkdir -p "$project"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+          .var {letters}
+              - B
+              - C
+
+          O-SIZE-BEGIN [.letters::size] O-SIZE-END
+          P-SIZE-BEGIN [.letters::prepended {A}::size] P-SIZE-END
+          A-SIZE-BEGIN [.letters::appended {D}::size] A-SIZE-END
+
+          P-BEGIN
+          .foreach {.letters::prepended {A}}
+              ITEM-BEGIN [.1] ITEM-END
+          P-END
+
+          A-BEGIN
+          .foreach {.letters::appended {D}}
+              ITEM-BEGIN [.1] ITEM-END
+          A-END
+
+          O2-BEGIN
+          .foreach {.letters}
+              ITEM-BEGIN [.1] ITEM-END
+          O2-END
+          QD
+
+          (cd "$project" && "$QUARKDOWN" c main.qd --clean)
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re, sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.parts=[]
+              def handle_data(self, data):
+                  self.parts.append(data)
+
+          parts=[]
+          for path in Path(sys.argv[1]).rglob('*.html'):
+              p=Text(); p.feed(path.read_text(encoding='utf-8')); parts.extend(p.parts)
+          flat=' '.join(' '.join(parts).split())
+          for key in ('O-SIZE','P-SIZE','A-SIZE'):
+              m=re.search(rf'{key}-BEGIN\s*\[(.*?)\]\s*{key}-END', flat)
+              if not m:
+                  raise SystemExit(f'{key}: size marker missing')
+              print(f'{key}={m.group(1)}')
+          for key in ('P','A','O2'):
+              m=re.search(rf'{key}-BEGIN\s*(.*?)\s*{key}-END', flat)
+              if not m:
+                  raise SystemExit(f'{key}: collection marker missing')
+              values=re.findall(r'ITEM-BEGIN\s*\[(.*?)\]\s*ITEM-END', m.group(1))
+              print(f'{key}={values!r}')
+          PY
