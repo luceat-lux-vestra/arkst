@@ -75,13 +75,13 @@ jobs:
           mkdir -p "$project"
           cat > "$project/main.qd" <<'QD'
           .doctype {plain}
-          D0-BEGIN [.doclang] D0-END
+          D0-BEGIN .doclang D0-END
           .doclang {de}
-          D1-BEGIN [.doclang] D1-END
+          D1-BEGIN .doclang D1-END
           .doclang {German}
-          D2-BEGIN [.doclang] D2-END
+          D2-BEGIN .doclang D2-END
           .doclang {es-MX}
-          D3-BEGIN [.doclang] D3-END
+          D3-BEGIN .doclang D3-END
           QD
 
           (cd "$project" && "$QUARKDOWN" c main.qd --clean)
@@ -101,10 +101,10 @@ jobs:
               p=Text(); p.feed(path.read_text(encoding='utf-8')); text.extend(p.parts)
           flat=' '.join(' '.join(text).split())
           for key in ('D0','D1','D2','D3'):
-              m=re.search(rf'{key}-BEGIN\s*\[(.*?)\]\s*{key}-END', flat)
+              m=re.search(rf'{key}-BEGIN\s*(.*?)\s*{key}-END', flat)
               if not m:
                   raise SystemExit(f'{key}: observation marker missing')
-              print(f'{key}={m.group(1)}')
+              print(f'{key}={m.group(1)!r}')
           PY
 
       - name: Observe prepended and appended collection semantics
@@ -121,23 +121,23 @@ jobs:
               - B
               - C
 
-          O-SIZE-BEGIN [.letters::size] O-SIZE-END
-          P-SIZE-BEGIN [.letters::prepended {A}::size] P-SIZE-END
-          A-SIZE-BEGIN [.letters::appended {D}::size] A-SIZE-END
+          O-SIZE-BEGIN .letters::size O-SIZE-END
+          P-SIZE-BEGIN .letters::prepended {A}::size P-SIZE-END
+          A-SIZE-BEGIN .letters::appended {D}::size A-SIZE-END
 
           P-BEGIN
           .foreach {.letters::prepended {A}}
-              ITEM-BEGIN [.1] ITEM-END
+              ITEM-BEGIN .1 ITEM-END
           P-END
 
           A-BEGIN
           .foreach {.letters::appended {D}}
-              ITEM-BEGIN [.1] ITEM-END
+              ITEM-BEGIN .1 ITEM-END
           A-END
 
           O2-BEGIN
           .foreach {.letters}
-              ITEM-BEGIN [.1] ITEM-END
+              ITEM-BEGIN .1 ITEM-END
           O2-END
           QD
 
@@ -158,14 +158,14 @@ jobs:
               p=Text(); p.feed(path.read_text(encoding='utf-8')); parts.extend(p.parts)
           flat=' '.join(' '.join(parts).split())
           for key in ('O-SIZE','P-SIZE','A-SIZE'):
-              m=re.search(rf'{key}-BEGIN\s*\[(.*?)\]\s*{key}-END', flat)
+              m=re.search(rf'{key}-BEGIN\s*(.*?)\s*{key}-END', flat)
               if not m:
                   raise SystemExit(f'{key}: size marker missing')
-              print(f'{key}={m.group(1)}')
+              print(f'{key}={m.group(1)!r}')
           for key in ('P','A','O2'):
               m=re.search(rf'{key}-BEGIN\s*(.*?)\s*{key}-END', flat)
               if not m:
                   raise SystemExit(f'{key}: collection marker missing')
-              values=re.findall(r'ITEM-BEGIN\s*\[(.*?)\]\s*ITEM-END', m.group(1))
+              values=re.findall(r'ITEM-BEGIN\s*(.*?)\s*ITEM-END', m.group(1))
               print(f'{key}={values!r}')
           PY
