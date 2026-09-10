@@ -1,0 +1,148 @@
+name: Disposable #189 listfiles pattern oracle
+
+on:
+  push:
+    branches:
+      - proof/189-listfiles-pattern-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: black-box Quarkdown v2.5.1 pattern probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download exact official Quarkdown v2.5.1 distribution
+        id: quarkdown
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/quarkdown-release.json"
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.5.1 \
+            > "$release"
+
+          test "$(jq -r '.tag_name')" = "v2.5.1"
+          test "$(jq '[.assets[] | select(.name == "quarkdown.zip")] | length' "$release")" -eq 1
+          asset_url="$(jq -r '.assets[] | select(.name == "quarkdown.zip") | .browser_download_url' "$release")"
+          asset_digest="$(jq -r '.assets[] | select(.name == "quarkdown.zip") | .digest // empty' "$release")"
+          case "$asset_digest" in
+            sha256:*) ;;
+            *) echo "official v2.5.1 quarkdown.zip has no SHA-256 release digest" >&2; exit 1 ;;
+          esac
+
+          archive="$RUNNER_TEMP/quarkdown-v2.5.1.zip"
+          curl --fail --silent --show-error --location "$asset_url" --output "$archive"
+          printf '%s  %s\n' "${asset_digest#sha256:}" "$archive" | sha256sum --check --strict
+
+          install_root="$RUNNER_TEMP/quarkdown-v2.5.1"
+          mkdir -p "$install_root"
+          unzip -q "$archive" -d "$install_root"
+          binary="$(find "$install_root" -type f -path '*/bin/quarkdown' -print -quit)"
+          test -n "$binary"
+          chmod +x "$binary"
+          version="$($binary --version 2>&1)"
+          printf 'quarkdown_version=%s\n' "$version"
+          printf '%s\n' "$version" | grep -F '2.5.1'
+          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
+          printf 'asset_digest=%s\n' "$asset_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Observe listfiles pattern behavior
+        shell: bash
+        env:
+          QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/pattern-probe"
+          mkdir -p "$project/data/alphaDir"
+          printf x > "$project/data/alpha"
+          printf x > "$project/data/alpha.txt"
+          printf x > "$project/data/xalpha"
+          printf x > "$project/data/xalpha.txt"
+          printf x > "$project/data/beta.txt"
+          printf x > "$project/data/metadata"
+          printf x > "$project/data/alphaDir/alpha.log"
+          printf x > "$project/data/alphaDir/xalpha2"
+
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+
+          P1: .listfiles {data} directories:{false} recursive:{false} pattern:{alpha} fullpath:{false} sortby:{none}::size
+          P2: .listfiles {data} directories:{false} recursive:{false} pattern:{^alpha} fullpath:{false} sortby:{none}::size
+          P3: .listfiles {data} directories:{false} recursive:{false} pattern:{.*alpha.*} fullpath:{false} sortby:{none}::size
+          P4: .listfiles {data} directories:{false} recursive:{false} pattern:{[.]txt$} fullpath:{false} sortby:{none}::size
+          P5: .listfiles {data} directories:{false} recursive:{false} pattern:{.*data.*} fullpath:{false} sortby:{none}::size
+          P6: .listfiles {data} directories:{false} recursive:{false} pattern:{^alpha[.]txt$} fullpath:{false} sortby:{none}::size
+          P7: .listfiles {data} directories:{true} recursive:{false} pattern:{alpha} fullpath:{false} sortby:{none}::size
+          P8: .listfiles {data} directories:{false} recursive:{true} pattern:{alpha} fullpath:{false} sortby:{none}::size
+          QD
+
+          (
+            cd "$project"
+            "$QUARKDOWN" c main.qd --clean
+          )
+
+          python3 - "$project/output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+              def handle_data(self, data):
+                  self.parts.append(data)
+
+          root = Path(sys.argv[1])
+          observations = {}
+          for path in root.rglob('*.html'):
+              parser = Text()
+              parser.feed(path.read_text(encoding='utf-8'))
+              text = ' '.join(parser.parts)
+              for key, value in re.findall(r'\b(P[1-8]):\s*(\d+)\b', text):
+                  observations.setdefault(key, set()).add(value)
+          for index in range(1, 9):
+              key = f'P{index}'
+              values = observations.get(key, set())
+              if len(values) != 1:
+                  raise SystemExit(f'{key}: expected one observed value, got {sorted(values)}')
+              print(f'{key}={next(iter(values))}')
+          PY
+
+      - name: Observe invalid-regex failure mode
+        shell: bash
+        env:
+          QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/invalid-pattern-probe"
+          mkdir -p "$project/data"
+          printf x > "$project/data/alpha.txt"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+          .listfiles {data} directories:{false} pattern:{[} fullpath:{false} sortby:{none}::size
+          QD
+
+          set +e
+          (
+            cd "$project"
+            "$QUARKDOWN" c main.qd --clean
+          ) >"$RUNNER_TEMP/invalid-pattern.stdout" 2>"$RUNNER_TEMP/invalid-pattern.stderr"
+          status=$?
+          set -e
+          printf 'invalid_pattern_exit=%s\n' "$status"
+          test "$status" -ne 0
+          test ! -e "$project/output" || ! grep -R -q --include='*.html' -F '1' "$project/output"
