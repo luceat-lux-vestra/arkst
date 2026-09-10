@@ -1,0 +1,72 @@
+name: Disposable #311 v2.6.0 prepend append signatures
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-iterable-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Observe exact v2.6.0 signatures
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset="quarkdown-linux-x64.zip"
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = "sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4"
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          run_case() {
+            name="$1"; body="$2"
+            dir="$RUNNER_TEMP/$name"; mkdir -p "$dir"
+            printf '.doctype {plain}\n.var {values}\n    - B\n    - C\n%s\n' "$body" > "$dir/main.qd"
+            set +e
+            (cd "$dir" && "$q" c main.qd --clean) >"$dir/stdout" 2>"$dir/stderr"
+            status=$?
+            set -e
+            echo "CASE=$name EXIT=$status"
+            sed -n '1,120p' "$dir/stderr" | sed 's/^/STDERR: /'
+            if [ -d "$dir/quarkdown-output" ]; then
+              python3 - "$dir/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          parts=[]
+          for p in Path(sys.argv[1]).rglob('*.html'):
+              t=T(); t.feed(p.read_text(encoding='utf-8')); parts.extend(t.parts)
+          print('TEXT:', ' '.join(' '.join(parts).split()))
+          PY
+            fi
+          }
+
+          run_case chain_pre '.values::prepended {A}::first'
+          run_case chain_app '.values::appended {D}::last'
+          run_case direct_pre '.prepended {.values} {A}::first'
+          run_case direct_app '.appended {.values} {D}::last'
+          run_case named_from_value '.prepended from:{.values} value:{A}::first'
+          run_case named_collection_value '.prepended collection:{.values} value:{A}::first'
+          run_case named_iterable_value '.prepended iterable:{.values} value:{A}::first'
+          run_case named_from_element '.prepended from:{.values} element:{A}::first'
+          run_case missing_pre '.prepended {.values}'
+          run_case extra_pre '.prepended {.values} {A} {X}'
+          run_case empty_chain '.range {1} {0}::prepended {A}::first'
