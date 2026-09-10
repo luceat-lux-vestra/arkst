@@ -52,6 +52,27 @@ fn collection_affixes_support_direct_and_named_invocation() {
 }
 
 #[test]
+fn collection_affixes_preserve_typed_iterables_and_inserted_values() {
+    let result = compile_source(
+        ".pair {left} {right}::prepended {zero}::first\n.pair {left} {right}::appended {tail}::last\n\n.var {table}\n    .dictionary\n        - a: 1\n        - b: 2\n.table::prepended {zero}::first\n.table::appended {tail}::last\n.table::prepended {zero}::last::first\n\n.range {-2} {1}::prepended {zero}::first\n.range {-2} {1}::appended {tail}::last\n\n.var {values}\n    - B\n    - C\n.values::prepended {.pair {x} {y}}::first::first\n.values::appended {.pair {x} {y}}::last::second\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(
+        output_text(&result),
+        "zero\ntail\nzero\ntail\nb\nzero\ntail\nx\ny"
+    );
+}
+
+#[test]
+fn source_defined_collection_affixes_shadow_native_dispatch() {
+    let result = compile_source(
+        ".function {prepended}\n    to value:\n    .value\n.function {appended}\n    to value:\n    .value\n\n.prepended {not-an-iterable} {shadow-pre}\n.appended {not-an-iterable} {shadow-app}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{result:?}");
+    assert_eq!(output_text(&result), "shadow-pre\nshadow-app");
+}
+
+#[test]
 fn collection_affixes_reject_wrong_arity_and_wrong_named_parameter() {
     for source in [
         ".var {values}\n    - B\n    - C\n.prepended {.values}\n",
