@@ -61,7 +61,6 @@ jobs:
           printf 'quarkdown_version=%s\n' "$version"
           printf '%s\n' "$version" | grep -F '2.5.1'
           printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
-          printf 'asset_digest=%s\n' "$asset_digest" >> "$GITHUB_OUTPUT"
 
       - name: Observe listfiles pattern behavior
         shell: bash
@@ -93,14 +92,9 @@ jobs:
           P8: .listfiles {data} directories:{false} recursive:{true} pattern:{alpha} fullpath:{false} sortby:{none}::size
           QD
 
-          (
-            cd "$project"
-            "$QUARKDOWN" c main.qd --clean
-          )
-
+          (cd "$project" && "$QUARKDOWN" c main.qd --clean)
           output="$project/quarkdown-output"
           test -d "$output"
-          find "$output" -type f -maxdepth 4 -print
           python3 - "$output" <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
@@ -114,9 +108,8 @@ jobs:
               def handle_data(self, data):
                   self.parts.append(data)
 
-          root = Path(sys.argv[1])
           observations = {}
-          for path in root.rglob('*.html'):
+          for path in Path(sys.argv[1]).rglob('*.html'):
               parser = Text()
               parser.feed(path.read_text(encoding='utf-8'))
               text = ' '.join(parser.parts)
@@ -130,7 +123,7 @@ jobs:
               print(f'{key}={next(iter(values))}')
           PY
 
-      - name: Observe invalid-regex failure mode
+      - name: Observe invalid-regex language outcome
         shell: bash
         env:
           QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
@@ -141,15 +134,85 @@ jobs:
           printf x > "$project/data/alpha.txt"
           cat > "$project/main.qd" <<'QD'
           .doctype {plain}
-          .listfiles {data} directories:{false} pattern:{[} fullpath:{false} sortby:{none}::size
+          BEFORE
+          INVALID: .listfiles {data} directories:{false} pattern:{[} fullpath:{false} sortby:{none}::size
+          AFTER
           QD
 
           set +e
-          (
-            cd "$project"
-            "$QUARKDOWN" c main.qd --clean
-          ) >"$RUNNER_TEMP/invalid-pattern.stdout" 2>"$RUNNER_TEMP/invalid-pattern.stderr"
+          (cd "$project" && "$QUARKDOWN" c main.qd --clean) >"$RUNNER_TEMP/invalid.stdout" 2>"$RUNNER_TEMP/invalid.stderr"
           status=$?
           set -e
           printf 'invalid_pattern_exit=%s\n' "$status"
-          test "$status" -ne 0
+          printf 'invalid_stdout_nonempty=%s\n' "$([ -s "$RUNNER_TEMP/invalid.stdout" ] && echo true || echo false)"
+          printf 'invalid_stderr_nonempty=%s\n' "$([ -s "$RUNNER_TEMP/invalid.stderr" ] && echo true || echo false)"
+
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(sys.argv[1])
+          paths = list(root.rglob('*.html')) if root.exists() else []
+          texts = []
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+              def handle_data(self, data):
+                  self.parts.append(data)
+          for path in paths:
+              parser = Text()
+              parser.feed(path.read_text(encoding='utf-8'))
+              texts.append(' '.join(parser.parts))
+          text = ' '.join(texts)
+          match = re.search(r'\bINVALID:\s*(\d+)\b', text)
+          print(f'invalid_html_count={len(paths)}')
+          print(f'invalid_before_present={"BEFORE" in text}')
+          print(f'invalid_after_present={"AFTER" in text}')
+          print(f'invalid_value={match.group(1) if match else "NONE"}')
+          PY
+
+      - name: Observe JVM-regex dialect edge
+        shell: bash
+        env:
+          QUARKDOWN: ${{ steps.quarkdown.outputs.binary }}
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/dialect-pattern-probe"
+          mkdir -p "$project/data"
+          printf x > "$project/data/alpha.txt"
+          printf x > "$project/data/alpha.log"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+          D1: .listfiles {data} directories:{false} pattern:{(?=alpha[.]txt$).*} fullpath:{false} sortby:{none}::size
+          QD
+
+          set +e
+          (cd "$project" && "$QUARKDOWN" c main.qd --clean) >"$RUNNER_TEMP/dialect.stdout" 2>"$RUNNER_TEMP/dialect.stderr"
+          status=$?
+          set -e
+          printf 'dialect_exit=%s\n' "$status"
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(sys.argv[1])
+          texts = []
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+              def handle_data(self, data):
+                  self.parts.append(data)
+          for path in root.rglob('*.html') if root.exists() else []:
+              parser = Text()
+              parser.feed(path.read_text(encoding='utf-8'))
+              texts.append(' '.join(parser.parts))
+          text = ' '.join(texts)
+          match = re.search(r'\bD1:\s*(\d+)\b', text)
+          print(f'dialect_value={match.group(1) if match else "NONE"}')
+          PY
