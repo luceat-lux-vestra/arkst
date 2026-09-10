@@ -34,50 +34,74 @@ jobs:
           q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; chmod +x "$q"
           "$q" --version | grep -F '2.6.0'
 
-          project="$RUNNER_TEMP/exhaustive"; mkdir -p "$project"
-          python3 - "$project/main.qd" "$RUNNER_TEMP/expected.tsv" <<'PY'
+          cases="$RUNNER_TEMP/locale-cases"; mkdir -p "$cases"
+          python3 - "$cases" "$RUNNER_TEMP/expected.tsv" <<'PY'
           import csv, sys
           from pathlib import Path
-          source = Path(sys.argv[1]); expected = Path(sys.argv[2])
+          root = Path(sys.argv[1]); expected = Path(sys.argv[2])
           seen = set(); rows=[]
           with open('tools/jdk25_available_locale_order.tsv', encoding='utf-8', newline='') as f:
               for row in csv.reader(f, delimiter='\t'):
-                  if not row or row[0] in seen: continue
+                  if not row or row[0] in seen:
+                      continue
                   seen.add(row[0]); rows.append((row[0], row[1]))
-          with source.open('w', encoding='utf-8') as out, expected.open('w', encoding='utf-8') as exp:
-              out.write('.doctype {plain}\n')
+          chunk_size=100
+          with expected.open('w', encoding='utf-8') as exp:
               for i,(tag,name) in enumerate(rows):
+                  chunk=i//chunk_size
                   key=f'Q{i:04d}'
-                  out.write(f'{key}-BEGIN\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
-                  exp.write(f'{key}\t{tag}\t{name}\n')
+                  exp.write(f'{key}\t{chunk}\t{tag}\t{name}\n')
+          for chunk_start in range(0, len(rows), chunk_size):
+              chunk=chunk_start//chunk_size
+              project=root/f'{chunk:02d}'; project.mkdir()
+              with (project/'main.qd').open('w', encoding='utf-8') as out:
+                  out.write('.doctype {plain}\n')
+                  for i,(tag,_name) in enumerate(rows[chunk_start:chunk_start+chunk_size], start=chunk_start):
+                      key=f'Q{i:04d}'
+                      out.write(f'{key}-BEGIN\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
           print(f'unique_input_tags={len(rows)}')
+          print(f'chunk_count={(len(rows)+chunk_size-1)//chunk_size}')
           PY
 
-          set +e
-          (cd "$project" && "$q" c main.qd --clean) >"$RUNNER_TEMP/stdout" 2>"$RUNNER_TEMP/stderr"
-          status=$?
-          set -e
-          printf 'compile_exit=%s\n' "$status"
-          test -d "$project/quarkdown-output"
+          : > "$RUNNER_TEMP/all.stderr"
+          harness_fail=0
+          for project in "$cases"/*; do
+            chunk="$(basename "$project")"
+            set +e
+            (cd "$project" && "$q" c main.qd --clean) >"$RUNNER_TEMP/$chunk.stdout" 2>"$RUNNER_TEMP/$chunk.stderr"
+            status=$?
+            set -e
+            printf 'chunk_%s_exit=%s\n' "$chunk" "$status"
+            sed "s/^/[chunk $chunk] /" "$RUNNER_TEMP/$chunk.stderr" >> "$RUNNER_TEMP/all.stderr"
+            if [ ! -d "$project/quarkdown-output" ]; then
+              echo "chunk $chunk produced no output" >&2
+              cat "$RUNNER_TEMP/$chunk.stderr" >&2
+              harness_fail=1
+            fi
+          done
+          test "$harness_fail" -eq 0
 
-          python3 - "$project/quarkdown-output" "$RUNNER_TEMP/expected.tsv" "$RUNNER_TEMP/stderr" <<'PY'
+          python3 - "$cases" "$RUNNER_TEMP/expected.tsv" "$RUNNER_TEMP/all.stderr" <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
           import re, sys
-          root, expected_path, stderr_path = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+          cases, expected_path, stderr_path = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
           class T(HTMLParser):
               def __init__(self): super().__init__(); self.parts=[]
               def handle_data(self,data): self.parts.append(data)
-          parts=[]
-          for p in root.rglob('*.html'):
-              t=T(); t.feed(p.read_text(encoding='utf-8')); parts.extend(t.parts)
-          flat=' '.join(' '.join(parts).split())
+          chunk_text={}
+          for project in sorted(cases.iterdir()):
+              parts=[]
+              for p in (project/'quarkdown-output').rglob('*.html'):
+                  t=T(); t.feed(p.read_text(encoding='utf-8')); parts.extend(t.parts)
+              chunk_text[int(project.name)]=' '.join(' '.join(parts).split())
           stderr=stderr_path.read_text(encoding='utf-8', errors='replace')
           rows=[]
           for line in expected_path.read_text(encoding='utf-8').splitlines():
-              key,tag,expected=line.split('\t',2); rows.append((key,tag,expected))
+              key,chunk,tag,expected=line.split('\t',3); rows.append((key,int(chunk),tag,expected))
           invalid=[]; missing=[]; mismatch=[]; valid=0
-          for key,tag,expected in rows:
+          for key,chunk,tag,expected in rows:
+              flat=chunk_text[chunk]
               m=re.search(rf'{key}-VALUE\s*(.*?)\s*{key}-END', flat)
               if not m:
                   missing.append(tag); continue
