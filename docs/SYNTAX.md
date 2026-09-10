@@ -450,7 +450,9 @@ supported Markdown list have identical element semantics:
 `.second` and `.third` are one-based accessors and return `None` when the
 sequence is too short, matching `.getat {2}` and `.getat {3}` without a
 fallback. `.distinct` keeps the first occurrence. `.reversed` returns a new
-typed Collection. `.groupvalues` returns a Collection of Collections in
+typed Collection. Quarkdown v2.6.0 `.prepended` and `.appended` return new
+typed Collections with the supplied value at the front or back, leaving the
+source iterable unchanged. `.groupvalues` returns a Collection of Collections in
 first-seen group order, preserving order inside each group. `.sumall` applies
 the upstream `asDouble()` conversion to every element; invalid conversions
 contribute zero, and `.average` divides by the full input count (empty input

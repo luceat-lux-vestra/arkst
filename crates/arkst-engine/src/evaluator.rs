@@ -7610,6 +7610,37 @@ impl Evaluator {
                     _ => unreachable!("collection access operation was prevalidated"),
                 }
             }
+            "prepended" | "appended" => {
+                let (collection, value) = match collection_affix_operands(
+                    name,
+                    positional_args,
+                    named_args,
+                    binding_plan,
+                    span,
+                    diagnostics,
+                ) {
+                    Ok(operands) => operands,
+                    Err(outcome) => return outcome,
+                };
+                let mut elements =
+                    match self.coerce_iterable(collection, span, diagnostics, context) {
+                        Ok(elements) => elements,
+                        Err(outcome) => return outcome,
+                    };
+                if let Err(error) = elements.try_reserve(1) {
+                    diagnostics.push(iteration_error(
+                        format!("`.{name}` collection cannot be allocated: {error}"),
+                        *span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+                if name == "prepended" {
+                    elements.insert(0, value.value);
+                } else {
+                    elements.push(value.value);
+                }
+                CallOutcome::Value(IrValue::Collection(elements))
+            }
             "getat" => {
                 let (value, index, fallback) = match getat_operands(
                     positional_args,
@@ -12002,6 +12033,8 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "distinct",
     "reversed",
     "groupvalues",
+    "prepended",
+    "appended",
 ];
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
 const DEFERRED_NATIVE_NAMES: &[&str] = &["llmstxt"];
@@ -13213,6 +13246,13 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             vec![ParameterMetadata::required("from")],
             BodyPolicy::Reject,
         ),
+        "prepended" | "appended" => (
+            vec![
+                ParameterMetadata::required("to"),
+                ParameterMetadata::required("value"),
+            ],
+            BodyPolicy::Reject,
+        ),
         "getat" => (
             vec![
                 ParameterMetadata::required("from"),
@@ -13362,6 +13402,73 @@ fn collection_access_operand(
         Some(BoundSlot::Explicit { value, .. }) => Ok(value),
         _ => Err(CallOutcome::Failed),
     }
+}
+
+fn collection_affix_operands(
+    name: &str,
+    positional_args: &[InvocationValue],
+    named_args: &[InvocationNamedArg],
+    binding_plan: &BindingPlan,
+    span: &SourceSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(InvocationValue, InvocationValue), CallOutcome> {
+    let candidates = invocation_candidates(
+        positional_args
+            .iter()
+            .map(|argument| (argument.clone(), value_source_span(&argument.value, span)))
+            .collect(),
+        named_args.to_vec(),
+    );
+    let bound = binding_plan
+        .bind(&candidates, None, *span)
+        .map_err(|error| {
+            let message = if let Some(argument_name) =
+                error.message.strip_prefix("unknown named argument ")
+            {
+                format!(
+                    "Unknown named argument `{}` for `.{name}`",
+                    argument_name.trim_matches('`')
+                )
+            } else if error.message == "received too many positional arguments" {
+                format!(
+                    "`.{name}` requires exactly two arguments (received {})",
+                    positional_args.len()
+                )
+            } else if error.message.starts_with("missing required argument `to`") {
+                format!("`.{name}` requires an iterable `to` argument")
+            } else if error
+                .message
+                .starts_with("missing required argument `value`")
+            {
+                format!("`.{name}` requires a `value` argument")
+            } else if let Some(parameter) =
+                error
+                    .message
+                    .strip_prefix("parameter ")
+                    .and_then(|message| {
+                        message.strip_suffix(" collides with an already bound argument")
+                    })
+            {
+                format!("`.{name}` received the {parameter} argument more than once")
+            } else {
+                error.message.clone()
+            };
+            let mut diagnostic = binding_diagnostic_with_code(error, "E3001");
+            diagnostic.message = message;
+            diagnostics.push(diagnostic);
+            CallOutcome::Failed
+        })?;
+    let mut slots = bound.slots.into_iter();
+    let Some(BoundSlot::Explicit {
+        value: collection, ..
+    }) = slots.next()
+    else {
+        return Err(CallOutcome::Failed);
+    };
+    let Some(BoundSlot::Explicit { value, .. }) = slots.next() else {
+        return Err(CallOutcome::Failed);
+    };
+    Ok((collection, value))
 }
 
 fn range_arguments(
