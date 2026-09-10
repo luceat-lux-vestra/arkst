@@ -1,0 +1,147 @@
+name: Disposable #311 v2.6.0 runtime locale oracle
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-iterable-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Identify distribution runtime and compare public locale behavior
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset="quarkdown-linux-x64.zip"
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = "sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4"
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; test -n "$q"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          echo 'JAVA_CANDIDATES_BEGIN'
+          find "$root" -type f -name java -perm -111 -print | sort
+          echo 'JAVA_CANDIDATES_END'
+          bundled_java="$(find "$root" -type f -name java -perm -111 -print -quit || true)"
+          if [ -n "$bundled_java" ]; then
+            echo 'BUNDLED_JAVA_VERSION_BEGIN'
+            "$bundled_java" -version 2>&1
+            echo 'BUNDLED_JAVA_VERSION_END'
+          else
+            echo 'bundled_java=NONE'
+          fi
+          echo 'PATH_JAVA_VERSION_BEGIN'
+          java -version 2>&1
+          echo 'PATH_JAVA_VERSION_END'
+
+          cat > "$RUNNER_TEMP/LocaleProbe.java" <<'JAVA'
+          import java.io.*;
+          import java.nio.charset.StandardCharsets;
+          import java.nio.file.*;
+          import java.util.*;
+
+          public final class LocaleProbe {
+              public static void main(String[] args) throws Exception {
+                  Set<Locale> available = new HashSet<>(Arrays.asList(Locale.getAvailableLocales()));
+                  int input = 0, accepted = 0;
+                  try (BufferedReader r = Files.newBufferedReader(Path.of(args[0]), StandardCharsets.UTF_8)) {
+                      String line;
+                      Set<String> seen = new HashSet<>();
+                      while ((line = r.readLine()) != null) {
+                          String[] p = line.split("\\t", 3);
+                          if (p.length < 2 || !seen.add(p[0])) continue;
+                          input++;
+                          Locale candidate = Locale.forLanguageTag(p[0]);
+                          boolean ok = available.contains(candidate);
+                          if (ok) accepted++;
+                          System.out.printf(Locale.ROOT, "%s\\t%s\\t%s%n", p[0], ok ? "1" : "0", candidate.getDisplayName(Locale.ENGLISH));
+                      }
+                  }
+                  System.err.printf(Locale.ROOT, "runtime_input=%d runtime_accepted=%d runtime_available=%d%n", input, accepted, available.size());
+              }
+          }
+          JAVA
+          javac --release 17 -d "$RUNNER_TEMP/probe-classes" "$RUNNER_TEMP/LocaleProbe.java"
+
+          candidate_java="${bundled_java:-$(command -v java)}"
+          "$candidate_java" -cp "$RUNNER_TEMP/probe-classes" LocaleProbe tools/jdk25_available_locale_order.tsv > "$RUNNER_TEMP/runtime.tsv" 2> "$RUNNER_TEMP/runtime.stats"
+          cat "$RUNNER_TEMP/runtime.stats"
+
+          # Re-observe exact v2.6.0 in bounded chunks and compare the runtime
+          # prediction directly with black-box acceptance and getter output.
+          cases="$RUNNER_TEMP/cases"; mkdir -p "$cases"
+          python3 - "$cases" "$RUNNER_TEMP/runtime.tsv" <<'PY'
+          import sys
+          from pathlib import Path
+          root=Path(sys.argv[1]); rows=[]
+          for line in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines():
+              tag,ok,name=line.split('\t',2); rows.append((tag,ok,name))
+          size=100
+          for start in range(0,len(rows),size):
+              chunk=start//size; p=root/f'{chunk:02d}'; p.mkdir()
+              with (p/'main.qd').open('w',encoding='utf-8') as out:
+                  out.write('.doctype {plain}\n')
+                  for i,(tag,_ok,_name) in enumerate(rows[start:start+size],start=start):
+                      key=f'Q{i:04d}'
+                      out.write(f'{key}-BEGIN\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
+          PY
+          : > "$RUNNER_TEMP/all.stderr"
+          for project in "$cases"/*; do
+            chunk="$(basename "$project")"
+            (cd "$project" && "$q" c main.qd --clean) > "$RUNNER_TEMP/$chunk.stdout" 2> "$RUNNER_TEMP/$chunk.stderr"
+            test -d "$project/quarkdown-output"
+            sed "s/^/[chunk $chunk] /" "$RUNNER_TEMP/$chunk.stderr" >> "$RUNNER_TEMP/all.stderr"
+          done
+
+          python3 - "$cases" "$RUNNER_TEMP/runtime.tsv" "$RUNNER_TEMP/all.stderr" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          cases,runtime_path,stderr_path=Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3])
+          rows=[]
+          for line in runtime_path.read_text(encoding='utf-8').splitlines():
+              tag,ok,name=line.split('\t',2); rows.append((tag,ok=='1',name))
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          chunk_text={}
+          for p in sorted(cases.iterdir()):
+              parts=[]
+              for html in (p/'quarkdown-output').rglob('*.html'):
+                  t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
+              chunk_text[int(p.name)]=' '.join(' '.join(parts).split())
+          stderr=stderr_path.read_text(encoding='utf-8',errors='replace')
+          acceptance=[]; names=[]; missing=[]
+          for i,(tag,pred_ok,pred_name) in enumerate(rows):
+              key=f'Q{i:04d}'; flat=chunk_text[i//100]
+              m=re.search(rf'{key}-VALUE\s*(.*?)\s*{key}-END',flat)
+              if not m: missing.append(tag); continue
+              observed_ok=not bool(re.search(rf'Locale\s+{re.escape(tag)}\s+not found',stderr,re.I))
+              if observed_ok != pred_ok: acceptance.append((tag,pred_ok,observed_ok))
+              if observed_ok and m.group(1) != pred_name: names.append((tag,pred_name,m.group(1)))
+          print(f'runtime_acceptance_mismatches={len(acceptance)}')
+          print(f'runtime_name_mismatches={len(names)}')
+          print(f'missing_markers={len(missing)}')
+          print('RUNTIME_ACCEPTANCE_MISMATCHES_BEGIN')
+          for row in acceptance: print('\t'.join(map(str,row)))
+          print('RUNTIME_ACCEPTANCE_MISMATCHES_END')
+          print('RUNTIME_NAME_MISMATCHES_BEGIN')
+          for row in names: print('\t'.join(row))
+          print('RUNTIME_NAME_MISMATCHES_END')
+          if missing: raise SystemExit(f'missing markers: {missing[:20]}')
+          PY
