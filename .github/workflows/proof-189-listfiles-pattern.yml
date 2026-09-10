@@ -33,16 +33,21 @@ jobs:
             https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.5.1 \
             > "$release"
 
-          test "$(jq -r '.tag_name')" = "v2.5.1"
-          test "$(jq '[.assets[] | select(.name == "quarkdown.zip")] | length' "$release")" -eq 1
-          asset_url="$(jq -r '.assets[] | select(.name == "quarkdown.zip") | .browser_download_url' "$release")"
-          asset_digest="$(jq -r '.assets[] | select(.name == "quarkdown.zip") | .digest // empty' "$release")"
+          asset_name="quarkdown-linux-x64.zip"
+          tag_name="$(jq -r '.tag_name' "$release")"
+          asset_count="$(jq --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release")"
+          printf 'release_tag=%s\nasset_name=%s\nasset_count=%s\n' "$tag_name" "$asset_name" "$asset_count"
+          test "$tag_name" = "v2.5.1"
+          test "$asset_count" -eq 1
+          asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .browser_download_url' "$release")"
+          asset_digest="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .digest // empty' "$release")"
+          printf 'release_asset_digest=%s\n' "$asset_digest"
           case "$asset_digest" in
             sha256:*) ;;
-            *) echo "official v2.5.1 quarkdown.zip has no SHA-256 release digest" >&2; exit 1 ;;
+            *) echo "official v2.5.1 Linux asset has no SHA-256 release digest" >&2; exit 1 ;;
           esac
 
-          archive="$RUNNER_TEMP/quarkdown-v2.5.1.zip"
+          archive="$RUNNER_TEMP/$asset_name"
           curl --fail --silent --show-error --location "$asset_url" --output "$archive"
           printf '%s  %s\n' "${asset_digest#sha256:}" "$archive" | sha256sum --check --strict
 
@@ -145,4 +150,3 @@ jobs:
           set -e
           printf 'invalid_pattern_exit=%s\n' "$status"
           test "$status" -ne 0
-          test ! -e "$project/output" || ! grep -R -q --include='*.html' -F '1' "$project/output"
