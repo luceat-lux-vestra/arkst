@@ -98,7 +98,10 @@ jobs:
             "$QUARKDOWN" c main.qd --clean
           )
 
-          python3 - "$project/output" <<'PY'
+          output="$project/quarkdown-output"
+          test -d "$output"
+          find "$output" -type f -maxdepth 4 -print
+          python3 - "$output" <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
           import re
