@@ -49,6 +49,23 @@ jobs:
           java -version 2>&1
           echo 'PATH_JAVA_VERSION_END'
 
+          # The checked-in TSV is RFC4180-style quoted. Decode it before the
+          # Java helper so quote characters can never become part of a tag.
+          python3 - tools/jdk25_available_locale_order.tsv "$RUNNER_TEMP/tags.txt" <<'PY'
+          import csv, sys
+          from pathlib import Path
+          src, out = Path(sys.argv[1]), Path(sys.argv[2])
+          tags=[]; seen=set()
+          with src.open(encoding='utf-8', newline='') as f:
+              for row in csv.reader(f, delimiter='\t'):
+                  if not row or not row[0] or row[0] in seen: continue
+                  seen.add(row[0]); tags.append(row[0])
+          out.write_text('\n'.join(tags)+'\n', encoding='utf-8')
+          print(f'decoded_candidate_tags={len(tags)}')
+          assert len(tags) == 1157
+          assert all('"' not in tag for tag in tags)
+          PY
+
           cat > "$RUNNER_TEMP/LocaleProbe.java" <<'JAVA'
           import java.io.*;
           import java.nio.charset.StandardCharsets;
@@ -60,16 +77,15 @@ jobs:
                   Set<Locale> available = new HashSet<>(Arrays.asList(Locale.getAvailableLocales()));
                   int input = 0, accepted = 0;
                   try (BufferedReader r = Files.newBufferedReader(Path.of(args[0]), StandardCharsets.UTF_8)) {
-                      String line;
+                      String tag;
                       Set<String> seen = new HashSet<>();
-                      while ((line = r.readLine()) != null) {
-                          String[] p = line.split("\\t", 3);
-                          if (p.length < 2 || !seen.add(p[0])) continue;
+                      while ((tag = r.readLine()) != null) {
+                          if (tag.isEmpty() || !seen.add(tag)) continue;
                           input++;
-                          Locale candidate = Locale.forLanguageTag(p[0]);
+                          Locale candidate = Locale.forLanguageTag(tag);
                           boolean ok = available.contains(candidate);
                           if (ok) accepted++;
-                          System.out.printf(Locale.ROOT, "%s\t%s\t%s%n", p[0], ok ? "1" : "0", candidate.getDisplayName(Locale.ENGLISH));
+                          System.out.printf(Locale.ROOT, "%s\t%s\t%s%n", tag, ok ? "1" : "0", candidate.getDisplayName(Locale.ENGLISH));
                       }
                   }
                   System.err.printf(Locale.ROOT, "runtime_input=%d runtime_accepted=%d runtime_available=%d%n", input, accepted, available.size());
@@ -79,7 +95,7 @@ jobs:
           javac --release 17 -d "$RUNNER_TEMP/probe-classes" "$RUNNER_TEMP/LocaleProbe.java"
 
           candidate_java="${bundled_java:-$(command -v java)}"
-          "$candidate_java" -cp "$RUNNER_TEMP/probe-classes" LocaleProbe tools/jdk25_available_locale_order.tsv > "$RUNNER_TEMP/runtime.tsv" 2> "$RUNNER_TEMP/runtime.stats"
+          "$candidate_java" -cp "$RUNNER_TEMP/probe-classes" LocaleProbe "$RUNNER_TEMP/tags.txt" > "$RUNNER_TEMP/runtime.tsv" 2> "$RUNNER_TEMP/runtime.stats"
           cat "$RUNNER_TEMP/runtime.stats"
           test "$(awk -F '\t' 'NF==3{n++} END{print n+0}' "$RUNNER_TEMP/runtime.tsv")" -eq 1157
 
