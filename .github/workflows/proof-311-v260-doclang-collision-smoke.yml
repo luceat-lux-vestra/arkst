@@ -1,0 +1,95 @@
+name: Disposable #311 v2.6.0 doclang collision smoke
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Probe English-name collision winners through exact-tag localization
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset='quarkdown-linux-x64.zip'
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = 'sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; test -n "$q"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          project="$RUNNER_TEMP/project"; mkdir -p "$project"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+
+          .localization {en_us}
+              - en-US
+                - winner: EN_US
+              - en-Latn-US
+                - winner: EN_LATN_US
+              - en-US-POSIX
+                - winner: EN_US_POSIX
+          .doclang {English (United States)}
+          C1-BEGIN .localize {en_us:winner} C1-END
+
+          .localization {zh_tw}
+              - zh-TW
+                - winner: ZH_TW
+              - zh-Hant-TW
+                - winner: ZH_HANT_TW
+          .doclang {Chinese (Taiwan)}
+          C2-BEGIN .localize {zh_tw:winner} C2-END
+
+          .localization {sr_rs}
+              - sr-RS
+                - winner: SR_RS
+              - sr-Cyrl-RS
+                - winner: SR_CYRL_RS
+              - sr-Latn-RS
+                - winner: SR_LATN_RS
+          .doclang {Serbian (Serbia)}
+          C3-BEGIN .localize {sr_rs:winner} C3-END
+
+          .localization {arabic}
+              - ar
+                - winner: AR
+              - ar-001
+                - winner: AR_001
+          .doclang {Arabic}
+          C4-BEGIN .localize {arabic:winner} C4-END
+          QD
+          (cd "$project" && "$q" c main.qd --clean) > "$RUNNER_TEMP/stdout" 2> "$RUNNER_TEMP/stderr"
+          cat "$RUNNER_TEMP/stderr"
+          test -d "$project/quarkdown-output"
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          parts=[]
+          for html in sorted(Path(sys.argv[1]).rglob('*.html')):
+              t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
+          text=' '.join(' '.join(parts).split())
+          for i in range(1,5):
+              m=re.search(rf'C{i}-BEGIN\s*(.*?)\s*C{i}-END',text)
+              if not m: raise SystemExit(f'missing C{i} marker')
+              print(f'collision_{i}_winner={m.group(1)}')
+          PY
