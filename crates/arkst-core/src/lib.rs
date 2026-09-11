@@ -2284,41 +2284,62 @@ mod tests {
     }
 
     #[test]
-    fn doclang_resolves_reference_jdk_locale_shapes_and_aliases() {
+    fn doclang_resolves_v260_locale_shapes_and_aliases() {
         let source = concat!(
-            ".doclang {Spanish}\n.doclang\n",
-            ".doclang {es-MX}\n.doclang\n",
-            ".doclang {zh-Hant-TW}\n.doclang\n",
-            ".doclang {sr-Cyrl-RS}\n.doclang\n",
-            ".doclang {English (United States, Computer)}\n.doclang\n",
-            ".doclang {iw}\n.doclang\n",
+            ".doclang {Spanish}
+.doclang
+",
+            ".doclang {es-MX}
+.doclang
+",
+            ".doclang {zh-Hant-TW}
+.doclang
+",
+            ".doclang {sr-Cyrl-RS}
+.doclang
+",
+            ".doclang {iw}
+.doclang
+",
+            ".doclang {in}
+.doclang
+",
+            ".doclang {ji}
+.doclang
+",
         );
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
         assert_eq!(
             output_text(&result),
-            "español\nespañol (México)\n中文 (繁體，台灣)\nсрпски (ћирилица, Србија)\nEnglish (United States, Computer)\nעברית"
+            "Spanish
+Spanish (Mexico)
+Chinese (Taiwan)
+Serbian (Serbia)
+Hebrew
+Indonesian
+Yiddish"
         );
         assert_eq!(
             result.ir.metadata.document_state.locale,
             Some(crate::ir::IrDocumentLocale {
-                tag: "he".to_string(),
-                localized_name: "עברית".to_string(),
+                tag: "yi".to_string(),
+                localized_name: "Yiddish".to_string(),
             })
         );
     }
 
     #[test]
-    fn doclang_preserves_localized_name_and_replaces_previous_locale() {
+    fn doclang_preserves_v260_english_name_and_replaces_previous_locale() {
         let source = ".doclang {Italian}\n.doclang\n.doclang {fr-CA}\n.doclang\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert_eq!(output_text(&result), "italiano\nfrançais (Canada)");
+        assert_eq!(output_text(&result), "Italian\nFrench (Canada)");
         assert_eq!(
             result.ir.metadata.document_state.locale,
             Some(crate::ir::IrDocumentLocale {
                 tag: "fr-CA".to_string(),
-                localized_name: "français (Canada)".to_string(),
+                localized_name: "French (Canada)".to_string(),
             })
         );
     }
@@ -2350,7 +2371,7 @@ mod tests {
         let source = ".function {setlang}\n    .doclang {it}\n\n.function {outer}\n    .setlang\n\n.outer\n.doclang\n";
         let (result, _) = compile_source(source);
         assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert_eq!(output_text(&result), "italiano");
+        assert_eq!(output_text(&result), "Italian");
         assert_eq!(
             result
                 .ir
@@ -2420,43 +2441,56 @@ mod tests {
     }
 
     #[test]
-    fn doclang_preserves_jdk_root_results_for_blank_or_legacy_inputs() {
-        for input in ["en_US", "   "] {
-            let source = format!(".doclang {{{input}}}\n.doclang\n");
-            let (result, _) = compile_source(&source);
-            assert!(result.diagnostics.is_empty(), "{input:?}: {result:?}");
-            assert_eq!(output_text(&result), "", "{input:?}: {result:?}");
+    fn doclang_v260_rejects_unavailable_and_jdk_only_identifiers_atomically() {
+        for invalid in ["xx-YY", "en_US", "   ", "English (United States, Computer)"] {
+            let source = format!(
+                ".doclang {{en}}
+.doclang {{{invalid}}}
+.doclang
+"
+            );
+            let (result, source_id) = compile_source(&source);
+            assert_eq!(result.diagnostics.len(), 1, "{invalid:?}: {result:?}");
             assert_eq!(
-                result
-                    .ir
-                    .metadata
-                    .document_state
-                    .locale
-                    .as_ref()
-                    .map(|locale| locale.tag.as_str()),
-                Some("und"),
-                "{input:?}: {result:?}"
+                result.diagnostics[0].primary.map(|span| span.source_id),
+                Some(source_id),
+                "{invalid:?}: {result:?}"
+            );
+            assert_eq!(output_text(&result), "English", "{invalid:?}: {result:?}");
+            assert_eq!(
+                result.ir.metadata.document_state.locale,
+                Some(crate::ir::IrDocumentLocale {
+                    tag: "en".to_string(),
+                    localized_name: "English".to_string(),
+                }),
+                "{invalid:?}: {result:?}"
             );
         }
     }
 
     #[test]
-    fn doclang_block_body_uses_raw_target_conversion_before_nested_mutations() {
-        let source =
-            ".doclang {en}\n.doclang\n    .doclang {it}\n    .uppercase {nested}\n.doclang\n";
-        let (result, _) = compile_source(source);
-        assert!(result.diagnostics.is_empty(), "{result:?}");
-        assert_eq!(output_text(&result), "");
+    fn doclang_v260_rejects_raw_block_locale_and_preserves_previous_state() {
+        let source = ".doclang {en}
+.doclang
+    .doclang {it}
+    .uppercase {nested}
+.doclang
+";
+        let (result, source_id) = compile_source(source);
+        assert_eq!(result.diagnostics.len(), 1, "{result:?}");
+        assert_eq!(result.diagnostics[0].code, "E3001", "{result:?}");
         assert_eq!(
-            result
-                .ir
-                .metadata
-                .document_state
-                .locale
-                .as_ref()
-                .unwrap()
-                .tag,
-            "und"
+            result.diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id),
+            "{result:?}"
+        );
+        assert_eq!(output_text(&result), "English", "{result:?}");
+        assert_eq!(
+            result.ir.metadata.document_state.locale,
+            Some(crate::ir::IrDocumentLocale {
+                tag: "en".to_string(),
+                localized_name: "English".to_string(),
+            })
         );
     }
 

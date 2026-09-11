@@ -139,7 +139,7 @@
           },
           {
             "Text": {
-              "content": "italiano",
+              "content": "Italian",
               "span": {
                 "source_id": 1,
                 "start": 240,
@@ -170,7 +170,7 @@
       "theme": null,
       "locale": {
         "tag": "it",
-        "localized_name": "italiano"
+        "localized_name": "Italian"
       }
     }
   }

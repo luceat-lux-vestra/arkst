@@ -435,6 +435,94 @@ pub(crate) fn resolve(identifier: &str) -> Option<IrDocumentLocale> {
     })
 }
 
+// Quarkdown v2.6.0 changed `.doclang` from the v2.5.1 host-JVM locale
+// surface to an observable release-specific contract: only known locales are
+// accepted and the getter returns the English display name.  This snapshot is
+// clean-room black-box data from the official v2.6.0 Linux distribution
+// (`quarkdown-linux-x64.zip`, SHA-256
+// 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4).
+// Its own SHA-256 is
+// b684f0cd8f6b14537f2857494c967cd73b1a33c9f51938ddcb2fbbcb8525c3a6.
+const DOCLANG_V260_SNAPSHOT: &str = include_str!("../data/quarkdown_v260_doclang_snapshot.tsv");
+
+// Modern Java locale parsing canonicalizes these deprecated language codes,
+// while Quarkdown v2.6.0 still accepts the suffix-preserving legacy spellings.
+// The closure was independently black-box checked for all nine forms.
+const DOCLANG_V260_LEGACY_ALIASES: &[(&str, &str)] = &[
+    ("in", "Indonesian"),
+    ("in-ID", "Indonesian (Indonesia)"),
+    ("in-Latn-ID", "Indonesian (Indonesia)"),
+    ("iw", "Hebrew"),
+    ("iw-Hebr-IL", "Hebrew (Israel)"),
+    ("iw-IL", "Hebrew (Israel)"),
+    ("ji", "Yiddish"),
+    ("ji-Hebr-UA", "Yiddish (Ukraine)"),
+    ("ji-UA", "Yiddish (Ukraine)"),
+];
+
+fn doclang_v260_snapshot_row(line: &str) -> Option<(&str, bool, &str)> {
+    let mut fields = line.splitn(3, '\t');
+    let tag = fields.next()?;
+    let accepted = match fields.next()? {
+        "1" => true,
+        "0" => false,
+        _ => return None,
+    };
+    let english_name = fields.next().unwrap_or_default();
+    Some((tag, accepted, english_name))
+}
+
+/// Resolves the Quarkdown v2.6.0 `.doclang` contract without consulting the
+/// host locale database. Name matching remains name-first and
+/// case-insensitive; tag matching is ASCII case-insensitive. Rejected and
+/// unknown tags fail closed instead of falling through to synthesized BCP 47
+/// locales.
+pub(crate) fn resolve_doclang_v260(identifier: &str) -> Option<IrDocumentLocale> {
+    if let Some((tag, english_name)) = DOCLANG_V260_SNAPSHOT.lines().find_map(|line| {
+        let (tag, accepted, english_name) = doclang_v260_snapshot_row(line)?;
+        (accepted && string_equals_ignore_case(english_name, identifier))
+            .then_some((tag, english_name))
+    }) {
+        // Preserve the established locale-state model when the older reference
+        // snapshot recognizes this English name. If the English spelling is
+        // new in v2.6.0, resolve through one accepted tag from the v2.6 oracle.
+        let mut locale = LOCALE_NAME_RECORDS
+            .iter()
+            .find(|record| string_equals_ignore_case(record.display_name, identifier))
+            .map(resolved_from_name_record)
+            .map(|locale| IrDocumentLocale {
+                tag: locale.tag,
+                localized_name: locale.localized_name,
+            })
+            .or_else(|| resolve(tag))?;
+        locale.localized_name = english_name.to_string();
+        return Some(locale);
+    }
+
+    for line in DOCLANG_V260_SNAPSHOT.lines() {
+        let (tag, accepted, english_name) = doclang_v260_snapshot_row(line)?;
+        if tag.eq_ignore_ascii_case(identifier) {
+            if !accepted {
+                return None;
+            }
+            let mut locale = resolve(identifier)?;
+            locale.localized_name = english_name.to_string();
+            return Some(locale);
+        }
+    }
+
+    if let Some((alias, english_name)) = DOCLANG_V260_LEGACY_ALIASES
+        .iter()
+        .find(|(alias, _)| alias.eq_ignore_ascii_case(identifier))
+    {
+        let mut locale = resolve(alias)?;
+        locale.localized_name = (*english_name).to_string();
+        return Some(locale);
+    }
+
+    None
+}
+
 fn string_equals_ignore_case(left: &str, right: &str) -> bool {
     let mut left_chars = left.chars();
     let mut right_chars = right.chars();
@@ -2393,5 +2481,63 @@ mod tests {
         assert!(!ascii_tag_equals_ignore_case("sgn-be-fr", "ſgn-BE-FR"));
         assert_eq!(parse_language_tag("i-Klingon").unwrap().tag, "und");
         assert_eq!(parse_language_tag("ſgn-BE-FR").unwrap().tag, "und");
+    }
+}
+
+#[cfg(test)]
+mod doclang_v260_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_rows_match_the_v260_black_box_contract() {
+        let mut rows = 0usize;
+        let mut accepted = 0usize;
+        let mut rejected = 0usize;
+        for line in DOCLANG_V260_SNAPSHOT.lines() {
+            let (tag, expected_acceptance, english_name) =
+                doclang_v260_snapshot_row(line).expect("valid v2.6 doclang snapshot row");
+            rows += 1;
+            let resolved = resolve_doclang_v260(tag);
+            if expected_acceptance {
+                accepted += 1;
+                let resolved = resolved.unwrap_or_else(|| panic!("v2.6 accepted tag {tag}"));
+                assert_eq!(resolved.localized_name, english_name, "{tag}");
+            } else {
+                rejected += 1;
+                assert!(resolved.is_none(), "v2.6 rejected tag {tag}");
+            }
+        }
+        assert_eq!(rows, 1162);
+        assert_eq!(accepted, 1076);
+        assert_eq!(rejected, 86);
+    }
+
+    #[test]
+    fn accepted_v260_english_names_are_name_first_and_case_insensitive() {
+        for line in DOCLANG_V260_SNAPSHOT.lines() {
+            let (_tag, accepted, english_name) =
+                doclang_v260_snapshot_row(line).expect("valid v2.6 doclang snapshot row");
+            if !accepted || english_name.is_empty() {
+                continue;
+            }
+            let resolved = resolve_doclang_v260(english_name)
+                .unwrap_or_else(|| panic!("v2.6 English name {english_name}"));
+            assert_eq!(resolved.localized_name, english_name, "{english_name}");
+        }
+        assert_eq!(
+            resolve_doclang_v260("gErMaN")
+                .expect("case-insensitive English name")
+                .localized_name,
+            "German"
+        );
+    }
+
+    #[test]
+    fn v260_legacy_alias_closure_is_supported() {
+        for (alias, english_name) in DOCLANG_V260_LEGACY_ALIASES {
+            let resolved =
+                resolve_doclang_v260(alias).unwrap_or_else(|| panic!("v2.6 legacy alias {alias}"));
+            assert_eq!(resolved.localized_name, *english_name, "{alias}");
+        }
     }
 }

@@ -12,11 +12,11 @@ The script and region locale is now .doclang
 .doclang {sr-Cyrl-RS}
 The language, script, and region locale is now .doclang
 
-.doclang {English (United States, Computer)}
+.doclang {ja-JP-u-ca-japanese-x-lvariant-JP}
 The variant locale is now .doclang
 
 .doclang {iw}
 The deprecated language alias resolves to .doclang
 
-.doclang {xx-YY}
-The valid unavailable tag is now .doclang
+.doclang {de-DE}
+The accepted regional tag is now .doclang
