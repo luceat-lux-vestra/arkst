@@ -50,7 +50,6 @@ jobs:
           rm -f .github/workflows/dev-311-v260-doclang.yml tools/apply_v260_doclang.py tools/fix_v260_doclang_regression.py
           git add -A
           test -n "$(git status --porcelain)"
-          test -z "$(git status --porcelain | grep -E '^.. (\.github/workflows/dev-311-v260-doclang\.yml|tools/apply_v260_doclang\.py|tools/fix_v260_doclang_regression\.py)$' || true)"
           git config user.name 'luceat-lux-vestra'
           git config user.email 'heathkimdev@gmail.com'
           git commit -m 'feat(compat): migrate doclang to Quarkdown v2.6.0'
