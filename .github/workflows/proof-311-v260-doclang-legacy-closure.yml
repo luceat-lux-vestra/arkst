@@ -1,0 +1,109 @@
+name: Disposable #311 v2.6.0 doclang legacy closure
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-snapshot
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Exhaust suffix-preserving legacy aliases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          snapshot_zip="$RUNNER_TEMP/snapshot.zip"
+          curl -fsSL -L -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/luceat-lux-vestra/arkst/actions/artifacts/10268667042/zip -o "$snapshot_zip"
+          mkdir -p "$RUNNER_TEMP/snapshot"; unzip -q "$snapshot_zip" -d "$RUNNER_TEMP/snapshot"
+          snapshot="$RUNNER_TEMP/snapshot/quarkdown-v2.6.0-doclang-snapshot.tsv"
+          printf '%s  %s\n' 'b684f0cd8f6b14537f2857494c967cd73b1a33c9f51938ddcb2fbbcb8525c3a6' "$snapshot" | sha256sum -c --strict
+
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset='quarkdown-linux-x64.zip'
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = 'sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; test -n "$q"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          python3 - "$snapshot" "$RUNNER_TEMP/aliases.tsv" <<'PY'
+          from pathlib import Path
+          import sys
+          inv={'he':'iw','id':'in','yi':'ji'}; rows=[]
+          for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
+              tag,ok,name=line.split('\t',2)
+              if ok!='1': continue
+              head,*tail=tag.split('-')
+              if head not in inv: continue
+              alias='-'.join([inv[head],*tail])
+              rows.append((alias,tag,name))
+          rows.sort(key=lambda r:r[0].encode())
+          Path(sys.argv[2]).write_text(''.join('\t'.join(r)+'\n' for r in rows),encoding='utf-8')
+          print(f'legacy_alias_candidates={len(rows)}')
+          print('LEGACY_ALIAS_CANDIDATES_BEGIN')
+          for r in rows: print('\t'.join(r))
+          print('LEGACY_ALIAS_CANDIDATES_END')
+          assert rows
+          PY
+
+          project="$RUNNER_TEMP/project"; mkdir -p "$project"
+          python3 - "$RUNNER_TEMP/aliases.tsv" "$project/main.qd" <<'PY'
+          from pathlib import Path
+          import sys
+          rows=[line.split('\t',2) for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()]
+          with Path(sys.argv[2]).open('w',encoding='utf-8') as out:
+              out.write('.doctype {plain}\n')
+              for i,(alias,_canonical,_expected) in enumerate(rows):
+                  table=f'a{i:03d}'; marker=f'A{i:03d}'
+                  out.write(f'.localization {{{table}}}\n    - {alias}\n      - winner: {marker}\n')
+                  out.write('.doclang {English}\n')
+                  out.write(f'.doclang {{{alias}}}\n')
+                  out.write(f'{marker}-BEGIN .doclang {marker}-MID .localize {{{table}:winner}} {marker}-END\n')
+          PY
+          (cd "$project" && "$q" c main.qd --clean) > "$RUNNER_TEMP/stdout" 2> "$RUNNER_TEMP/stderr"
+          cat "$RUNNER_TEMP/stderr"
+          test -d "$project/quarkdown-output"
+
+          python3 - "$RUNNER_TEMP/aliases.tsv" "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          rows=[line.split('\t',2) for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()]
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          parts=[]
+          for html in sorted(Path(sys.argv[2]).rglob('*.html')):
+              t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
+          text=' '.join(' '.join(parts).split())
+          getter_mismatch=[]; identity_mismatch=[]; missing=[]
+          for i,(alias,canonical,expected) in enumerate(rows):
+              marker=f'A{i:03d}'
+              m=re.search(rf'{marker}-BEGIN\s*(.*?)\s*{marker}-MID\s*(.*?)\s*{marker}-END',text)
+              if not m: missing.append(alias); continue
+              if m.group(1)!=expected: getter_mismatch.append((alias,canonical,expected,m.group(1)))
+              if m.group(2)!=marker: identity_mismatch.append((alias,canonical,m.group(2)))
+          print(f'legacy_alias_rows={len(rows)}')
+          print(f'legacy_alias_missing={len(missing)}')
+          print(f'legacy_alias_getter_mismatches={len(getter_mismatch)}')
+          print(f'legacy_alias_identity_mismatches={len(identity_mismatch)}')
+          print('GETTER_MISMATCHES_BEGIN'); [print('\t'.join(r)) for r in getter_mismatch]; print('GETTER_MISMATCHES_END')
+          print('IDENTITY_MISMATCHES_BEGIN'); [print('\t'.join(r)) for r in identity_mismatch]; print('IDENTITY_MISMATCHES_END')
+          if missing or getter_mismatch or identity_mismatch: raise SystemExit(1)
+          PY
