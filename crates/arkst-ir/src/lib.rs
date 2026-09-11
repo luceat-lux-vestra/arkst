@@ -459,7 +459,8 @@ pub struct IrDocumentState {
 pub struct IrDocumentLocale {
     /// Canonical BCP 47-style tag selected by the evaluator.
     pub tag: String,
-    /// Localized name returned by the `.doclang` getter.
+    /// Display name returned by the `.doclang` getter. The serialized field name is
+    /// retained for IR wire compatibility; Quarkdown v2.6.0 returns this value in English.
     pub localized_name: String,
 }
 

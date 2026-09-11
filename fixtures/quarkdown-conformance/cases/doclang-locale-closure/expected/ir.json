@@ -13,7 +13,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The base locale is now ", "span": {"source_id": 1, "start": 65, "end": 88}}},
-          {"Text": {"content": "español", "span": {"source_id": 1, "start": 88, "end": 96}}}
+          {"Text": {"content": "Spanish", "span": {"source_id": 1, "start": 88, "end": 96}}}
         ],
         "span": {"source_id": 1, "start": 65, "end": 96}
       }
@@ -22,7 +22,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The regional locale is now ", "span": {"source_id": 1, "start": 115, "end": 142}}},
-          {"Text": {"content": "español (México)", "span": {"source_id": 1, "start": 142, "end": 150}}}
+          {"Text": {"content": "Spanish (Mexico)", "span": {"source_id": 1, "start": 142, "end": 150}}}
         ],
         "span": {"source_id": 1, "start": 115, "end": 150}
       }
@@ -31,7 +31,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The script and region locale is now ", "span": {"source_id": 1, "start": 174, "end": 210}}},
-          {"Text": {"content": "中文 (繁體，台灣)", "span": {"source_id": 1, "start": 210, "end": 218}}}
+          {"Text": {"content": "Chinese (Taiwan)", "span": {"source_id": 1, "start": 210, "end": 218}}}
         ],
         "span": {"source_id": 1, "start": 174, "end": 218}
       }
@@ -40,7 +40,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The language, script, and region locale is now ", "span": {"source_id": 1, "start": 242, "end": 289}}},
-          {"Text": {"content": "српски (ћирилица, Србија)", "span": {"source_id": 1, "start": 289, "end": 297}}}
+          {"Text": {"content": "Serbian (Serbia)", "span": {"source_id": 1, "start": 289, "end": 297}}}
         ],
         "span": {"source_id": 1, "start": 242, "end": 297}
       }
@@ -49,7 +49,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The variant locale is now ", "span": {"source_id": 1, "start": 344, "end": 370}}},
-          {"Text": {"content": "English (United States, Computer)", "span": {"source_id": 1, "start": 370, "end": 378}}}
+          {"Text": {"content": "Japanese (Japan)", "span": {"source_id": 1, "start": 370, "end": 378}}}
         ],
         "span": {"source_id": 1, "start": 344, "end": 378}
       }
@@ -58,7 +58,7 @@
       "Paragraph": {
         "content": [
           {"Text": {"content": "The deprecated language alias resolves to ", "span": {"source_id": 1, "start": 394, "end": 436}}},
-          {"Text": {"content": "עברית", "span": {"source_id": 1, "start": 436, "end": 444}}}
+          {"Text": {"content": "Hebrew", "span": {"source_id": 1, "start": 436, "end": 444}}}
         ],
         "span": {"source_id": 1, "start": 394, "end": 444}
       }
@@ -66,8 +66,8 @@
     {
       "Paragraph": {
         "content": [
-          {"Text": {"content": "The valid unavailable tag is now ", "span": {"source_id": 1, "start": 463, "end": 496}}},
-          {"Text": {"content": "xx (YY)", "span": {"source_id": 1, "start": 496, "end": 504}}}
+          {"Text": {"content": "The accepted regional tag is now ", "span": {"source_id": 1, "start": 463, "end": 496}}},
+          {"Text": {"content": "German (Germany)", "span": {"source_id": 1, "start": 496, "end": 504}}}
         ],
         "span": {"source_id": 1, "start": 463, "end": 504}
       }
@@ -85,7 +85,7 @@
       "authors": [],
       "keywords": [],
       "theme": null,
-      "locale": {"tag": "xx-YY", "localized_name": "xx (YY)"},
+      "locale": {"tag": "de-DE", "localized_name": "German (Germany)"},
       "caption_position": {
         "default": "Bottom",
         "figures": null,
