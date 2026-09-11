@@ -1,0 +1,168 @@
+name: Disposable #311 v2.6.0 doclang snapshot
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Generate deterministic black-box snapshot twice
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          test "$(jq -r '.tag_name' "$release")" = 'v2.6.0'
+          asset='quarkdown-linux-x64.zip'
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = 'sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          zip="$RUNNER_TEMP/$asset"
+          curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/quarkdown"
+          mkdir -p "$root"
+          unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"
+          test -n "$q"
+          chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          python3 - tools/jdk25_available_locale_order.tsv "$RUNNER_TEMP/candidates.txt" <<'PY'
+          import csv, sys
+          from pathlib import Path
+          src, out = Path(sys.argv[1]), Path(sys.argv[2])
+          tags=[]; seen=set()
+          with src.open(encoding='utf-8', newline='') as f:
+              for row in csv.reader(f, delimiter='\t'):
+                  if not row or not row[0] or row[0] in seen:
+                      continue
+                  seen.add(row[0]); tags.append(row[0])
+          # Independent adversarial/legacy inputs not present as canonical JDK25 rows.
+          for tag in ('iw', 'in', 'ji', 'xx-YY', 'EN-us'):
+              if tag not in seen:
+                  seen.add(tag); tags.append(tag)
+          tags.sort(key=lambda s: s.encode('utf-8'))
+          out.write_text('\n'.join(tags)+'\n', encoding='utf-8')
+          print(f'candidate_count={len(tags)}')
+          assert len(tags) == 1162
+          assert all('"' not in t and '\t' not in t and '\n' not in t for t in tags)
+          PY
+
+          run_probe() {
+            label="$1"
+            base="$RUNNER_TEMP/$label"
+            cases="$base/cases"
+            mkdir -p "$cases"
+            python3 - "$RUNNER_TEMP/candidates.txt" "$cases" <<'PY'
+          import sys
+          from pathlib import Path
+          tags=Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()
+          root=Path(sys.argv[2]); size=80
+          for start in range(0,len(tags),size):
+              p=root/f'{start//size:03d}'; p.mkdir(parents=True)
+              with (p/'main.qd').open('w',encoding='utf-8') as out:
+                  out.write('.doctype {plain}\n')
+                  for i,tag in enumerate(tags[start:start+size],start=start):
+                      key=f'Q{i:04d}'
+                      out.write(f'{key}-BEGIN\n.doclang {{English}}\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
+          PY
+            : > "$base/all.stderr"
+            for project in "$cases"/*; do
+              chunk="$(basename "$project")"
+              set +e
+              (cd "$project" && "$q" c main.qd --clean) > "$base/$chunk.stdout" 2> "$base/$chunk.stderr"
+              status=$?
+              set -e
+              printf '%s_chunk_%s_exit=%s\n' "$label" "$chunk" "$status"
+              test "$status" -eq 0
+              test -d "$project/quarkdown-output"
+              sed "s/^/[chunk $chunk] /" "$base/$chunk.stderr" >> "$base/all.stderr"
+            done
+            python3 - "$RUNNER_TEMP/candidates.txt" "$cases" "$base/all.stderr" "$base/snapshot.tsv" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          tags=Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()
+          cases=Path(sys.argv[2]); stderr=Path(sys.argv[3]).read_text(encoding='utf-8',errors='replace')
+          out=Path(sys.argv[4]); size=80
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          texts={}
+          for p in sorted(cases.iterdir()):
+              parts=[]
+              for html in sorted((p/'quarkdown-output').rglob('*.html')):
+                  t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
+              texts[int(p.name)]=' '.join(' '.join(parts).split())
+          rows=[]; missing=[]; accepted=0
+          for i,tag in enumerate(tags):
+              key=f'Q{i:04d}'
+              m=re.search(rf'{key}-VALUE\s*(.*?)\s*{key}-END',texts[i//size])
+              if not m:
+                  missing.append(tag); continue
+              rejected=bool(re.search(rf'Locale\s+{re.escape(tag)}\s+not found',stderr,re.I))
+              getter='' if rejected else m.group(1)
+              accepted += int(not rejected)
+              rows.append((tag,'0' if rejected else '1',getter))
+          print(f'accepted={accepted}')
+          print(f'rejected={len(rows)-accepted}')
+          print(f'missing_markers={len(missing)}')
+          if missing: raise SystemExit(f'missing markers: {missing[:20]}')
+          out.write_text(''.join('\t'.join(row)+'\n' for row in rows),encoding='utf-8')
+          PY
+            sha256sum "$base/snapshot.tsv"
+          }
+
+          run_probe oracle_a
+          run_probe oracle_b
+          cmp --silent "$RUNNER_TEMP/oracle_a/snapshot.tsv" "$RUNNER_TEMP/oracle_b/snapshot.tsv"
+          echo 'snapshot_repeatability=IDENTICAL'
+          sha256sum "$RUNNER_TEMP/oracle_a/snapshot.tsv" | tee "$RUNNER_TEMP/snapshot.sha256"
+          cp "$RUNNER_TEMP/oracle_a/snapshot.tsv" "$RUNNER_TEMP/quarkdown-v2.6.0-doclang-snapshot.tsv"
+
+          python3 - "$RUNNER_TEMP/quarkdown-v2.6.0-doclang-snapshot.tsv" <<'PY'
+          from collections import defaultdict
+          from pathlib import Path
+          import sys
+          rows=[]; groups=defaultdict(list)
+          for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
+              tag,ok,name=line.split('\t',2); rows.append((tag,ok,name))
+              if ok=='1': groups[name.casefold()].append((tag,name))
+          collisions=[g for g in groups.values() if len(g)>1]
+          print(f'snapshot_rows={len(rows)}')
+          print(f'snapshot_accepted={sum(ok=="1" for _,ok,_ in rows)}')
+          print(f'snapshot_rejected={sum(ok=="0" for _,ok,_ in rows)}')
+          print(f'getter_collision_classes={len(collisions)}')
+          print('COLLISION_SAMPLES_BEGIN')
+          for g in sorted(collisions,key=lambda g:(g[0][1].casefold(),g[0][0]))[:40]:
+              print(g[0][1]+'\t'+' | '.join(tag for tag,_ in g))
+          print('COLLISION_SAMPLES_END')
+          for tag in ('iw','in','ji','xx-YY','EN-us'):
+              print('special\t'+'\t'.join(next(r for r in rows if r[0]==tag)))
+          PY
+
+      - name: Upload disposable snapshot evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: proof-311-v260-doclang-snapshot
+          path: |
+            ${{ runner.temp }}/quarkdown-v2.6.0-doclang-snapshot.tsv
+            ${{ runner.temp }}/snapshot.sha256
+          if-no-files-found: error
+          retention-days: 7
