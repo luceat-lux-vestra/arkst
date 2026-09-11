@@ -16,7 +16,7 @@ use arkst_ir::IrDocumentLocale;
 //
 // Independently captured `.doclang` black-box snapshot:
 // SHA-256 b684f0cd8f6b14537f2857494c967cd73b1a33c9f51938ddcb2fbbcb8525c3a6
-const SNAPSHOT: &str = include_str!("../data/quarkdown_v260_doclang_snapshot.tsv");
+const SNAPSHOT: &str = include_str!("../data/quarkdown/v260_doclang_snapshot.tsv");
 
 const LEGACY_ALIASES: &[(&str, &str)] = &[
     ("in", "Indonesian"),
