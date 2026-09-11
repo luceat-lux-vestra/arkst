@@ -1,0 +1,104 @@
+name: Disposable #311 v2.6.0 doclang legacy aliases
+
+on:
+  push:
+    branches:
+      - proof/311-v260-doclang-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Probe direct legacy aliases and English-name winners
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset='quarkdown-linux-x64.zip'
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = 'sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          zip="$RUNNER_TEMP/$asset"; curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/q"; mkdir -p "$root"; unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"; test -n "$q"; chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          project="$RUNNER_TEMP/project"; mkdir -p "$project"
+          cat > "$project/main.qd" <<'QD'
+          .doctype {plain}
+
+          .localization {yid}
+              - ji-UA
+                - winner: JI_UA
+              - yi-UA
+                - winner: YI_UA
+              - yi-Hebr-UA
+                - winner: YI_HEBR_UA
+          .doclang {ji-UA}
+          D1-BEGIN .doclang D1-MID .localize {yid:winner} D1-END
+          .doclang {yi-UA}
+          D2-BEGIN .doclang D2-MID .localize {yid:winner} D2-END
+          .doclang {yi-Hebr-UA}
+          D3-BEGIN .doclang D3-MID .localize {yid:winner} D3-END
+          .doclang {Yiddish (Ukraine)}
+          N1-BEGIN .doclang N1-MID .localize {yid:winner} N1-END
+
+          .localization {heb}
+              - iw-IL
+                - winner: IW_IL
+              - he-IL
+                - winner: HE_IL
+              - he-Hebr-IL
+                - winner: HE_HEBR_IL
+          .doclang {iw-IL}
+          D4-BEGIN .doclang D4-MID .localize {heb:winner} D4-END
+          .doclang {he-IL}
+          D5-BEGIN .doclang D5-MID .localize {heb:winner} D5-END
+          .doclang {Hebrew (Israel)}
+          N2-BEGIN .doclang N2-MID .localize {heb:winner} N2-END
+
+          .localization {ind}
+              - in-ID
+                - winner: IN_ID
+              - id-ID
+                - winner: ID_ID
+              - id-Latn-ID
+                - winner: ID_LATN_ID
+          .doclang {in-ID}
+          D6-BEGIN .doclang D6-MID .localize {ind:winner} D6-END
+          .doclang {id-ID}
+          D7-BEGIN .doclang D7-MID .localize {ind:winner} D7-END
+          .doclang {Indonesian (Indonesia)}
+          N3-BEGIN .doclang N3-MID .localize {ind:winner} N3-END
+          QD
+          (cd "$project" && "$q" c main.qd --clean) > "$RUNNER_TEMP/stdout" 2> "$RUNNER_TEMP/stderr"
+          cat "$RUNNER_TEMP/stderr"
+          test -d "$project/quarkdown-output"
+          python3 - "$project/quarkdown-output" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          class T(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          parts=[]
+          for html in sorted(Path(sys.argv[1]).rglob('*.html')):
+              t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
+          text=' '.join(' '.join(parts).split())
+          for key in ('D1','D2','D3','N1','D4','D5','N2','D6','D7','N3'):
+              m=re.search(rf'{key}-BEGIN\s*(.*?)\s*{key}-MID\s*(.*?)\s*{key}-END',text)
+              if not m: raise SystemExit(f'missing {key}: {text}')
+              print(f'{key}_getter={m.group(1)}')
+              print(f'{key}_winner={m.group(2)}')
+          PY
