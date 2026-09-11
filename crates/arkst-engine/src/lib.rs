@@ -7,6 +7,7 @@
 
 pub mod ast_to_ir;
 pub mod builtins;
+pub(crate) mod doclang_v260;
 pub mod evaluator;
 pub(crate) mod invocation_binder;
 pub(crate) mod locale;

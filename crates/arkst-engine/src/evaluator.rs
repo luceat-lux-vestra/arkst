@@ -5490,7 +5490,7 @@ impl Evaluator {
             }
         };
 
-        let Some(locale) = crate::locale::resolve_doclang_v260(&identifier) else {
+        let Some(locale) = crate::doclang_v260::resolve(&identifier) else {
             diagnostics.push(document_state_conversion_error(
                 format!("`.doclang` locale `{identifier}` was not found"),
                 argument_span,

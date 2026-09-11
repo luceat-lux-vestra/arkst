@@ -160,8 +160,8 @@ mod tests {
             if !accepted || english_name.is_empty() {
                 continue;
             }
-            let resolved = resolve(english_name)
-                .unwrap_or_else(|| panic!("v2.6 English name {english_name}"));
+            let resolved =
+                resolve(english_name).unwrap_or_else(|| panic!("v2.6 English name {english_name}"));
             assert_eq!(resolved.localized_name, english_name, "{english_name}");
         }
         assert_eq!(
