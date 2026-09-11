@@ -69,7 +69,7 @@ jobs:
                           Locale candidate = Locale.forLanguageTag(p[0]);
                           boolean ok = available.contains(candidate);
                           if (ok) accepted++;
-                          System.out.printf(Locale.ROOT, "%s\\t%s\\t%s%n", p[0], ok ? "1" : "0", candidate.getDisplayName(Locale.ENGLISH));
+                          System.out.printf(Locale.ROOT, "%s\t%s\t%s%n", p[0], ok ? "1" : "0", candidate.getDisplayName(Locale.ENGLISH));
                       }
                   }
                   System.err.printf(Locale.ROOT, "runtime_input=%d runtime_accepted=%d runtime_available=%d%n", input, accepted, available.size());
@@ -81,9 +81,8 @@ jobs:
           candidate_java="${bundled_java:-$(command -v java)}"
           "$candidate_java" -cp "$RUNNER_TEMP/probe-classes" LocaleProbe tools/jdk25_available_locale_order.tsv > "$RUNNER_TEMP/runtime.tsv" 2> "$RUNNER_TEMP/runtime.stats"
           cat "$RUNNER_TEMP/runtime.stats"
+          test "$(awk -F '\t' 'NF==3{n++} END{print n+0}' "$RUNNER_TEMP/runtime.tsv")" -eq 1157
 
-          # Re-observe exact v2.6.0 in bounded chunks and compare the runtime
-          # prediction directly with black-box acceptance and getter output.
           cases="$RUNNER_TEMP/cases"; mkdir -p "$cases"
           python3 - "$cases" "$RUNNER_TEMP/runtime.tsv" <<'PY'
           import sys
@@ -98,7 +97,7 @@ jobs:
                   out.write('.doctype {plain}\n')
                   for i,(tag,_ok,_name) in enumerate(rows[start:start+size],start=start):
                       key=f'Q{i:04d}'
-                      out.write(f'{key}-BEGIN\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
+                      out.write(f'{key}-BEGIN\n.doclang {{English}}\n.doclang {{{tag}}}\n{key}-VALUE .doclang {key}-END\n')
           PY
           : > "$RUNNER_TEMP/all.stderr"
           for project in "$cases"/*; do
@@ -126,14 +125,16 @@ jobs:
                   t=T(); t.feed(html.read_text(encoding='utf-8')); parts.extend(t.parts)
               chunk_text[int(p.name)]=' '.join(' '.join(parts).split())
           stderr=stderr_path.read_text(encoding='utf-8',errors='replace')
-          acceptance=[]; names=[]; missing=[]
+          acceptance=[]; names=[]; missing=[]; observed_accepted=0
           for i,(tag,pred_ok,pred_name) in enumerate(rows):
               key=f'Q{i:04d}'; flat=chunk_text[i//100]
               m=re.search(rf'{key}-VALUE\s*(.*?)\s*{key}-END',flat)
               if not m: missing.append(tag); continue
               observed_ok=not bool(re.search(rf'Locale\s+{re.escape(tag)}\s+not found',stderr,re.I))
+              observed_accepted += int(observed_ok)
               if observed_ok != pred_ok: acceptance.append((tag,pred_ok,observed_ok))
               if observed_ok and m.group(1) != pred_name: names.append((tag,pred_name,m.group(1)))
+          print(f'blackbox_accepted={observed_accepted}')
           print(f'runtime_acceptance_mismatches={len(acceptance)}')
           print(f'runtime_name_mismatches={len(names)}')
           print(f'missing_markers={len(missing)}')
