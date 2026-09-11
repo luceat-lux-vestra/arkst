@@ -1,0 +1,49 @@
+name: Dev #311 v2.6.0 doclang relocate
+
+on:
+  push:
+    branches:
+      - compat/311-v260-doclang-getter
+
+permissions:
+  contents: write
+
+jobs:
+  relocate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Relocate release-specific snapshot outside JDK25 exact-artifact namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p crates/arkst-engine/data/quarkdown
+          git mv crates/arkst-engine/data/quarkdown_v260_doclang_snapshot.tsv \
+            crates/arkst-engine/data/quarkdown/v260_doclang_snapshot.tsv
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/arkst-engine/src/doclang_v260.rs')
+          text = path.read_text(encoding='utf-8')
+          old = 'include_str!("../data/quarkdown_v260_doclang_snapshot.tsv")'
+          new = 'include_str!("../data/quarkdown/v260_doclang_snapshot.tsv")'
+          assert text.count(old) == 1
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          cargo fmt --all
+          cargo test -p arkst-engine doclang_v260 --locked
+          cargo test -p arkst-core doclang_ --locked
+
+      - name: Commit product candidate without disposable workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/dev-311-v260-doclang-relocate.yml
+          git add -A
+          git config user.name 'luceat-lux-vestra'
+          git config user.email 'heathkimdev@gmail.com'
+          git commit -m 'fix(compat): isolate v2.6 doclang snapshot namespace'
+          git push origin HEAD:compat/311-v260-doclang-getter
