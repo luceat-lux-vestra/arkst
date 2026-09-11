@@ -16,17 +16,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Set up pinned JDK 17 candidate
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '17.0.20.1+1'
       - name: Compare JDK17 public locale API with exact Quarkdown v2.6.0
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          jdk_asset='OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz'
+          jdk_url='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz'
+          jdk_sha='3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e'
+          jdk_archive="$RUNNER_TEMP/$jdk_asset"
+          curl -fsSL "$jdk_url" -o "$jdk_archive"
+          printf '%s  %s\n' "$jdk_sha" "$jdk_archive" | sha256sum -c --strict
+          jdk_root="$RUNNER_TEMP/temurin17"
+          mkdir -p "$jdk_root"
+          tar -xzf "$jdk_archive" -C "$jdk_root" --strip-components=1
+          export JAVA_HOME="$jdk_root"
+          export PATH="$JAVA_HOME/bin:$PATH"
           echo 'JAVA_VERSION_BEGIN'; java -version 2>&1; echo 'JAVA_VERSION_END'
           java -version 2>&1 | grep -F 'Temurin-17.0.20.1+1'
 
