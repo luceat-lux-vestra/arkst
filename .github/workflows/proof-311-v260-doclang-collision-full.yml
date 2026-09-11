@@ -25,8 +25,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Reuse the independently repeated snapshot from run 34611630206,
-          # but verify its exact content digest before using it.
           snapshot_zip="$RUNNER_TEMP/snapshot.zip"
           curl -fsSL -L -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/luceat-lux-vestra/arkst/actions/artifacts/10268667042/zip -o "$snapshot_zip"
@@ -65,16 +63,29 @@ jobs:
                   groups[name.casefold()].append((tag,name))
           collisions=[g for g in groups.values() if len(g)>1]
           collisions.sort(key=lambda g:(g[0][1].casefold(),g[0][0]))
+          inverse={'he':'iw','id':'in','yi':'ji'}
+          alias_count=0
           with out_groups.open('w',encoding='utf-8') as go, out_mapping.open('w',encoding='utf-8') as mo:
               for i,g in enumerate(collisions):
-                  name=g[0][1]; tags=sorted(tag for tag,_ in g)
+                  name=g[0][1]
+                  tags=sorted(tag for tag,_ in g)
+                  probe_tags=list(tags)
+                  for tag in tags:
+                      head,*tail=tag.split('-')
+                      if head in inverse:
+                          alias='-'.join([inverse[head],*tail])
+                          if alias not in probe_tags:
+                              probe_tags.append(alias); alias_count += 1
+                  probe_tags.sort(key=lambda s:s.encode('utf-8'))
                   assert all(c not in name for c in '{}\t\n')
-                  go.write(f'{i}\t{name}\t{"|".join(tags)}\n')
-                  for j,tag in enumerate(tags):
+                  go.write(f'{i}\t{name}\t{"|".join(probe_tags)}\n')
+                  for j,tag in enumerate(probe_tags):
                       mo.write(f'{i}\tM{i:04d}_{j:02d}\t{tag}\n')
           print(f'canonical_tags={len(canonical)}')
           print(f'collision_classes={len(collisions)}')
-          assert len(collisions) > 250
+          print(f'legacy_alias_probe_tags={alias_count}')
+          assert len(collisions) == 266
+          assert alias_count > 0
           PY
 
           run_collision_probe() {
@@ -104,7 +115,6 @@ jobs:
                       out.write(f'.doclang {{{name}}}\n')
                       out.write(f'C{i:04d}-BEGIN .localize {{{table}:winner}} C{i:04d}-END\n')
           PY
-            : > "$base/all.stderr"
             for project in "$cases"/*; do
               chunk="$(basename "$project")"
               set +e
@@ -114,7 +124,6 @@ jobs:
               printf '%s_chunk_%s_exit=%s\n' "$label" "$chunk" "$status"
               test "$status" -eq 0
               test -d "$project/quarkdown-output"
-              sed "s/^/[chunk $chunk] /" "$base/$chunk.stderr" >> "$base/all.stderr"
             done
             python3 - "$RUNNER_TEMP/groups.tsv" "$RUNNER_TEMP/mapping.tsv" "$cases" "$base/winners.tsv" <<'PY'
           from collections import defaultdict
@@ -124,9 +133,9 @@ jobs:
           groups=[]
           for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
               i,name,tags=line.split('\t',2); groups.append((int(i),name,tags.split('|')))
-          by_marker={}; by_case=defaultdict(dict)
+          by_case=defaultdict(dict)
           for line in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines():
-              i,marker,tag=line.split('\t',2); by_marker[marker]=tag; by_case[int(i)][marker]=tag
+              i,marker,tag=line.split('\t',2); by_case[int(i)][marker]=tag
           root=Path(sys.argv[3]); out=Path(sys.argv[4]); chunk=20
           class T(HTMLParser):
               def __init__(self): super().__init__(); self.parts=[]
@@ -173,12 +182,14 @@ jobs:
               'Chinese (Taiwan)':'zh-Hant-TW',
               'Serbian (Serbia)':'sr-Latn-RS',
               'Arabic':'ar-001',
+              'Yiddish (Ukraine)':'ji-UA',
           }
           for name,winner in expected.items():
               actual=rows[name][0]
               print(f'representative\t{name}\t{actual}')
               assert actual == winner, (name,actual,winner)
           print(f'final_collision_classes={len(rows)}')
+          assert len(rows) == 266
           PY
 
       - name: Upload exhaustive collision evidence
