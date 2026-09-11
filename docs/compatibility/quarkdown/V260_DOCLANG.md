@@ -11,7 +11,7 @@ Arkst's Quarkdown v2.6.0 `.doclang` behavior is pinned to clean-room black-box o
 
 The v2.6.0 contract differs from the older Arkst/JDK25-backed compatibility model in two observable ways: the getter returns the English display name, and locale availability is release-specific rather than accepting every structurally valid BCP-47 tag. Unknown or explicitly rejected identifiers fail closed and do not replace the previous document locale.
 
-The existing JDK25 locale snapshot remains in the repository for other pinned JVM-observable compatibility behavior. It is not treated as the v2.6.0 `.doclang` availability/name oracle.
+The existing JDK25 locale snapshot remains in the repository for other pinned JVM-observable compatibility behavior. It is not treated as the v2.6.0 `.doclang` availability/name oracle. The JDK25 semantic verifier in `crates/arkst-engine/src/locale.rs` therefore remains byte-identical to its pre-v2.6 baseline, while the release-specific resolver and exhaustive snapshot regressions live in `crates/arkst-engine/src/doclang_v260.rs`.
 
 Legacy Java spellings `iw`, `in`, and `ji`, including the independently black-box-checked suffix-preserving forms used by the v2.6.0 probe set, remain accepted and return English display names.
 
