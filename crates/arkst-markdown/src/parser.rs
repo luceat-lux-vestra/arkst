@@ -1787,15 +1787,20 @@ fn is_chained_contextual_inline_body_position(call_name: &str, positional_index:
     positional_index == 0 && matches!(call_name, "foreach" | "repeat")
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ArgConversionMode {
+    allow_unmarked_lambda: bool,
+    contextual_inline_body: bool,
+    target_owns_opaque_markers: bool,
+}
+
 fn convert_arg_with_mode(
     arg: &Arg,
     source: &str,
     base: usize,
     call_base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
-    allow_unmarked_lambda: bool,
-    contextual_inline_body: bool,
-    target_owns_opaque_markers: bool,
+    mode: ArgConversionMode,
 ) -> Value {
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
@@ -1811,7 +1816,7 @@ fn convert_arg_with_mode(
                 });
                 return Value::String(String::new());
             };
-            let parsed_lambda = if allow_unmarked_lambda {
+            let parsed_lambda = if mode.allow_unmarked_lambda {
                 arkst_quarkdown::parse_callback_lambda(source, span)
             } else {
                 arkst_quarkdown::parse_inline_lambda(source, span)
@@ -1841,16 +1846,16 @@ fn convert_arg_with_mode(
                         span,
                         base,
                         diagnostics,
-                        target_owns_opaque_markers,
+                        mode.target_owns_opaque_markers,
                     );
                     let body = parse_original_content(
                         source,
                         lambda.body,
                         base,
                         diagnostics,
-                        target_owns_opaque_markers,
+                        mode.target_owns_opaque_markers,
                     );
-                    if contextual_inline_body {
+                    if mode.contextual_inline_body {
                         Value::InlineBody {
                             content,
                             parameters,
@@ -1870,7 +1875,7 @@ fn convert_arg_with_mode(
                     span,
                     base,
                     diagnostics,
-                    target_owns_opaque_markers,
+                    mode.target_owns_opaque_markers,
                 )),
                 Err(error) => {
                     diagnostics.push(ParserDiagnostic {
@@ -1883,7 +1888,7 @@ fn convert_arg_with_mode(
                         span,
                         base,
                         diagnostics,
-                        target_owns_opaque_markers,
+                        mode.target_owns_opaque_markers,
                     ))
                 }
             }
@@ -2093,6 +2098,7 @@ fn convert_call_arguments(
             arkst_quarkdown::CallArgument::Positional(arg) => {
                 let index = positional_index;
                 positional_index += 1;
+                let contextual_inline_body = positional_body(call_name, index);
                 CallArgument::Positional {
                     value: convert_arg_with_mode(
                         arg,
@@ -2100,9 +2106,11 @@ fn convert_call_arguments(
                         base,
                         call_base,
                         diagnostics,
-                        positional_body(call_name, index),
-                        positional_body(call_name, index),
-                        call_name == "code" && index == 4,
+                        ArgConversionMode {
+                            allow_unmarked_lambda: contextual_inline_body,
+                            contextual_inline_body,
+                            target_owns_opaque_markers: call_name == "code" && index == 4,
+                        },
                     ),
                     span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
                 }
@@ -2140,9 +2148,11 @@ fn convert_named_arg(
             base,
             call_base,
             diagnostics,
-            callback_lambda,
-            false,
-            call_name == Some("code") && arg.name == "callouts",
+            ArgConversionMode {
+                allow_unmarked_lambda: callback_lambda,
+                contextual_inline_body: false,
+                target_owns_opaque_markers: call_name == Some("code") && arg.name == "callouts",
+            },
         ),
         value_span: offset_span(arg.value.span, offset).unwrap_or(ByteSpan::new(0, 0)),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
