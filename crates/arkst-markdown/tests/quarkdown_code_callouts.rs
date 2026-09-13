@@ -19,15 +19,13 @@ fn code_callouts_own_marker_bearing_map_text_without_widening_e3010() {
         panic!("expected .code block call, got {:?}", output.document.nodes);
     };
     assert_eq!(name, "code");
-    let Some(CallArgument::Named {
-        name,
-        value: Value::Content(content),
-        ..
-    }) = arguments.first()
-    else {
+    let Some(CallArgument::Named(argument)) = arguments.first() else {
         panic!("expected named callouts content, got {arguments:?}");
     };
-    assert_eq!(name, "callouts");
+    assert_eq!(argument.name, "callouts");
+    let Value::Content(content) = &argument.value else {
+        panic!("expected callouts content value, got {:?}", argument.value);
+    };
     assert!(matches!(
         content.as_slice(),
         [Inline::Text { content, .. }]
