@@ -27,15 +27,106 @@ jobs:
           echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
           mkdir -p /tmp/quarkdown
           unzip -q /tmp/quarkdown.zip -d /tmp/quarkdown
-          test -x /tmp/quarkdown/quarkdown/bin/quarkdown
-      - name: Inspect public CLI surface
+          /tmp/quarkdown/quarkdown/bin/quarkdown --version
+      - name: Probe bounded observable contract
         shell: bash
         run: |
+          set -euo pipefail
           BIN=/tmp/quarkdown/quarkdown/bin/quarkdown
-          "$BIN" --version || true
-          echo '=== ROOT HELP ==='
-          "$BIN" --help
-          echo '=== COMPILE HELP ==='
-          "$BIN" compile --help || true
-          echo '=== C HELP ==='
-          "$BIN" c --help || true
+          mkdir -p /tmp/probe
+
+          cat > /tmp/probe/basic.qd <<'EOF'
+          .code lang:{javascript} callouts:{
+              - 1: Declares the function.
+              - 3: Builds the greeting.
+          }
+              function greet() {
+                  const name = "World";
+                  return `Hello, ${name}!`;
+              }
+          EOF
+
+          cat > /tmp/probe/no-lines.qd <<'EOF'
+          .code linenumbers:{no} callouts:{
+              - 1: First line.
+          }
+              alpha
+              beta
+          EOF
+
+          cat > /tmp/probe/bad-alias.qd <<'EOF'
+          .code callout:{
+              - 1: First line.
+          }
+              alpha
+          EOF
+
+          cat > /tmp/probe/bad-zero.qd <<'EOF'
+          .code callouts:{
+              - 0: Zero line.
+          }
+              alpha
+          EOF
+
+          cat > /tmp/probe/bad-text-key.qd <<'EOF'
+          .code callouts:{
+              - nope: Text key.
+          }
+              alpha
+          EOF
+
+          cat > /tmp/probe/out-of-range.qd <<'EOF'
+          .code callouts:{
+              - 9: Beyond source.
+          }
+              alpha
+              beta
+          EOF
+
+          cat > /tmp/probe/shadow.qd <<'EOF'
+          .function {code}
+              callouts code:
+              SHADOWED
+
+          .code callouts:{
+              - 1: Description.
+          }
+              alpha
+          EOF
+
+          run_ok() {
+            local name="$1"
+            echo "=== $name ==="
+            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" > "/tmp/probe/$name.out" 2> "/tmp/probe/$name.err"
+            echo "status=0"
+            echo '--- stdout ---'
+            cat "/tmp/probe/$name.out"
+            echo
+            echo '--- stderr ---'
+            cat "/tmp/probe/$name.err"
+            echo
+          }
+
+          run_any() {
+            local name="$1"
+            echo "=== $name ==="
+            set +e
+            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" > "/tmp/probe/$name.out" 2> "/tmp/probe/$name.err"
+            status=$?
+            set -e
+            echo "status=$status"
+            echo '--- stdout ---'
+            cat "/tmp/probe/$name.out"
+            echo
+            echo '--- stderr ---'
+            cat "/tmp/probe/$name.err"
+            echo
+          }
+
+          run_ok basic
+          run_any no-lines
+          run_any bad-alias
+          run_any bad-zero
+          run_any bad-text-key
+          run_any out-of-range
+          run_any shadow
