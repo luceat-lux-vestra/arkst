@@ -1,0 +1,43 @@
+name: Dev #185/#311 v2.6 code presentation
+
+on:
+  push:
+    branches:
+      - compat/185-311-v260-code-callouts
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Apply bounded product patch
+        run: python3 tools/apply_v260_code.py
+
+      - name: Format and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check --workspace --all-targets --locked
+          cargo test -p arkst-core --test quarkdown_v260_code_callouts --locked
+          cargo test -p arkst-typst --locked
+          cargo test -p arkst-engine --lib --locked
+
+      - name: Commit product candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/dev-185-311-v260-code.yml tools/apply_v260_code.py
+          git add -A
+          test -n "$(git status --porcelain)"
+          git config user.name 'luceat-lux-vestra'
+          git config user.email 'heathkimdev@gmail.com'
+          git commit -m 'feat(compat): add Quarkdown v2.6 code callouts'
+          git push origin HEAD:compat/185-311-v260-code-callouts
