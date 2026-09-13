@@ -18,7 +18,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply bounded product patch
-        run: python3 tools/apply_v260_code.py
+        run: |
+          python3 tools/fix_apply_v260_code.py
+          python3 tools/apply_v260_code.py
 
       - name: Format and verify
         shell: bash
@@ -34,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/dev-185-311-v260-code.yml tools/apply_v260_code.py
+          rm -f .github/workflows/dev-185-311-v260-code.yml tools/apply_v260_code.py tools/fix_apply_v260_code.py
           git add -A
           test -n "$(git status --porcelain)"
           git config user.name 'luceat-lux-vestra'
