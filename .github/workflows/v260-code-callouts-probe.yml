@@ -42,6 +42,7 @@ jobs:
           python3 /tmp/apply.py
           python3 tools/tmp_v260_code_fix.py
           python3 tools/tmp_v260_code_parser_fix.py
+          python3 tools/tmp_v260_code_test_fix.py
       - name: Validate candidate
         shell: bash
         run: |
