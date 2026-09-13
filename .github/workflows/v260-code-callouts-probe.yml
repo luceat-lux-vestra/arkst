@@ -4,129 +4,47 @@ on:
   push:
     branches:
       - compat/311-v260-code-callouts
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   probe:
-    if: startsWith(github.event.head_commit.message, 'test(compat):') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.event.head_commit.message, 'test(compat):')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download official Quarkdown v2.6.0 binary
+      - name: Inspect Arkst producer and lowering boundaries
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL --retry 3 -o /tmp/quarkdown.zip \
-            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
-          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
-          mkdir -p /tmp/quarkdown
-          unzip -q /tmp/quarkdown.zip -d /tmp/quarkdown
-          /tmp/quarkdown/quarkdown/bin/quarkdown --version
-      - name: Probe bounded observable contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN=/tmp/quarkdown/quarkdown/bin/quarkdown
-          mkdir -p /tmp/probe
-
-          cat > /tmp/probe/basic.qd <<'EOF'
-          .code lang:{javascript} callouts:{
-              - 1: Declares the function.
-              - 3: Builds the greeting.
-          }
-              function greet() {
-                  const name = "World";
-                  return `Hello, ${name}!`;
-              }
-          EOF
-
-          cat > /tmp/probe/no-lines.qd <<'EOF'
-          .code linenumbers:{no} callouts:{
-              - 1: First line.
-          }
-              alpha
-              beta
-          EOF
-
-          cat > /tmp/probe/bad-alias.qd <<'EOF'
-          .code callout:{
-              - 1: First line.
-          }
-              alpha
-          EOF
-
-          cat > /tmp/probe/bad-zero.qd <<'EOF'
-          .code callouts:{
-              - 0: Zero line.
-          }
-              alpha
-          EOF
-
-          cat > /tmp/probe/bad-text-key.qd <<'EOF'
-          .code callouts:{
-              - nope: Text key.
-          }
-              alpha
-          EOF
-
-          cat > /tmp/probe/out-of-range.qd <<'EOF'
-          .code callouts:{
-              - 9: Beyond source.
-          }
-              alpha
-              beta
-          EOF
-
-          cat > /tmp/probe/shadow.qd <<'EOF'
-          .function {code}
-              callouts code:
-              SHADOWED
-
-          .code callouts:{
-              - 1: Description.
-          }
-              alpha
-          EOF
-
-          run_ok() {
-            local name="$1"
-            echo "=== $name ==="
-            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" > "/tmp/probe/$name.out" 2> "/tmp/probe/$name.err"
-            echo "status=0"
-            echo '--- stdout ---'
-            cat "/tmp/probe/$name.out"
-            echo
-            echo '--- stderr ---'
-            cat "/tmp/probe/$name.err"
-            echo
+          context() {
+            file="$1"
+            pattern="$2"
+            before="${3:-25}"
+            after="${4:-70}"
+            line="$(grep -n -m1 -F "$pattern" "$file" | cut -d: -f1)"
+            start=$(( line > before ? line - before : 1 ))
+            end=$(( line + after ))
+            echo "=== $file :: $pattern @ $line ==="
+            nl -ba "$file" | sed -n "${start},${end}p"
           }
 
-          run_any() {
-            local name="$1"
-            echo "=== $name ==="
-            set +e
-            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" > "/tmp/probe/$name.out" 2> "/tmp/probe/$name.err"
-            status=$?
-            set -e
-            echo "status=$status"
-            echo '--- stdout ---'
-            cat "/tmp/probe/$name.out"
-            echo
-            echo '--- stderr ---'
-            cat "/tmp/probe/$name.err"
-            echo
-          }
+          context crates/arkst-ir/src/lib.rs 'pub enum IrNode' 5 150
+          context crates/arkst-ir/src/lib.rs 'WireNode {' 5 100
+          context crates/arkst-ir/src/lib.rs 'IrNode::CodeBlock {' 20 60
+          context crates/arkst-engine/src/ast_to_ir.rs 'IrNode::CodeBlock {' 25 55
+          context crates/arkst-typst/src/lowering.rs 'IrNode::CodeBlock {' 25 80
 
-          run_ok basic
-          run_any no-lines
-          run_any bad-alias
-          run_any bad-zero
-          run_any bad-text-key
-          run_any out-of-range
-          run_any shadow
+          echo '=== evaluator known-native references ==='
+          grep -n -E 'doclang|captionposition|container|landscape|row|column' crates/arkst-engine/src/evaluator.rs | head -n 160
+          line="$(grep -n -m1 '"doclang"' crates/arkst-engine/src/evaluator.rs | cut -d: -f1)"
+          start=$(( line > 100 ? line - 100 : 1 ))
+          end=$(( line + 220 ))
+          nl -ba crates/arkst-engine/src/evaluator.rs | sed -n "${start},${end}p"
+
+          echo '=== native manifest ==='
+          grep -n -E 'SUPPORTED|BUILTIN|NATIVE|doclang|captionposition' crates/arkst-engine/src/evaluator.rs crates/arkst-core/tests/stdlib_builtin_audit.rs | head -n 200
