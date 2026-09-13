@@ -24,7 +24,8 @@ fn find_typst() -> Option<PathBuf> {
 
 #[test]
 fn v260_code_callouts_lower_to_typst_that_compiles_to_pdf() {
-    let source = ".code lang:{rust} callouts:{\n    - 2: Second\n    - 1: First\n}\n    alpha\n    beta\n";
+    let source =
+        ".code lang:{rust} callouts:{\n    - 2: Second\n    - 1: First\n}\n    alpha\n    beta\n";
     let project = VirtualProjectBuilder::new()
         .entry("code-callouts.qd")
         .expect("valid entry")
