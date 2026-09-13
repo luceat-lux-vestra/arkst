@@ -3,7 +3,8 @@ use arkst_markdown::{parse_with_mode, Mode};
 
 #[test]
 fn code_callouts_own_marker_bearing_map_text_without_widening_e3010() {
-    let source = ".code callouts:{\n    - 2: Second *item*\n    - 1: First\n}\n    alpha\n    beta\n";
+    let source =
+        ".code callouts:{\n    - 2: Second *item*\n    - 1: First\n}\n    alpha\n    beta\n";
     let output = parse_with_mode(source, Mode::Quarkdown);
     assert!(
         output.diagnostics.is_empty(),
