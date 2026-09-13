@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'chore: apply v2.6 callout backtick proof patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +52,7 @@ jobs:
           git diff --check
           git diff -- crates/arkst-typst/src/lowering.rs crates/arkst-typst-subprocess/tests/code_callouts_integration.rs
 
-      - name: Commit validated patch and remove disposable workflow
+      - name: Commit patch and remove disposable workflow
         run: |
           rm .github/workflows/v260-backtick-fix.yml
           git config user.name github-actions[bot]
