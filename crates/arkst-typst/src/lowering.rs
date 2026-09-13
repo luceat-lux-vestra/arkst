@@ -1265,7 +1265,7 @@ fn escape_typst_text(s: &str) -> String {
     for character in s.chars() {
         match character {
             '\\' => escaped.push_str("\\\\"),
-            '*' | '_' | '~' | '#' | '$' | '<' | '>' | '@' | '[' | ']' => {
+            '*' | '_' | '~' | '`' | '#' | '$' | '<' | '>' | '@' | '[' | ']' => {
                 escaped.push('\\');
                 escaped.push(character);
             }
