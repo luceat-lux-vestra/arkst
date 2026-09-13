@@ -1,4 +1,4 @@
-name: v2.6 code callouts probe
+name: v2.6 code callouts candidate
 
 on:
   push:
@@ -6,35 +6,226 @@ on:
       - compat/311-v260-code-callouts
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  probe:
-    if: startsWith(github.event.head_commit.message, 'test(compat):')
+  candidate:
+    if: github.event.head_commit.message == 'test(compat): implement v2.6 code callouts candidate'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-      - name: Inspect Arkst unresolved argument representation
+          fetch-depth: 0
+      - name: Apply candidate implementation
         shell: bash
         run: |
           set -euo pipefail
-          cat > crates/arkst-core/tests/v260_code_shape_probe.rs <<'EOF'
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one match, got {text.count(old)} for {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Backend-neutral IR: native .code options are explicit and old fenced blocks keep legacy behavior.
+          path = 'crates/arkst-ir/src/lib.rs'
+          marker = '/// A backend-neutral block-level IR node.\n'
+          insert = '''/// One Quarkdown code callout after evaluator validation and ordering.\n#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\npub struct IrCodeCallout {\n    /// One-based source line. The evaluator enforces positivity; values beyond\n    /// the current source length remain valid because Quarkdown accepts them.\n    pub line: u32,\n    /// Backend-neutral visible description text.\n    pub description: String,\n}\n\n'''
+          replace_once(path, marker, insert + marker)
+
+          replace_once(path,
+          '''    CodeBlock {\n        language: Option<String>,\n        info: Option<String>,\n        source: String,\n        span: SourceSpan,\n    },''',
+          '''    CodeBlock {\n        language: Option<String>,\n        info: Option<String>,\n        source: String,\n        #[serde(default, skip_serializing_if = "Option::is_none")]\n        line_numbers: Option<bool>,\n        #[serde(default, skip_serializing_if = "Vec::is_empty")]\n        callouts: Vec<IrCodeCallout>,\n        span: SourceSpan,\n    },''')
+
+          replace_once(path,
+          '''    CodeBlock {\n        language: Option<String>,\n        info: Option<String>,\n        source: String,\n        span: SourceSpan,\n    },\n    RawHtml {''',
+          '''    CodeBlock {\n        language: Option<String>,\n        info: Option<String>,\n        source: String,\n        #[serde(default, skip_serializing_if = "Option::is_none")]\n        line_numbers: Option<bool>,\n        #[serde(default, skip_serializing_if = "Vec::is_empty")]\n        callouts: Vec<IrCodeCallout>,\n        span: SourceSpan,\n    },\n    RawHtml {''')
+
+          replace_once(path,
+          '''        IrNode::CodeBlock {\n            language,\n            info,\n            source,\n            span,\n        } => WireNode::CodeBlock {\n            language: language.clone(),\n            info: info.clone(),\n            source: source.clone(),\n            span: *span,\n        },''',
+          '''        IrNode::CodeBlock {\n            language,\n            info,\n            source,\n            line_numbers,\n            callouts,\n            span,\n        } => WireNode::CodeBlock {\n            language: language.clone(),\n            info: info.clone(),\n            source: source.clone(),\n            line_numbers: *line_numbers,\n            callouts: callouts.clone(),\n            span: *span,\n        },''')
+
+          replace_once(path,
+          '''        WireNode::CodeBlock {\n            language,\n            info,\n            source,\n            span,\n        } => IrNode::CodeBlock {\n            language,\n            info,\n            source,\n            span,\n        },''',
+          '''        WireNode::CodeBlock {\n            language,\n            info,\n            source,\n            line_numbers,\n            callouts,\n            span,\n        } => IrNode::CodeBlock {\n            language,\n            info,\n            source,\n            line_numbers,\n            callouts,\n            span,\n        },''')
+
+          # Markdown code blocks remain semantically unchanged.
+          replace_once('crates/arkst-engine/src/ast_to_ir.rs',
+          '''        } => Some(IrNode::CodeBlock {\n            language: language.clone(),\n            info: info.clone(),\n            source: source.clone(),\n            span: to_source_span(source_id, *span),\n        }),''',
+          '''        } => Some(IrNode::CodeBlock {\n            language: language.clone(),\n            info: info.clone(),\n            source: source.clone(),\n            line_numbers: None,\n            callouts: Vec::new(),\n            span: to_source_span(source_id, *span),\n        }),''')
+
+          # Evaluator import and binding signature.
+          replace_once('crates/arkst-engine/src/evaluator.rs',
+          '''    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrComponent,\n    IrContainerAlignment,''',
+          '''    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,\n    IrContainerAlignment,''')
+
+          replace_once('crates/arkst-engine/src/evaluator.rs',
+          '''        "captionposition" => (\n            vec![\n                ParameterMetadata::optional("default"),\n                ParameterMetadata::optional("figures"),\n                ParameterMetadata::optional("tables"),\n                ParameterMetadata::optional("code"),\n            ],\n            BodyPolicy::BindFinal,\n        ),\n        "html" | "markdown" => (''',
+          '''        "captionposition" => (\n            vec![\n                ParameterMetadata::optional("default"),\n                ParameterMetadata::optional("figures"),\n                ParameterMetadata::optional("tables"),\n                ParameterMetadata::optional("code"),\n            ],\n            BodyPolicy::BindFinal,\n        ),\n        "code" => (\n            vec![\n                ParameterMetadata::optional("lang"),\n                ParameterMetadata::optional("caption"),\n                ParameterMetadata::defaulted("linenumbers"),\n                ParameterMetadata::optional("focus"),\n                ParameterMetadata::defaulted("callouts"),\n                ParameterMetadata::optional("ref"),\n                ParameterMetadata::required("code"),\n            ],\n            BodyPolicy::BindFinal,\n        ),\n        "html" | "markdown" => (''')
+
+          # Source-defined function fallback stays before the native adapter.
+          replace_once('crates/arkst-engine/src/evaluator.rs',
+          '''        if is_center(name) {\n            return self.evaluate_center(''',
+          '''        if name == "code" {\n            return self.evaluate_code(\n                ordered_args,\n                positional_args,\n                named_args,\n                body,\n                raw_body,\n                lambda_parameters,\n                span,\n                diagnostics,\n                context,\n                native_binding_plan.as_ref(),\n                first_origin,\n                implicit_argument.as_ref(),\n            );\n        }\n\n        if is_center(name) {\n            return self.evaluate_center(''')
+
+          # Evaluator implementation before center.
+          replace_once('crates/arkst-engine/src/evaluator.rs',
+          '''    #[allow(clippy::too_many_arguments)]\n    fn evaluate_center(''',
+          '''    #[allow(clippy::too_many_arguments)]\n    fn evaluate_code(\n        &self,\n        ordered_args: Option<&[IrCallArgument]>,\n        positional_args: &[IrValue],\n        named_args: &[IrNamedArg],\n        body: Option<CallBody<'_>>,\n        raw_body: Option<&IrRawBody>,\n        lambda_parameters: Option<&[IrParameter]>,\n        span: &SourceSpan,\n        diagnostics: &mut Vec<Diagnostic>,\n        context: &mut EvaluationContext<'_>,\n        binding_plan: Option<&BindingPlan>,\n        first_origin: Option<ValueOrigin>,\n        implicit_argument: Option<&InvocationValue>,\n    ) -> CallOutcome {\n        let Some(binding_plan) = binding_plan else {\n            return CallOutcome::Failed;\n        };\n        if let Some(parameters) = lambda_parameters {\n            diagnostics.push(chain_evaluation_error(\n                "`.code` body is an evaluable string, not a lambda".to_string(),\n                parameters.first().map_or(*span, |parameter| parameter.span),\n            ));\n            return CallOutcome::Failed;\n        }\n\n        let candidates = match self.evaluate_invocation_candidates(\n            ordered_args,\n            positional_args,\n            named_args,\n            span,\n            diagnostics,\n            context,\n            first_origin,\n            implicit_argument,\n        ) {\n            Ok(values) => values,\n            Err(outcome) => return outcome,\n        };\n        let body_candidate = match body {\n            Some(call_body) => {\n                let Some(raw_body) = raw_body else {\n                    diagnostics.push(chain_evaluation_error(\n                        "`.code` body requires source-backed text".to_string(),\n                        call_body_source_span(call_body, *span),\n                    ));\n                    return CallOutcome::Failed;\n                };\n                let Some(text) = value_conversion::raw_body_dynamic_text(raw_body) else {\n                    diagnostics.push(chain_evaluation_error(\n                        "`.code` body has an invalid source span".to_string(),\n                        call_body_source_span(call_body, *span),\n                    ));\n                    return CallOutcome::Failed;\n                };\n                Some(Candidate::Positional {\n                    value: InvocationValue::dynamic_value(IrValue::String(text)),\n                    span: call_body_source_span(call_body, *span),\n                })\n            }\n            None => None,\n        };\n        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {\n            Ok(bound) => bound,\n            Err(error) => {\n                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));\n                return CallOutcome::Failed;\n            }\n        };\n\n        for (index, parameter) in [(1usize, "caption"), (3, "focus"), (5, "ref")] {\n            if let Some(BoundSlot::Explicit { value, span: argument_span }) = bound.slots.get(index) {\n                if !matches!(value.value, IrValue::None) {\n                    diagnostics.push(chain_evaluation_error(\n                        format!("`.code` parameter `{parameter}` remains outside the bounded v2.6 callouts slice"),\n                        *argument_span,\n                    ));\n                    return CallOutcome::Failed;\n                }\n            }\n        }\n\n        let language = match bound.slots.first() {\n            Some(BoundSlot::Explicit { value, span: argument_span }) => {\n                if matches!(value.value, IrValue::None) {\n                    None\n                } else {\n                    match value_conversion::convert_scalar_with_origin(value, ScalarTarget::String) {\n                        Ok(ScalarValue::String(value)) => Some(value),\n                        _ => {\n                            diagnostics.push(chain_evaluation_error(\n                                "`.code` `lang` must be text or None".to_string(),\n                                *argument_span,\n                            ));\n                            return CallOutcome::Failed;\n                        }\n                    }\n                }\n            }\n            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,\n        };\n\n        let line_numbers = match bound.slots.get(2) {\n            Some(BoundSlot::Explicit { value, span: argument_span }) => {\n                match value_conversion::convert_scalar_with_origin(value, ScalarTarget::Boolean) {\n                    Ok(ScalarValue::Boolean(value)) => value,\n                    _ => {\n                        diagnostics.push(chain_evaluation_error(\n                            "`.code` `linenumbers` must be Boolean".to_string(),\n                            *argument_span,\n                        ));\n                        return CallOutcome::Failed;\n                    }\n                }\n            }\n            Some(BoundSlot::Defaulted) | Some(BoundSlot::Omitted) | None => true,\n        };\n\n        let callouts = match bound.slots.get(4) {\n            Some(BoundSlot::Explicit { value, span: argument_span }) => {\n                match parse_code_callouts(&value.value, *argument_span) {\n                    Ok(callouts) => callouts,\n                    Err(message) => {\n                        diagnostics.push(chain_evaluation_error(message, *argument_span));\n                        return CallOutcome::Failed;\n                    }\n                }\n            }\n            Some(BoundSlot::Defaulted) | Some(BoundSlot::Omitted) | None => Vec::new(),\n        };\n\n        let source = match bound.slots.get(6) {\n            Some(BoundSlot::Explicit { value, span: argument_span }) => {\n                let Some(text) = code_value_text(&value.value) else {\n                    diagnostics.push(chain_evaluation_error(\n                        "`.code` `code` must resolve to evaluable text".to_string(),\n                        *argument_span,\n                    ));\n                    return CallOutcome::Failed;\n                };\n                text\n            }\n            _ => {\n                diagnostics.push(chain_evaluation_error(\n                    "`.code` requires `code`".to_string(),\n                    *span,\n                ));\n                return CallOutcome::Failed;\n            }\n        };\n\n        CallOutcome::Value(IrValue::Content(vec![IrNode::CodeBlock {\n            language,\n            info: None,\n            source,\n            line_numbers: Some(line_numbers),\n            callouts,\n            span: *span,\n        }]))\n    }\n\n    #[allow(clippy::too_many_arguments)]\n    fn evaluate_center(''')
+
+          # Free helpers live at the evaluator/value boundary, not in the frontend parser.
+          replace_once('crates/arkst-engine/src/evaluator.rs',
+          '''fn opaque_html_body_string(nodes: &[IrNode]) -> Option<String> {''',
+          '''fn parse_code_callouts(value: &IrValue, span: SourceSpan) -> Result<Vec<IrCodeCallout>, String> {\n    let mut entries = BTreeMap::<u32, String>::new();\n    match value {\n        IrValue::Dictionary(dictionary) => {\n            for pair in &dictionary.entries {\n                let line = code_callout_line(&pair.first)?;\n                let description = code_value_text(&pair.second).ok_or_else(|| {\n                    "`.code` callout descriptions must be displayable values".to_string()\n                })?;\n                entries.insert(line, description);\n            }\n        }\n        IrValue::Content(_) | IrValue::String(_) | IrValue::Identifier(_) => {\n            let raw = code_value_text(value).ok_or_else(|| {\n                "`.code` `callouts` must be a map".to_string()\n            })?;\n            for line in raw.lines() {\n                let trimmed = line.trim();\n                if trimmed.is_empty() {\n                    continue;\n                }\n                let Some(item) = trimmed.strip_prefix("- ") else {\n                    return Err("`.code` `callouts` must use map entries such as `- 1: description`".to_string());\n                };\n                let Some((key, description)) = item.split_once(':') else {\n                    return Err("`.code` `callouts` entry is missing `:`".to_string());\n                };\n                let key = key.trim();\n                let parsed = key.parse::<i64>().map_err(|_| {\n                    format!("Callout keys must be integers, but got '{key}'.")\n                })?;\n                if parsed <= 0 {\n                    return Err(format!("Callout line numbers must be positive, but got {parsed}."));\n                }\n                let parsed = u32::try_from(parsed).map_err(|_| {\n                    format!("Callout line number {parsed} is too large")\n                })?;\n                entries.insert(parsed, normalize_code_callout_description(description.trim(), span));\n            }\n        }\n        _ => return Err("`.code` `callouts` must be a map".to_string()),\n    }\n    Ok(entries\n        .into_iter()\n        .map(|(line, description)| IrCodeCallout { line, description })\n        .collect())\n}\n\nfn code_callout_line(value: &IrValue) -> Result<u32, String> {\n    let parsed = match value {\n        IrValue::Number(value) if value.is_finite() && value.fract() == 0.0 => {\n            if *value < i64::MIN as f64 || *value > i64::MAX as f64 {\n                return Err(format!("Callout line number {value} is too large"));\n            }\n            *value as i64\n        }\n        IrValue::String(value) | IrValue::Identifier(value) => value.parse::<i64>().map_err(|_| {\n            format!("Callout keys must be integers, but got '{value}'.")\n        })?,\n        other => {\n            return Err(format!("Callout keys must be integers, but got '{other:?}'."));\n        }\n    };\n    if parsed <= 0 {\n        return Err(format!("Callout line numbers must be positive, but got {parsed}."));\n    }\n    u32::try_from(parsed).map_err(|_| format!("Callout line number {parsed} is too large"))\n}\n\nfn normalize_code_callout_description(description: &str, span: SourceSpan) -> String {\n    let parsed = arkst_markdown::parse_inline_with_mode(description, Mode::Quarkdown);\n    if !parsed.diagnostics.is_empty() {\n        return description.to_string();\n    }\n    let (document, diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(\n        &parsed.document,\n        span.source_id,\n        &crate::DocumentMetadataDefaults::default(),\n        Mode::Quarkdown,\n    );\n    if !diagnostics.is_empty() {\n        return description.to_string();\n    }\n    code_value_text(&IrValue::Content(document.nodes)).unwrap_or_else(|| description.to_string())\n}\n\nfn code_value_text(value: &IrValue) -> Option<String> {\n    match value {\n        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),\n        IrValue::Number(value) => Some(value.to_string()),\n        IrValue::Boolean(value) => Some(value.to_string()),\n        IrValue::None => Some(String::new()),\n        IrValue::Content(nodes) => {\n            let mut output = String::new();\n            for node in nodes {\n                append_code_node_text(node, &mut output)?;\n            }\n            Some(output)\n        }\n        _ => None,\n    }\n}\n\nfn append_code_node_text(node: &IrNode, output: &mut String) -> Option<()> {\n    match node {\n        IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {\n            for inline in content {\n                append_code_inline_text(inline, output)?;\n            }\n        }\n        IrNode::Blockquote { content, .. } => {\n            for child in content {\n                append_code_node_text(child, output)?;\n            }\n        }\n        IrNode::CodeBlock { source, .. } => output.push_str(source),\n        _ => return None,\n    }\n    Some(())\n}\n\nfn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()> {\n    match inline {\n        IrInline::Text { content, .. } | IrInline::Code { content, .. } => output.push_str(content),\n        IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\\n'),\n        IrInline::Emphasis { content, .. }\n        | IrInline::Strong { content, .. }\n        | IrInline::Strikethrough { content, .. } => {\n            for child in content {\n                append_code_inline_text(child, output)?;\n            }\n        }\n        IrInline::Whitespace { .. } => output.push(' '),\n        IrInline::TargetSpecificContent { content } => output.push_str(&content.content),\n        _ => return None,\n    }\n    Some(())\n}\n\nfn opaque_html_body_string(nodes: &[IrNode]) -> Option<String> {''')
+
+          # Typst lowering: legacy fenced blocks are unchanged; native .code uses typed metadata.
+          replace_once('crates/arkst-typst/src/lowering.rs',
+          '''            IrNode::CodeBlock {\n                language,\n                info: _info,\n                source,\n                span,\n            } => {\n                let before = self.output.len();\n                self.push_str("```");\n                if let Some(lang) = language {\n                    self.push_str(lang);\n                }\n                self.push('\\n');\n                let was_verbatim = std::mem::replace(&mut self.verbatim, true);\n                self.push_str(source);\n                if !source.ends_with('\\n') {\n                    self.push('\\n');\n                }\n                self.verbatim = was_verbatim;\n                self.push_str("```\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }''',
+          '''            IrNode::CodeBlock {\n                language,\n                info: _info,\n                source,\n                line_numbers,\n                callouts,\n                span,\n            } => {\n                let before = self.output.len();\n                self.lower_code_block(language.as_deref(), source, *line_numbers, callouts);\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }''')
+
+          replace_once('crates/arkst-typst/src/lowering.rs',
+          '''    fn lower_table(&mut self, header: &IrTableRow, rows: &[IrTableRow]) {''',
+          '''    fn lower_code_block(\n        &mut self,\n        language: Option<&str>,\n        source: &str,\n        line_numbers: Option<bool>,\n        callouts: &[arkst_ir::IrCodeCallout],\n    ) {\n        if line_numbers.is_none() && callouts.is_empty() {\n            self.push_str("```");\n            if let Some(lang) = language {\n                self.push_str(lang);\n            }\n            self.push('\\n');\n            let was_verbatim = std::mem::replace(&mut self.verbatim, true);\n            self.push_str(source);\n            if !source.ends_with('\\n') {\n                self.push('\\n');\n            }\n            self.verbatim = was_verbatim;\n            self.push_str("```\\n");\n            return;\n        }\n\n        let show_numbers = line_numbers.unwrap_or(false);\n        if !show_numbers && callouts.is_empty() {\n            self.push_str("#raw(\\\"");\n            self.push_str(&escape_typst_string(source));\n            self.push('\\\"');\n            if let Some(lang) = language {\n                self.push_str(", lang: \\\"");\n                self.push_str(&escape_typst_string(lang));\n                self.push('\\\"');\n            }\n            self.push_str(", block: true)\\n");\n            return;\n        }\n\n        self.push_str("#block[\\n#grid(\\n  columns: (auto, auto, 1fr),\\n  column-gutter: 0.6em,\\n  row-gutter: 0pt,\\n");\n        for (index, line) in source.split('\\n').enumerate() {\n            let line_number = index + 1;\n            self.push_str("  [");\n            if show_numbers {\n                self.push_str(&line_number.to_string());\n            }\n            self.push_str("], [");\n            if let Some(marker) = callouts\n                .iter()\n                .position(|callout| callout.line as usize == line_number)\n                .map(|marker| marker + 1)\n            {\n                self.push_str(&marker.to_string());\n            }\n            self.push_str("], [#raw(\\\"");\n            self.push_str(&escape_typst_string(line));\n            self.push('\\\"');\n            if let Some(lang) = language {\n                self.push_str(", lang: \\\"");\n                self.push_str(&escape_typst_string(lang));\n                self.push('\\\"');\n            }\n            self.push_str(")],\\n");\n        }\n        self.push_str(")\\n]\\n");\n        if !callouts.is_empty() {\n            self.push_str("#enum(\\n");\n            for callout in callouts {\n                self.push_str("  [");\n                self.push_str(&escape_typst_text(&callout.description));\n                self.push_str("],\\n");\n            }\n            self.push_str(")\\n");\n        }\n    }\n\n    fn lower_table(&mut self, header: &IrTableRow, rows: &[IrTableRow]) {''')
+
+          # Focused semantic regression suite.
+          Path('crates/arkst-core/tests/quarkdown_code_callouts.rs').write_text(r'''use arkst_core::ir::{IrCodeCallout, IrNode};
           use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
-          #[test]
-          fn print_shape() {
-              let source = ".unknown callouts:{\n    - 3: Third\n    - 1: First\n} linenumbers:{no} lang:{rust}\n    alpha\n    beta\n";
+          fn compile_source(source: &str) -> arkst_core::CompileResult {
               let project = VirtualProjectBuilder::new()
                   .entry("main.qd").unwrap()
                   .add_source("main.qd", source).unwrap()
                   .build().unwrap();
-              let result = compile(&project, &CompileOptions::default());
-              println!("IR={:#?}", result.ir);
-              println!("DIAGNOSTICS={:#?}", result.diagnostics);
+              compile(&project, &CompileOptions::default())
           }
-          EOF
-          cargo test -p arkst-core --test v260_code_shape_probe -- --nocapture
-          rm crates/arkst-core/tests/v260_code_shape_probe.rs
+
+          #[test]
+          fn code_callouts_are_typed_sorted_and_do_not_require_in_range_lines() {
+              let result = compile_source(".code lang:{rust} callouts:{\n    - 3: Third *item*\n    - 1: First\n    - 9: Beyond\n}\n    alpha\n    beta\n    gamma\n");
+              assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+              let [IrNode::CodeBlock { language, source, line_numbers, callouts, .. }] = result.ir.nodes.as_slice() else { panic!("{:?}", result.ir.nodes); };
+              assert_eq!(language.as_deref(), Some("rust"));
+              assert_eq!(source, "alpha\nbeta\ngamma");
+              assert_eq!(*line_numbers, Some(true));
+              assert_eq!(callouts, &vec![
+                  IrCodeCallout { line: 1, description: "First".into() },
+                  IrCodeCallout { line: 3, description: "Third item".into() },
+                  IrCodeCallout { line: 9, description: "Beyond".into() },
+              ]);
+          }
+
+          #[test]
+          fn code_linenumbers_no_and_empty_callouts_are_supported() {
+              let result = compile_source(".code linenumbers:{no} callouts:{}\n    alpha\n");
+              assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+              let [IrNode::CodeBlock { line_numbers, callouts, .. }] = result.ir.nodes.as_slice() else { panic!("{:?}", result.ir.nodes); };
+              assert_eq!(*line_numbers, Some(false));
+              assert!(callouts.is_empty());
+          }
+
+          #[test]
+          fn code_callout_keys_fail_closed() {
+              for (source, message) in [
+                  (".code callouts:{\n    - 0: zero\n}\n    alpha\n", "must be positive"),
+                  (".code callouts:{\n    - nope: text\n}\n    alpha\n", "must be integers"),
+              ] {
+                  let result = compile_source(source);
+                  assert!(result.ir.nodes.is_empty(), "{source}: {:?}", result.ir.nodes);
+                  assert!(result.diagnostics.iter().any(|d| d.message.contains(message)), "{source}: {:?}", result.diagnostics);
+              }
+          }
+
+          #[test]
+          fn code_binding_rejects_wrong_alias_and_baseline_options_are_explicitly_deferred() {
+              let wrong = compile_source(".code callout:{}\n    alpha\n");
+              assert!(wrong.ir.nodes.is_empty());
+              assert!(!wrong.diagnostics.is_empty());
+
+              for source in [
+                  ".code caption:{x}\n    alpha\n",
+                  ".code focus:{1..2}\n    alpha\n",
+                  ".code ref:{x}\n    alpha\n",
+              ] {
+                  let result = compile_source(source);
+                  assert!(result.ir.nodes.is_empty(), "{source}");
+                  assert!(result.diagnostics.iter().any(|d| d.message.contains("outside the bounded v2.6 callouts slice")), "{:?}", result.diagnostics);
+              }
+          }
+
+          #[test]
+          fn source_defined_code_still_shadows_native() {
+              let result = compile_source(".function {code}\n    callouts code:\n    SHADOWED\n\n.code callouts:{\n    - 1: ignored\n}\n    alpha\n");
+              assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+              assert!(!result.ir.nodes.iter().any(|node| matches!(node, IrNode::CodeBlock { .. })));
+              assert!(format!("{:?}", result.ir).contains("SHADOWED"));
+          }
+
+          #[test]
+          fn markdown_fenced_code_keeps_legacy_backend_contract() {
+              let result = compile_source("```rust\nfn main() {}\n```\n");
+              assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+              let [IrNode::CodeBlock { line_numbers, callouts, .. }] = result.ir.nodes.as_slice() else { panic!("{:?}", result.ir.nodes); };
+              assert_eq!(*line_numbers, None);
+              assert!(callouts.is_empty());
+          }
+          ''')
+
+          # Lowerer regression tests live in their owner crate.
+          Path('crates/arkst-typst/tests').mkdir(exist_ok=True)
+          Path('crates/arkst-typst/tests/code_callouts.rs').write_text(r'''use arkst_ir::{IrCodeCallout, IrDocument, IrMetadata, IrNode};
+          use arkst_source::{SourceId, SourceSpan};
+          use arkst_typst::lowering::lower_to_typst_code;
+
+          #[test]
+          fn native_code_callouts_lower_without_changing_legacy_fences() {
+              let span = SourceSpan::new(SourceId(0), 0, 0);
+              let native = IrNode::CodeBlock {
+                  language: Some("rust".into()),
+                  info: None,
+                  source: "alpha\nbeta\ngamma".into(),
+                  line_numbers: Some(true),
+                  callouts: vec![
+                      IrCodeCallout { line: 1, description: "First".into() },
+                      IrCodeCallout { line: 3, description: "Third".into() },
+                  ],
+                  span,
+              };
+              let code = lower_to_typst_code(&IrDocument { nodes: vec![native], metadata: IrMetadata::default() });
+              assert!(code.contains("#grid("), "{code}");
+              assert!(code.contains("#raw(\"alpha\", lang: \"rust\")"), "{code}");
+              assert!(code.contains("#enum("), "{code}");
+              assert!(code.contains("[First]"), "{code}");
+              assert!(code.contains("[Third]"), "{code}");
+
+              let legacy = IrNode::CodeBlock {
+                  language: Some("rust".into()),
+                  info: Some("rust".into()),
+                  source: "alpha".into(),
+                  line_numbers: None,
+                  callouts: vec![],
+                  span,
+              };
+              let legacy = lower_to_typst_code(&IrDocument { nodes: vec![legacy], metadata: IrMetadata::default() });
+              assert_eq!(legacy, "```rust\nalpha\n```\n");
+          }
+          ''')
+          PY
+
+          cargo fmt --all
+          git diff --check
+          cargo test -p arkst-core --test quarkdown_code_callouts
+          cargo test -p arkst-typst --test code_callouts
+          cargo check --workspace --all-targets
+      - name: Commit candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-core/tests/quarkdown_code_callouts.rs crates/arkst-typst/tests/code_callouts.rs
+          git commit -m 'feat(compat): add Quarkdown v2.6 code callouts'
+          git push origin HEAD:compat/311-v260-code-callouts
