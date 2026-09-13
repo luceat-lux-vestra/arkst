@@ -23,8 +23,7 @@ fn code_callout_fields_roundtrip_when_present() {
     };
 
     let encoded = serde_json::to_string(&document).expect("code callout IR serializes");
-    let decoded: IrDocument =
-        serde_json::from_str(&encoded).expect("code callout IR deserializes");
+    let decoded: IrDocument = serde_json::from_str(&encoded).expect("code callout IR deserializes");
     assert_eq!(decoded, document);
 }
 
