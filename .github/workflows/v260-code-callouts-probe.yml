@@ -36,6 +36,8 @@ jobs:
           if script.count(needle) != 1:
               raise SystemExit('candidate helper shape changed')
           script = script.replace(needle, replacement, 1)
+          # ast_to_ir uses byte_to_source_span(span, source_id) on current main.
+          script = script.replace('to_source_span(source_id, *span)', 'byte_to_source_span(span, source_id)')
           Path('/tmp/apply.py').write_text(script)
           PY
           python3 /tmp/apply.py
