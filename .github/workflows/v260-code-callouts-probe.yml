@@ -88,64 +88,46 @@ jobs:
           )
           text = text[:start] + function + text[end:]
 
-          positional_old = '''                CallArgument::Positional {
-                      value: convert_arg_with_mode(
-                          arg,
-                          source,
-                          base,
-                          call_base,
-                          diagnostics,
-                          positional_body(call_name, index),
-                          positional_body(call_name, index),
-                          call_name == "code" && index == 4,
-                      ),
+          index_anchor = '''                let index = positional_index;
+                          positional_index += 1;
+                          CallArgument::Positional {
           '''
-          positional_new = '''                let contextual_inline_body = positional_body(call_name, index);
-                      CallArgument::Positional {
-                          value: convert_arg_with_mode(
-                              arg,
-                              source,
-                              base,
-                              call_base,
-                              diagnostics,
-                              ArgConversionMode {
-                                  allow_unmarked_lambda: contextual_inline_body,
-                                  contextual_inline_body,
-                                  target_owns_opaque_markers: call_name == "code" && index == 4,
-                              },
-                          ),
+          index_replacement = '''                let index = positional_index;
+                          positional_index += 1;
+                          let contextual_inline_body = positional_body(call_name, index);
+                          CallArgument::Positional {
           '''
-          if text.count(positional_old) != 1:
-              raise SystemExit(f"positional call anchor count: {text.count(positional_old)}")
-          text = text.replace(positional_old, positional_new, 1)
+          if text.count(index_anchor) != 1:
+              raise SystemExit(f"positional index anchor count: {text.count(index_anchor)}")
+          text = text.replace(index_anchor, index_replacement, 1)
 
-          named_old = '''        value: convert_arg_with_mode(
-                  &arg.value,
-                  source,
-                  base,
-                  call_base,
-                  diagnostics,
-                  callback_lambda,
-                  false,
-                  call_name == Some("code") && arg.name == "callouts",
-              ),
+          positional_args = '''                        positional_body(call_name, index),
+                                  positional_body(call_name, index),
+                                  call_name == "code" && index == 4,
           '''
-          named_new = '''        value: convert_arg_with_mode(
-                  &arg.value,
-                  source,
-                  base,
-                  call_base,
-                  diagnostics,
-                  ArgConversionMode {
-                      allow_unmarked_lambda: callback_lambda,
-                      contextual_inline_body: false,
-                      target_owns_opaque_markers: call_name == Some("code") && arg.name == "callouts",
-                  },
-              ),
+          positional_mode = '''                        ArgConversionMode {
+                                      allow_unmarked_lambda: contextual_inline_body,
+                                      contextual_inline_body,
+                                      target_owns_opaque_markers: call_name == "code" && index == 4,
+                                  },
           '''
-          if text.count(named_old) != 1:
-              raise SystemExit(f"named call anchor count: {text.count(named_old)}")
-          text = text.replace(named_old, named_new, 1)
+          if text.count(positional_args) != 1:
+              raise SystemExit(f"positional mode anchor count: {text.count(positional_args)}")
+          text = text.replace(positional_args, positional_mode, 1)
+
+          named_args = '''            callback_lambda,
+                      false,
+                      call_name == Some("code") && arg.name == "callouts",
+          '''
+          named_mode = '''            ArgConversionMode {
+                          allow_unmarked_lambda: callback_lambda,
+                          contextual_inline_body: false,
+                          target_owns_opaque_markers: call_name == Some("code") && arg.name == "callouts",
+                      },
+          '''
+          if text.count(named_args) != 1:
+              raise SystemExit(f"named mode anchor count: {text.count(named_args)}")
+          text = text.replace(named_args, named_mode, 1)
 
           path.write_text(text)
           PY
