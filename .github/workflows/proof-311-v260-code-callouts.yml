@@ -1,0 +1,149 @@
+name: Disposable #311 v2.6.0 code callouts
+
+on:
+  push:
+    branches:
+      - proof/311-v260-code-callouts
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Probe official v2.6.0 binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.6.0 > "$release"
+          asset='quarkdown-linux-x64.zip'
+          url="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .browser_download_url' "$release")"
+          digest="$(jq -r --arg n "$asset" '.assets[] | select(.name==$n) | .digest' "$release")"
+          test "$digest" = 'sha256:5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          zip="$RUNNER_TEMP/$asset"
+          curl -fsSL "$url" -o "$zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c --strict
+          root="$RUNNER_TEMP/quarkdown"
+          mkdir -p "$root" && unzip -q "$zip" -d "$root"
+          q="$(find "$root" -type f -path '*/bin/quarkdown' -print -quit)"
+          chmod +x "$q"
+          "$q" --version | grep -F '2.6.0'
+
+          make_case() {
+            name="$1"; shift
+            mkdir -p "$RUNNER_TEMP/cases/$name"
+            cat > "$RUNNER_TEMP/cases/$name/main.qd"
+          }
+
+          make_case basic <<'QD'
+          .doctype {plain}
+          BEFORE
+          .code lang:{javascript} callouts:{
+              - 1: Declares the function.
+              - 3: Builds the greeting.
+          }
+              function greet() {
+                  const name = "World";
+                  return `Hello, ${name}!`;
+              }
+          AFTER
+          QD
+
+          make_case lineoff <<'QD'
+          .doctype {plain}
+          .code linenumbers:{no} callouts:{
+              - 1: First line.
+          }
+              alpha
+              beta
+          QD
+
+          make_case rich <<'QD'
+          .doctype {plain}
+          .code focus:{2..3} callouts:{
+              - 2: **Bold explanation**
+              - 3: Third explanation.
+          }
+              alpha
+              beta
+              gamma
+              delta
+          QD
+
+          make_case zero <<'QD'
+          .doctype {plain}
+          .code callouts:{
+              - 0: Zero line.
+          }
+              alpha
+          QD
+
+          make_case textkey <<'QD'
+          .doctype {plain}
+          .code callouts:{
+              - nope: Invalid key.
+          }
+              alpha
+          QD
+
+          make_case beyond <<'QD'
+          .doctype {plain}
+          .code callouts:{
+              - 99: Far line.
+          }
+              alpha
+          QD
+
+          : > "$RUNNER_TEMP/results.txt"
+          for project in "$RUNNER_TEMP/cases"/*; do
+            name="$(basename "$project")"
+            set +e
+            (cd "$project" && "$q" c main.qd --clean) > "$project/stdout" 2> "$project/stderr"
+            status=$?
+            set -e
+            echo "CASE=$name EXIT=$status" | tee -a "$RUNNER_TEMP/results.txt"
+            sed -n '1,80p' "$project/stderr" | sed 's/^/STDERR: /' | tee -a "$RUNNER_TEMP/results.txt"
+            if [ -d "$project/quarkdown-output" ]; then
+              python3 - "$project/quarkdown-output" "$name" <<'PY' | tee -a "$RUNNER_TEMP/results.txt"
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re,sys
+          root=Path(sys.argv[1]); name=sys.argv[2]
+          class Text(HTMLParser):
+              def __init__(self): super().__init__(); self.parts=[]
+              def handle_data(self,d): self.parts.append(d)
+          html='\n'.join(p.read_text(encoding='utf-8',errors='replace') for p in root.rglob('*.html'))
+          t=Text(); t.feed(html)
+          visible=' '.join(' '.join(t.parts).split())
+          print('VISIBLE='+visible[:3000])
+          needles=('callout','line-number','linenumber','data-line','code-line','focused','focus')
+          snippets=[]
+          for line in html.splitlines():
+              low=line.lower()
+              if any(n in low for n in needles):
+                  snippets.append(line.strip())
+          print('HTML_SNIPPETS_BEGIN')
+          for line in snippets[:80]: print(line[:1200])
+          print('HTML_SNIPPETS_END')
+          PY
+            fi
+          done
+          cat "$RUNNER_TEMP/results.txt"
+
+      - name: Upload probe evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: proof-311-v260-code-callouts
+          path: ${{ runner.temp }}/results.txt
+          if-no-files-found: error
+          retention-days: 7
