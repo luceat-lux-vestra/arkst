@@ -31,6 +31,14 @@ jobs:
           end = text.index(end_marker, start)
           lines = text[start:end].splitlines()
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          # The first CodeBlock shape intentionally occurs in both the public IR
+          # and its wire enum. The candidate script later patches WireNode with a
+          # more-specific anchor, so permit this one public-first replacement.
+          needle = """    if text.count(old) != 1:\n        raise SystemExit(f\"{path}: expected one match, got {text.count(old)} for {old[:80]!r}\")\n    p.write_text(text.replace(old, new, 1))\n"""
+          replacement = """    count = text.count(old)\n    public_code_block = (\n        path == 'crates/arkst-ir/src/lib.rs'\n        and old.startswith('    CodeBlock {\\n        language: Option<String>,')\n        and old.endswith('        span: SourceSpan,\\n    },')\n    )\n    if count != 1 and not (public_code_block and count == 2):\n        raise SystemExit(f\"{path}: expected one match, got {count} for {old[:80]!r}\")\n    p.write_text(text.replace(old, new, 1))\n"""
+          if script.count(needle) != 1:
+              raise SystemExit('candidate helper shape changed')
+          script = script.replace(needle, replacement, 1)
           Path('/tmp/apply.py').write_text(script)
           PY
           python3 /tmp/apply.py
