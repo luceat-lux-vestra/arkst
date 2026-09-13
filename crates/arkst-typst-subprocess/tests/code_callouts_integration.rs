@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use arkst_core::ir::IrNode;
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 use arkst_typst::lowering::lower_to_typst_code;
 use arkst_typst::{TypstBackend, TypstInput};
@@ -40,10 +41,16 @@ fn v260_code_callouts_lower_to_typst_that_compiles_to_pdf() {
         result.diagnostics
     );
 
+    let mut result = result;
+    let IrNode::CodeBlock { callouts, .. } = &mut result.ir.nodes[0] else {
+        panic!("expected compiled code block");
+    };
+    callouts[0].description = "literal ` backtick".into();
+
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(typst_code.contains("#grid("), "{typst_code}");
     assert!(typst_code.contains("#enum("), "{typst_code}");
-    assert!(typst_code.contains("[First]"), "{typst_code}");
+    assert!(typst_code.contains(r"[literal \` backtick]"), "{typst_code}");
     assert!(typst_code.contains("[Second]"), "{typst_code}");
 
     let Some(path) = find_typst() else {
