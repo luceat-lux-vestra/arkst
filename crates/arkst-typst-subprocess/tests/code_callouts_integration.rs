@@ -50,7 +50,10 @@ fn v260_code_callouts_lower_to_typst_that_compiles_to_pdf() {
     let typst_code = lower_to_typst_code(&result.ir);
     assert!(typst_code.contains("#grid("), "{typst_code}");
     assert!(typst_code.contains("#enum("), "{typst_code}");
-    assert!(typst_code.contains(r"[literal \` backtick]"), "{typst_code}");
+    assert!(
+        typst_code.contains(r"[literal \` backtick]"),
+        "{typst_code}"
+    );
     assert!(typst_code.contains("[Second]"), "{typst_code}");
 
     let Some(path) = find_typst() else {
