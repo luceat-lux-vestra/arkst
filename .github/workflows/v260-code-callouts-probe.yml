@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   probe:
+    if: startsWith(github.event.head_commit.message, 'test(compat):') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,12 +27,15 @@ jobs:
           echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
           mkdir -p /tmp/quarkdown
           unzip -q /tmp/quarkdown.zip -d /tmp/quarkdown
-          find /tmp/quarkdown -maxdepth 3 -type f -perm -111 -print
-      - name: Print version and CLI help
+          test -x /tmp/quarkdown/quarkdown/bin/quarkdown
+      - name: Inspect public CLI surface
         shell: bash
         run: |
-          set -euo pipefail
-          BIN="$(find /tmp/quarkdown -type f -name quarkdown -perm -111 | head -n1)"
-          test -n "$BIN"
-          "$BIN" version
+          BIN=/tmp/quarkdown/quarkdown/bin/quarkdown
+          "$BIN" --version || true
+          echo '=== ROOT HELP ==='
           "$BIN" --help
+          echo '=== COMPILE HELP ==='
+          "$BIN" compile --help || true
+          echo '=== C HELP ==='
+          "$BIN" c --help || true
