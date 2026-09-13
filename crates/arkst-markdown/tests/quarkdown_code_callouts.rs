@@ -32,7 +32,7 @@ fn code_callouts_own_marker_bearing_map_text_without_widening_e3010() {
             if content == "\n    - 2: Second *item*\n    - 1: First\n"
     ));
 
-    let ordinary = parse_with_mode(".foo value:{Second *item*}\n", Mode::Quarkdown);
+    let ordinary = parse_with_mode(".foo {**hello** <em>world</em>}\n", Mode::Quarkdown);
     assert!(
         ordinary
             .diagnostics
