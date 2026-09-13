@@ -12,52 +12,29 @@ jobs:
   probe:
     if: startsWith(github.event.head_commit.message, 'test(compat):')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download official Quarkdown v2.6.0 binary
+      - name: Inspect Arkst unresolved argument representation
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL --retry 3 -o /tmp/quarkdown.zip \
-            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
-          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
-          mkdir -p /tmp/quarkdown
-          unzip -q /tmp/quarkdown.zip -d /tmp/quarkdown
-          /tmp/quarkdown/quarkdown/bin/quarkdown --version
-      - name: Probe ordering and Any rendering
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN=/tmp/quarkdown/quarkdown/bin/quarkdown
-          mkdir -p /tmp/probe
+          cat > crates/arkst-core/tests/v260_code_shape_probe.rs <<'EOF'
+          use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
-          cat > /tmp/probe/ordering.qd <<'EOF'
-          .code callouts:{
-              - 3: Third input first.
-              - 1: First input second.
-              - 2: Second input third.
+          #[test]
+          fn print_shape() {
+              let source = ".unknown callouts:{\n    - 3: Third\n    - 1: First\n} linenumbers:{no} lang:{rust}\n    alpha\n    beta\n";
+              let project = VirtualProjectBuilder::new()
+                  .entry("main.qd").unwrap()
+                  .add_source("main.qd", source).unwrap()
+                  .build().unwrap();
+              let result = compile(&project, &CompileOptions::default());
+              println!("IR={:#?}", result.ir);
+              println!("DIAGNOSTICS={:#?}", result.diagnostics);
           }
-              alpha
-              beta
-              gamma
           EOF
-
-          cat > /tmp/probe/values.qd <<'EOF'
-          .code callouts:{
-              - 1: 42
-              - 2: yes
-              - 3: Hello *world*
-          }
-              alpha
-              beta
-              gamma
-          EOF
-
-          for name in ordering values; do
-            echo "=== $name ==="
-            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" \
-              | sed -n '/<main>/,/<\/main>/p'
-          done
+          cargo test -p arkst-core --test v260_code_shape_probe -- --nocapture
+          rm crates/arkst-core/tests/v260_code_shape_probe.rs
