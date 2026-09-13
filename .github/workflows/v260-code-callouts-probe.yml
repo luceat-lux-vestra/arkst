@@ -17,34 +17,47 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Inspect Arkst producer and lowering boundaries
+      - name: Download official Quarkdown v2.6.0 binary
         shell: bash
         run: |
           set -euo pipefail
-          context() {
-            file="$1"
-            pattern="$2"
-            before="${3:-25}"
-            after="${4:-70}"
-            line="$(grep -n -m1 -F "$pattern" "$file" | cut -d: -f1)"
-            start=$(( line > before ? line - before : 1 ))
-            end=$(( line + after ))
-            echo "=== $file :: $pattern @ $line ==="
-            nl -ba "$file" | sed -n "${start},${end}p"
+          curl -fL --retry 3 -o /tmp/quarkdown.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
+          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
+          mkdir -p /tmp/quarkdown
+          unzip -q /tmp/quarkdown.zip -d /tmp/quarkdown
+          /tmp/quarkdown/quarkdown/bin/quarkdown --version
+      - name: Probe ordering and Any rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=/tmp/quarkdown/quarkdown/bin/quarkdown
+          mkdir -p /tmp/probe
+
+          cat > /tmp/probe/ordering.qd <<'EOF'
+          .code callouts:{
+              - 3: Third input first.
+              - 1: First input second.
+              - 2: Second input third.
           }
+              alpha
+              beta
+              gamma
+          EOF
 
-          context crates/arkst-ir/src/lib.rs 'pub enum IrNode' 5 150
-          context crates/arkst-ir/src/lib.rs 'WireNode {' 5 100
-          context crates/arkst-ir/src/lib.rs 'IrNode::CodeBlock {' 20 60
-          context crates/arkst-engine/src/ast_to_ir.rs 'IrNode::CodeBlock {' 25 55
-          context crates/arkst-typst/src/lowering.rs 'IrNode::CodeBlock {' 25 80
+          cat > /tmp/probe/values.qd <<'EOF'
+          .code callouts:{
+              - 1: 42
+              - 2: yes
+              - 3: Hello *world*
+          }
+              alpha
+              beta
+              gamma
+          EOF
 
-          echo '=== evaluator known-native references ==='
-          grep -n -E 'doclang|captionposition|container|landscape|row|column' crates/arkst-engine/src/evaluator.rs | head -n 160
-          line="$(grep -n -m1 '"doclang"' crates/arkst-engine/src/evaluator.rs | cut -d: -f1)"
-          start=$(( line > 100 ? line - 100 : 1 ))
-          end=$(( line + 220 ))
-          nl -ba crates/arkst-engine/src/evaluator.rs | sed -n "${start},${end}p"
-
-          echo '=== native manifest ==='
-          grep -n -E 'SUPPORTED|BUILTIN|NATIVE|doclang|captionposition' crates/arkst-engine/src/evaluator.rs crates/arkst-core/tests/stdlib_builtin_audit.rs | head -n 200
+          for name in ordering values; do
+            echo "=== $name ==="
+            "$BIN" compile -r html --pipe --strict "/tmp/probe/$name.qd" \
+              | sed -n '/<main>/,/<\/main>/p'
+          done
