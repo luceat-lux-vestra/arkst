@@ -57,7 +57,7 @@ use crate::{
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
-    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrComponent,
+    IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent,
     IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrRawBody,
@@ -3516,6 +3516,23 @@ impl Evaluator {
             );
         }
 
+        if name == "code" {
+            return self.evaluate_code(
+                ordered_args,
+                positional_args,
+                named_args,
+                body,
+                raw_body,
+                lambda_parameters,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
         if is_center(name) {
             return self.evaluate_center(
                 positional_args,
@@ -3980,6 +3997,258 @@ impl Evaluator {
         let mut nodes = document.nodes;
         rebase_dynamic_nodes(&mut nodes, span);
         Ok(nodes)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_code(
+        &self,
+        _ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        lambda_parameters: Option<&[IrParameter]>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        _first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        if implicit_argument.is_some() {
+            diagnostics.push(chain_evaluation_error(
+                "chained input into `.code` is outside the bounded v2.6 callouts slice".to_string(),
+                *span,
+            ));
+            return CallOutcome::Failed;
+        }
+        if let Some(parameters) = lambda_parameters {
+            diagnostics.push(chain_evaluation_error(
+                "`.code` body is an evaluable string, not a lambda".to_string(),
+                parameters.first().map_or(*span, |parameter| parameter.span),
+            ));
+            return CallOutcome::Failed;
+        }
+
+        let candidates = raw_invocation_locations(positional_args, named_args, *span);
+        let body_candidate = body.map(|body| Candidate::Positional {
+            value: InvocationArgumentLocation::Body,
+            span: call_body_source_span(body, *span),
+        });
+        let bound = match binding_plan.bind(&candidates, body_candidate.as_ref(), *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        macro_rules! evaluate_location {
+            ($location:expr) => {{
+                match $location {
+                    InvocationArgumentLocation::Body => {
+                        let Some(raw_body) = raw_body else {
+                            diagnostics.push(chain_evaluation_error(
+                                "`.code` body requires source-backed text".to_string(),
+                                *span,
+                            ));
+                            return CallOutcome::Failed;
+                        };
+                        let Some(text) = value_conversion::raw_body_dynamic_text(raw_body) else {
+                            diagnostics.push(chain_evaluation_error(
+                                "`.code` body has an invalid source span".to_string(),
+                                *span,
+                            ));
+                            return CallOutcome::Failed;
+                        };
+                        InvocationValue::dynamic_value(IrValue::String(text))
+                    }
+                    InvocationArgumentLocation::Positional(index) => {
+                        let Some(source) = positional_args.get(index) else {
+                            return CallOutcome::Failed;
+                        };
+                        let value = match self.evaluate_value(source, diagnostics, context) {
+                            CallOutcome::Value(value) => value,
+                            CallOutcome::Unresolved => {
+                                match self.preserve_value_expression(source, diagnostics, context) {
+                                    Ok(value) => value,
+                                    Err(outcome) => return outcome,
+                                }
+                            }
+                            CallOutcome::NoValue => {
+                                diagnostics
+                                    .push(no_value_required(value_source_span(source, span)));
+                                return CallOutcome::Failed;
+                            }
+                            CallOutcome::Failed => return CallOutcome::Failed,
+                        };
+                        InvocationValue::dynamic_value(value)
+                    }
+                    InvocationArgumentLocation::Named(index) => {
+                        let Some(argument) = named_args.get(index) else {
+                            return CallOutcome::Failed;
+                        };
+                        let value = match self.evaluate_value(&argument.value, diagnostics, context)
+                        {
+                            CallOutcome::Value(value) => value,
+                            CallOutcome::Unresolved => {
+                                match self.preserve_value_expression(
+                                    &argument.value,
+                                    diagnostics,
+                                    context,
+                                ) {
+                                    Ok(value) => value,
+                                    Err(outcome) => return outcome,
+                                }
+                            }
+                            CallOutcome::NoValue => {
+                                diagnostics.push(no_value_required(value_source_span(
+                                    &argument.value,
+                                    span,
+                                )));
+                                return CallOutcome::Failed;
+                            }
+                            CallOutcome::Failed => return CallOutcome::Failed,
+                        };
+                        InvocationValue::dynamic_value(value)
+                    }
+                }
+            }};
+        }
+
+        macro_rules! raw_value {
+            ($location:expr) => {{
+                match $location {
+                    InvocationArgumentLocation::Positional(index) => positional_args.get(index),
+                    InvocationArgumentLocation::Named(index) => {
+                        named_args.get(index).map(|argument| &argument.value)
+                    }
+                    InvocationArgumentLocation::Body => None,
+                }
+            }};
+        }
+
+        let language = match bound.slots.first() {
+            Some(BoundSlot::Explicit {
+                value: location,
+                span: argument_span,
+            }) => {
+                let value = evaluate_location!(*location);
+                if matches!(value.value, IrValue::None) {
+                    None
+                } else {
+                    match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::String)
+                    {
+                        Ok(ScalarValue::String(value)) => Some(value),
+                        _ => {
+                            diagnostics.push(chain_evaluation_error(
+                                "`.code` `lang` must be text or None".to_string(),
+                                *argument_span,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    }
+                }
+            }
+            Some(BoundSlot::Omitted | BoundSlot::Defaulted) | None => None,
+        };
+
+        for (index, parameter) in [(1usize, "caption"), (3, "focus"), (5, "ref")] {
+            if let Some(BoundSlot::Explicit {
+                value: location,
+                span: argument_span,
+            }) = bound.slots.get(index)
+            {
+                let literal_none =
+                    raw_value!(*location).is_some_and(|value| matches!(value, IrValue::None));
+                if !literal_none {
+                    diagnostics.push(chain_evaluation_error(
+                        format!("`.code` parameter `{parameter}` remains outside the bounded v2.6 callouts slice"),
+                        *argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                }
+            }
+        }
+
+        let line_numbers = match bound.slots.get(2) {
+            Some(BoundSlot::Explicit {
+                value: location,
+                span: argument_span,
+            }) => {
+                let value = evaluate_location!(*location);
+                match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
+                    Ok(ScalarValue::Boolean(value)) => value,
+                    _ => {
+                        diagnostics.push(chain_evaluation_error(
+                            "`.code` `linenumbers` must be Boolean".to_string(),
+                            *argument_span,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            Some(BoundSlot::Defaulted) | Some(BoundSlot::Omitted) | None => true,
+        };
+
+        let callouts = match bound.slots.get(4) {
+            Some(BoundSlot::Explicit {
+                value: location,
+                span: argument_span,
+            }) => {
+                let raw = raw_value!(*location);
+                let value = if let Some(raw) = raw.filter(|value| code_value_text(value).is_some())
+                {
+                    InvocationValue::dynamic_value(raw.clone())
+                } else {
+                    evaluate_location!(*location)
+                };
+                match parse_code_callouts(&value.value, *argument_span) {
+                    Ok(callouts) => callouts,
+                    Err(message) => {
+                        diagnostics.push(chain_evaluation_error(message, *argument_span));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            Some(BoundSlot::Defaulted) | Some(BoundSlot::Omitted) | None => Vec::new(),
+        };
+
+        let source = match bound.slots.get(6) {
+            Some(BoundSlot::Explicit {
+                value: location,
+                span: argument_span,
+            }) => {
+                let value = evaluate_location!(*location);
+                let Some(text) = code_value_text(&value.value) else {
+                    diagnostics.push(chain_evaluation_error(
+                        "`.code` `code` must resolve to evaluable text".to_string(),
+                        *argument_span,
+                    ));
+                    return CallOutcome::Failed;
+                };
+                text
+            }
+            _ => {
+                diagnostics.push(chain_evaluation_error(
+                    "`.code` requires `code`".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        CallOutcome::Value(IrValue::Content(vec![IrNode::CodeBlock {
+            language,
+            info: None,
+            source,
+            line_numbers: Some(line_numbers),
+            callouts,
+            span: *span,
+        }]))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -12928,6 +13197,155 @@ fn body_contains_raw_html(nodes: &[IrNode]) -> bool {
     })
 }
 
+fn parse_code_callouts(value: &IrValue, span: SourceSpan) -> Result<Vec<IrCodeCallout>, String> {
+    let mut entries = BTreeMap::<u32, String>::new();
+    match value {
+        IrValue::Dictionary(dictionary) => {
+            for pair in &dictionary.entries {
+                let line = code_callout_line(&pair.first)?;
+                let description = code_value_text(&pair.second).ok_or_else(|| {
+                    "`.code` callout descriptions must be displayable values".to_string()
+                })?;
+                entries.insert(line, description);
+            }
+        }
+        IrValue::Content(_) | IrValue::String(_) | IrValue::Identifier(_) => {
+            let raw = code_value_text(value)
+                .ok_or_else(|| "`.code` `callouts` must be a map".to_string())?;
+            for line in raw.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let Some(item) = trimmed.strip_prefix("- ") else {
+                    return Err(
+                        "`.code` `callouts` must use map entries such as `- 1: description`"
+                            .to_string(),
+                    );
+                };
+                let Some((key, description)) = item.split_once(':') else {
+                    return Err("`.code` `callouts` entry is missing `:`".to_string());
+                };
+                let key = key.trim();
+                let parsed = key
+                    .parse::<i64>()
+                    .map_err(|_| format!("Callout keys must be integers, but got '{key}'."))?;
+                if parsed <= 0 {
+                    return Err(format!(
+                        "Callout line numbers must be positive, but got {parsed}."
+                    ));
+                }
+                let parsed = u32::try_from(parsed)
+                    .map_err(|_| format!("Callout line number {parsed} is too large"))?;
+                entries.insert(
+                    parsed,
+                    normalize_code_callout_description(description.trim(), span),
+                );
+            }
+        }
+        _ => return Err("`.code` `callouts` must be a map".to_string()),
+    }
+    Ok(entries
+        .into_iter()
+        .map(|(line, description)| IrCodeCallout { line, description })
+        .collect())
+}
+
+fn code_callout_line(value: &IrValue) -> Result<u32, String> {
+    let parsed = match value {
+        IrValue::Number(value) if value.is_finite() && value.fract() == 0.0 => {
+            if *value < i64::MIN as f64 || *value > i64::MAX as f64 {
+                return Err(format!("Callout line number {value} is too large"));
+            }
+            *value as i64
+        }
+        IrValue::String(value) | IrValue::Identifier(value) => value
+            .parse::<i64>()
+            .map_err(|_| format!("Callout keys must be integers, but got '{value}'."))?,
+        other => {
+            return Err(format!(
+                "Callout keys must be integers, but got '{other:?}'."
+            ));
+        }
+    };
+    if parsed <= 0 {
+        return Err(format!(
+            "Callout line numbers must be positive, but got {parsed}."
+        ));
+    }
+    u32::try_from(parsed).map_err(|_| format!("Callout line number {parsed} is too large"))
+}
+
+fn normalize_code_callout_description(description: &str, span: SourceSpan) -> String {
+    let parsed = arkst_markdown::parse_inline_with_mode(description, Mode::Quarkdown);
+    if !parsed.diagnostics.is_empty() {
+        return description.to_string();
+    }
+    let (document, diagnostics) = ast_to_ir::ast_to_ir_with_diagnostics_for_mode(
+        &parsed.document,
+        span.source_id,
+        &crate::DocumentMetadataDefaults::default(),
+        Mode::Quarkdown,
+    );
+    if !diagnostics.is_empty() {
+        return description.to_string();
+    }
+    code_value_text(&IrValue::Content(document.nodes)).unwrap_or_else(|| description.to_string())
+}
+
+fn code_value_text(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),
+        IrValue::Number(value) => Some(value.to_string()),
+        IrValue::Boolean(value) => Some(value.to_string()),
+        IrValue::None => Some(String::new()),
+        IrValue::Content(nodes) => {
+            let mut output = String::new();
+            for node in nodes {
+                append_code_node_text(node, &mut output)?;
+            }
+            Some(output)
+        }
+        _ => None,
+    }
+}
+
+fn append_code_node_text(node: &IrNode, output: &mut String) -> Option<()> {
+    match node {
+        IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {
+            for inline in content {
+                append_code_inline_text(inline, output)?;
+            }
+        }
+        IrNode::Blockquote { content, .. } => {
+            for child in content {
+                append_code_node_text(child, output)?;
+            }
+        }
+        IrNode::CodeBlock { source, .. } => output.push_str(source),
+        _ => return None,
+    }
+    Some(())
+}
+
+fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()> {
+    match inline {
+        IrInline::Text { content, .. } | IrInline::Code { content, .. } => output.push_str(content),
+        IrInline::SoftBreak { .. } | IrInline::HardBreak { .. } => output.push('\n'),
+        IrInline::Emphasis { content, .. }
+        | IrInline::Strong { content, .. }
+        | IrInline::Strikethrough { content, .. } => {
+            for child in content {
+                append_code_inline_text(child, output)?;
+            }
+        }
+        IrInline::Whitespace { .. } => output.push(' '),
+        IrInline::TargetSpecificContent { content } => output.push_str(&content.content),
+        _ => return None,
+    }
+    Some(())
+}
+
 fn opaque_html_body_string(nodes: &[IrNode]) -> Option<String> {
     let mut output = String::new();
     for node in nodes {
@@ -13131,6 +13549,18 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::optional("figures"),
                 ParameterMetadata::optional("tables"),
                 ParameterMetadata::optional("code"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "code" => (
+            vec![
+                ParameterMetadata::optional("lang"),
+                ParameterMetadata::optional("caption"),
+                ParameterMetadata::defaulted("linenumbers"),
+                ParameterMetadata::optional("focus"),
+                ParameterMetadata::defaulted("callouts"),
+                ParameterMetadata::optional("ref"),
+                ParameterMetadata::required("code"),
             ],
             BodyPolicy::BindFinal,
         ),

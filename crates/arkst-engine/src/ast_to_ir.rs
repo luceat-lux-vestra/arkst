@@ -165,6 +165,8 @@ fn block_to_ir(
             language: language.clone(),
             info: info.clone(),
             source: source.clone(),
+            line_numbers: None,
+            callouts: Vec::new(),
             span: byte_to_source_span(span, source_id),
         }),
         Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {

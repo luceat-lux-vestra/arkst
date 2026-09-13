@@ -1795,6 +1795,7 @@ fn convert_arg_with_mode(
     diagnostics: &mut Vec<ParserDiagnostic>,
     allow_unmarked_lambda: bool,
     contextual_inline_body: bool,
+    target_owns_opaque_markers: bool,
 ) -> Value {
     match &arg.content {
         ArgContent::Scalar(value) => convert_value(value, arg.span, base, call_base, diagnostics),
@@ -1835,8 +1836,20 @@ fn convert_arg_with_mode(
                         )
                         .unwrap_or(ByteSpan::new(lambda.span.start, lambda.body.start)),
                     });
-                    let content = parse_original_content(source, span, base, diagnostics);
-                    let body = parse_original_content(source, lambda.body, base, diagnostics);
+                    let content = parse_original_content(
+                        source,
+                        span,
+                        base,
+                        diagnostics,
+                        target_owns_opaque_markers,
+                    );
+                    let body = parse_original_content(
+                        source,
+                        lambda.body,
+                        base,
+                        diagnostics,
+                        target_owns_opaque_markers,
+                    );
                     if contextual_inline_body {
                         Value::InlineBody {
                             content,
@@ -1852,14 +1865,26 @@ fn convert_arg_with_mode(
                         }
                     }
                 }
-                Ok(None) => Value::Content(parse_original_content(source, span, base, diagnostics)),
+                Ok(None) => Value::Content(parse_original_content(
+                    source,
+                    span,
+                    base,
+                    diagnostics,
+                    target_owns_opaque_markers,
+                )),
                 Err(error) => {
                     diagnostics.push(ParserDiagnostic {
                         code: error.code,
                         message: error.message,
                         span: offset_span(error.span, base).unwrap_or(error.span),
                     });
-                    Value::Content(parse_original_content(source, span, base, diagnostics))
+                    Value::Content(parse_original_content(
+                        source,
+                        span,
+                        base,
+                        diagnostics,
+                        target_owns_opaque_markers,
+                    ))
                 }
             }
         }
@@ -1871,6 +1896,7 @@ fn parse_original_content(
     span: ByteSpan,
     base: usize,
     diagnostics: &mut Vec<ParserDiagnostic>,
+    target_owns_opaque_markers: bool,
 ) -> Vec<Inline> {
     let Some(_) = source.get(span.start..span.end) else {
         return Vec::new();
@@ -1885,7 +1911,7 @@ fn parse_original_content(
 
     let mut inlines = Vec::new();
     push_content_text(&mut inlines, source, span.start, span.end, base);
-    if content_requires_e3010(source, span) {
+    if !target_owns_opaque_markers && content_requires_e3010(source, span) {
         diagnostics.push(ParserDiagnostic {
             code: "E3010",
             message: "Markdown inline syntax in a Quarkdown content argument is preserved as original text but is not lowered because the content contains an unsupported inline construct".to_string(),
@@ -2076,6 +2102,7 @@ fn convert_call_arguments(
                         diagnostics,
                         positional_body(call_name, index),
                         positional_body(call_name, index),
+                        call_name == "code" && index == 4,
                     ),
                     span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
                 }
@@ -2115,6 +2142,7 @@ fn convert_named_arg(
             diagnostics,
             callback_lambda,
             false,
+            call_name == Some("code") && arg.name == "callouts",
         ),
         value_span: offset_span(arg.value.span, offset).unwrap_or(ByteSpan::new(0, 0)),
         span: offset_span(arg.span, offset).unwrap_or(ByteSpan::new(0, 0)),
