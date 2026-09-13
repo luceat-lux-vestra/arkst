@@ -17,8 +17,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply bounded lowering fix and adversarial proof
-        shell: python
+        shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path
 
           lowering = Path('crates/arkst-typst/src/lowering.rs')
@@ -45,6 +46,7 @@ jobs:
           assert text.count(assertion) == 1, text.count(assertion)
           text = text.replace(assertion, replacement, 1)
           test.write_text(text)
+          PY
 
       - name: Format and verify patch ownership
         run: |
