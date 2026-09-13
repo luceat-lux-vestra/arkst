@@ -41,6 +41,7 @@ jobs:
           PY
           python3 /tmp/apply.py
           python3 tools/tmp_v260_code_fix.py
+          python3 tools/tmp_v260_code_parser_fix.py
       - name: Validate candidate
         shell: bash
         run: |
@@ -56,6 +57,6 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-core/tests/quarkdown_code_callouts.rs crates/arkst-typst/tests/code_callouts.rs
+          git add crates/arkst-ir/src/lib.rs crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-core/tests/quarkdown_code_callouts.rs crates/arkst-typst/tests/code_callouts.rs
           git commit -m 'feat(compat): add Quarkdown v2.6 code callouts'
           git push origin HEAD:compat/311-v260-code-callouts
