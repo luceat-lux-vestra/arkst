@@ -114,7 +114,11 @@ mod tests {
     use arkst_ir::{IrDocumentTheme, IrMetadata, IrNode};
     use arkst_source::{SourceId, SourceSpan};
 
-    fn document(document_type: IrDocumentType, color: Option<&str>, layout: Option<&str>) -> IrDocument {
+    fn document(
+        document_type: IrDocumentType,
+        color: Option<&str>,
+        layout: Option<&str>,
+    ) -> IrDocument {
         let mut metadata = IrMetadata::default();
         metadata.document_state.document_type = document_type;
         metadata.document_state.theme = Some(IrDocumentTheme {
