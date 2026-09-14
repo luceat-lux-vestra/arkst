@@ -10,7 +10,9 @@ pub mod lowering;
 #[path = "lowering.rs"]
 mod lowering_base;
 
-pub use backend::{TypstBackend, TypstInput, TypstOutput};
+pub use backend::{
+    TypstArtifact, TypstBackend, TypstInput, TypstOutput, TypstOutputTarget,
+};
 pub use lowering::{lower_to_typst, lower_to_typst_code};
 /// The Arkst-Typst result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
