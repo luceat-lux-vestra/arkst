@@ -8,7 +8,7 @@ def replace_once(old: str, new: str, label: str) -> None:
     global text
     count = text.count(old)
     if count != 1:
-        raise SystemExit(f"{label}: expected one patcher replacement, found {count}")
+        raise SystemExit(f"{label}: expected one occurrence, found {count}")
     text = text.replace(old, new, 1)
 
 
@@ -71,10 +71,10 @@ replace_once(
                 IrStackedLayout::Row | IrStackedLayout::Column => IrMainAxisAlignment::Start,
             });
             WireComponent::Stacked(WireStackedComponent {
-            layout: component.layout.clone(),
-            main_axis_alignment: legacy_main_axis,
-            main_axis_alignment_inherited: inherited_main_axis,
-            cross_axis_alignment: component.cross_axis_alignment,""",
+                layout: component.layout.clone(),
+                main_axis_alignment: legacy_main_axis,
+                main_axis_alignment_inherited: inherited_main_axis,
+                cross_axis_alignment: component.cross_axis_alignment,""",
 )
 replace_once(
     "crates/arkst-ir/src/lib.rs",
@@ -82,9 +82,9 @@ replace_once(
             span: component.span,
         }),
         IrComponent::Container(component) =>""",
-    """            children: wire_nodes(&component.children, sources)?,
-            span: component.span,
-        })
+    """                children: wire_nodes(&component.children, sources)?,
+                span: component.span,
+            })
         }
         IrComponent::Container(component) =>""",
 )
@@ -129,10 +129,7 @@ replace_once(
 
         let encoded = serde_json::to_value(&document).expect(\"document wire serializes\");
         let stacked = &encoded[\"nodes\"][0][\"Component\"][\"component\"][\"Stacked\"];
-        assert_eq!(
-            stacked.get(\"main_axis_alignment\"),
-            Some(&serde_json::json!(\"Start\"))
-        );
+        assert_eq!(stacked.get(\"main_axis_alignment\"), Some(&serde_json::json!(\"Start\")));
         assert_eq!(
             stacked.get(\"main_axis_alignment_inherited\"),
             Some(&serde_json::json!(true))
@@ -141,8 +138,7 @@ replace_once(
             .expect(\"legacy-shaped reader ignores additive inheritance flag\");
         assert_eq!(legacy.main_axis_alignment, IrMainAxisAlignment::Start);
         assert_eq!(
-            serde_json::from_value::<IrDocument>(encoded)
-                .expect(\"new document wire round trips\"),
+            serde_json::from_value::<IrDocument>(encoded).expect(\"new document wire round trips\"),
             document
         );
 
@@ -161,8 +157,7 @@ replace_once(
             metadata: IrMetadata::default(),
         };
         let explicit_json = serde_json::to_value(&explicit).expect(\"explicit document serializes\");
-        let explicit_stack =
-            &explicit_json[\"nodes\"][0][\"Component\"][\"component\"][\"Stacked\"];
+        let explicit_stack = &explicit_json[\"nodes\"][0][\"Component\"][\"component\"][\"Stacked\"];
         assert!(explicit_stack.get(\"main_axis_alignment_inherited\").is_none());
         assert_eq!(
             serde_json::from_value::<IrDocument>(explicit_json)
@@ -177,7 +172,7 @@ replace_once(
 
 '''
 count = text.count(anchor)
-if count != 1:
-    raise SystemExit(f"wire patch anchor: expected one occurrence, found {count}")
+if count != 2:
+    raise SystemExit(f"wire patch anchor: expected two evaluator patch anchors, found {count}")
 text = text.replace(anchor, wire_patch + anchor, 1)
 path.write_text(text)
