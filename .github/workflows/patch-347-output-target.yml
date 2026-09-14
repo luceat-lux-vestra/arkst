@@ -15,7 +15,7 @@ concurrency:
 jobs:
   patch-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,20 +25,22 @@ jobs:
           toolchain: 1.98.0
           components: rustfmt,clippy
       - name: Apply bounded source patch
-        run: python3 tools/patch-347-output-target.py
+        run: |
+          python3 tools/patch-347-output-target.py
+          python3 tools/patch-347-output-consumers.py
       - name: Format
         run: cargo fmt --all
-      - name: Verify targeted crates
+      - name: Verify full workspace
         run: |
-          cargo test --locked -p arkst-typst -p arkst-typst-subprocess -p arkst-typst-inprocess -p arkst-cli --all-features
-          cargo clippy --locked -p arkst-typst -p arkst-typst-subprocess -p arkst-typst-inprocess -p arkst-cli --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features --locked
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           git diff --check
       - name: Commit candidate and remove temporary harness
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm tools/patch-347-output-target.py .github/workflows/patch-347-output-target.yml
+          rm tools/patch-347-output-target.py tools/patch-347-output-consumers.py .github/workflows/patch-347-output-target.yml
           git add -A
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
