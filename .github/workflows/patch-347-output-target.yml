@@ -1,0 +1,46 @@
+name: Patch 347 Typst output target contract
+
+on:
+  push:
+    branches:
+      - feat/347-typst-output-target-contract
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-347-output-target-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+          components: rustfmt,clippy
+      - name: Apply bounded source patch
+        run: python3 tools/patch-347-output-target.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Verify targeted crates
+        run: |
+          cargo test --locked -p arkst-typst -p arkst-typst-subprocess -p arkst-typst-inprocess -p arkst-cli --all-features
+          cargo clippy --locked -p arkst-typst -p arkst-typst-subprocess -p arkst-typst-inprocess -p arkst-cli --all-targets --all-features -- -D warnings
+          git diff --check
+      - name: Commit candidate and remove temporary harness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm tools/patch-347-output-target.py .github/workflows/patch-347-output-target.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(typst): model backend output targets'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
