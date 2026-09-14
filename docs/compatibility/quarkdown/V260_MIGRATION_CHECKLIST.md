@@ -6,7 +6,7 @@ This checklist fixes the migration scope so compatibility work does not expand o
 
 - [x] `.prepended` / `.appended` collection operations — merged in #319.
 - [x] `.doclang` v2.6.0 English getter and release-scoped locale acceptance — implemented and documented in `V260_DOCLANG.md`.
-- [ ] `.code(callouts:)` binding, typed IR ownership, and renderer behavior — implementation/evidence candidate is tracked in `V260_CODE_CALLOUTS.md`; mark complete only after the adaptation PR is merged.
+- [x] `.code(callouts:)` binding, typed IR ownership, and renderer behavior — merged in #326; implementation/evidence is documented in `V260_CODE_CALLOUTS.md`.
 - [ ] `focus` layout theme acceptance and output behavior.
 - [ ] `slides` H1/H2 automatic page-break behavior and `.autopagebreak` override.
 - [ ] `.row` / `.column` omitted-alignment inheritance.
