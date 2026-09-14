@@ -1,0 +1,707 @@
+name: Apply #336 stack alignment candidate
+
+on:
+  push:
+    branches:
+      - compat/336-stack-alignment-inheritance
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Apply bounded #336 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one replacement, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_all_checked(path, old, new, expected):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} replacements, found {count}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          # IR: omission is a first-class backend-neutral state. Old explicit
+          # serialized values still deserialize as Some(value); inherited None
+          # is omitted from the wire shape.
+          replace_once(
+              'crates/arkst-ir/src/lib.rs',
+              '    pub main_axis_alignment: IrMainAxisAlignment,\n    pub cross_axis_alignment: IrCrossAxisAlignment,',
+              '    /// Explicit main-axis alignment. `None` means a row/column omitted the\\n'
+              '    /// argument and must inherit final document-global alignment at output time.\\n'
+              '    /// Grid evaluation always publishes an explicit/defaulted value.\\n'
+              '    #[serde(default, skip_serializing_if = "Option::is_none")]\\n'
+              '    pub main_axis_alignment: Option<IrMainAxisAlignment>,\\n'
+              '    pub cross_axis_alignment: IrCrossAxisAlignment,'.replace('\\n', '\n'),
+          )
+          replace_once(
+              'crates/arkst-ir/src/lib.rs',
+              '''            IrStackedLayout::Row => (
+                IrMainAxisAlignment::Start,
+                None,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),
+            IrStackedLayout::Column => (
+                IrMainAxisAlignment::Start,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                None,
+            ),
+            IrStackedLayout::Grid { .. } => (
+                IrMainAxisAlignment::Center,
+                Some(IrSize {
+                    value: 8.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                Some(IrSize {
+                    value: 12.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),''',
+              '''            IrStackedLayout::Row => (
+                Some(IrMainAxisAlignment::Start),
+                None,
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),
+            IrStackedLayout::Column => (
+                Some(IrMainAxisAlignment::Start),
+                Some(IrSize {
+                    value: 10.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                None,
+            ),
+            IrStackedLayout::Grid { .. } => (
+                Some(IrMainAxisAlignment::Center),
+                Some(IrSize {
+                    value: 8.0,
+                    unit: IrSizeUnit::Px,
+                }),
+                Some(IrSize {
+                    value: 12.0,
+                    unit: IrSizeUnit::Px,
+                }),
+            ),''',
+          )
+          replace_once(
+              'crates/arkst-ir/src/lib.rs',
+              '''    #[test]
+    fn grid_layout_rejects_zero_columns_during_deserialization() {''',
+              '''    #[test]
+    fn stacked_main_axis_serde_preserves_legacy_explicit_and_inherited_omission() {
+        let span = SourceSpan::new(SourceId(11), 0, 8);
+        let inherited = IrStackedComponent {
+            layout: IrStackedLayout::Row,
+            main_axis_alignment: None,
+            cross_axis_alignment: IrCrossAxisAlignment::Center,
+            row_gap: None,
+            column_gap: None,
+            children: Vec::new(),
+            span,
+        };
+        let inherited_json = serde_json::to_value(&inherited).expect("inherited stack serializes");
+        assert!(inherited_json.get("main_axis_alignment").is_none());
+        assert_eq!(
+            serde_json::from_value::<IrStackedComponent>(inherited_json)
+                .expect("inherited stack round trips")
+                .main_axis_alignment,
+            None
+        );
+
+        let legacy = serde_json::json!({
+            "layout": "Row",
+            "main_axis_alignment": "Start",
+            "cross_axis_alignment": "Center",
+            "row_gap": null,
+            "column_gap": null,
+            "children": [],
+            "span": { "source_id": 11, "start": 0, "end": 8 }
+        });
+        assert_eq!(
+            serde_json::from_value::<IrStackedComponent>(legacy)
+                .expect("legacy explicit alignment remains readable")
+                .main_axis_alignment,
+            Some(IrMainAxisAlignment::Start)
+        );
+    }
+
+    #[test]
+    fn grid_layout_rejects_zero_columns_during_deserialization() {''',
+          )
+
+          # Evaluator: row/column omission survives evaluation; explicit values
+          # still use the existing closed conversion. Grid keeps its old Center
+          # default as an explicit semantic value.
+          replace_once(
+              'crates/arkst-engine/src/evaluator.rs',
+              '''                let alignment = bound.take(0).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
+                        IrMainAxisAlignment::Start,
+                    )))
+                });
+                let cross = bound.take(1).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(
+                        IrCrossAxisAlignment::Center,
+                    )))
+                });
+                let gap = bound.take(2).unwrap_or_else(|| default(IrValue::None));
+                let main_axis = match convert_stacked_main_axis(&alignment.value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(stacked_conversion_error(
+                            name,
+                            "alignment",
+                            alignment.span,
+                            alignment.parameter_span,
+                            error,
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                };''',
+              '''                let alignment = bound.take(0);
+                let cross = bound.take(1).unwrap_or_else(|| {
+                    default(IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(
+                        IrCrossAxisAlignment::Center,
+                    )))
+                });
+                let gap = bound.take(2).unwrap_or_else(|| default(IrValue::None));
+                let main_axis = match alignment.as_ref() {
+                    Some(alignment) => match convert_stacked_main_axis(&alignment.value) {
+                        Ok(value) => Some(value),
+                        Err(error) => {
+                            diagnostics.push(stacked_conversion_error(
+                                name,
+                                "alignment",
+                                alignment.span,
+                                alignment.parameter_span,
+                                error,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    },
+                    None => None,
+                };''',
+          )
+          replace_once(
+              'crates/arkst-engine/src/evaluator.rs',
+              '''                (
+                    IrStackedLayout::Grid { columns },
+                    main_axis,
+                    cross_axis,
+                    vgap.or_else(|| gap.clone()),
+                    hgap.or(gap),
+                )''',
+              '''                (
+                    IrStackedLayout::Grid { columns },
+                    Some(main_axis),
+                    cross_axis,
+                    vgap.or_else(|| gap.clone()),
+                    hgap.or(gap),
+                )''',
+          )
+
+          # Test-only constructors that model explicit stack alignment.
+          replace_all_checked(
+              'crates/arkst-engine/src/value_conversion.rs',
+              '            main_axis_alignment: IrMainAxisAlignment::Start,',
+              '            main_axis_alignment: Some(IrMainAxisAlignment::Start),',
+              2,
+          )
+
+          # Existing core compatibility tests now assert the new omission state,
+          # while all explicit/grid invariants stay concrete via Some(...).
+          replace_once(
+              'crates/arkst-core/tests/quarkdown_stacked_layout.rs',
+              '    assert_eq!(row.main_axis_alignment, IrMainAxisAlignment::Start);',
+              '    assert_eq!(row.main_axis_alignment, None);',
+          )
+          replace_once(
+              'crates/arkst-core/tests/quarkdown_stacked_layout.rs',
+              '    assert_eq!(column.main_axis_alignment, IrMainAxisAlignment::Start);',
+              '    assert_eq!(column.main_axis_alignment, None);',
+          )
+          replace_once(
+              'crates/arkst-core/tests/quarkdown_stacked_layout.rs',
+              '    assert_eq!(grid.main_axis_alignment, IrMainAxisAlignment::Center);',
+              '    assert_eq!(grid.main_axis_alignment, Some(IrMainAxisAlignment::Center));',
+          )
+          replace_once(
+              'crates/arkst-core/tests/quarkdown_stacked_layout.rs',
+              '    assert_eq!(row.main_axis_alignment, IrMainAxisAlignment::SpaceBetween);',
+              '    assert_eq!(row.main_axis_alignment, Some(IrMainAxisAlignment::SpaceBetween));',
+          )
+          replace_once(
+              'crates/arkst-core/tests/quarkdown_stacked_layout.rs',
+              '    assert_eq!(column.main_axis_alignment, IrMainAxisAlignment::Start);',
+              '    assert_eq!(column.main_axis_alignment, Some(IrMainAxisAlignment::Start));',
+          )
+
+          # Typst lowering owns final resolution because it can see both the
+          # omission-preserving IR and final document state. Justify is not a
+          # stack-main-axis value and deliberately resolves to Start.
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''    IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
+    IrDocument, IrDocumentType, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,''',
+              '''    IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
+    IrDocument, IrDocumentAlignment, IrDocumentType, IrInline, IrLandscapeComponent,
+    IrMainAxisAlignment, IrNode,''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''    /// Whether the raw pushed text must not receive the continuation
+    /// indent (verbatim code/raw content inside a list item).
+    verbatim: bool,
+}''',
+              '''    /// Whether the raw pushed text must not receive the continuation
+    /// indent (verbatim code/raw content inside a list item).
+    verbatim: bool,
+    /// Final document-global alignment consumed only by row/column components
+    /// whose main-axis alignment remained omitted through semantic evaluation.
+    inherited_stack_main_axis: IrMainAxisAlignment,
+}''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''            list_item_indent: String::new(),
+            at_line_start: false,
+            verbatim: false,
+        }''',
+              '''            list_item_indent: String::new(),
+            at_line_start: false,
+            verbatim: false,
+            inherited_stack_main_axis: IrMainAxisAlignment::Start,
+        }''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''    fn lower_document(&mut self, doc: &IrDocument) {
+        // Emit metadata as Typst set-rules''',
+              '''    fn lower_document(&mut self, doc: &IrDocument) {
+        self.inherited_stack_main_axis = match doc.metadata.document_state.page_alignment {
+            Some(IrDocumentAlignment::Center) => IrMainAxisAlignment::Center,
+            Some(IrDocumentAlignment::End) => IrMainAxisAlignment::End,
+            Some(IrDocumentAlignment::Start) | Some(IrDocumentAlignment::Justify) | None => {
+                IrMainAxisAlignment::Start
+            }
+        };
+
+        // Emit metadata as Typst set-rules''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '        let distribution = component.main_axis_alignment;',
+              '''        let distribution = component
+            .main_axis_alignment
+            .unwrap_or(self.inherited_stack_main_axis);''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''    fn lower_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+        let main_alignment = match component.main_axis_alignment {''',
+              '''    fn lower_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+        let distribution = component
+            .main_axis_alignment
+            .unwrap_or(IrMainAxisAlignment::Center);
+        let main_alignment = match distribution {''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''        let distributed = matches!(
+            component.main_axis_alignment,
+            IrMainAxisAlignment::SpaceBetween
+                | IrMainAxisAlignment::SpaceAround
+                | IrMainAxisAlignment::SpaceEvenly
+        );
+        if distributed {
+            self.lower_distributed_grid(component, columns);''',
+              '''        let distributed = matches!(
+            distribution,
+            IrMainAxisAlignment::SpaceBetween
+                | IrMainAxisAlignment::SpaceAround
+                | IrMainAxisAlignment::SpaceEvenly
+        );
+        if distributed {
+            self.lower_distributed_grid(component, columns, distribution);''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''    fn lower_distributed_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+        let logical_columns = columns as usize;
+        let edge_fraction = match component.main_axis_alignment {''',
+              '''    fn lower_distributed_grid(
+        &mut self,
+        component: &IrStackedComponent,
+        columns: u32,
+        distribution: IrMainAxisAlignment,
+    ) {
+        let logical_columns = columns as usize;
+        let edge_fraction = match distribution {''',
+          )
+          replace_once(
+              'crates/arkst-typst/src/lowering.rs',
+              '''                layout,
+                main_axis_alignment,
+                cross_axis_alignment,''',
+              '''                layout,
+                main_axis_alignment: Some(main_axis_alignment),
+                cross_axis_alignment,''',
+          )
+
+          # Focused core semantic matrix.
+          Path('crates/arkst-core/tests/quarkdown_v260_stack_alignment_inheritance.rs').write_text(r'''use arkst_core::ir::{
+    IrComponent, IrDocumentAlignment, IrMainAxisAlignment, IrNode, IrStackedLayout,
+};
+use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
+
+fn compile_source(source: &str) -> arkst_core::CompileResult {
+    let project = VirtualProjectBuilder::new()
+        .entry("main.qd")
+        .expect("entry")
+        .add_source("main.qd", source)
+        .expect("source")
+        .build()
+        .expect("project");
+    compile(&project, &CompileOptions::default())
+}
+
+fn stacked(node: &IrNode) -> &arkst_core::ir::IrStackedComponent {
+    let IrNode::Component {
+        component: IrComponent::Stacked(component),
+    } = node
+    else {
+        panic!("expected stacked component, got {node:?}");
+    };
+    component
+}
+
+#[test]
+fn omitted_row_and_column_preserve_inherit_through_final_page_state() {
+    let result = compile_source(
+        ".row\n    BEFORE\n\n.pageformat alignment:{center}\n.column\n    AFTER\n\n.pageformat alignment:{end}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.ir.metadata.document_state.page_alignment,
+        Some(IrDocumentAlignment::End)
+    );
+    let [row, column] = result.ir.nodes.as_slice() else {
+        panic!("expected row and column only: {:?}", result.ir.nodes);
+    };
+    assert_eq!(stacked(row).layout, IrStackedLayout::Row);
+    assert_eq!(stacked(row).main_axis_alignment, None);
+    assert_eq!(stacked(column).layout, IrStackedLayout::Column);
+    assert_eq!(stacked(column).main_axis_alignment, None);
+}
+
+#[test]
+fn explicit_stack_alignment_remains_authoritative_under_conflicting_global_state() {
+    let result = compile_source(
+        ".pageformat alignment:{center}\n.row alignment:{start}\n    A\n\n.column alignment:{spacebetween}\n    B\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let [row, column] = result.ir.nodes.as_slice() else {
+        panic!("expected row and column only: {:?}", result.ir.nodes);
+    };
+    assert_eq!(
+        stacked(row).main_axis_alignment,
+        Some(IrMainAxisAlignment::Start)
+    );
+    assert_eq!(
+        stacked(column).main_axis_alignment,
+        Some(IrMainAxisAlignment::SpaceBetween)
+    );
+}
+
+#[test]
+fn justify_global_state_does_not_fabricate_a_stack_alignment() {
+    let result = compile_source(".pageformat alignment:{justify}\n.row\n    A\n");
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.ir.metadata.document_state.page_alignment,
+        Some(IrDocumentAlignment::Justify)
+    );
+    assert_eq!(stacked(&result.ir.nodes[0]).main_axis_alignment, None);
+}
+
+#[test]
+fn align_and_center_wrappers_do_not_stamp_omitted_stack_alignment() {
+    let aligned = compile_source(".align {center}\n    .row\n        A\n");
+    assert!(aligned.diagnostics.is_empty(), "{:?}", aligned.diagnostics);
+    let [IrNode::Component {
+        component: IrComponent::Container(container),
+    }] = aligned.ir.nodes.as_slice()
+    else {
+        panic!("expected align container: {:?}", aligned.ir.nodes);
+    };
+    assert_eq!(stacked(&container.children[0]).main_axis_alignment, None);
+
+    let centered = compile_source(".center\n    .column\n        A\n");
+    assert!(centered.diagnostics.is_empty(), "{:?}", centered.diagnostics);
+    let [IrNode::Component {
+        component: IrComponent::Container(container),
+    }] = centered.ir.nodes.as_slice()
+    else {
+        panic!("expected center container: {:?}", centered.ir.nodes);
+    };
+    assert_eq!(stacked(&container.children[0]).main_axis_alignment, None);
+}
+
+#[test]
+fn nested_omitted_and_explicit_stacks_remain_independent() {
+    let result = compile_source(
+        ".pageformat alignment:{center}\n.row\n    .column alignment:{end}\n        INNER\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let outer = stacked(&result.ir.nodes[0]);
+    assert_eq!(outer.main_axis_alignment, None);
+    let inner = stacked(&outer.children[0]);
+    assert_eq!(
+        inner.main_axis_alignment,
+        Some(IrMainAxisAlignment::End)
+    );
+}
+
+#[test]
+fn source_defined_row_and_column_keep_ownership() {
+    let result = compile_source(
+        ".function {row}\n    SHADOW-ROW\n\n.function {column}\n    SHADOW-COLUMN\n\n.pageformat alignment:{center}\n.row\n.column\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let debug = format!("{:?}", result.ir.nodes);
+    assert!(debug.contains("SHADOW-ROW"), "{debug}");
+    assert!(debug.contains("SHADOW-COLUMN"), "{debug}");
+    assert!(!debug.contains("Stacked"), "{debug}");
+}
+''')
+
+          # Target-level lowering regressions independently verify final-state
+          # resolution and the explicit-override / justify boundaries.
+          Path('crates/arkst-typst/tests/stack_alignment_inheritance.rs').write_text(r'''use arkst_ir::{
+    IrComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentState,
+    IrInline, IrMainAxisAlignment, IrMetadata, IrNode, IrStackedComponent, IrStackedLayout,
+};
+use arkst_source::{SourceId, SourceSpan};
+use arkst_typst::lowering::lower_to_typst_code;
+
+fn span() -> SourceSpan {
+    SourceSpan::new(SourceId(0), 0, 0)
+}
+
+fn paragraph(text: &str) -> IrNode {
+    IrNode::Paragraph {
+        content: vec![IrInline::Text {
+            content: text.to_string(),
+            span: span(),
+        }],
+        span: span(),
+    }
+}
+
+fn stack(layout: IrStackedLayout, alignment: Option<IrMainAxisAlignment>) -> IrNode {
+    IrNode::Component {
+        component: IrComponent::Stacked(IrStackedComponent {
+            layout,
+            main_axis_alignment: alignment,
+            cross_axis_alignment: IrCrossAxisAlignment::Center,
+            row_gap: None,
+            column_gap: None,
+            children: vec![paragraph("A"), paragraph("B")],
+            span: span(),
+        }),
+    }
+}
+
+fn lower(page_alignment: Option<IrDocumentAlignment>, node: IrNode) -> String {
+    lower_to_typst_code(&IrDocument {
+        nodes: vec![node],
+        metadata: IrMetadata {
+            document_state: IrDocumentState {
+                page_alignment,
+                ..IrDocumentState::default()
+            },
+            ..IrMetadata::default()
+        },
+    })
+}
+
+#[test]
+fn omitted_row_and_column_consume_final_document_alignment() {
+    let row = lower(
+        Some(IrDocumentAlignment::Center),
+        stack(IrStackedLayout::Row, None),
+    );
+    assert_eq!(row.matches("h(1fr)").count(), 2, "{row}");
+
+    let column = lower(
+        Some(IrDocumentAlignment::Center),
+        stack(IrStackedLayout::Column, None),
+    );
+    assert_eq!(column.matches("v(1fr)").count(), 2, "{column}");
+
+    let end = lower(
+        Some(IrDocumentAlignment::End),
+        stack(IrStackedLayout::Row, None),
+    );
+    assert_eq!(end.matches("h(1fr)").count(), 1, "{end}");
+}
+
+#[test]
+fn explicit_alignment_wins_and_justify_falls_back_to_start() {
+    let explicit = lower(
+        Some(IrDocumentAlignment::Center),
+        stack(
+            IrStackedLayout::Row,
+            Some(IrMainAxisAlignment::Start),
+        ),
+    );
+    assert_eq!(explicit.matches("h(1fr)").count(), 0, "{explicit}");
+
+    let justify = lower(
+        Some(IrDocumentAlignment::Justify),
+        stack(IrStackedLayout::Row, None),
+    );
+    assert_eq!(justify.matches("h(1fr)").count(), 0, "{justify}");
+}
+
+#[test]
+fn manual_grid_omission_keeps_grid_default_instead_of_page_inheritance() {
+    let grid = lower(
+        Some(IrDocumentAlignment::End),
+        stack(
+            IrStackedLayout::Grid {
+                columns: 2.try_into().unwrap(),
+            },
+            None,
+        ),
+    );
+    assert!(grid.contains("#align(center)["), "{grid}");
+    assert!(!grid.contains("#align(right)["), "{grid}");
+}
+''')
+
+          # Real pinned-Typst path; PR CI already installs Typst 0.15.1 and
+          # ARKST_REQUIRE_TYPST ensures this cannot silently skip there.
+          replace_once(
+              'crates/arkst-typst-subprocess/tests/backend_integration.rs',
+              '''#[test]
+fn integration_center_layout_lowers_to_valid_typst_and_pdf() {''',
+              r'''#[test]
+fn integration_v260_omitted_stack_alignment_uses_final_page_state() {
+    let source = ".row\n    A\n\n    B\n\n.pageformat alignment:{center}\n.column\n    C\n\n    D\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("v260-stack-inherit.qd")
+        .expect("valid entry path")
+        .add_source("v260-stack-inherit.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "v2.6 stack inheritance diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert_eq!(typst_code.matches("h(1fr)").count(), 2, "{typst_code}");
+    assert_eq!(typst_code.matches("v(1fr)").count(), 2, "{typst_code}");
+
+    with_typst("v260-stack-alignment-inheritance", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "v260-stack-inherit.qd".to_string(),
+            })
+            .expect("inherited stack Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
+fn integration_center_layout_lowers_to_valid_typst_and_pdf() {''',
+          )
+
+          Path('docs/compatibility/quarkdown/V260_STACK_ALIGNMENT_INHERITANCE.md').write_text(r'''# Quarkdown v2.6 row/column omitted-alignment inheritance
+
+Issue: #336. Prerequisite document-global alignment state: #338 / #339.
+
+## Clean-room oracle
+
+The compatibility contract was observed with the official Quarkdown v2.6.0 Linux x64 distribution, SHA-256 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`, using independently authored fixtures only. Disposable probe PR #337 ended at exact HEAD `37dbb72e891ac1a4374cb80a3892d502b4e7c46f` and was closed without merge.
+
+Observed invariants:
+
+- omitted `.row` and `.column` do not publish an explicit main-axis override;
+- final document-global `.pageformat alignment:{start|center|end}` controls omitted stacks, including stacks that occur before the final setter in source order;
+- explicit stack `alignment` remains authoritative, including distributed values such as `spacebetween`;
+- `.align` and `.center` wrappers do not become the inheritance source;
+- plain/slides targeted defaults without a global override remain `start`;
+- global `justify` is text/content justification and does not become a stacked main-axis value;
+- source-defined `row` / `column` keep ownership and invalid explicit alignment remains fail-closed.
+
+## Arkst ownership
+
+`IrStackedComponent.main_axis_alignment` is optional. `None` means only that row/column source omitted the main-axis argument; explicit `start` is `Some(Start)`. Grid retains its existing explicit/defaulted `Center` semantics and does not inherit document page alignment.
+
+The evaluator preserves omission rather than resolving it at call time because the oracle proves that a later `.pageformat` setter affects an earlier stack. Typst lowering resolves row/column omission from the final immutable `IrDocumentState.page_alignment`: `start -> Start`, `center -> Center`, `end -> End`, and unset/`justify -> Start`. The `justify` fallback is deliberate: the clean-room oracle proves no stacked `justify` value exists.
+
+This keeps the IR backend-neutral and preserves the observable distinction required by other output targets; no editor, host, CSS, browser, or Quarkdown renderer concept enters Arkst IR.
+
+## Verification
+
+Regression coverage pins omission versus explicit alignment, final-setter semantics, wrapper non-inheritance, nested override independence, source-function shadowing, backward-compatible serde, grid non-regression, target lowering, and a real pinned-Typst PDF integration path.
+
+The v2.6 migration checklist is intentionally not changed in this implementation PR; #336 requires that bookkeeping update only after the implementation lands.
+''')
+          PY
+
+          rm .github/workflows/zz-apply-336.yml
+          cargo fmt --all
+          cargo test --locked -p arkst-core --test quarkdown_stacked_layout --test quarkdown_v260_stack_alignment_inheritance
+          cargo test --locked -p arkst-ir
+          cargo test --locked -p arkst-typst --test stack_alignment_inheritance
+          cargo test --locked -p arkst-typst --lib
+          git diff --check
+
+      - name: Commit candidate without harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          test -n "$(git status --porcelain)"
+          git commit -m 'feat(compat): inherit omitted stacked alignment'
+          git push origin HEAD:compat/336-stack-alignment-inheritance
