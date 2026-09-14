@@ -56,7 +56,8 @@ fn final_doctype_applies_implicit_slides_breaks_to_preceding_headings() {
 
 #[test]
 fn final_noautopagebreak_disables_breaks_for_preceding_headings() {
-    let source = ".doctype {slides}\n\n# Earlier H1\n\nA.\n\n## Earlier H2\n\nB.\n\n.noautopagebreak\n";
+    let source =
+        ".doctype {slides}\n\n# Earlier H1\n\nA.\n\n## Earlier H2\n\nB.\n\n.noautopagebreak\n";
     assert_eq!(page_count(&compile_pdf(source)), 1);
 }
 
@@ -72,6 +73,7 @@ fn nested_heading_does_not_attempt_a_container_pagebreak() {
         ".doctype {slides}\n\nIntro.\n\n> Quote lead.\n>\n> ## Nested H2\n>\n> Quote tail.\n";
     assert_eq!(page_count(&compile_pdf(blockquote)), 1);
 
-    let list = ".doctype {slides}\n\nIntro.\n\n- List lead.\n\n    ## Nested H2\n\n    List tail.\n";
+    let list =
+        ".doctype {slides}\n\nIntro.\n\n- List lead.\n\n    ## Nested H2\n\n    List tail.\n";
     assert_eq!(page_count(&compile_pdf(list)), 1);
 }
