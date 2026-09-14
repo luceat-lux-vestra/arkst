@@ -188,16 +188,11 @@ mod tests {
     #[test]
     fn build_rejects_unowned_browser_and_legacy_pdf_controls() {
         for option in ["--chrome-path", "--node-path", "--npm-path"] {
-            let error = match Cli::try_parse_from([
-                "arkst",
-                "build",
-                "document.qd",
-                option,
-                "/tmp/tool",
-            ]) {
-                Ok(_) => panic!("{option} must not be accepted as a dead or misleading alias"),
-                Err(error) => error,
-            };
+            let error =
+                match Cli::try_parse_from(["arkst", "build", "document.qd", option, "/tmp/tool"]) {
+                    Ok(_) => panic!("{option} must not be accepted as a dead or misleading alias"),
+                    Err(error) => error,
+                };
             assert_eq!(
                 error.kind(),
                 clap::error::ErrorKind::UnknownArgument,
