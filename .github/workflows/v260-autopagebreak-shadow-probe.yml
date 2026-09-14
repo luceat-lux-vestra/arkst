@@ -1,0 +1,71 @@
+name: Quarkdown v2.6 auto-page-break shadow probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/v260-autopagebreak-shadow-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create independently-authored collision fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/shadow-probe
+          mkdir -p "$root"
+          cat > "$root/autopagebreak.qd" <<'EOF'
+          .function {autopagebreak}
+              maxdepth:
+              QD-SHADOW-AUTOPAGEBREAK
+
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-SHADOW-H1
+          EOF
+          cat > "$root/noautopagebreak.qd" <<'EOF'
+          .function {noautopagebreak}
+              QD-SHADOW-NOAUTOPAGEBREAK
+
+          .doctype {slides}
+          .noautopagebreak
+
+          # QD-SHADOW-H1
+          EOF
+
+      - name: Compile and print collision contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/shadow-probe
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            "$QD" compile "$src" --strict --clean --pretty --out "$root/out-$name" --out-name probe
+            html="$(find "$root/out-$name" -type f -name '*.html' -print -quit)"
+            printf 'FIXTURE %s\n' "$name"
+            grep -o 'QD-SHADOW-[A-Z0-9-]*' "$html" | sort -u || true
+            grep -o '<h1[^>]*id="qd-shadow-h1"[^>]*>' "$html" || true
+          done
