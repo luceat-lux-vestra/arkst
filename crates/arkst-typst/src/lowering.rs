@@ -222,21 +222,12 @@ impl LoweringContext {
                 language,
                 info: _info,
                 source,
+                line_numbers,
+                callouts,
                 span,
             } => {
                 let before = self.output.len();
-                self.push_str("```");
-                if let Some(lang) = language {
-                    self.push_str(lang);
-                }
-                self.push('\n');
-                let was_verbatim = std::mem::replace(&mut self.verbatim, true);
-                self.push_str(source);
-                if !source.ends_with('\n') {
-                    self.push('\n');
-                }
-                self.verbatim = was_verbatim;
-                self.push_str("```\n");
+                self.lower_code_block(language.as_deref(), source, *line_numbers, callouts);
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
@@ -1083,6 +1074,80 @@ impl LoweringContext {
         }
     }
 
+    fn lower_code_block(
+        &mut self,
+        language: Option<&str>,
+        source: &str,
+        line_numbers: Option<bool>,
+        callouts: &[arkst_ir::IrCodeCallout],
+    ) {
+        if line_numbers.is_none() && callouts.is_empty() {
+            self.push_str("```");
+            if let Some(lang) = language {
+                self.push_str(lang);
+            }
+            self.push('\n');
+            let was_verbatim = std::mem::replace(&mut self.verbatim, true);
+            self.push_str(source);
+            if !source.ends_with('\n') {
+                self.push('\n');
+            }
+            self.verbatim = was_verbatim;
+            self.push_str("```\n");
+            return;
+        }
+
+        let show_numbers = line_numbers.unwrap_or(false);
+        if !show_numbers && callouts.is_empty() {
+            self.push_str("#raw(\"");
+            self.push_str(&escape_typst_string(source));
+            self.push('\"');
+            if let Some(lang) = language {
+                self.push_str(", lang: \"");
+                self.push_str(&escape_typst_string(lang));
+                self.push('\"');
+            }
+            self.push_str(", block: true)\n");
+            return;
+        }
+
+        self.push_str("#block[\n#grid(\n  columns: (auto, auto, 1fr),\n  column-gutter: 0.6em,\n  row-gutter: 0pt,\n");
+        for (index, line) in source.split('\n').enumerate() {
+            let line_number = index + 1;
+            self.push_str("  [");
+            if show_numbers {
+                self.push_str(&line_number.to_string());
+            }
+            self.push_str("], [");
+            if let Some(marker) = callouts
+                .iter()
+                .position(|callout| callout.line as usize == line_number)
+                .map(|marker| marker + 1)
+            {
+                self.push_str(&marker.to_string());
+            }
+            self.push_str("], [#raw(\"");
+            self.push_str(&escape_typst_string(line));
+            self.push('\"');
+            if let Some(lang) = language {
+                self.push_str(", lang: \"");
+                self.push_str(&escape_typst_string(lang));
+                self.push('\"');
+            }
+            self.push_str(")],\n");
+        }
+        self.push_str(")\n]\n");
+        if !callouts.is_empty() {
+            self.push_str("#enum(\n");
+            for callout in callouts {
+                self.push_str("  [");
+                self.push_str(&escape_typst_text(&callout.description));
+                self.push_str("],\n");
+            }
+            self.push_str(")\n");
+        }
+    }
+
     fn lower_table(&mut self, header: &IrTableRow, rows: &[IrTableRow]) {
         let columns = header
             .cells
@@ -1200,7 +1265,7 @@ fn escape_typst_text(s: &str) -> String {
     for character in s.chars() {
         match character {
             '\\' => escaped.push_str("\\\\"),
-            '*' | '_' | '~' | '#' | '$' | '<' | '>' | '@' | '[' | ']' => {
+            '*' | '_' | '~' | '`' | '#' | '$' | '<' | '>' | '@' | '[' | ']' => {
                 escaped.push('\\');
                 escaped.push(character);
             }
@@ -2306,6 +2371,8 @@ mod tests {
                 language: Some("rust".into()),
                 info: Some("rust".into()),
                 source: "fn main() {}".into(),
+                line_numbers: None,
+                callouts: vec![],
                 span: empty_span(),
             }],
             metadata: IrMetadata::default(),
@@ -2558,6 +2625,8 @@ mod tests {
                                 language: None,
                                 info: None,
                                 source: "code".into(),
+                                line_numbers: None,
+                                callouts: vec![],
                                 span: empty_span(),
                             },
                         ],
@@ -2596,6 +2665,8 @@ mod tests {
                                 language: None,
                                 info: None,
                                 source: "code".into(),
+                                line_numbers: None,
+                                callouts: vec![],
                                 span: empty_span(),
                             },
                         ],
@@ -2635,6 +2706,8 @@ mod tests {
                                 language: None,
                                 info: None,
                                 source: "code".into(),
+                                line_numbers: None,
+                                callouts: vec![],
                                 span: empty_span(),
                             },
                             IrNode::Paragraph {

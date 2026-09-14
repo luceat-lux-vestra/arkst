@@ -841,6 +841,10 @@ enum WireNode {
         language: Option<String>,
         info: Option<String>,
         source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line_numbers: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        callouts: Vec<IrCodeCallout>,
         span: SourceSpan,
     },
     RawHtml {
@@ -1181,11 +1185,15 @@ fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String
             language,
             info,
             source,
+            line_numbers,
+            callouts,
             span,
         } => WireNode::CodeBlock {
             language: language.clone(),
             info: info.clone(),
             source: source.clone(),
+            line_numbers: *line_numbers,
+            callouts: callouts.clone(),
             span: *span,
         },
         IrNode::RawHtml { source, span } => WireNode::RawHtml {
@@ -1631,11 +1639,15 @@ fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrN
             language,
             info,
             source,
+            line_numbers,
+            callouts,
             span,
         } => IrNode::CodeBlock {
             language,
             info,
             source,
+            line_numbers,
+            callouts,
             span,
         },
         WireNode::RawHtml { source, span } => IrNode::RawHtml { source, span },
@@ -1988,6 +2000,16 @@ fn callable_capture_from_wire(
     })
 }
 
+/// One Quarkdown code callout after evaluator validation and ordering.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrCodeCallout {
+    /// One-based source line. The evaluator enforces positivity; values beyond
+    /// the current source length remain valid because Quarkdown accepts them.
+    pub line: u32,
+    /// Backend-neutral visible description text.
+    pub description: String,
+}
+
 /// A backend-neutral block-level IR node.
 ///
 /// Depending on the pipeline stage, a node may contain evaluated semantic
@@ -2038,6 +2060,10 @@ pub enum IrNode {
         language: Option<String>,
         info: Option<String>,
         source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line_numbers: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        callouts: Vec<IrCodeCallout>,
         span: SourceSpan,
     },
     /// Parser-owned raw HTML retained only while a function body can claim it
