@@ -1,0 +1,46 @@
+name: "Run #336 bounded candidate patch"
+
+on:
+  push:
+    branches:
+      - compat/336-stack-alignment-inheritance
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact patch and run targeted tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply_336.py
+          rm .github/scripts/apply_336.py
+          rm .github/workflows/zz-apply-336.yml
+          rm .github/workflows/zz-run-336.yml
+          cargo fmt --all
+          cargo test --locked -p arkst-core --test quarkdown_stacked_layout --test quarkdown_v260_stack_alignment_inheritance
+          cargo test --locked -p arkst-ir
+          cargo test --locked -p arkst-typst --test stack_alignment_inheritance
+          cargo test --locked -p arkst-typst --lib
+          git diff --check
+
+      - name: Commit candidate without temporary tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          test -n "$(git status --porcelain)"
+          git commit -m 'feat(compat): inherit omitted stacked alignment'
+          git push origin HEAD:compat/336-stack-alignment-inheritance
