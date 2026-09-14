@@ -49,6 +49,18 @@ fn slides_default_and_disable_have_real_typst_page_count_evidence() {
 }
 
 #[test]
+fn final_doctype_applies_implicit_slides_breaks_to_preceding_headings() {
+    let source = "# Earlier H1\n\nA.\n\n## Earlier H2\n\nB.\n\n.doctype {slides}\n";
+    assert_eq!(page_count(&compile_pdf(source)), 2);
+}
+
+#[test]
+fn final_noautopagebreak_disables_breaks_for_preceding_headings() {
+    let source = ".doctype {slides}\n\n# Earlier H1\n\nA.\n\n## Earlier H2\n\nB.\n\n.noautopagebreak\n";
+    assert_eq!(page_count(&compile_pdf(source)), 1);
+}
+
+#[test]
 fn weak_break_at_document_start_does_not_create_an_empty_leading_page() {
     let source = ".doctype {slides}\n\n# First\n\n## Second\n";
     assert_eq!(page_count(&compile_pdf(source)), 2);
@@ -56,7 +68,10 @@ fn weak_break_at_document_start_does_not_create_an_empty_leading_page() {
 
 #[test]
 fn nested_heading_does_not_attempt_a_container_pagebreak() {
-    let source =
+    let blockquote =
         ".doctype {slides}\n\nIntro.\n\n> Quote lead.\n>\n> ## Nested H2\n>\n> Quote tail.\n";
-    assert_eq!(page_count(&compile_pdf(source)), 1);
+    assert_eq!(page_count(&compile_pdf(blockquote)), 1);
+
+    let list = ".doctype {slides}\n\nIntro.\n\n- List lead.\n\n    ## Nested H2\n\n    List tail.\n";
+    assert_eq!(page_count(&compile_pdf(list)), 1);
 }
