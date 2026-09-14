@@ -18037,7 +18037,7 @@ mod tests {
     fn component_value(component_span: SourceSpan) -> IrValue {
         IrValue::Component(IrComponent::Stacked(IrStackedComponent {
             layout: IrStackedLayout::Column,
-            main_axis_alignment: IrMainAxisAlignment::Start,
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
             cross_axis_alignment: IrCrossAxisAlignment::Center,
             row_gap: Some(IrSize {
                 value: 10.0,
