@@ -30,7 +30,7 @@ jobs:
           test -n "$qd"
           chmod +x "$qd"
           printf '%s\n' "$qd" > evidence/executable.txt
-          "$qd" version | tee evidence/version.txt
+          "$qd" --version | tee evidence/version.txt
           printf '%s\n' "$qd" > "$RUNNER_TEMP/qd-path"
 
       - name: Capture v2.6 CLI surface
