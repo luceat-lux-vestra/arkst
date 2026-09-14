@@ -146,4 +146,58 @@ mod tests {
         assert!(help.contains("default"));
         assert!(help.contains("typst-inprocess"));
     }
+
+    #[test]
+    fn build_exposes_typst_path_as_the_current_pdf_host_control() {
+        let cli = Cli::try_parse_from([
+            "arkst",
+            "build",
+            "document.qd",
+            "--format",
+            "pdf",
+            "--typst-path",
+            "custom-typst",
+        ])
+        .expect("typst path must remain accepted");
+        let Commands::Build { typst_path, .. } = cli.command else {
+            panic!("expected build command");
+        };
+        assert_eq!(typst_path, PathBuf::from("custom-typst"));
+    }
+
+    #[test]
+    fn build_help_does_not_advertise_unowned_browser_or_legacy_pdf_controls() {
+        use clap::CommandFactory;
+
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("build")
+            .expect("build subcommand")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("--typst-path"));
+        for unexpected in ["--chrome-path", "--node-path", "--npm-path"] {
+            assert!(
+                !help.contains(unexpected),
+                "{unexpected} must not be advertised while Arkst PDF remains Typst-native"
+            );
+        }
+    }
+
+    #[test]
+    fn build_rejects_unowned_browser_and_legacy_pdf_controls() {
+        for option in ["--chrome-path", "--node-path", "--npm-path"] {
+            let error =
+                match Cli::try_parse_from(["arkst", "build", "document.qd", option, "/tmp/tool"]) {
+                    Ok(_) => panic!("{option} must not be accepted as a dead or misleading alias"),
+                    Err(error) => error,
+                };
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{option} must fail closed at the CLI boundary"
+            );
+        }
+    }
 }
