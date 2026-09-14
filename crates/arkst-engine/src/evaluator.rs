@@ -462,6 +462,7 @@ struct DocumentState {
     theme: Option<IrDocumentTheme>,
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
+    auto_page_break_max_depth: Option<u32>,
     localization_tables: LocalizationTables,
 }
 
@@ -476,6 +477,7 @@ impl Default for DocumentState {
             theme: None,
             locale: None,
             caption_position: Default::default(),
+            auto_page_break_max_depth: None,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -492,6 +494,7 @@ impl DocumentState {
             theme: snapshot.theme.clone(),
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
+            auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -506,6 +509,7 @@ impl DocumentState {
             theme: self.theme.clone(),
             locale: self.locale.clone(),
             caption_position: self.caption_position,
+            auto_page_break_max_depth: self.auto_page_break_max_depth,
         }
     }
 }
@@ -869,6 +873,7 @@ enum DocumentStateField {
     Theme,
     Locale,
     CaptionPosition,
+    AutoPageBreakMaxDepth,
     LocalizationTables,
 }
 
@@ -881,6 +886,7 @@ enum DocumentStateUndo {
     Theme(Option<IrDocumentTheme>),
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
+    AutoPageBreakMaxDepth(Option<u32>),
     LocalizationTables(LocalizationTableUndo),
 }
 
@@ -1941,6 +1947,9 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::Theme(previous) => state.theme = previous,
             DocumentStateUndo::Locale(previous) => state.locale = previous,
             DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
+            DocumentStateUndo::AutoPageBreakMaxDepth(previous) => {
+                state.auto_page_break_max_depth = previous
+            }
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
                     match table {
@@ -1986,6 +1995,18 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().document_type = value;
+    }
+
+    fn set_auto_page_break_max_depth(&self, value: Option<u32>) {
+        self.record_document_state_undo(DocumentStateField::AutoPageBreakMaxDepth, || {
+            (
+                DocumentStateUndo::AutoPageBreakMaxDepth(
+                    self.document_state.borrow().auto_page_break_max_depth,
+                ),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().auto_page_break_max_depth = value;
     }
 
     fn append_document_author(&self, name: String) {
@@ -2948,7 +2969,14 @@ impl Evaluator {
         // shadowed explicitly by the evaluator's existing precedence rule.
         let state_shadowed = matches!(
             name,
-            "captionposition" | "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
+            "captionposition"
+                | "docauthor"
+                | "docauthors"
+                | "dockeywords"
+                | "doclang"
+                | "theme"
+                | "autopagebreak"
+                | "noautopagebreak"
         ) && context.get_function(name).is_some();
         if context.get_function(name).is_some() && !is_document_state(name) {
             return Ok(None);
@@ -3290,7 +3318,14 @@ impl Evaluator {
 
         let source_defined_shadowable_document_state = matches!(
             name,
-            "captionposition" | "docauthor" | "docauthors" | "dockeywords" | "doclang" | "theme"
+            "captionposition"
+                | "docauthor"
+                | "docauthors"
+                | "dockeywords"
+                | "doclang"
+                | "theme"
+                | "autopagebreak"
+                | "noautopagebreak"
         ) && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
@@ -5434,6 +5469,95 @@ impl Evaluator {
                 binding_plan,
                 first_origin,
             );
+        }
+
+        if name == "noautopagebreak" {
+            context.set_auto_page_break_max_depth(Some(0));
+            return CallOutcome::NoValue;
+        }
+
+        if name == "autopagebreak" {
+            let Some(binding_plan) = binding_plan else {
+                return CallOutcome::Failed;
+            };
+            let raw_body_candidate = match source_backed_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                name,
+                diagnostics,
+            ) {
+                Ok(candidate) => candidate,
+                Err(outcome) => return outcome,
+            };
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(values) => values,
+                    Err(outcome) => return outcome,
+                };
+            let bound = match bind_evaluated_arguments(
+                binding_plan,
+                evaluated_positional
+                    .into_iter()
+                    .zip(positional_args.iter())
+                    .map(|(value, source)| (value, value_source_span(source, span)))
+                    .collect(),
+                evaluated_named,
+                raw_body_candidate.as_ref(),
+                *span,
+            ) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    return CallOutcome::Failed;
+                }
+            };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
+            let Some(BoundSlot::Explicit {
+                value: argument,
+                span: argument_span,
+            }) = bound.slots.into_iter().next()
+            else {
+                return CallOutcome::Failed;
+            };
+            let max_depth = match value_conversion::convert_integer_with_origin(&argument) {
+                Ok(value) => value,
+                Err(error) => {
+                    diagnostics.push(conversion_failure_diagnostic(
+                        value_conversion::ConversionFailure::new(
+                            error,
+                            Some(argument_span),
+                            Some("maxdepth"),
+                            parameter_span,
+                            *span,
+                        ),
+                        Some("`.autopagebreak`"),
+                    ));
+                    return CallOutcome::Failed;
+                }
+            };
+            if max_depth < 0 {
+                diagnostics.push(document_state_conversion_error(
+                    "Heading depth cannot be negative.".to_string(),
+                    argument_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            context.set_auto_page_break_max_depth(Some(max_depth as u32));
+            return CallOutcome::NoValue;
         }
 
         if body.is_none() && positional_args.is_empty() && named_args.is_empty() {
@@ -12254,6 +12378,8 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "docname",
     "docdescription",
     "doctype",
+    "autopagebreak",
+    "noautopagebreak",
     "docauthor",
     "docauthors",
     "dockeywords",
@@ -13438,6 +13564,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     const CALLBACK_ALIASES: &[&str] = &["by"];
 
     let signature = match name {
+        "autopagebreak" => (
+            vec![ParameterMetadata::required("maxdepth")],
+            BodyPolicy::BindFinal,
+        ),
+        "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),
         "docname" | "docdescription" => (
             vec![ParameterMetadata::optional("value").named(false)],
             BodyPolicy::BindFinal,
