@@ -36,9 +36,101 @@ jobs:
         run: |
           set -euo pipefail
           "$QD" --version
-          echo '--- top-level help ---'
-          "$QD" --help
-          echo '--- compile alias help ---'
-          "$QD" c --help || true
-          echo '--- compile help ---'
-          "$QD" compile --help || true
+          "$QD" compile --help
+
+      - name: Compile independently-authored layout controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/focus-probe
+          mkdir -p "$root"
+
+          for doctype in plain paged slides; do
+            for layout in latex focus; do
+              src="$root/${doctype}-${layout}.qd"
+              out="$root/out-${doctype}-${layout}"
+              cat > "$src" <<EOF
+          .docname {Focus Probe}
+          .doctype {$doctype}
+          .theme {paperwhite} layout:{$layout}
+
+          # Probe Title
+
+          Lead paragraph with **bold** and *italic*.
+
+          ## Section
+
+          - Alpha
+          - Beta
+
+          > Quote
+
+          ```text
+          hello
+          ```
+          EOF
+              "$QD" compile "$src" --strict --clean --out "$out" --out-name probe
+              html="$(find "$out" -type f -name '*.html' -print -quit)"
+              test -n "$html"
+              printf '%s|%s|%s\n' "$doctype" "$layout" "$html" >> "$root/html-paths.tsv"
+            done
+          done
+
+          python3 - <<'PY'
+          from collections import Counter
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/focus-probe')
+
+          class SummaryParser(HTMLParser):
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.tags = Counter()
+                  self.text = []
+                  self.html_attrs = {}
+                  self.body_attrs = {}
+              def handle_starttag(self, tag, attrs):
+                  self.tags[tag] += 1
+                  if tag == 'html' and not self.html_attrs:
+                      self.html_attrs = dict(attrs)
+                  if tag == 'body' and not self.body_attrs:
+                      self.body_attrs = dict(attrs)
+              def handle_data(self, data):
+                  if data.strip():
+                      self.text.append(' '.join(data.split()))
+
+          summaries = {}
+          for row in (root / 'html-paths.tsv').read_text().splitlines():
+              doctype, layout, path = row.split('|', 2)
+              data = Path(path).read_bytes()
+              text = data.decode('utf-8')
+              parser = SummaryParser()
+              parser.feed(text)
+              key = f'{doctype}/{layout}'
+              summaries[key] = {
+                  'bytes': len(data),
+                  'sha256': sha256(data).hexdigest(),
+                  'tags': {k: parser.tags[k] for k in ('html','body','main','section','article','h1','h2','p','ul','li','blockquote','pre','code') if parser.tags[k]},
+                  'html_attrs': parser.html_attrs,
+                  'body_attrs': parser.body_attrs,
+                  'visible_text_sha256': sha256('\n'.join(parser.text).encode()).hexdigest(),
+              }
+
+          print('--- observable artifact summaries ---')
+          print(json.dumps(summaries, ensure_ascii=False, sort_keys=True, indent=2))
+          print('--- pairwise layout checks ---')
+          for doctype in ('plain', 'paged', 'slides'):
+              control = summaries[f'{doctype}/latex']
+              focus = summaries[f'{doctype}/focus']
+              print(json.dumps({
+                  'doctype': doctype,
+                  'artifact_differs': control['sha256'] != focus['sha256'],
+                  'visible_text_equal': control['visible_text_sha256'] == focus['visible_text_sha256'],
+                  'tag_counts_equal': control['tags'] == focus['tags'],
+                  'html_attrs_equal': control['html_attrs'] == focus['html_attrs'],
+                  'body_attrs_equal': control['body_attrs'] == focus['body_attrs'],
+              }, sort_keys=True))
+          PY
