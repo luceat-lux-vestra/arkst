@@ -22,6 +22,8 @@ Observed invariants:
 
 The evaluator preserves omission rather than resolving it at call time because the oracle proves that a later `.pageformat` setter affects an earlier stack. Typst lowering resolves row/column omission from the final immutable `IrDocumentState.page_alignment`: `start -> Start`, `center -> Center`, `end -> End`, and unset/`justify -> Start`. The `justify` fallback is deliberate: the clean-room oracle proves no stacked `justify` value exists.
 
+Document serialization keeps the existing concrete `main_axis_alignment` wire field for legacy readers and adds `main_axis_alignment_inherited: true` only when omission provenance must survive a round trip. New readers use that additive flag to restore `None`; legacy serde readers ignore it and continue to consume the concrete `Start` fallback for omitted rows/columns. Explicit alignments do not emit the flag.
+
 This keeps the IR backend-neutral and preserves the observable distinction required by other output targets; no editor, host, CSS, browser, or Quarkdown renderer concept enters Arkst IR.
 
 ## Verification
