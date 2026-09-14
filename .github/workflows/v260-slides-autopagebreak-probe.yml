@@ -42,24 +42,11 @@ jobs:
           root.mkdir(parents=True, exist_ok=True)
 
           sequence = '\n'.join([
-              'Intro marker.',
-              '',
-              '# QD-H1-A',
-              '',
-              'Body H1 A.',
-              '',
-              '## QD-H2-A',
-              '',
-              'Body H2 A.',
-              '',
-              '### QD-H3-A',
-              '',
-              'Body H3 A.',
-              '',
-              '## QD-H2-B',
-              '',
-              'Body H2 B.',
-              '',
+              'Intro marker.', '',
+              '# QD-H1-A', '', 'Body H1 A.', '',
+              '## QD-H2-A', '', 'Body H2 A.', '',
+              '### QD-H3-A', '', 'Body H3 A.', '',
+              '## QD-H2-B', '', 'Body H2 B.', '',
           ])
 
           fixtures = {
@@ -80,6 +67,7 @@ jobs:
               'slides-manual': '.doctype {slides}\n\nIntro manual.\n\n## QD-MANUAL-H2-A\n\nBody before manual.\n\n<<<\n\n## QD-MANUAL-H2-B\n\nBody after manual.\n',
               'slides-breakpage-no': '.doctype {slides}\n\nIntro heading primitive.\n\n.heading {QD-BREAKPAGE-NO} depth:{2} breakpage:{no}\n\nBody no break.\n',
               'slides-breakpage-yes': '.doctype {slides}\n\nIntro heading primitive.\n\n.heading {QD-BREAKPAGE-YES} depth:{2}\n\nBody default break.\n',
+              'slides-mutation': '.doctype {slides}\n.autopagebreak maxdepth:{1}\n\n# QD-MUT-H1-A\n\nBody A.\n\n## QD-MUT-H2-A\n\nBody B.\n\n.autopagebreak maxdepth:{2}\n\n## QD-MUT-H2-B\n\nBody C.\n\n.noautopagebreak\n\n# QD-MUT-H1-C\n\nBody D.\n\n.autopagebreak maxdepth:{3}\n\n### QD-MUT-H3-D\n\nBody E.\n',
               'slides-apb-negative': '.doctype {slides}\n.autopagebreak maxdepth:{-1}\n\n# QD-NEGATIVE\n',
           }
 
@@ -115,10 +103,7 @@ jobs:
           rc=$?
           set -e
           printf 'negative_override_exit=%s\n' "$rc"
-          printf '%s\n' '--- negative stderr ---'
-          cat "$root/negative.stderr"
-          printf '%s\n' '--- negative stdout ---'
-          cat "$root/negative.stdout"
+          grep -m1 'Heading depth cannot be negative' "$root/negative.stderr"
 
       - name: Compare deterministic HTML artifacts
         shell: bash
@@ -151,121 +136,95 @@ jobs:
               print(json.dumps({'left': left, 'right': right, 'html_byte_identical': html[left] == html[right]}, sort_keys=True))
           PY
 
-      - name: Observe rendered DOM slide and page grouping
+      - name: Print concise heading break contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class HeadingParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.rows = []
+              def handle_starttag(self, tag, attrs):
+                  if tag not in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
+                      return
+                  attrs = dict(attrs)
+                  ident = attrs.get('id', '')
+                  if not ident.startswith('qd-'):
+                      return
+                  classes = set(attrs.get('class', '').split())
+                  self.rows.append((tag, ident, 'page-break' in classes))
+
+          root = Path('/tmp/autopagebreak-probe')
+          wanted = {
+              'slides-default', 'slides-apb-0', 'slides-apb-1', 'slides-apb-2', 'slides-apb-3',
+              'slides-noapb', 'plain-default', 'plain-apb-2', 'paged-default', 'docs-default',
+              'slides-heading-start', 'slides-consecutive', 'slides-manual',
+              'slides-breakpage-no', 'slides-breakpage-yes', 'slides-mutation',
+          }
+          paths = dict(row.split('|', 1) for row in (root / 'html-paths.tsv').read_text().splitlines())
+          for name in sorted(wanted):
+              parser = HeadingParser()
+              parser.feed(Path(paths[name]).read_text())
+              contract = ','.join(f'{tag}:{ident}:break={str(br).lower()}' for tag, ident, br in parser.rows)
+              print(f'CONTRACT {name} {contract}')
+          PY
+
+      - name: Observe rendered slide grouping for adversarial fixtures
         shell: bash
         run: |
           set -euo pipefail
           root=/tmp/autopagebreak-probe
           chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$chrome"
-          printf 'chrome=%s\n' "$chrome"
 
           python3 - <<'PY'
           from pathlib import Path
-
           root = Path('/tmp/autopagebreak-probe')
+          wanted = {'slides-default', 'slides-heading-start', 'slides-consecutive', 'slides-manual', 'slides-mutation'}
+          paths = dict(row.split('|', 1) for row in (root / 'html-paths.tsv').read_text().splitlines())
           script = r'''<script>
           window.addEventListener('load', () => {
             const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-            const describe = (el) => ({
-              tag: el.tagName.toLowerCase(),
-              id: el.id || '',
-              class: typeof el.className === 'string' ? el.className : '',
-              childIndex: el.parentElement ? Array.prototype.indexOf.call(el.parentElement.children, el) : -1,
-            });
-            const headings = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')]
-              .filter(h => clean(h.textContent).startsWith('QD-'))
-              .map(h => {
-                const ancestors = [];
-                let cur = h;
-                while (cur && cur !== document.documentElement) {
-                  ancestors.push(describe(cur));
-                  cur = cur.parentElement;
-                }
-                return {tag: h.tagName.toLowerCase(), text: clean(h.textContent), ancestors};
-              });
-            const sections = [...document.querySelectorAll('section')].map((s, index) => ({
+            const sections = [...document.querySelectorAll('.slides > section')].map((s, index) => ({
               index,
-              id: s.id || '',
-              class: typeof s.className === 'string' ? s.className : '',
-              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => h.tagName.toLowerCase() + ':' + clean(h.textContent)).filter(x => x.includes('QD-')),
-              text: clean(s.innerText).slice(0, 180),
+              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => clean(h.textContent)).filter(x => x.startsWith('QD-')),
+              text: clean(s.innerText).slice(0, 120),
             }));
-            const breakish = [...document.querySelectorAll('*')]
-              .filter(el => /(?:^|[\s_-])(page|slide|break)(?:$|[\s_-])/i.test(el.tagName + ' ' + (el.id || '') + ' ' + (typeof el.className === 'string' ? el.className : '')))
-              .slice(0, 80)
-              .map(el => ({...describe(el), text: clean(el.innerText).slice(0, 100)}));
-            const result = {
-              headings,
-              sectionCount: sections.length,
-              sections,
-              breakish,
-              bodyText: clean(document.body.innerText).slice(0, 500),
-            };
             const pre = document.createElement('pre');
-            pre.id = 'qd-autopagebreak-probe-dump';
-            pre.textContent = JSON.stringify(result);
+            pre.id = 'qd-probe-dump';
+            pre.textContent = JSON.stringify(sections);
             document.body.appendChild(pre);
           });
           </script>'''
-
-          rows = []
-          for row in (root / 'html-paths.tsv').read_text().splitlines():
-              name, html_path = row.split('|', 1)
-              path = Path(html_path)
-              text = path.read_text()
-              instrumented = path.with_name(path.stem + '-instrumented.html')
-              instrumented.write_text(text.replace('</body>', script + '</body>', 1))
-              dump = root / f'{name}-dom.html'
-              rows.append((name, instrumented, dump))
-          (root / 'instrumented-paths.tsv').write_text('\n'.join('|'.join(map(str, row)) for row in rows) + '\n')
+          rows=[]
+          for name in sorted(wanted):
+              path=Path(paths[name])
+              inst=path.with_name(path.stem + '-instrumented.html')
+              inst.write_text(path.read_text().replace('</body>', script + '</body>', 1))
+              rows.append((name, inst, root / f'{name}-dom.html'))
+          (root / 'instrumented-paths.tsv').write_text('\n'.join('|'.join(map(str,row)) for row in rows) + '\n')
           PY
 
           while IFS='|' read -r name html dump; do
             "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
-              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump"
+              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump" 2>/dev/null
           done < "$root/instrumented-paths.tsv"
 
           python3 - <<'PY'
           from html import unescape
-          import json
           from pathlib import Path
-          import re
-
-          root = Path('/tmp/autopagebreak-probe')
-          pattern = re.compile(r'<pre id="qd-autopagebreak-probe-dump">(.*?)</pre>', re.S)
+          import json, re
+          root=Path('/tmp/autopagebreak-probe')
+          pattern=re.compile(r'<pre id="qd-probe-dump">(.*?)</pre>', re.S)
           for row in (root / 'instrumented-paths.tsv').read_text().splitlines():
-              name, _, dump_path = row.split('|', 2)
-              match = pattern.search(Path(dump_path).read_text())
+              name, _, dump=row.split('|',2)
+              match=pattern.search(Path(dump).read_text())
               if not match:
                   raise SystemExit(f'missing DOM dump for {name}')
-              observed = json.loads(unescape(match.group(1)))
-              print('OBSERVATION ' + name)
-              print(json.dumps(observed, ensure_ascii=False, sort_keys=True))
-          PY
-
-      - name: Print raw HTML neighborhoods around probe headings
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          root = Path('/tmp/autopagebreak-probe')
-          markers = re.compile(r'QD-[A-Z0-9-]+')
-          for row in (root / 'html-paths.tsv').read_text().splitlines():
-              name, path = row.split('|', 1)
-              text = Path(path).read_text()
-              print(f'RAW-NEIGHBORHOODS {name}')
-              seen = set()
-              for match in markers.finditer(text):
-                  marker = match.group(0)
-                  if marker in seen:
-                      continue
-                  seen.add(marker)
-                  start = max(0, match.start() - 350)
-                  end = min(len(text), match.end() + 350)
-                  snippet = text[start:end].replace('\n', '\\n')
-                  print(f'{marker}: {snippet}')
+              sections=json.loads(unescape(match.group(1)))
+              print('SECTIONS ' + name + ' ' + json.dumps(sections, sort_keys=True))
           PY
