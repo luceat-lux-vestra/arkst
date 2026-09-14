@@ -5,10 +5,10 @@
 /// - platform-neutral Typst backend input/output contract
 /// - Source map updates during lowering
 pub mod backend;
-#[path = "lowering.rs"]
-mod lowering_base;
 #[path = "focus_lowering.rs"]
 pub mod lowering;
+#[path = "lowering.rs"]
+mod lowering_base;
 
 pub use backend::{TypstBackend, TypstInput, TypstOutput};
 pub use lowering::{lower_to_typst, lower_to_typst_code};
