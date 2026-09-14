@@ -53,3 +53,5 @@ jobs:
           auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" \
             push origin "HEAD:${GITHUB_REF_NAME}"
+
+# rerun after correcting independently-authored fixture indentation
