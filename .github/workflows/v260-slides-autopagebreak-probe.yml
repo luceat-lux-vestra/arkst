@@ -1,0 +1,264 @@
+name: Quarkdown v2.6 slides auto-page-break black-box probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/v260-slides-autopagebreak-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create independently-authored fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('/tmp/autopagebreak-probe')
+          root.mkdir(parents=True, exist_ok=True)
+
+          sequence = '''Intro marker.
+
+# QD-H1-A
+
+Body H1 A.
+
+## QD-H2-A
+
+Body H2 A.
+
+### QD-H3-A
+
+Body H3 A.
+
+## QD-H2-B
+
+Body H2 B.
+'''
+
+          fixtures = {
+              'slides-default': '.doctype {slides}\n\n' + sequence,
+              'slides-apb-0': '.doctype {slides}\n.autopagebreak maxdepth:{0}\n\n' + sequence,
+              'slides-apb-1': '.doctype {slides}\n.autopagebreak maxdepth:{1}\n\n' + sequence,
+              'slides-apb-2': '.doctype {slides}\n.autopagebreak maxdepth:{2}\n\n' + sequence,
+              'slides-apb-3': '.doctype {slides}\n.autopagebreak maxdepth:{3}\n\n' + sequence,
+              'slides-noapb': '.doctype {slides}\n.noautopagebreak\n\n' + sequence,
+              'plain-default': '.doctype {plain}\n\n' + sequence,
+              'paged-default': '.doctype {paged}\n\n' + sequence,
+              'docs-default': '.doctype {docs}\n\n' + sequence,
+              'slides-heading-start': '.doctype {slides}\n\n# QD-START-H1\n\nStart body.\n\n## QD-START-H2\n\nSecond body.\n',
+              'slides-consecutive': '.doctype {slides}\n\nIntro consecutive.\n\n# QD-CON-H1\n\n## QD-CON-H2-A\n\n## QD-CON-H2-B\n\nTail consecutive.\n',
+              'slides-manual': '.doctype {slides}\n\nIntro manual.\n\n## QD-MANUAL-H2-A\n\nBody before manual.\n\n<<<\n\n## QD-MANUAL-H2-B\n\nBody after manual.\n',
+              'slides-breakpage-no': '.doctype {slides}\n\nIntro heading primitive.\n\n.heading {QD-BREAKPAGE-NO} depth:{2} breakpage:{no}\n\nBody no break.\n',
+              'slides-breakpage-yes': '.doctype {slides}\n\nIntro heading primitive.\n\n.heading {QD-BREAKPAGE-YES} depth:{2}\n\nBody default break.\n',
+              'slides-apb-negative': '.doctype {slides}\n.autopagebreak maxdepth:{-1}\n\n# QD-NEGATIVE\n',
+          }
+
+          for name, text in fixtures.items():
+              (root / f'{name}.qd').write_text(text)
+          PY
+
+      - name: Compile successful fixtures with the official binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/autopagebreak-probe
+          : > "$root/html-paths.tsv"
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            if [ "$name" = slides-apb-negative ]; then
+              continue
+            fi
+            out="$root/out-$name"
+            "$QD" compile "$src" --strict --clean --pretty --out "$out" --out-name probe
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+            printf '%s|%s\n' "$name" "$html" >> "$root/html-paths.tsv"
+          done
+
+      - name: Observe invalid negative override
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/autopagebreak-probe
+          set +e
+          "$QD" compile "$root/slides-apb-negative.qd" --strict --clean --pretty --out "$root/out-slides-apb-negative" --out-name probe >"$root/negative.stdout" 2>"$root/negative.stderr"
+          rc=$?
+          set -e
+          printf 'negative_override_exit=%s\n' "$rc"
+          printf '%s\n' '--- negative stderr ---'
+          cat "$root/negative.stderr"
+          printf '%s\n' '--- negative stdout ---'
+          cat "$root/negative.stdout"
+
+      - name: Compare deterministic HTML artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from hashlib import sha256
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/autopagebreak-probe')
+          html = {}
+          for row in (root / 'html-paths.tsv').read_text().splitlines():
+              name, path = row.split('|', 1)
+              data = Path(path).read_bytes()
+              html[name] = data
+              print(json.dumps({'fixture': name, 'html_sha256': sha256(data).hexdigest(), 'html_bytes': len(data)}, sort_keys=True))
+
+          pairs = [
+              ('slides-default', 'slides-apb-0'),
+              ('slides-default', 'slides-apb-1'),
+              ('slides-default', 'slides-apb-2'),
+              ('slides-default', 'slides-apb-3'),
+              ('slides-apb-0', 'slides-noapb'),
+              ('slides-breakpage-no', 'slides-breakpage-yes'),
+          ]
+          for left, right in pairs:
+              print(json.dumps({'left': left, 'right': right, 'html_byte_identical': html[left] == html[right]}, sort_keys=True))
+          PY
+
+      - name: Observe rendered DOM slide/page grouping
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/autopagebreak-probe
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          printf 'chrome=%s\n' "$chrome"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('/tmp/autopagebreak-probe')
+          script = r'''<script>
+          window.addEventListener('load', () => {
+            const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+            const describe = (el) => ({
+              tag: el.tagName.toLowerCase(),
+              id: el.id || '',
+              class: typeof el.className === 'string' ? el.className : '',
+              childIndex: el.parentElement ? Array.prototype.indexOf.call(el.parentElement.children, el) : -1,
+            });
+            const headings = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')]
+              .filter(h => clean(h.textContent).startsWith('QD-'))
+              .map(h => {
+                const ancestors = [];
+                let cur = h;
+                while (cur && cur !== document.documentElement) {
+                  ancestors.push(describe(cur));
+                  cur = cur.parentElement;
+                }
+                return {tag: h.tagName.toLowerCase(), text: clean(h.textContent), ancestors};
+              });
+            const sections = [...document.querySelectorAll('section')].map((s, index) => ({
+              index,
+              id: s.id || '',
+              class: typeof s.className === 'string' ? s.className : '',
+              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => `${h.tagName.toLowerCase()}:${clean(h.textContent)}`).filter(x => x.includes('QD-')),
+              text: clean(s.innerText).slice(0, 180),
+            }));
+            const breakish = [...document.querySelectorAll('*')]
+              .filter(el => /(?:^|[\s_-])(page|slide|break)(?:$|[\s_-])/i.test(`${el.tagName} ${el.id || ''} ${typeof el.className === 'string' ? el.className : ''}`))
+              .slice(0, 80)
+              .map(el => ({...describe(el), text: clean(el.innerText).slice(0, 100)}));
+            const result = {
+              headings,
+              sectionCount: sections.length,
+              sections,
+              breakish,
+              bodyText: clean(document.body.innerText).slice(0, 500),
+            };
+            const pre = document.createElement('pre');
+            pre.id = 'qd-autopagebreak-probe-dump';
+            pre.textContent = JSON.stringify(result);
+            document.body.appendChild(pre);
+          });
+          </script>'''
+
+          rows = []
+          for row in (root / 'html-paths.tsv').read_text().splitlines():
+              name, html_path = row.split('|', 1)
+              path = Path(html_path)
+              text = path.read_text()
+              instrumented = path.with_name(path.stem + '-instrumented.html')
+              instrumented.write_text(text.replace('</body>', script + '</body>', 1))
+              dump = root / f'{name}-dom.html'
+              rows.append((name, instrumented, dump))
+          (root / 'instrumented-paths.tsv').write_text('\n'.join('|'.join(map(str, row)) for row in rows) + '\n')
+          PY
+
+          while IFS='|' read -r name html dump; do
+            "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump"
+          done < "$root/instrumented-paths.tsv"
+
+          python3 - <<'PY'
+          from html import unescape
+          import json
+          from pathlib import Path
+          import re
+
+          root = Path('/tmp/autopagebreak-probe')
+          pattern = re.compile(r'<pre id="qd-autopagebreak-probe-dump">(.*?)</pre>', re.S)
+          for row in (root / 'instrumented-paths.tsv').read_text().splitlines():
+              name, _, dump_path = row.split('|', 2)
+              match = pattern.search(Path(dump_path).read_text())
+              if not match:
+                  raise SystemExit(f'missing DOM dump for {name}')
+              observed = json.loads(unescape(match.group(1)))
+              print('OBSERVATION ' + name)
+              print(json.dumps(observed, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Print raw HTML neighborhoods around probe headings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('/tmp/autopagebreak-probe')
+          markers = re.compile(r'QD-[A-Z0-9-]+')
+          for row in (root / 'html-paths.tsv').read_text().splitlines():
+              name, path = row.split('|', 1)
+              text = Path(path).read_text()
+              print(f'RAW-NEIGHBORHOODS {name}')
+              seen = set()
+              for match in markers.finditer(text):
+                  marker = match.group(0)
+                  if marker in seen:
+                      continue
+                  seen.add(marker)
+                  start = max(0, match.start() - 350)
+                  end = min(len(text), match.end() + 350)
+                  snippet = text[start:end].replace('\n', '\\n')
+                  print(f'{marker}: {snippet}')
+          PY
