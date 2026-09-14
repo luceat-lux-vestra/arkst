@@ -37,19 +37,12 @@ jobs:
           set -euo pipefail
           root=/tmp/focus-probe
           mkdir -p "$root"
-
           for doctype in plain paged slides; do
             for variant in latex focus focus-default-color; do
               case "$variant" in
-                latex)
-                  theme='.theme {paperwhite} layout:{latex}'
-                  ;;
-                focus)
-                  theme='.theme {paperwhite} layout:{focus}'
-                  ;;
-                focus-default-color)
-                  theme='.theme layout:{focus}'
-                  ;;
+                latex) theme='.theme {paperwhite} layout:{latex}' ;;
+                focus) theme='.theme {paperwhite} layout:{focus}' ;;
+                focus-default-color) theme='.theme layout:{focus}' ;;
               esac
               src="$root/${doctype}-${variant}.qd"
               out="$root/out-${doctype}-${variant}"
@@ -57,20 +50,10 @@ jobs:
                 ".docname {Focus Probe}" \
                 ".doctype {$doctype}" \
                 "$theme" \
-                '' \
-                '# Probe Title' \
-                '' \
-                'Lead paragraph with **bold** and *italic*.' \
-                '' \
-                '## Section' \
-                '' \
-                '- Alpha' \
-                '- Beta' \
-                '' \
-                '> Quote' \
-                '' \
-                '.code lang:{text}' \
-                '    hello' > "$src"
+                '' '# Probe Title' '' \
+                'Lead paragraph with **bold** and *italic*.' '' \
+                '## Section' '' '- Alpha' '- Beta' '' '> Quote' '' \
+                '.code lang:{text}' '    hello' > "$src"
               "$QD" compile "$src" --strict --clean --out "$out" --out-name probe
               html="$(find "$out" -type f -name '*.html' -print -quit)"
               test -n "$html"
@@ -78,90 +61,57 @@ jobs:
             done
           done
 
-      - name: Observe artifact manifests without reading bundled implementation source
+      - name: Observe asset-set boundary only
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          from collections import Counter
           from hashlib import sha256
-          from html.parser import HTMLParser
           import json
           from pathlib import Path
-
           root = Path('/tmp/focus-probe')
-
-          class SummaryParser(HTMLParser):
-              def __init__(self):
-                  super().__init__(convert_charrefs=True)
-                  self.tags = Counter()
-                  self.text = []
-                  self.body_attrs = {}
-              def handle_starttag(self, tag, attrs):
-                  self.tags[tag] += 1
-                  if tag == 'body' and not self.body_attrs:
-                      self.body_attrs = dict(attrs)
-              def handle_data(self, data):
-                  if data.strip():
-                      self.text.append(' '.join(data.split()))
-
-          summaries = {}
           manifests = {}
+          html_hashes = {}
           for row in (root / 'html-paths.tsv').read_text().splitlines():
               doctype, variant, out_dir, html_path = row.split('|', 3)
               out = Path(out_dir)
-              data = Path(html_path).read_bytes()
-              parser = SummaryParser()
-              parser.feed(data.decode('utf-8'))
               key = f'{doctype}/{variant}'
-              summaries[key] = {
-                  'html_bytes': len(data),
-                  'html_sha256': sha256(data).hexdigest(),
-                  'tags': {k: parser.tags[k] for k in ('html','body','main','section','article','h1','h2','p','ul','li','blockquote','pre','code') if parser.tags[k]},
-                  'body_attrs': parser.body_attrs,
-                  'visible_text_sha256': sha256('\n'.join(parser.text).encode()).hexdigest(),
-              }
               manifests[key] = {
-                  str(p.relative_to(out)): (p.stat().st_size, sha256(p.read_bytes()).hexdigest())
+                  str(p.relative_to(out)): sha256(p.read_bytes()).hexdigest()
                   for p in sorted(out.rglob('*')) if p.is_file()
               }
-
-          print('--- HTML observable summaries ---')
-          print(json.dumps(summaries, ensure_ascii=False, sort_keys=True, indent=2))
-          print('--- output-manifest differences ---')
+              html_hashes[key] = sha256(Path(html_path).read_bytes()).hexdigest()
           for doctype in ('plain', 'paged', 'slides'):
-              base = manifests[f'{doctype}/latex']
-              for variant in ('focus', 'focus-default-color'):
-                  other = manifests[f'{doctype}/{variant}']
-                  paths = sorted(set(base) | set(other))
-                  changed = [p for p in paths if base.get(p) != other.get(p)]
-                  print(json.dumps({
-                      'doctype': doctype,
-                      'compare': f'latex-vs-{variant}',
-                      'file_count_latex': len(base),
-                      'file_count_other': len(other),
-                      'changed_file_count': len(changed),
-                      'changed_paths': changed,
-                  }, sort_keys=True))
+              latex = manifests[f'{doctype}/latex']
+              focus = manifests[f'{doctype}/focus']
+              changed = [p for p in sorted(set(latex) | set(focus)) if latex.get(p) != focus.get(p)]
+              print(json.dumps({
+                  'doctype': doctype,
+                  'html_byte_identical': html_hashes[f'{doctype}/latex'] == html_hashes[f'{doctype}/focus'],
+                  'latex_file_count': len(latex),
+                  'focus_file_count': len(focus),
+                  'changed_file_count': len(changed),
+                  'focus_layout_asset_present': any('/theme/layout/focus/' in ('/' + p) or p.endswith('/theme/layout/focus.checksum') for p in focus),
+                  'latex_layout_asset_present': any('/theme/layout/latex/' in ('/' + p) or p.endswith('/theme/layout/latex.checksum') for p in latex),
+              }, sort_keys=True))
           PY
 
-      - name: Observe unknown-layout failure boundary
+      - name: Observe unknown-layout renderer warning boundary
         shell: bash
         run: |
           set -euo pipefail
           root=/tmp/focus-probe
           src="$root/unknown-layout.qd"
-          printf '%s\n' \
-            '.doctype {plain}' \
-            '.theme {paperwhite} layout:{arkst-probe-missing-layout}' \
-            '# Probe' > "$src"
+          printf '%s\n' '.doctype {plain}' '.theme {paperwhite} layout:{arkst-probe-missing-layout}' '# Probe' > "$src"
           set +e
           "$QD" compile "$src" --strict --clean --out "$root/out-unknown" --out-name probe >"$root/unknown.stdout" 2>"$root/unknown.stderr"
           rc=$?
           set -e
           printf 'unknown_layout_exit=%s\n' "$rc"
-          sed -n '1,40p' "$root/unknown.stderr"
-          test "$rc" -ne 0
+          cat "$root/unknown.stderr"
+          test "$rc" -eq 0
+          grep -F "'layout' theme not found: arkst-probe-missing-layout" "$root/unknown.stderr"
+          test -n "$(find "$root/out-unknown" -type f -name '*.html' -print -quit)"
 
       - name: Observe rendered computed styles and geometry
         shell: bash
@@ -172,14 +122,12 @@ jobs:
           printf 'chrome=%s\n' "$chrome"
 
           python3 - <<'PY'
-          import json
           from pathlib import Path
-
           root = Path('/tmp/focus-probe')
           script = r'''<script>
           window.addEventListener('load', () => {
-            const selectors = ['body', 'main', 'section', 'h1', 'h2', 'p', 'ul', 'blockquote', 'pre', 'code'];
-            const props = ['display', 'position', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'textAlign', 'color', 'backgroundColor', 'marginTop', 'marginBottom', 'paddingTop', 'paddingBottom', 'maxWidth'];
+            const selectors = ['body','main','section','h1','h2','p','ul','blockquote','pre','code'];
+            const props = ['display','position','fontFamily','fontSize','fontWeight','lineHeight','textAlign','color','backgroundColor','marginTop','marginBottom','paddingTop','paddingBottom','maxWidth'];
             const result = {};
             for (const selector of selectors) {
               const el = document.querySelector(selector);
@@ -188,12 +136,7 @@ jobs:
               const rect = el.getBoundingClientRect();
               const values = {};
               for (const prop of props) values[prop] = style[prop];
-              values.rect = {
-                x: Math.round(rect.x * 100) / 100,
-                y: Math.round(rect.y * 100) / 100,
-                width: Math.round(rect.width * 100) / 100,
-                height: Math.round(rect.height * 100) / 100
-              };
+              values.rect = {x: Math.round(rect.x*100)/100, y: Math.round(rect.y*100)/100, width: Math.round(rect.width*100)/100, height: Math.round(rect.height*100)/100};
               result[selector] = values;
             }
             const pre = document.createElement('pre');
@@ -202,31 +145,21 @@ jobs:
             document.body.appendChild(pre);
           });
           </script>'''
-
           rows = []
           for row in (root / 'html-paths.tsv').read_text().splitlines():
               doctype, variant, out_dir, html_path = row.split('|', 3)
               path = Path(html_path)
               text = path.read_text()
-              marker = '</body>'
-              if marker not in text:
-                  raise SystemExit(f'missing body close in {path}')
               instrumented = path.with_name(path.stem + '-instrumented.html')
-              instrumented.write_text(text.replace(marker, script + marker, 1))
+              instrumented.write_text(text.replace('</body>', script + '</body>', 1))
               dump = root / f'{doctype}-{variant}-dom.html'
               rows.append((doctype, variant, instrumented, dump))
           (root / 'instrumented-paths.tsv').write_text('\n'.join('|'.join(map(str, row)) for row in rows) + '\n')
           PY
 
           while IFS='|' read -r doctype variant html dump; do
-            "$chrome" \
-              --headless=new \
-              --no-sandbox \
-              --disable-gpu \
-              --allow-file-access-from-files \
-              --window-size=1440,1000 \
-              --virtual-time-budget=3000 \
-              --dump-dom "file://$html" > "$dump"
+            "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump"
           done < /tmp/focus-probe/instrumented-paths.tsv
 
           python3 - <<'PY'
@@ -234,30 +167,29 @@ jobs:
           import json
           from pathlib import Path
           import re
-
           root = Path('/tmp/focus-probe')
           observed = {}
           pattern = re.compile(r'<pre id="qd-focus-probe-style-dump">(.*?)</pre>', re.S)
           for row in (root / 'instrumented-paths.tsv').read_text().splitlines():
               doctype, variant, html_path, dump_path = row.split('|', 3)
-              dumped = Path(dump_path).read_text()
-              match = pattern.search(dumped)
+              match = pattern.search(Path(dump_path).read_text())
               if not match:
                   raise SystemExit(f'missing style dump for {doctype}/{variant}')
               observed[f'{doctype}/{variant}'] = json.loads(unescape(match.group(1)))
 
-          print('--- computed-style pairwise differences ---')
-          for doctype in ('plain', 'paged', 'slides'):
+          for doctype in ('plain','paged','slides'):
               latex = observed[f'{doctype}/latex']
-              for variant in ('focus', 'focus-default-color'):
-                  other = observed[f'{doctype}/{variant}']
-                  diff = {}
-                  for selector in sorted(set(latex) | set(other)):
-                      if latex.get(selector) == other.get(selector):
-                          continue
-                      keys = sorted(set(latex.get(selector, {})) | set(other.get(selector, {})))
-                      changed = {k: {'latex': latex.get(selector, {}).get(k), variant: other.get(selector, {}).get(k)} for k in keys if latex.get(selector, {}).get(k) != other.get(selector, {}).get(k)}
-                      if changed:
-                          diff[selector] = changed
-                  print(json.dumps({'doctype': doctype, 'compare': f'latex-vs-{variant}', 'differences': diff}, ensure_ascii=False, sort_keys=True))
+              focus = observed[f'{doctype}/focus']
+              focus_default = observed[f'{doctype}/focus-default-color']
+              diff = {}
+              for selector in sorted(set(latex) | set(focus)):
+                  keys = sorted(set(latex.get(selector, {})) | set(focus.get(selector, {})))
+                  changed = {k: {'latex': latex.get(selector, {}).get(k), 'focus': focus.get(selector, {}).get(k)} for k in keys if latex.get(selector, {}).get(k) != focus.get(selector, {}).get(k)}
+                  if changed:
+                      diff[selector] = changed
+              print(json.dumps({
+                  'doctype': doctype,
+                  'focus_vs_latex': diff,
+                  'focus_default_color_equals_explicit_paperwhite': focus_default == focus,
+              }, ensure_ascii=False, sort_keys=True))
           PY
