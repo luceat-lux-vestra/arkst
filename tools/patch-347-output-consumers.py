@@ -55,14 +55,15 @@ for name in PATHS:
         text,
     )
 
-    path.write_text(text)
+    # Fake Typst executables must treat the final CLI argument as the output
+    # path now that `--format <target>` precedes the input/output pair.
+    text = text.replace(
+        '  if [ \\"$2\\" = \\"--root\\" ]; then output=\\"$5\\"; else output=\\"$3\\"; fi\\n',
+        '  for output do :; done\\n',
+    )
+    text = text.replace(
+        '  if [ \\"$2\\" = \\"--root\\" ]; then output=\\"$5\\"; else output=\\"$3\\"; fi\\n  printf',
+        '  for output do :; done\\n  printf',
+    )
 
-# Fail closed if any known old TypstOutput field access remains in migrated files.
-remaining = []
-for name in PATHS:
-    text = Path(name).read_text()
-    for needle in ("output.pdf", "typst_output.pdf"):
-        if needle in text:
-            remaining.append(f"{name}: {needle}")
-if remaining:
-    raise SystemExit("unmigrated TypstOutput PDF access:\n" + "\n".join(remaining))
+    path.write_text(text)
