@@ -457,6 +457,21 @@ pub struct IrDocumentState {
     /// implicit default for the output backend to resolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_page_break_max_depth: Option<u32>,
+    /// Explicit document-global horizontal alignment selected by the bounded
+    /// alignment-only `.pageformat` slice. `None` preserves the document and
+    /// backend default. This is intentionally distinct from stacked main-axis
+    /// alignment because `justify` is valid here but not for `.row`/`.column`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_alignment: Option<IrDocumentAlignment>,
+}
+
+/// Backend-neutral document-global horizontal alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrDocumentAlignment {
+    Start,
+    Center,
+    End,
+    Justify,
 }
 
 /// Backend-neutral locale data retained by the bounded `.doclang` slice.
@@ -3121,6 +3136,7 @@ mod tests {
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
                 auto_page_break_max_depth: Some(2),
+                page_alignment: None,
             },
             ..IrMetadata::default()
         };
@@ -3247,6 +3263,7 @@ mod tests {
                 code_blocks: None,
             },
             auto_page_break_max_depth: None,
+            page_alignment: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(

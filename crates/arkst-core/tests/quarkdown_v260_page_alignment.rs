@@ -21,7 +21,11 @@ fn alignment_only_pageformat_commits_final_document_state() {
         ("justify", IrDocumentAlignment::Justify),
     ] {
         let result = compile_source(&format!(".pageformat alignment:{{{raw}}}\n"));
-        assert!(result.diagnostics.is_empty(), "{raw}: {:?}", result.diagnostics);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{raw}: {:?}",
+            result.diagnostics
+        );
         assert_eq!(
             result.ir.metadata.document_state.page_alignment,
             Some(expected),
@@ -50,9 +54,7 @@ fn unsupported_pageformat_shapes_do_not_claim_global_alignment_state() {
         ".pageformat alignment:{none}\n",
         ".pageformat\n",
     ] {
-        let result = compile_source(&format!(
-            ".pageformat alignment:{{center}}\n{source}"
-        ));
+        let result = compile_source(&format!(".pageformat alignment:{{center}}\n{source}"));
         assert_eq!(
             result.ir.metadata.document_state.page_alignment,
             Some(IrDocumentAlignment::Center),
@@ -65,9 +67,8 @@ fn unsupported_pageformat_shapes_do_not_claim_global_alignment_state() {
 
 #[test]
 fn invalid_alignment_fails_without_replacing_last_committed_state() {
-    let result = compile_source(
-        ".pageformat alignment:{center}\n.pageformat alignment:{INVALID}\n",
-    );
+    let result =
+        compile_source(".pageformat alignment:{center}\n.pageformat alignment:{INVALID}\n");
     assert!(
         !result.diagnostics.is_empty(),
         "invalid closed-enum text must fail conversion"
@@ -94,8 +95,7 @@ fn failed_outer_alignment_conversion_rolls_back_nested_document_state_writes() {
         "outer pageformat failure must roll back nested document-state mutation"
     );
     assert_eq!(
-        result.ir.metadata.document_state.page_alignment,
-        None,
+        result.ir.metadata.document_state.page_alignment, None,
         "failed pageformat must not publish alignment state"
     );
 }
@@ -133,8 +133,5 @@ fn page_alignment_wire_is_backward_compatible_and_explicit_when_set() {
     );
     let restored: IrDocumentState =
         serde_json::from_value(value).expect("round trip explicit state");
-    assert_eq!(
-        restored.page_alignment,
-        Some(IrDocumentAlignment::Justify)
-    );
+    assert_eq!(restored.page_alignment, Some(IrDocumentAlignment::Justify));
 }

@@ -8,8 +8,8 @@
 
 use arkst_ir::{
     IrCallable, IrCaptionPosition, IrColor, IrContainerAlignment, IrCrossAxisAlignment,
-    IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg, IrNode, IrRange,
-    IrRawBody, IrSize, IrSizeUnit, IrValue,
+    IrDocumentAlignment, IrDocumentType, IrEnumValue, IrInline, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrRange, IrRawBody, IrSize, IrSizeUnit, IrValue,
 };
 use arkst_source::SourceSpan;
 use std::ops::Deref;
@@ -325,6 +325,27 @@ static CAPTION_POSITION_SPEC: ClosedEnumSpec<'static, IrCaptionPosition> = Close
         ClosedEnumVariant {
             declaration_name: "BOTTOM",
             value: IrCaptionPosition::Bottom,
+        },
+    ],
+};
+
+static DOCUMENT_ALIGNMENT_SPEC: ClosedEnumSpec<'static, IrDocumentAlignment> = ClosedEnumSpec {
+    variants: &[
+        ClosedEnumVariant {
+            declaration_name: "START",
+            value: IrDocumentAlignment::Start,
+        },
+        ClosedEnumVariant {
+            declaration_name: "CENTER",
+            value: IrDocumentAlignment::Center,
+        },
+        ClosedEnumVariant {
+            declaration_name: "END",
+            value: IrDocumentAlignment::End,
+        },
+        ClosedEnumVariant {
+            declaration_name: "JUSTIFY",
+            value: IrDocumentAlignment::Justify,
         },
     ],
 };
@@ -905,6 +926,30 @@ pub(crate) fn convert_domain_with_origin(
                 }),
             },
         },
+    }
+}
+
+/// Converts the bounded document-global `.pageformat alignment` domain.
+///
+/// Dynamic text follows the same origin gate as the existing closed-enum
+/// conversion boundary. A nested/static String does not silently acquire a
+/// new domain identity.
+pub(crate) fn convert_document_alignment_with_origin(
+    argument: &InvocationValue,
+) -> Result<IrDocumentAlignment, ConversionError> {
+    match &argument.value {
+        IrValue::String(value) | IrValue::Identifier(value)
+            if argument.origin == ValueOrigin::Dynamic =>
+        {
+            DOCUMENT_ALIGNMENT_SPEC
+                .value_for(value)
+                .ok_or(ConversionError::InvalidText {
+                    target: ConversionTarget::Enum,
+                })
+        }
+        _ => Err(ConversionError::UnsupportedValue {
+            target: ConversionTarget::Enum,
+        }),
     }
 }
 
