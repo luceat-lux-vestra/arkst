@@ -59,10 +59,10 @@ use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody, IrLandscapeComponent,
-    IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter, IrRange, IrRawBody,
-    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,
+    IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
+    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -463,6 +463,7 @@ struct DocumentState {
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
     auto_page_break_max_depth: Option<u32>,
+    page_alignment: Option<IrDocumentAlignment>,
     localization_tables: LocalizationTables,
 }
 
@@ -478,6 +479,7 @@ impl Default for DocumentState {
             locale: None,
             caption_position: Default::default(),
             auto_page_break_max_depth: None,
+            page_alignment: None,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -495,6 +497,7 @@ impl DocumentState {
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
+            page_alignment: snapshot.page_alignment,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -510,6 +513,7 @@ impl DocumentState {
             locale: self.locale.clone(),
             caption_position: self.caption_position,
             auto_page_break_max_depth: self.auto_page_break_max_depth,
+            page_alignment: self.page_alignment,
         }
     }
 }
@@ -874,6 +878,7 @@ enum DocumentStateField {
     Locale,
     CaptionPosition,
     AutoPageBreakMaxDepth,
+    PageAlignment,
     LocalizationTables,
 }
 
@@ -887,6 +892,7 @@ enum DocumentStateUndo {
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
     AutoPageBreakMaxDepth(Option<u32>),
+    PageAlignment(Option<IrDocumentAlignment>),
     LocalizationTables(LocalizationTableUndo),
 }
 
@@ -1950,6 +1956,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::AutoPageBreakMaxDepth(previous) => {
                 state.auto_page_break_max_depth = previous
             }
+            DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
                     match table {
@@ -2007,6 +2014,16 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().auto_page_break_max_depth = value;
+    }
+
+    fn set_page_alignment(&self, value: Option<IrDocumentAlignment>) {
+        self.record_document_state_undo(DocumentStateField::PageAlignment, || {
+            (
+                DocumentStateUndo::PageAlignment(self.document_state.borrow().page_alignment),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_alignment = value;
     }
 
     fn append_document_author(&self, name: String) {
@@ -3254,6 +3271,19 @@ impl Evaluator {
                 None,
             ));
             return CallOutcome::Failed;
+        }
+
+        if name == "pageformat"
+            && context.get_function(name).is_none()
+            && positional_args.is_empty()
+            && named_args.len() == 1
+            && named_args[0].name == "alignment"
+            && !matches!(&named_args[0].value, IrValue::None)
+            && body.is_none()
+            && raw_body.is_none()
+            && lambda_parameters.is_none()
+        {
+            return self.evaluate_page_alignment_builtin(named_args, span, diagnostics, context);
         }
 
         let native_binding_plan = match self.preflight_native_binding(
@@ -5384,6 +5414,46 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
+        CallOutcome::NoValue
+    }
+
+    fn evaluate_page_alignment_builtin(
+        &self,
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let Some(argument) = evaluated_named.into_iter().next() else {
+            return CallOutcome::Unresolved;
+        };
+        let candidate_span = argument.arg.span;
+        let value = InvocationValue {
+            value: argument.arg.value,
+            origin: argument.origin,
+        };
+        let alignment = match value_conversion::convert_document_alignment_with_origin(&value) {
+            Ok(value) => value,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(candidate_span),
+                        Some("alignment"),
+                        None,
+                        *span,
+                    ),
+                    Some("`.pageformat`"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        context.set_page_alignment(Some(alignment));
         CallOutcome::NoValue
     }
 
