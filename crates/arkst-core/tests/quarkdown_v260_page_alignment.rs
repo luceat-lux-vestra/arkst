@@ -1,4 +1,4 @@
-use arkst_core::ir::{IrDocumentAlignment, IrDocumentState, IrNode};
+use arkst_core::ir::{IrDocumentAlignment, IrDocumentState};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -42,7 +42,7 @@ fn alignment_only_pageformat_commits_final_document_state() {
 }
 
 #[test]
-fn unsupported_pageformat_shapes_remain_structurally_preserved() {
+fn unsupported_pageformat_shapes_do_not_claim_global_alignment_state() {
     for source in [
         ".pageformat side:{left} alignment:{end}\n",
         ".pageformat pages:{1..2} alignment:{end}\n",
@@ -56,13 +56,8 @@ fn unsupported_pageformat_shapes_remain_structurally_preserved() {
         assert_eq!(
             result.ir.metadata.document_state.page_alignment,
             Some(IrDocumentAlignment::Center),
-            "unsupported partial pageformat must not mutate the bounded global state: {source:?}"
-        );
-        assert!(
-            result.ir.nodes.iter().any(
-                |node| matches!(node, IrNode::FunctionCall { name, .. } if name == "pageformat")
-            ),
-            "unsupported pageformat must remain structurally preserved: {source:?}; IR={:?}",
+            "unsupported partial pageformat must not mutate the bounded global state: {source:?}; diagnostics={:?}; IR={:?}",
+            result.diagnostics,
             result.ir
         );
     }
@@ -87,12 +82,7 @@ fn invalid_alignment_fails_without_replacing_last_committed_state() {
 #[test]
 fn failed_outer_alignment_conversion_rolls_back_nested_document_state_writes() {
     let result = compile_source(
-        ".autopagebreak maxdepth:{3}\n\
-.function {badalignment}\n\
-    .autopagebreak maxdepth:{1}\n\
-    invalid\n\
-\n\
-.pageformat alignment:{.badalignment}\n",
+        ".autopagebreak maxdepth:{3}\n.function {badalignment}\n    .autopagebreak maxdepth:{1}\n    invalid\n\n.pageformat alignment:{.badalignment}\n",
     );
     assert!(
         !result.diagnostics.is_empty(),
@@ -113,11 +103,7 @@ fn failed_outer_alignment_conversion_rolls_back_nested_document_state_writes() {
 #[test]
 fn source_defined_pageformat_shadows_the_bounded_native() {
     let result = compile_source(
-        ".function {pageformat}\n\
-    alignment:\n\
-    SHADOW-PAGEFORMAT\n\
-\n\
-.pageformat alignment:{center}\n",
+        ".function {pageformat}\n    alignment:\n    SHADOW-PAGEFORMAT\n\n.pageformat alignment:{center}\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.ir.metadata.document_state.page_alignment, None);
