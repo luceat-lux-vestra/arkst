@@ -30,7 +30,7 @@ fn row_column_and_grid_defaults_are_distinct_and_typed() {
     assert!(row.diagnostics.is_empty(), "{row:?}");
     let row = stacked(&row);
     assert_eq!(row.layout, IrStackedLayout::Row);
-    assert_eq!(row.main_axis_alignment, IrMainAxisAlignment::Start);
+    assert_eq!(row.main_axis_alignment, None);
     assert_eq!(row.cross_axis_alignment, IrCrossAxisAlignment::Center);
     assert_eq!(row.row_gap, None);
     assert_eq!(row.column_gap, None);
@@ -39,7 +39,7 @@ fn row_column_and_grid_defaults_are_distinct_and_typed() {
     assert!(column.diagnostics.is_empty(), "{column:?}");
     let column = stacked(&column);
     assert_eq!(column.layout, IrStackedLayout::Column);
-    assert_eq!(column.main_axis_alignment, IrMainAxisAlignment::Start);
+    assert_eq!(column.main_axis_alignment, None);
     assert_eq!(column.cross_axis_alignment, IrCrossAxisAlignment::Center);
 
     let grid = compile_source(".grid columns:{2}\n    A\n");
@@ -51,7 +51,7 @@ fn row_column_and_grid_defaults_are_distinct_and_typed() {
             columns: 2.try_into().unwrap()
         }
     );
-    assert_eq!(grid.main_axis_alignment, IrMainAxisAlignment::Center);
+    assert_eq!(grid.main_axis_alignment, Some(IrMainAxisAlignment::Center));
     assert_eq!(grid.cross_axis_alignment, IrCrossAxisAlignment::Center);
     assert_eq!(grid.row_gap, None);
     assert_eq!(grid.column_gap, None);
@@ -63,7 +63,10 @@ fn row_column_and_grid_bind_typed_arguments_and_preserve_children() {
     let result = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let row = stacked(&result);
-    assert_eq!(row.main_axis_alignment, IrMainAxisAlignment::SpaceBetween);
+    assert_eq!(
+        row.main_axis_alignment,
+        Some(IrMainAxisAlignment::SpaceBetween)
+    );
     assert_eq!(row.cross_axis_alignment, IrCrossAxisAlignment::Start);
     assert_eq!(
         row.column_gap,
@@ -80,7 +83,7 @@ fn row_column_and_grid_bind_typed_arguments_and_preserve_children() {
     let result = compile_source(source);
     assert!(result.diagnostics.is_empty(), "{result:?}");
     let column = stacked(&result);
-    assert_eq!(column.main_axis_alignment, IrMainAxisAlignment::Start);
+    assert_eq!(column.main_axis_alignment, Some(IrMainAxisAlignment::Start));
     assert_eq!(column.cross_axis_alignment, IrCrossAxisAlignment::Stretch);
     assert_eq!(
         column.row_gap.as_ref().map(|gap| gap.unit),

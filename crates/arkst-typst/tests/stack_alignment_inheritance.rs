@@ -1,6 +1,6 @@
 use arkst_ir::{
-    IrComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentState,
-    IrInline, IrMainAxisAlignment, IrMetadata, IrNode, IrStackedComponent, IrStackedLayout,
+    IrComponent, IrCrossAxisAlignment, IrDocument, IrDocumentAlignment, IrDocumentState, IrInline,
+    IrMainAxisAlignment, IrMetadata, IrNode, IrStackedComponent, IrStackedLayout,
 };
 use arkst_source::{SourceId, SourceSpan};
 use arkst_typst::lowering::lower_to_typst_code;
@@ -71,10 +71,7 @@ fn omitted_row_and_column_consume_final_document_alignment() {
 fn explicit_alignment_wins_and_justify_falls_back_to_start() {
     let explicit = lower(
         Some(IrDocumentAlignment::Center),
-        stack(
-            IrStackedLayout::Row,
-            Some(IrMainAxisAlignment::Start),
-        ),
+        stack(IrStackedLayout::Row, Some(IrMainAxisAlignment::Start)),
     );
     assert_eq!(explicit.matches("h(1fr)").count(), 0, "{explicit}");
 

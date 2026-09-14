@@ -86,7 +86,11 @@ fn align_and_center_wrappers_do_not_stamp_omitted_stack_alignment() {
     assert_eq!(stacked(&container.children[0]).main_axis_alignment, None);
 
     let centered = compile_source(".center\n    .column\n        A\n");
-    assert!(centered.diagnostics.is_empty(), "{:?}", centered.diagnostics);
+    assert!(
+        centered.diagnostics.is_empty(),
+        "{:?}",
+        centered.diagnostics
+    );
     let [IrNode::Component {
         component: IrComponent::Container(container),
     }] = centered.ir.nodes.as_slice()
@@ -105,10 +109,7 @@ fn nested_omitted_and_explicit_stacks_remain_independent() {
     let outer = stacked(&result.ir.nodes[0]);
     assert_eq!(outer.main_axis_alignment, None);
     let inner = stacked(&outer.children[0]);
-    assert_eq!(
-        inner.main_axis_alignment,
-        Some(IrMainAxisAlignment::End)
-    );
+    assert_eq!(inner.main_axis_alignment, Some(IrMainAxisAlignment::End));
 }
 
 #[test]
