@@ -1,0 +1,118 @@
+name: Quarkdown v2.6 auto-page-break final-state probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/v260-slides-autopagebreak-final-state-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create independently-authored reversal fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/final-state-probe
+          mkdir -p "$root"
+          cat > "$root/slides-final-zero.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{3}
+
+          # QD-ZERO-H1
+
+          ## QD-ZERO-H2
+
+          .noautopagebreak
+
+          ### QD-ZERO-H3
+          EOF
+          cat > "$root/slides-final-one.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{3}
+
+          ## QD-ONE-H2-EARLY
+
+          # QD-ONE-H1
+
+          .autopagebreak maxdepth:{1}
+
+          ## QD-ONE-H2-LATE
+          EOF
+          cat > "$root/slides-doctype-at-end.qd" <<'EOF'
+          # QD-END-H1
+
+          ## QD-END-H2
+
+          ### QD-END-H3
+
+          .doctype {slides}
+          EOF
+
+      - name: Compile with official binary and assert final-state contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/final-state-probe
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            "$QD" compile "$src" --strict --clean --pretty --out "$root/out-$name" --out-name probe
+          done
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class Parser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.rows = []
+              def handle_starttag(self, tag, attrs):
+                  if tag not in {'h1','h2','h3','h4','h5','h6'}:
+                      return
+                  attrs = dict(attrs)
+                  ident = attrs.get('id', '')
+                  if ident.startswith('qd-'):
+                      self.rows.append((ident, 'page-break' in set(attrs.get('class', '').split())))
+
+          root = Path('/tmp/final-state-probe')
+          expected = {
+              'slides-final-zero': [
+                  ('qd-zero-h1', False), ('qd-zero-h2', False), ('qd-zero-h3', False),
+              ],
+              'slides-final-one': [
+                  ('qd-one-h2-early', False), ('qd-one-h1', True), ('qd-one-h2-late', False),
+              ],
+              'slides-doctype-at-end': [
+                  ('qd-end-h1', True), ('qd-end-h2', True), ('qd-end-h3', False),
+              ],
+          }
+          for name, want in expected.items():
+              html = next((root / f'out-{name}').rglob('*.html'))
+              parser = Parser()
+              parser.feed(html.read_text())
+              print(f'CONTRACT {name} {parser.rows}')
+              if parser.rows != want:
+                  raise SystemExit(f'{name}: expected {want}, observed {parser.rows}')
+          PY
