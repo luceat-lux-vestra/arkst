@@ -1,0 +1,291 @@
+name: Quarkdown v2.6 row-column alignment black-box probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/v260-row-column-alignment-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create independently-authored fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('/tmp/stack-alignment-probe')
+          root.mkdir(parents=True, exist_ok=True)
+
+          row = '''.row
+              .container classname:{probe-a} width:{80px} height:{30px}
+                  QD-ROW-A
+
+              .container classname:{probe-b} width:{80px} height:{30px}
+                  QD-ROW-B
+          '''
+          row_start = row.replace('.row\n', '.row alignment:{start}\n', 1)
+          row_end = row.replace('.row\n', '.row alignment:{end}\n', 1)
+          row_space = row.replace('.row\n', '.row alignment:{spacebetween}\n', 1)
+
+          column = '''.column
+              .container classname:{probe-a} width:{80px} height:{30px}
+                  QD-COLUMN-A
+
+              .container classname:{probe-b} width:{80px} height:{30px}
+                  QD-COLUMN-B
+          '''
+          column_start = column.replace('.column\n', '.column alignment:{start}\n', 1)
+          column_end = column.replace('.column\n', '.column alignment:{end}\n', 1)
+
+          fixtures = {
+              'plain-row-omitted': '.doctype {plain}\n\n' + row,
+              'plain-row-align-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in row.splitlines(True)),
+              'plain-row-align-end': '.doctype {plain}\n\n.align {end}\n' + ''.join('    ' + line if line.strip() else line for line in row.splitlines(True)),
+              'plain-row-page-center': '.doctype {plain}\n.pageformat alignment:{center}\n\n' + row,
+              'plain-row-explicit-start-in-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in row_start.splitlines(True)),
+              'plain-row-explicit-end-in-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in row_end.splitlines(True)),
+              'plain-row-explicit-space-in-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in row_space.splitlines(True)),
+              'plain-column-omitted': '.doctype {plain}\n\n' + column,
+              'plain-column-align-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in column.splitlines(True)),
+              'plain-column-align-end': '.doctype {plain}\n\n.align {end}\n' + ''.join('    ' + line if line.strip() else line for line in column.splitlines(True)),
+              'plain-column-page-center': '.doctype {plain}\n.pageformat alignment:{center}\n\n' + column,
+              'plain-column-explicit-start-in-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in column_start.splitlines(True)),
+              'plain-column-explicit-end-in-center': '.doctype {plain}\n\n.align {center}\n' + ''.join('    ' + line if line.strip() else line for line in column_end.splitlines(True)),
+              'plain-row-center-wrapper': '.doctype {plain}\n\n.center\n' + ''.join('    ' + line if line.strip() else line for line in row.splitlines(True)),
+              'slides-row-omitted': '.doctype {slides}\n\n' + row,
+              'slides-column-omitted': '.doctype {slides}\n\n' + column,
+              'paged-row-omitted': '.doctype {paged}\n\n' + row,
+              'docs-row-omitted': '.doctype {docs}\n\n' + row,
+              'plain-container-resets-center': '.doctype {plain}\n\n.align {center}\n    .container\n' + ''.join('        ' + line if line.strip() else line for line in row.splitlines(True)),
+              'nested-row-column-center': '''.doctype {plain}
+
+.align {center}
+    .row
+        .container classname:{probe-outer} width:{100px}
+            QD-OUTER
+
+        .column
+            .container classname:{probe-a} width:{80px} height:{30px}
+                QD-NESTED-A
+
+            .container classname:{probe-b} width:{80px} height:{30px}
+                QD-NESTED-B
+''',
+              'nested-row-column-explicit-start': '''.doctype {plain}
+
+.align {center}
+    .row
+        .container classname:{probe-outer} width:{100px}
+            QD-OUTER
+
+        .column alignment:{start}
+            .container classname:{probe-a} width:{80px} height:{30px}
+                QD-NESTED-A
+
+            .container classname:{probe-b} width:{80px} height:{30px}
+                QD-NESTED-B
+''',
+              'shadow-row': '''.function {row}
+    QD-SHADOW-ROW
+
+.row
+''',
+              'shadow-column': '''.function {column}
+    QD-SHADOW-COLUMN
+
+.column
+''',
+              'invalid-row': '''.row alignment:{INVALID}
+    QD-INVALID
+''',
+              'invalid-column': '''.column alignment:{INVALID}
+    QD-INVALID
+''',
+          }
+
+          for name, text in fixtures.items():
+              (root / f'{name}.qd').write_text(text)
+          PY
+
+      - name: Compile successful fixtures with official binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/stack-alignment-probe
+          : > "$root/html-paths.tsv"
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            case "$name" in
+              invalid-row|invalid-column) continue ;;
+            esac
+            out="$root/out-$name"
+            "$QD" compile "$src" --strict --clean --pretty --out "$out" --out-name probe
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+            printf '%s|%s\n' "$name" "$html" >> "$root/html-paths.tsv"
+          done
+
+      - name: Verify shadowing and fail-closed invalid explicit alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/stack-alignment-probe
+          for name in shadow-row shadow-column; do
+            html="$(awk -F'|' -v n="$name" '$1==n {print $2}' "$root/html-paths.tsv")"
+            grep -q "QD-SHADOW-" "$html"
+            printf 'SHADOW %s ok\n' "$name"
+          done
+          for name in invalid-row invalid-column; do
+            set +e
+            "$QD" compile "$root/$name.qd" --strict --clean --pretty --out "$root/out-$name" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
+            rc=$?
+            set -e
+            printf 'INVALID %s exit=%s stderr=%s\n' "$name" "$rc" "$(tr '\n' ' ' < "$root/$name.stderr" | head -c 400)"
+            if find "$root/out-$name" -type f -name '*.html' -print -quit 2>/dev/null | grep -q .; then
+              html="$(find "$root/out-$name" -type f -name '*.html' -print -quit)"
+              if grep -q 'QD-INVALID' "$html"; then
+                echo "invalid alignment unexpectedly rendered marker" >&2
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Print raw HTML ancestry hints
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/stack-alignment-probe
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('/tmp/stack-alignment-probe')
+          for row in (root / 'html-paths.tsv').read_text().splitlines():
+              name, path = row.split('|', 1)
+              if name.startswith('shadow-'):
+                  continue
+              text = Path(path).read_text()
+              marker = 'QD-ROW-A' if 'row' in name and 'nested-' not in name else 'QD-COLUMN-A'
+              if name.startswith('nested-'):
+                  marker = 'QD-NESTED-A'
+              pos = text.find(marker)
+              if pos >= 0:
+                  snippet = re.sub(r'\s+', ' ', text[max(0, pos-900):pos+300])
+                  print(f'RAW {name} {snippet}')
+          PY
+
+      - name: Observe computed style and geometry ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/stack-alignment-probe
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('/tmp/stack-alignment-probe')
+          script = r'''<script>
+          window.addEventListener('load', () => {
+            const markers = ['QD-ROW-A','QD-COLUMN-A','QD-NESTED-A'];
+            const findText = marker => {
+              const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+              while (w.nextNode()) if ((w.currentNode.nodeValue || '').includes(marker)) return w.currentNode.parentElement;
+              return null;
+            };
+            const dump = {};
+            for (const marker of markers) {
+              let el = findText(marker);
+              if (!el) continue;
+              const chain = [];
+              for (let i = 0; el && i < 12; i++, el = el.parentElement) {
+                const s = getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                chain.push({
+                  tag: el.tagName.toLowerCase(),
+                  id: el.id || '',
+                  cls: el.className || '',
+                  display: s.display,
+                  flexDirection: s.flexDirection,
+                  justifyContent: s.justifyContent,
+                  alignItems: s.alignItems,
+                  alignSelf: s.alignSelf,
+                  textAlign: s.textAlign,
+                  width: Math.round(r.width * 100) / 100,
+                  height: Math.round(r.height * 100) / 100,
+                  x: Math.round(r.x * 100) / 100,
+                  y: Math.round(r.y * 100) / 100,
+                });
+                if (el === document.body) break;
+              }
+              dump[marker] = chain;
+            }
+            const pre = document.createElement('pre');
+            pre.id = 'qd-stack-probe-dump';
+            pre.textContent = JSON.stringify(dump);
+            document.body.appendChild(pre);
+          });
+          </script>'''
+          rows=[]
+          for row in (root/'html-paths.tsv').read_text().splitlines():
+              name,path=row.split('|',1)
+              if name.startswith('shadow-'):
+                  continue
+              path=Path(path)
+              inst=path.with_name(path.stem+'-instrumented.html')
+              inst.write_text(path.read_text().replace('</body>', script+'</body>', 1))
+              rows.append((name,inst,root/f'{name}-dom.html'))
+          (root/'instrumented.tsv').write_text('\n'.join('|'.join(map(str,r)) for r in rows)+'\n')
+          PY
+          while IFS='|' read -r name html dump; do
+            "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump" 2>/dev/null
+          done < "$root/instrumented.tsv"
+          python3 - <<'PY'
+          from html import unescape
+          from pathlib import Path
+          import json,re
+          root=Path('/tmp/stack-alignment-probe')
+          pattern=re.compile(r'<pre id="qd-stack-probe-dump">(.*?)</pre>',re.S)
+          for row in (root/'instrumented.tsv').read_text().splitlines():
+              name,_,dump=row.split('|',2)
+              match=pattern.search(Path(dump).read_text())
+              if not match:
+                  raise SystemExit(f'missing dump for {name}')
+              data=json.loads(unescape(match.group(1)))
+              compact={}
+              for marker,chain in data.items():
+                  compact[marker]=[
+                      item for item in chain
+                      if item['display'] in ('flex','inline-flex','grid','inline-grid')
+                      or 'row' in str(item['cls']).lower()
+                      or 'column' in str(item['cls']).lower()
+                      or 'stack' in str(item['cls']).lower()
+                  ]
+              print('COMPUTED '+name+' '+json.dumps(compact,sort_keys=True))
+          PY
