@@ -27,17 +27,11 @@ jobs:
           from pathlib import Path
           path = Path('crates/arkst-engine/src/evaluator.rs')
           text = path.read_text()
-          old = '''        IrValue::Component(IrComponent::Stacked(IrStackedComponent {
-              layout: IrStackedLayout::Column,
-              main_axis_alignment: IrMainAxisAlignment::Start,
-              cross_axis_alignment: IrCrossAxisAlignment::Center,'''
-          new = '''        IrValue::Component(IrComponent::Stacked(IrStackedComponent {
-              layout: IrStackedLayout::Column,
-              main_axis_alignment: Some(IrMainAxisAlignment::Start),
-              cross_axis_alignment: IrCrossAxisAlignment::Center,'''
+          old = '            main_axis_alignment: IrMainAxisAlignment::Start,\n'
+          new = '            main_axis_alignment: Some(IrMainAxisAlignment::Start),\n'
           count = text.count(old)
           if count != 1:
-              raise SystemExit(f'expected exactly one test constructor, found {count}')
+              raise SystemExit(f'expected exactly one remaining concrete test constructor, found {count}')
           path.write_text(text.replace(old, new, 1))
           PY
           rm .github/workflows/zz-fix-340.yml
