@@ -3120,6 +3120,7 @@ mod tests {
                     tables: None,
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
+                auto_page_break_max_depth: Some(2),
             },
             ..IrMetadata::default()
         };
@@ -3245,6 +3246,7 @@ mod tests {
                 tables: Some(IrCaptionPosition::Bottom),
                 code_blocks: None,
             },
+            auto_page_break_max_depth: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(
