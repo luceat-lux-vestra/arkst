@@ -8,7 +8,7 @@ This checklist fixes the migration scope so compatibility work does not expand o
 - [x] `.doclang` v2.6.0 English getter and release-scoped locale acceptance — implemented and documented in `V260_DOCLANG.md`.
 - [x] `.code(callouts:)` binding, typed IR ownership, and renderer behavior — merged in #326; implementation/evidence is documented in `V260_CODE_CALLOUTS.md`.
 - [x] `focus` layout theme acceptance and output behavior — merged in #330; implementation/evidence is documented in `V260_FOCUS_LAYOUT.md`.
-- [ ] `slides` H1/H2 automatic page-break behavior and `.autopagebreak` override.
+- [x] `slides` H1/H2 automatic page-break behavior and `.autopagebreak` override — merged in #334; implementation/evidence is documented in `V260_AUTOPAGEBREAK.md`.
 - [ ] `.row` / `.column` omitted-alignment inheritance.
 - [ ] PDF export Chromium-family adapter and `--chrome-path` / `QD_CHROME_PATH`; obsolete Node/npm controls removed from the Arkst-compatible surface where present.
 - [ ] `docs` wide-table horizontal scrolling behavior for HTML output where Arkst owns equivalent output.
