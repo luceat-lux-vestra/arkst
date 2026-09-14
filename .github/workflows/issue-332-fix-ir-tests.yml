@@ -6,6 +6,7 @@ on:
       - feat/332-slides-autopagebreak
     paths:
       - .github/workflows/issue-332-fix-ir-tests.yml
+      - .github/issue-332-fix-ir-tests.py
 
 permissions:
   contents: write
