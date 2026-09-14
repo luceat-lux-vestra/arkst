@@ -34,7 +34,15 @@ pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {
 
 /// Lower an Arkst IR document to Typst source without returning its source map.
 pub fn lower_to_typst_code(doc: &IrDocument) -> String {
-    lower_to_typst(doc).0
+    let body = lowering_base::lower_to_typst_code(doc);
+    let Some(prelude) = focus_prelude(doc) else {
+        return body;
+    };
+
+    let mut output = String::with_capacity(prelude.len() + body.len());
+    output.push_str(&prelude);
+    output.push_str(&body);
+    output
 }
 
 fn focus_prelude(doc: &IrDocument) -> Option<String> {
