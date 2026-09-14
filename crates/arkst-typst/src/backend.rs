@@ -140,6 +140,18 @@ impl TypstOutput {
             None
         }
     }
+
+    pub fn single_artifact_bytes(&self) -> Option<&[u8]> {
+        self.single_artifact().map(|artifact| artifact.bytes.as_slice())
+    }
+
+    pub fn into_single_artifact(mut self) -> Option<TypstArtifact> {
+        if self.artifacts.len() == 1 {
+            self.artifacts.pop()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +185,7 @@ mod tests {
             Duration::ZERO,
         );
         assert!(empty.single_artifact().is_none());
+        assert!(empty.single_artifact_bytes().is_none());
 
         let one = TypstOutput::new(
             TypstOutputTarget::Pdf,
@@ -181,6 +194,7 @@ mod tests {
             Duration::ZERO,
         );
         assert_eq!(one.single_artifact().unwrap().path, "output.pdf");
+        assert_eq!(one.single_artifact_bytes(), Some(b"%PDF".as_slice()));
 
         let many = TypstOutput::new(
             TypstOutputTarget::Png,
@@ -192,5 +206,16 @@ mod tests {
             Duration::ZERO,
         );
         assert!(many.single_artifact().is_none());
+        assert!(many.single_artifact_bytes().is_none());
+
+        let owned = TypstOutput::new(
+            TypstOutputTarget::Pdf,
+            vec![TypstArtifact::new("output.pdf", b"owned".to_vec())],
+            vec![],
+            Duration::ZERO,
+        )
+        .into_single_artifact()
+        .unwrap();
+        assert_eq!(owned.bytes, b"owned");
     }
 }
