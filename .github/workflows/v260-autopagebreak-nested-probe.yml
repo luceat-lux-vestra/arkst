@@ -117,3 +117,56 @@ jobs:
               parser.feed(Path(path).read_text())
               print(f'CONTRACT {name} {parser.rows}')
           PY
+
+      - name: Observe final browser section grouping
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/nested-pagebreak-probe
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/nested-pagebreak-probe')
+          script=r'''<script>
+          window.addEventListener('load', () => {
+            const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+            const sections = [...document.querySelectorAll('.slides > section')].map((s,index) => ({
+              index,
+              text: clean(s.innerText).slice(0,240),
+              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => clean(h.textContent)).filter(x => x.startsWith('QD-')),
+              nested: [...s.querySelectorAll('blockquote h1,blockquote h2,blockquote h3,li h1,li h2,li h3')].map(h => clean(h.textContent)).filter(x => x.startsWith('QD-')),
+            }));
+            const pre=document.createElement('pre');
+            pre.id='qd-nested-dump';
+            pre.textContent=JSON.stringify(sections);
+            document.body.appendChild(pre);
+          });
+          </script>'''
+          rows=[]
+          for row in (root/'html-paths.tsv').read_text().splitlines():
+              name,path=row.split('|',1)
+              path=Path(path)
+              inst=path.with_name(path.stem+'-instrumented.html')
+              inst.write_text(path.read_text().replace('</body>', script+'</body>', 1))
+              rows.append((name,inst,root/f'{name}-dom.html'))
+          (root/'instrumented.tsv').write_text('\n'.join('|'.join(map(str,r)) for r in rows)+'\n')
+          PY
+          while IFS='|' read -r name html dump; do
+            "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+              --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$html" > "$dump" 2>/dev/null
+          done < "$root/instrumented.tsv"
+          python3 - <<'PY'
+          from html import unescape
+          from pathlib import Path
+          import json,re
+          root=Path('/tmp/nested-pagebreak-probe')
+          pattern=re.compile(r'<pre id="qd-nested-dump">(.*?)</pre>',re.S)
+          for row in (root/'instrumented.tsv').read_text().splitlines():
+              name,_,dump=row.split('|',2)
+              match=pattern.search(Path(dump).read_text())
+              if not match:
+                  raise SystemExit(f'missing dump for {name}')
+              sections=json.loads(unescape(match.group(1)))
+              print('SECTIONS '+name+' '+json.dumps(sections,sort_keys=True))
+          PY
