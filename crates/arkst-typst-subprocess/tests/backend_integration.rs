@@ -155,6 +155,41 @@ fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
 }
 
 #[test]
+fn integration_v260_omitted_stack_alignment_uses_final_page_state() {
+    let source =
+        ".row\n    A\n\n    B\n\n.pageformat alignment:{center}\n.column\n    C\n\n    D\n";
+    let project = VirtualProjectBuilder::new()
+        .entry("v260-stack-inherit.qd")
+        .expect("valid entry path")
+        .add_source("v260-stack-inherit.qd", source)
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let result = compile(&project, &CompileOptions::default());
+    assert!(
+        result.diagnostics.is_empty(),
+        "v2.6 stack inheritance diagnostics: {:?}",
+        result.diagnostics
+    );
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert_eq!(typst_code.matches("h(1fr)").count(), 2, "{typst_code}");
+    assert_eq!(typst_code.matches("v(1fr)").count(), 2, "{typst_code}");
+
+    with_typst("v260-stack-alignment-inheritance", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "v260-stack-inherit.qd".to_string(),
+            })
+            .expect("inherited stack Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_center_layout_lowers_to_valid_typst_and_pdf() {
     let source = ".center\n    Hello\n\n    .row\n        A\n\n        B\n";
     let project = VirtualProjectBuilder::new()

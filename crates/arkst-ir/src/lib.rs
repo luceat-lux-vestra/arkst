@@ -644,7 +644,11 @@ pub enum IrContainerAlignment {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IrStackedComponent {
     pub layout: IrStackedLayout,
-    pub main_axis_alignment: IrMainAxisAlignment,
+    /// Explicit main-axis alignment. `None` means a row/column omitted the
+    /// argument and must inherit final document-global alignment at output time.
+    /// Grid evaluation always publishes an explicit/defaulted value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_axis_alignment: Option<IrMainAxisAlignment>,
     pub cross_axis_alignment: IrCrossAxisAlignment,
     pub row_gap: Option<IrSize>,
     pub column_gap: Option<IrSize>,
@@ -1062,10 +1066,19 @@ enum WireComponent {
     Landscape(WireLandscapeComponent),
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WireStackedComponent {
     layout: IrStackedLayout,
+    // Keep the legacy concrete field on the wire so older readers can still
+    // decode newly serialized documents. The additive flag carries the new
+    // omission provenance and is ignored by legacy serde readers.
     main_axis_alignment: IrMainAxisAlignment,
+    #[serde(default, skip_serializing_if = "is_false")]
+    main_axis_alignment_inherited: bool,
     cross_axis_alignment: IrCrossAxisAlignment,
     row_gap: Option<IrSize>,
     column_gap: Option<IrSize>,
@@ -1505,15 +1518,28 @@ fn component_to_wire(
     sources: &SourceTable,
 ) -> Result<WireComponent, String> {
     Ok(match component {
-        IrComponent::Stacked(component) => WireComponent::Stacked(WireStackedComponent {
-            layout: component.layout.clone(),
-            main_axis_alignment: component.main_axis_alignment,
-            cross_axis_alignment: component.cross_axis_alignment,
-            row_gap: component.row_gap.clone(),
-            column_gap: component.column_gap.clone(),
-            children: wire_nodes(&component.children, sources)?,
-            span: component.span,
-        }),
+        IrComponent::Stacked(component) => {
+            let inherited_main_axis = component.main_axis_alignment.is_none();
+            let legacy_main_axis =
+                component
+                    .main_axis_alignment
+                    .unwrap_or(match component.layout {
+                        IrStackedLayout::Grid { .. } => IrMainAxisAlignment::Center,
+                        IrStackedLayout::Row | IrStackedLayout::Column => {
+                            IrMainAxisAlignment::Start
+                        }
+                    });
+            WireComponent::Stacked(WireStackedComponent {
+                layout: component.layout.clone(),
+                main_axis_alignment: legacy_main_axis,
+                main_axis_alignment_inherited: inherited_main_axis,
+                cross_axis_alignment: component.cross_axis_alignment,
+                row_gap: component.row_gap.clone(),
+                column_gap: component.column_gap.clone(),
+                children: wire_nodes(&component.children, sources)?,
+                span: component.span,
+            })
+        }
         IrComponent::Container(component) => WireComponent::Container(WireContainerComponent {
             width: component.width.clone(),
             height: component.height.clone(),
@@ -1953,7 +1979,8 @@ fn component_from_wire(
     Ok(match component {
         WireComponent::Stacked(component) => IrComponent::Stacked(IrStackedComponent {
             layout: component.layout,
-            main_axis_alignment: component.main_axis_alignment,
+            main_axis_alignment: (!component.main_axis_alignment_inherited)
+                .then_some(component.main_axis_alignment),
             cross_axis_alignment: component.cross_axis_alignment,
             row_gap: component.row_gap,
             column_gap: component.column_gap,
@@ -2808,7 +2835,7 @@ mod tests {
         let child_span = SourceSpan::new(SourceId(7), 12, 19);
         let (main_axis_alignment, row_gap, column_gap) = match &layout {
             IrStackedLayout::Row => (
-                IrMainAxisAlignment::Start,
+                Some(IrMainAxisAlignment::Start),
                 None,
                 Some(IrSize {
                     value: 10.0,
@@ -2816,7 +2843,7 @@ mod tests {
                 }),
             ),
             IrStackedLayout::Column => (
-                IrMainAxisAlignment::Start,
+                Some(IrMainAxisAlignment::Start),
                 Some(IrSize {
                     value: 10.0,
                     unit: IrSizeUnit::Px,
@@ -2824,7 +2851,7 @@ mod tests {
                 None,
             ),
             IrStackedLayout::Grid { .. } => (
-                IrMainAxisAlignment::Center,
+                Some(IrMainAxisAlignment::Center),
                 Some(IrSize {
                     value: 8.0,
                     unit: IrSizeUnit::Px,
@@ -2913,6 +2940,111 @@ mod tests {
                 value
             );
         }
+    }
+
+    #[test]
+    fn stacked_main_axis_serde_preserves_legacy_explicit_and_inherited_omission() {
+        let span = SourceSpan::new(SourceId(11), 0, 8);
+        let inherited = IrStackedComponent {
+            layout: IrStackedLayout::Row,
+            main_axis_alignment: None,
+            cross_axis_alignment: IrCrossAxisAlignment::Center,
+            row_gap: None,
+            column_gap: None,
+            children: Vec::new(),
+            span,
+        };
+        let inherited_json = serde_json::to_value(&inherited).expect("inherited stack serializes");
+        assert!(inherited_json.get("main_axis_alignment").is_none());
+        assert_eq!(
+            serde_json::from_value::<IrStackedComponent>(inherited_json)
+                .expect("inherited stack round trips")
+                .main_axis_alignment,
+            None
+        );
+
+        let explicit = IrStackedComponent {
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
+            ..inherited
+        };
+        let legacy_shape = serde_json::to_value(&explicit).expect("explicit stack serializes");
+        assert_eq!(
+            legacy_shape.get("main_axis_alignment"),
+            Some(&serde_json::json!("Start"))
+        );
+        assert_eq!(
+            serde_json::from_value::<IrStackedComponent>(legacy_shape)
+                .expect("old explicit wire shape remains readable")
+                .main_axis_alignment,
+            Some(IrMainAxisAlignment::Start)
+        );
+    }
+
+    #[test]
+    fn document_wire_keeps_legacy_stack_alignment_field_with_additive_inheritance_flag() {
+        #[derive(serde::Deserialize)]
+        struct LegacyStackShape {
+            main_axis_alignment: IrMainAxisAlignment,
+        }
+
+        let span = SourceSpan::new(SourceId(12), 0, 8);
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Stacked(IrStackedComponent {
+                    layout: IrStackedLayout::Row,
+                    main_axis_alignment: None,
+                    cross_axis_alignment: IrCrossAxisAlignment::Center,
+                    row_gap: None,
+                    column_gap: None,
+                    children: Vec::new(),
+                    span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_value(&document).expect("document wire serializes");
+        let stacked = &encoded["nodes"][0]["Component"]["component"]["Stacked"];
+        assert_eq!(
+            stacked.get("main_axis_alignment"),
+            Some(&serde_json::json!("Start"))
+        );
+        assert_eq!(
+            stacked.get("main_axis_alignment_inherited"),
+            Some(&serde_json::json!(true))
+        );
+        let legacy: LegacyStackShape = serde_json::from_value(stacked.clone())
+            .expect("legacy-shaped reader ignores additive inheritance flag");
+        assert_eq!(legacy.main_axis_alignment, IrMainAxisAlignment::Start);
+        assert_eq!(
+            serde_json::from_value::<IrDocument>(encoded).expect("new document wire round trips"),
+            document
+        );
+
+        let explicit = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Stacked(IrStackedComponent {
+                    layout: IrStackedLayout::Row,
+                    main_axis_alignment: Some(IrMainAxisAlignment::Start),
+                    cross_axis_alignment: IrCrossAxisAlignment::Center,
+                    row_gap: None,
+                    column_gap: None,
+                    children: Vec::new(),
+                    span,
+                }),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let explicit_json = serde_json::to_value(&explicit).expect("explicit document serializes");
+        let explicit_stack = &explicit_json["nodes"][0]["Component"]["component"]["Stacked"];
+        assert!(explicit_stack
+            .get("main_axis_alignment_inherited")
+            .is_none());
+        assert_eq!(
+            serde_json::from_value::<IrDocument>(explicit_json)
+                .expect("legacy explicit document remains readable"),
+            explicit
+        );
     }
 
     #[test]

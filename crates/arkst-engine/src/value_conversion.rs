@@ -2339,7 +2339,7 @@ mod tests {
     fn target_conversion_preserves_node_callable_iterable_dictionary_and_none() {
         let component = IrValue::Component(IrComponent::Stacked(IrStackedComponent {
             layout: IrStackedLayout::Row,
-            main_axis_alignment: IrMainAxisAlignment::Start,
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
             cross_axis_alignment: IrCrossAxisAlignment::Stretch,
             row_gap: None,
             column_gap: None,
@@ -2595,7 +2595,7 @@ mod tests {
     fn component_is_rejected_by_scalar_range_and_domain_converters() {
         let component = IrValue::Component(IrComponent::Stacked(IrStackedComponent {
             layout: IrStackedLayout::Row,
-            main_axis_alignment: IrMainAxisAlignment::Start,
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
             cross_axis_alignment: IrCrossAxisAlignment::Stretch,
             row_gap: None,
             column_gap: None,

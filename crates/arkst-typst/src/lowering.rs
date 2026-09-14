@@ -5,9 +5,9 @@
 
 use arkst_ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrDocumentType, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
-    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrTaskStatus, IrValue,
+    IrDocument, IrDocumentAlignment, IrDocumentType, IrInline, IrLandscapeComponent,
+    IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -75,6 +75,9 @@ struct LoweringContext {
     /// Whether the raw pushed text must not receive the continuation
     /// indent (verbatim code/raw content inside a list item).
     verbatim: bool,
+    /// Final document-global alignment consumed only by row/column components
+    /// whose main-axis alignment remained omitted through semantic evaluation.
+    inherited_stack_main_axis: IrMainAxisAlignment,
 }
 
 impl LoweringContext {
@@ -87,6 +90,7 @@ impl LoweringContext {
             list_item_indent: String::new(),
             at_line_start: false,
             verbatim: false,
+            inherited_stack_main_axis: IrMainAxisAlignment::Start,
         }
     }
 
@@ -104,6 +108,14 @@ impl LoweringContext {
     }
 
     fn lower_document(&mut self, doc: &IrDocument) {
+        self.inherited_stack_main_axis = match doc.metadata.document_state.page_alignment {
+            Some(IrDocumentAlignment::Center) => IrMainAxisAlignment::Center,
+            Some(IrDocumentAlignment::End) => IrMainAxisAlignment::End,
+            Some(IrDocumentAlignment::Start) | Some(IrDocumentAlignment::Justify) | None => {
+                IrMainAxisAlignment::Start
+            }
+        };
+
         // Emit metadata as Typst set-rules
         if let Some(ref title) = doc.metadata.title {
             self.push_str(&format!("// Title: {}\n", title));
@@ -459,7 +471,9 @@ impl LoweringContext {
         self.push_str("#stack(dir: ");
         self.push_str(direction);
         self.push_str(", ");
-        let distribution = component.main_axis_alignment;
+        let distribution = component
+            .main_axis_alignment
+            .unwrap_or(self.inherited_stack_main_axis);
         let child_count = component.children.len();
         if matches!(
             distribution,
@@ -586,7 +600,10 @@ impl LoweringContext {
     }
 
     fn lower_grid(&mut self, component: &IrStackedComponent, columns: u32) {
-        let main_alignment = match component.main_axis_alignment {
+        let distribution = component
+            .main_axis_alignment
+            .unwrap_or(IrMainAxisAlignment::Center);
+        let main_alignment = match distribution {
             IrMainAxisAlignment::Start => "left",
             IrMainAxisAlignment::Center => "center",
             IrMainAxisAlignment::End => "right",
@@ -595,13 +612,13 @@ impl LoweringContext {
             | IrMainAxisAlignment::SpaceEvenly => "left",
         };
         let distributed = matches!(
-            component.main_axis_alignment,
+            distribution,
             IrMainAxisAlignment::SpaceBetween
                 | IrMainAxisAlignment::SpaceAround
                 | IrMainAxisAlignment::SpaceEvenly
         );
         if distributed {
-            self.lower_distributed_grid(component, columns);
+            self.lower_distributed_grid(component, columns, distribution);
             return;
         }
         if main_alignment != "left" {
@@ -638,9 +655,14 @@ impl LoweringContext {
         self.push('\n');
     }
 
-    fn lower_distributed_grid(&mut self, component: &IrStackedComponent, columns: u32) {
+    fn lower_distributed_grid(
+        &mut self,
+        component: &IrStackedComponent,
+        columns: u32,
+        distribution: IrMainAxisAlignment,
+    ) {
         let logical_columns = columns as usize;
-        let edge_fraction = match component.main_axis_alignment {
+        let edge_fraction = match distribution {
             IrMainAxisAlignment::SpaceAround => Some("0.5fr"),
             IrMainAxisAlignment::SpaceEvenly => Some("1fr"),
             IrMainAxisAlignment::SpaceBetween => None,
@@ -1334,7 +1356,7 @@ mod tests {
         IrNode::Component {
             component: IrComponent::Stacked(IrStackedComponent {
                 layout,
-                main_axis_alignment,
+                main_axis_alignment: Some(main_axis_alignment),
                 cross_axis_alignment,
                 row_gap,
                 column_gap,

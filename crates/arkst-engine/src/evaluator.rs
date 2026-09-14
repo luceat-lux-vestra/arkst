@@ -4875,29 +4875,28 @@ impl Evaluator {
 
         let (layout, main_axis, cross_axis, row_gap, column_gap) = match name {
             "row" | "column" => {
-                let alignment = bound.take(0).unwrap_or_else(|| {
-                    default(IrValue::Enum(IrEnumValue::StackedMainAxisAlignment(
-                        IrMainAxisAlignment::Start,
-                    )))
-                });
+                let alignment = bound.take(0);
                 let cross = bound.take(1).unwrap_or_else(|| {
                     default(IrValue::Enum(IrEnumValue::StackedCrossAxisAlignment(
                         IrCrossAxisAlignment::Center,
                     )))
                 });
                 let gap = bound.take(2).unwrap_or_else(|| default(IrValue::None));
-                let main_axis = match convert_stacked_main_axis(&alignment.value) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        diagnostics.push(stacked_conversion_error(
-                            name,
-                            "alignment",
-                            alignment.span,
-                            alignment.parameter_span,
-                            error,
-                        ));
-                        return CallOutcome::Failed;
-                    }
+                let main_axis = match alignment.as_ref() {
+                    Some(alignment) => match convert_stacked_main_axis(&alignment.value) {
+                        Ok(value) => Some(value),
+                        Err(error) => {
+                            diagnostics.push(stacked_conversion_error(
+                                name,
+                                "alignment",
+                                alignment.span,
+                                alignment.parameter_span,
+                                error,
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    },
+                    None => None,
                 };
                 let cross_axis = match convert_stacked_cross_axis(&cross.value) {
                     Ok(value) => value,
@@ -5053,7 +5052,7 @@ impl Evaluator {
                 };
                 (
                     IrStackedLayout::Grid { columns },
-                    main_axis,
+                    Some(main_axis),
                     cross_axis,
                     vgap.or_else(|| gap.clone()),
                     hgap.or(gap),
@@ -18038,7 +18037,7 @@ mod tests {
     fn component_value(component_span: SourceSpan) -> IrValue {
         IrValue::Component(IrComponent::Stacked(IrStackedComponent {
             layout: IrStackedLayout::Column,
-            main_axis_alignment: IrMainAxisAlignment::Start,
+            main_axis_alignment: Some(IrMainAxisAlignment::Start),
             cross_axis_alignment: IrCrossAxisAlignment::Center,
             row_gap: Some(IrSize {
                 value: 10.0,
