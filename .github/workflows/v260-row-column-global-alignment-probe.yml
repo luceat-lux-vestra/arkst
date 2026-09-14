@@ -1,0 +1,125 @@
+name: Quarkdown v2.6 row-column global-alignment probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v260-row-column-global-alignment-probe-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/qd.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/qd.zip | sha256sum -c -
+          mkdir -p /tmp/qd
+          unzip -q /tmp/qd.zip -d /tmp/qd
+          qd="$(find /tmp/qd -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create focused fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('/tmp/global-alignment-probe')
+          root.mkdir(parents=True, exist_ok=True)
+          row = '.row\n    .container width:{80px} height:{30px}\n        QD-A\n\n    .container width:{80px} height:{30px}\n        QD-B\n'
+          col = '.column\n    .container width:{80px} height:{30px}\n        QD-A\n\n    .container width:{80px} height:{30px}\n        QD-B\n'
+          def exp(src, value):
+              first, rest = src.split('\n', 1)
+              return f'{first} alignment:{{{value}}}\n{rest}'
+          cases = {}
+          for kind, src in [('row', row), ('column', col)]:
+              for value in ['start', 'center', 'end', 'justify']:
+                  cases[f'plain-{kind}-global-{value}'] = f'.doctype {{plain}}\n.pageformat alignment:{{{value}}}\n\n{src}'
+              cases[f'plain-{kind}-explicit-start-global-center'] = '.doctype {plain}\n.pageformat alignment:{center}\n\n' + exp(src, 'start')
+              cases[f'plain-{kind}-explicit-end-global-center'] = '.doctype {plain}\n.pageformat alignment:{center}\n\n' + exp(src, 'end')
+              cases[f'plain-{kind}-before-final-center'] = '.doctype {plain}\n\n' + src + '\n.pageformat alignment:{center}\n'
+              cases[f'plain-{kind}-final-end'] = '.doctype {plain}\n.pageformat alignment:{center}\n\n' + src + '\n.pageformat alignment:{end}\n'
+              cases[f'slides-{kind}-global-center'] = f'.doctype {{slides}}\n.pageformat alignment:{{center}}\n\n{src}'
+              cases[f'paged-{kind}-global-center'] = f'.doctype {{paged}}\n.pageformat alignment:{{center}}\n\n{src}'
+              cases[f'docs-{kind}-global-center'] = f'.doctype {{docs}}\n.pageformat alignment:{{center}}\n\n{src}'
+          for name, text in cases.items():
+              (root / f'{name}.qd').write_text(text)
+          PY
+
+      - name: Compile and inspect HTML contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/global-alignment-probe
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            out="$root/out-$name"
+            "$QD" compile "$src" --strict --clean --pretty --out "$out" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+            python3 - "$name" "$html" <<'PY'
+          import re, sys
+          from pathlib import Path
+          name, path = sys.argv[1:]
+          text = Path(path).read_text()
+          pos = text.find('QD-A')
+          if pos < 0:
+              raise SystemExit(f'marker missing: {name}')
+          before = text[max(0, pos - 1200):pos]
+          stack = re.findall(r'<div([^>]*class="stack stack-(?:row|column)"[^>]*)>', before)
+          styles = re.findall(r'<style>(.*?)</style>', text, re.S)
+          stack_attrs = re.sub(r'\s+', ' ', stack[-1]).strip() if stack else 'MISSING'
+          relevant_css = ' '.join(re.sub(r'\s+', ' ', s).strip() for s in styles if '--qd-horizontal-alignment' in s)
+          print(f'OBS {name} STACK={stack_attrs} GLOBALCSS={relevant_css}')
+          PY
+          done
+
+      - name: Observe computed row-column main-axis alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/global-alignment-probe
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            html="$(find "$root/out-$name" -type f -name '*.html' -print -quit)"
+            inst="$root/$name.instrumented.html"
+            python3 - "$html" "$inst" <<'PY'
+          import sys
+          from pathlib import Path
+          src, dst = map(Path, sys.argv[1:])
+          script = "<script>window.addEventListener('load',()=>{const s=document.querySelector('.stack.stack-row,.stack.stack-column');const c=getComputedStyle(s);const p=document.createElement('pre');p.id='probe';p.textContent=JSON.stringify({justifyContent:c.justifyContent,alignItems:c.alignItems,textAlign:c.textAlign,flexDirection:c.flexDirection});document.body.appendChild(p);});</script>"
+          dst.write_text(src.read_text().replace('</body>', script + '</body>', 1))
+          PY
+            "$chrome" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files --window-size=1440,1000 --virtual-time-budget=3000 --dump-dom "file://$inst" > "$root/$name.dom" 2>/dev/null
+            python3 - "$name" "$root/$name.dom" <<'PY'
+          import json, re, sys
+          from html import unescape
+          from pathlib import Path
+          name, path = sys.argv[1:]
+          m = re.search(r'<pre id="probe">(.*?)</pre>', Path(path).read_text(), re.S)
+          if not m:
+              raise SystemExit(f'computed marker missing: {name}')
+          print('COMPUTED ' + name + ' ' + json.dumps(json.loads(unescape(m.group(1))), sort_keys=True))
+          PY
+          done
