@@ -23,7 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 .github/scripts/fix_apply_336.py
           python3 .github/scripts/apply_336.py
+          rm .github/scripts/fix_apply_336.py
           rm .github/scripts/apply_336.py
           rm .github/workflows/zz-apply-336.yml
           rm .github/workflows/zz-run-336.yml
