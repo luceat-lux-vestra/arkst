@@ -452,6 +452,11 @@ pub struct IrDocumentState {
     /// positions from explicit values.
     #[serde(default)]
     pub caption_position: IrCaptionPositionInfo,
+    /// Explicit global heading depth selected by `.autopagebreak` or
+    /// `.noautopagebreak`. `None` preserves the document-type-specific
+    /// implicit default for the output backend to resolve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_page_break_max_depth: Option<u32>,
 }
 
 /// Backend-neutral locale data retained by the bounded `.doclang` slice.
@@ -3115,6 +3120,7 @@ mod tests {
                     tables: None,
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
+                auto_page_break_max_depth: Some(2),
             },
             ..IrMetadata::default()
         };
@@ -3240,6 +3246,7 @@ mod tests {
                 tables: Some(IrCaptionPosition::Bottom),
                 code_blocks: None,
             },
+            auto_page_break_max_depth: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(

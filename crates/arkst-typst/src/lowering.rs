@@ -5,9 +5,9 @@
 
 use arkst_ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus,
-    IrValue,
+    IrDocument, IrDocumentType, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrNode,
+    IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -115,7 +115,27 @@ impl LoweringContext {
             self.push_str(&format!("// Date: {}\n", date));
         }
 
+        let auto_page_break_max_depth = doc
+            .metadata
+            .document_state
+            .auto_page_break_max_depth
+            .unwrap_or(match doc.metadata.document_state.document_type {
+                IrDocumentType::Plain => 0,
+                IrDocumentType::Paged => 1,
+                IrDocumentType::Slides => 2,
+                IrDocumentType::Docs => 0,
+            });
+
         for node in &doc.nodes {
+            if auto_page_break_max_depth > 0
+                && matches!(
+                    node,
+                    IrNode::Heading { level, .. }
+                        if (*level as u32) <= auto_page_break_max_depth
+                )
+            {
+                self.push_str("#pagebreak(weak: true)\n");
+            }
             let before = self.output.len();
             self.lower_node(node);
             if self.output.len() > before {
