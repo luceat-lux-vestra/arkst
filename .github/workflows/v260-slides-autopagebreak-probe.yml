@@ -41,24 +41,26 @@ jobs:
           root = Path('/tmp/autopagebreak-probe')
           root.mkdir(parents=True, exist_ok=True)
 
-          sequence = '''Intro marker.
-
-# QD-H1-A
-
-Body H1 A.
-
-## QD-H2-A
-
-Body H2 A.
-
-### QD-H3-A
-
-Body H3 A.
-
-## QD-H2-B
-
-Body H2 B.
-'''
+          sequence = '\n'.join([
+              'Intro marker.',
+              '',
+              '# QD-H1-A',
+              '',
+              'Body H1 A.',
+              '',
+              '## QD-H2-A',
+              '',
+              'Body H2 A.',
+              '',
+              '### QD-H3-A',
+              '',
+              'Body H3 A.',
+              '',
+              '## QD-H2-B',
+              '',
+              'Body H2 B.',
+              '',
+          ])
 
           fixtures = {
               'slides-default': '.doctype {slides}\n\n' + sequence,
@@ -66,8 +68,11 @@ Body H2 B.
               'slides-apb-1': '.doctype {slides}\n.autopagebreak maxdepth:{1}\n\n' + sequence,
               'slides-apb-2': '.doctype {slides}\n.autopagebreak maxdepth:{2}\n\n' + sequence,
               'slides-apb-3': '.doctype {slides}\n.autopagebreak maxdepth:{3}\n\n' + sequence,
+              'slides-apb1-before-doctype': '.autopagebreak maxdepth:{1}\n.doctype {slides}\n\n' + sequence,
               'slides-noapb': '.doctype {slides}\n.noautopagebreak\n\n' + sequence,
+              'slides-noapb-before-doctype': '.noautopagebreak\n.doctype {slides}\n\n' + sequence,
               'plain-default': '.doctype {plain}\n\n' + sequence,
+              'plain-apb-2': '.doctype {plain}\n.autopagebreak maxdepth:{2}\n\n' + sequence,
               'paged-default': '.doctype {paged}\n\n' + sequence,
               'docs-default': '.doctype {docs}\n\n' + sequence,
               'slides-heading-start': '.doctype {slides}\n\n# QD-START-H1\n\nStart body.\n\n## QD-START-H2\n\nSecond body.\n',
@@ -138,13 +143,15 @@ Body H2 B.
               ('slides-default', 'slides-apb-2'),
               ('slides-default', 'slides-apb-3'),
               ('slides-apb-0', 'slides-noapb'),
+              ('slides-apb-1', 'slides-apb1-before-doctype'),
+              ('slides-noapb', 'slides-noapb-before-doctype'),
               ('slides-breakpage-no', 'slides-breakpage-yes'),
           ]
           for left, right in pairs:
               print(json.dumps({'left': left, 'right': right, 'html_byte_identical': html[left] == html[right]}, sort_keys=True))
           PY
 
-      - name: Observe rendered DOM slide/page grouping
+      - name: Observe rendered DOM slide and page grouping
         shell: bash
         run: |
           set -euo pipefail
@@ -181,11 +188,11 @@ Body H2 B.
               index,
               id: s.id || '',
               class: typeof s.className === 'string' ? s.className : '',
-              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => `${h.tagName.toLowerCase()}:${clean(h.textContent)}`).filter(x => x.includes('QD-')),
+              headings: [...s.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(h => h.tagName.toLowerCase() + ':' + clean(h.textContent)).filter(x => x.includes('QD-')),
               text: clean(s.innerText).slice(0, 180),
             }));
             const breakish = [...document.querySelectorAll('*')]
-              .filter(el => /(?:^|[\s_-])(page|slide|break)(?:$|[\s_-])/i.test(`${el.tagName} ${el.id || ''} ${typeof el.className === 'string' ? el.className : ''}`))
+              .filter(el => /(?:^|[\s_-])(page|slide|break)(?:$|[\s_-])/i.test(el.tagName + ' ' + (el.id || '') + ' ' + (typeof el.className === 'string' ? el.className : '')))
               .slice(0, 80)
               .map(el => ({...describe(el), text: clean(el.innerText).slice(0, 100)}));
             const result = {
