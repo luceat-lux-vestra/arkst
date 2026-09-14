@@ -44,6 +44,34 @@ pub enum IrDocumentAlignment {
 ''',
 )
 
+# Existing explicit IR-state fixtures must name the new field so the crate's
+# own unit tests continue to compile while still exercising deterministic
+# serialization of the complete state shape.
+replace_once(
+    "crates/arkst-ir/src/lib.rs",
+    '''                auto_page_break_max_depth: Some(2),
+            },
+            ..IrMetadata::default()
+''',
+    '''                auto_page_break_max_depth: Some(2),
+                page_alignment: None,
+            },
+            ..IrMetadata::default()
+''',
+)
+replace_once(
+    "crates/arkst-ir/src/lib.rs",
+    '''            auto_page_break_max_depth: None,
+        };
+        let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
+''',
+    '''            auto_page_break_max_depth: None,
+            page_alignment: None,
+        };
+        let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
+''',
+)
+
 # Closed conversion domain used only by the bounded page-format state owner.
 replace_once(
     "crates/arkst-engine/src/value_conversion.rs",
