@@ -17,30 +17,36 @@ for name in PATHS:
     text = path.read_text()
 
     # Move a historical owned PDF artifact out of the new artifact-set result.
+    # Existing tests often place `.pdf` on the next line after `output`.
     text = re.sub(
-        r"\b(output)\.pdf\s*\.expect\(([^\n;]+)\)",
+        r"\b(output)\s*\.pdf\s*\.expect\(([^;]+?)\)",
         r"\1.into_single_artifact().expect(\2).bytes",
         text,
+        flags=re.DOTALL,
     )
 
     # Borrow a single PDF artifact where ownership is not needed.
     text = re.sub(
-        r"\b(output)\.pdf\.is_some_and\(\|pdf\| pdf\.starts_with\(([^\n]+?)\)\)",
+        r"\b(output)\s*\.pdf\s*\.is_some_and\(\|pdf\|\s*pdf\.starts_with\(([^)]+)\)\)",
         r"\1.single_artifact_bytes().is_some_and(|pdf| pdf.starts_with(\2))",
         text,
+        flags=re.DOTALL,
     )
 
     # Backend parity intentionally keeps an optional PDF observation.
-    text = text.replace(
-        "pdf: output.pdf.map(|pdf| pdf_observation(&pdf)),",
+    text = re.sub(
+        r"pdf:\s*output\s*\.pdf\s*\.map\(\|pdf\|\s*pdf_observation\(&pdf\)\),",
         "pdf: output.single_artifact_bytes().map(pdf_observation),",
+        text,
+        flags=re.DOTALL,
     )
 
     # The markdown compatibility harness owns the returned PDF bytes.
     text = re.sub(
-        r"\b(output)\.pdf\s*\.context\(([^\n]+)\)\?",
+        r"\b(output)\s*\.pdf\s*\.context\(([^)]+)\)\?",
         r"\1.into_single_artifact().map(|artifact| artifact.bytes).context(\2)?",
         text,
+        flags=re.DOTALL,
     )
 
     # Benchmark examples only need successful PDF production.
