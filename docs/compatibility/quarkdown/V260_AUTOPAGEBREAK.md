@@ -28,6 +28,6 @@ Typst lowering owns page-boundary emission. It emits `#pagebreak(weak: true)` on
 
 ## Verification
 
-The bounded regression suite covers final-state ordering, explicit thresholds, `.noautopagebreak`, negative rollback, source shadowing, backward-compatible serde omission, document-type defaults, top-level-only lowering, weak break emission, and real in-process Typst PDF page counts. Existing CI supplies the repository's pinned Typst 0.15.1 dependency and platform/WASM checks.
+The bounded regression suite covers final-state ordering, explicit thresholds, `.noautopagebreak`, negative rollback, source shadowing, backward-compatible serde omission, document-type defaults, top-level-only lowering, weak break emission, and real in-process Typst PDF page counts. The PDF adversarial cases deliberately place a final `.doctype {slides}` and a final `.noautopagebreak` after earlier headings, proving that the backend consumes final document state rather than source-local heading history; nested blockquote and list headings are also compiled through the real Typst backend without creating page boundaries. Existing CI supplies the repository's pinned Typst 0.15.1 dependency and platform/WASM checks.
 
 Manual `.pagebreak` / `<<<` syntax remains owned by the existing content/page primitive work; this slice does not broaden that primitive. The automatic break output is weak so an adjacent backend/manual page boundary can collapse without creating an empty page.
