@@ -10,7 +10,7 @@ This checklist fixes the migration scope so compatibility work does not expand o
 - [x] `focus` layout theme acceptance and output behavior — merged in #330; implementation/evidence is documented in `V260_FOCUS_LAYOUT.md`.
 - [x] `slides` H1/H2 automatic page-break behavior and `.autopagebreak` override — merged in #334; implementation/evidence is documented in `V260_AUTOPAGEBREAK.md`.
 - [x] `.row` / `.column` omitted-alignment inheritance — merged in #340; implementation/evidence is documented in `V260_STACK_ALIGNMENT_INHERITANCE.md`.
-- [ ] PDF export Chromium-family adapter and `--chrome-path` / `QD_CHROME_PATH`; obsolete Node/npm controls removed from the Arkst-compatible surface where present.
+- [x] PDF export Chromium-family adapter and `--chrome-path` / `QD_CHROME_PATH`; obsolete Node/npm controls removed from the Arkst-compatible surface where present — classified as not applicable to Arkst's current Typst-native PDF surface in #344; evidence and future ownership are documented in `V260_PDF_EXPORT_ADAPTER.md`.
 - [ ] `docs` wide-table horizontal scrolling behavior for HTML output where Arkst owns equivalent output.
 - [ ] `slides` PDF fixes that are observable in Arkst-owned export behavior.
 - [ ] `quarkdown create` slides-tailored starter content for the Arkst CLI/project-template equivalent where that command is supported.
