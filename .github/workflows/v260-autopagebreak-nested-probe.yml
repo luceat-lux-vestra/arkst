@@ -1,0 +1,119 @@
+name: Quarkdown v2.6 nested auto-page-break probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/v260-autopagebreak-nested-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Create independently-authored nested fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/nested-pagebreak-probe
+          mkdir -p "$root"
+          cat > "$root/blockquote.qd" <<'EOF'
+          .doctype {slides}
+
+          Intro before quote.
+
+          > Quote lead.
+          >
+          > ## QD-NESTED-BQ-H2
+          >
+          > Quote tail.
+
+          After quote.
+          EOF
+          cat > "$root/list.qd" <<'EOF'
+          .doctype {slides}
+
+          Intro before list.
+
+          - List lead.
+
+              ## QD-NESTED-LIST-H2
+
+              List tail.
+
+          After list.
+          EOF
+          cat > "$root/top-level.qd" <<'EOF'
+          .doctype {slides}
+
+          Intro.
+
+          ## QD-TOP-H2
+
+          Tail.
+          EOF
+
+      - name: Compile and print heading ancestry contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/nested-pagebreak-probe
+          : > "$root/html-paths.tsv"
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            "$QD" compile "$src" --strict --clean --pretty --out "$root/out-$name" --out-name probe
+            html="$(find "$root/out-$name" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+            printf '%s|%s\n' "$name" "$html" >> "$root/html-paths.tsv"
+          done
+
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class Parser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.stack=[]
+                  self.rows=[]
+              def handle_starttag(self, tag, attrs):
+                  attrs=dict(attrs)
+                  ident=attrs.get('id','')
+                  classes=tuple(attrs.get('class','').split())
+                  if tag in {'h1','h2','h3','h4','h5','h6'} and ident.startswith('qd-'):
+                      self.rows.append((tag, ident, 'page-break' in classes, tuple(self.stack)))
+                  if tag not in {'meta','link','img','br','hr','input','source'}:
+                      self.stack.append((tag, attrs.get('id',''), attrs.get('class','')))
+              def handle_endtag(self, tag):
+                  for i in range(len(self.stack)-1,-1,-1):
+                      if self.stack[i][0] == tag:
+                          del self.stack[i:]
+                          break
+
+          root=Path('/tmp/nested-pagebreak-probe')
+          for row in (root/'html-paths.tsv').read_text().splitlines():
+              name,path=row.split('|',1)
+              parser=Parser()
+              parser.feed(Path(path).read_text())
+              print(f'CONTRACT {name} {parser.rows}')
+          PY
