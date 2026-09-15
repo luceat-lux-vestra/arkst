@@ -74,6 +74,8 @@ jobs:
           test -n "$narrow_html"
           cp "$wide_html" evidence/wide.html
           cp "$narrow_html" evidence/narrow.html
+          printf '%s\n' "$wide_html" > "$RUNNER_TEMP/wide-html-path"
+          printf '%s\n' "$narrow_html" > "$RUNNER_TEMP/narrow-html-path"
 
           grep -n '<table' "$wide_html" | head -20 | tee evidence/wide-table-lines.txt
           grep -n '<table' "$narrow_html" | head -20 | tee evidence/narrow-table-lines.txt
@@ -90,11 +92,6 @@ jobs:
           sha256sum "$wide_global_css" "$narrow_global_css" | tee evidence/global-css-sha256.txt
           grep -n -B 6 -A 8 'overflow-x: auto' "$wide_global_css" | tee evidence/global-css-overflow-context.txt
           test -s evidence/global-css-overflow-context.txt
-
-          wide_color_css="$(find out-wide -type f -path '*/theme/color/paperwhite/paperwhite.css' -print -quit)"
-          if [[ -n "$wide_color_css" ]]; then
-            grep -n -B 4 -A 6 'overflow-x: auto' "$wide_color_css" | tee evidence/color-css-overflow-context.txt || true
-          fi
 
           python3 - <<'PY'
           from pathlib import Path
@@ -114,19 +111,41 @@ jobs:
           table_context(narrow, Path('evidence/narrow-table-context.html'))
           PY
 
+      - name: Observe runtime DOM in headless Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          wide_html="$(cat "$RUNNER_TEMP/wide-html-path")"
+          narrow_html="$(cat "$RUNNER_TEMP/narrow-html-path")"
+          "$browser" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+            --virtual-time-budget=3000 --dump-dom "file://$PWD/$wide_html" \
+            > evidence/wide-runtime-dom.html 2> evidence/wide-browser.stderr
+          "$browser" --headless=new --no-sandbox --disable-gpu --allow-file-access-from-files \
+            --virtual-time-budget=3000 --dump-dom "file://$PWD/$narrow_html" \
+            > evidence/narrow-runtime-dom.html 2> evidence/narrow-browser.stderr
+          grep -n -B 2 -A 4 'table-scroll-area' evidence/wide-runtime-dom.html \
+            | tee evidence/wide-runtime-scroll-wrapper.txt
+          grep -n -B 2 -A 4 'table-scroll-area' evidence/narrow-runtime-dom.html \
+            | tee evidence/narrow-runtime-scroll-wrapper.txt
+          test -s evidence/wide-runtime-scroll-wrapper.txt
+          test -s evidence/narrow-runtime-scroll-wrapper.txt
+
           {
-            echo '=== wide files ==='
-            cat evidence/wide-files.txt
-            echo '=== overflow matches ==='
-            cat evidence/wide-overflow-matches.txt
+            echo '=== browser ==='
+            "$browser" --version
             echo '=== global CSS overflow selector context ==='
             cat evidence/global-css-overflow-context.txt
             echo '=== global CSS hashes (wide/narrow must match) ==='
             cat evidence/global-css-sha256.txt
-            echo '=== wide table context ==='
+            echo '=== wide runtime wrapper ==='
+            cat evidence/wide-runtime-scroll-wrapper.txt
+            echo '=== narrow runtime wrapper ==='
+            cat evidence/narrow-runtime-scroll-wrapper.txt
+            echo '=== static wide table context ==='
             cat evidence/wide-table-context.html
-            echo
-            echo '=== narrow table context ==='
+            echo '=== static narrow table context ==='
             cat evidence/narrow-table-context.html
           } | tee evidence/summary.txt
 
