@@ -1,0 +1,281 @@
+name: Probe 352 v2.6 slides PDF oracle v2
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/probe-352-v260-slides-pdf-oracle-v2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install artifact inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          printf 'CHROME=%s\n' "$chrome" >> "$GITHUB_ENV"
+          "$chrome" --version | tee chrome-version.txt
+
+      - name: Fetch and verify exact official distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/qd-251 /tmp/qd-260 evidence
+          curl -fL --retry 3 --retry-all-errors -o /tmp/qd251.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.5.1/quarkdown-linux-x64.zip
+          echo '5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9  /tmp/qd251.zip' | sha256sum -c - | tee evidence/v251-sha256.txt
+          unzip -q /tmp/qd251.zip -d /tmp/qd-251
+          curl -fL --retry 3 --retry-all-errors -o /tmp/qd260.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
+          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/qd260.zip' | sha256sum -c - | tee evidence/v260-sha256.txt
+          unzip -q /tmp/qd260.zip -d /tmp/qd-260
+          qd251="$(find /tmp/qd-251 -type f -name quarkdown -perm -111 -print -quit)"
+          qd260="$(find /tmp/qd-260 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd251" && test -n "$qd260"
+          printf 'QD251=%s\nQD260=%s\n' "$qd251" "$qd260" >> "$GITHUB_ENV"
+          "$qd251" --version | tee evidence/v251-version.txt
+          "$qd260" --version | tee evidence/v260-version.txt
+
+      - name: Create independent slides fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p "$root/fixtures"
+          cat > "$root/fixtures/headerless-body.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-HEAD-ONE
+
+          Alpha body.
+
+          .pagebreak
+
+          QD-HEADERLESS-BODY
+
+          A body-only slide with no heading.
+
+          .pagebreak
+
+          # QD-HEAD-TWO
+
+          Omega body.
+          EOF
+          cat > "$root/fixtures/heading-only.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-HEADING-ONLY
+
+          .pagebreak
+
+          QD-BODY-ONLY
+          EOF
+          cat > "$root/fixtures/double-break.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-BEFORE-DOUBLE
+
+          Before.
+
+          .pagebreak
+          .pagebreak
+
+          QD-AFTER-DOUBLE
+          EOF
+          cat > "$root/fixtures/short-long.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          QD-SHORT-BODY
+
+          Short.
+
+          .pagebreak
+
+          QD-LONG-BODY
+
+          Line one of a deliberately longer body.
+
+          Line two adds more vertical content.
+
+          Line three adds more vertical content.
+
+          Line four adds more vertical content.
+
+          Line five adds more vertical content.
+          EOF
+
+      - name: Compile both black-box versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          : > "$root/html.tsv"
+          for version in 251 260; do
+            var="QD${version}"; qd="${!var}"
+            for src in "$root"/fixtures/*.qd; do
+              name="$(basename "$src" .qd)"
+              out="$root/out-$version-$name"
+              "$qd" compile "$src" --strict --clean --pretty --out "$out" --out-name probe
+              html="$(find "$out" -type f -name '*.html' -print -quit)"
+              test -n "$html"
+              printf '%s|%s|%s\n' "$version" "$name" "$html" >> "$root/html.tsv"
+            done
+          done
+          cat "$root/html.tsv" | tee evidence/html-paths.txt
+
+      - name: Instrument generated artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('/tmp/slides-pdf-probe')
+          script = r'''<script>
+          window.addEventListener('load', () => setTimeout(() => {
+            const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+            const all = [...document.querySelectorAll('.reveal .slides > section, .slides > section')];
+            const sections = [...new Set(all)].map((s, index) => {
+              const r = s.getBoundingClientRect(), cs = getComputedStyle(s);
+              const first = [...s.children].find(el => clean(el.innerText || el.textContent));
+              const fr = first ? first.getBoundingClientRect() : null;
+              return {
+                index, text: clean(s.innerText).slice(0,240),
+                hasHeading: !!s.querySelector('h1,h2,h3,h4,h5,h6'),
+                className: s.className,
+                rect:{x:r.x,y:r.y,width:r.width,height:r.height},
+                paddingTop:cs.paddingTop,paddingBottom:cs.paddingBottom,
+                marginTop:cs.marginTop,marginBottom:cs.marginBottom,
+                display:cs.display,justifyContent:cs.justifyContent,
+                first:first&&fr?{tag:first.tagName,text:clean(first.innerText||first.textContent).slice(0,120),x:fr.x,y:fr.y,width:fr.width,height:fr.height,offsetFromSectionTop:fr.y-r.y}:null
+              };
+            });
+            const pre=document.createElement('pre'); pre.id='qd-layout-dump';
+            pre.textContent=JSON.stringify({viewport:{width:innerWidth,height:innerHeight},body:{width:document.body.scrollWidth,height:document.body.scrollHeight},sections});
+            document.body.appendChild(pre);
+          },1200));
+          </script>'''
+          rows=[]
+          for line in (root/'html.tsv').read_text().splitlines():
+            version,name,html=line.split('|',2)
+            p=Path(html); text=p.read_text()
+            marker='</body>'
+            if marker not in text.lower():
+              raise SystemExit(f'no body close in {p}')
+            # Quarkdown pretty output uses lowercase closing body; literal replace avoids regex replacement escaping.
+            pos=text.lower().find(marker)
+            replaced=text[:pos]+script+text[pos:]
+            instrumented=p.with_name('probe-instrumented.html')
+            instrumented.write_text(replaced)
+            rows.append('|'.join((version,name,str(instrumented))))
+          (root/'instrumented.tsv').write_text('\n'.join(rows)+'\n')
+          PY
+
+      - name: Capture runtime DOM and same-Chrome print PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p evidence/dom evidence/pdf evidence/pdfinfo evidence/bbox
+          port=8127
+          while IFS='|' read -r version name html; do
+            serve_dir="$(dirname "$html")"
+            python3 -m http.server "$port" --bind 127.0.0.1 --directory "$serve_dir" > "/tmp/http-${version}-${name}.log" 2>&1 &
+            pid=$!; trap 'kill "$pid" 2>/dev/null || true' EXIT; sleep 1
+            for mode in normal print; do
+              suffix=''; [[ "$mode" == print ]] && suffix='?print-pdf'
+              dump="evidence/dom/${version}-${name}-${mode}.html"
+              "$CHROME" --headless=new --no-sandbox --disable-gpu \
+                --user-data-dir="/tmp/chrome-${version}-${name}-${mode}" \
+                --window-size=1440,1000 --virtual-time-budget=5000 --dump-dom \
+                "http://127.0.0.1:${port}/probe-instrumented.html${suffix}" > "$dump" 2>/dev/null
+              grep -F 'qd-layout-dump' "$dump" >/dev/null
+            done
+            pdf="$PWD/evidence/pdf/${version}-${name}.pdf"
+            "$CHROME" --headless=new --no-sandbox --disable-gpu \
+              --user-data-dir="/tmp/chrome-pdf-${version}-${name}" \
+              --virtual-time-budget=5000 --no-pdf-header-footer \
+              --print-to-pdf="$pdf" "http://127.0.0.1:${port}/probe-instrumented.html?print-pdf" >/dev/null 2>&1
+            test -s "$pdf"
+            pdfinfo "$pdf" > "evidence/pdfinfo/${version}-${name}.txt"
+            pdftotext -bbox-layout "$pdf" "evidence/bbox/${version}-${name}.html"
+            kill "$pid"; wait "$pid" 2>/dev/null || true; trap - EXIT
+          done < "$root/instrumented.tsv"
+
+      - name: Probe official v2.6 native PDF adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p evidence/native-v260
+          for src in "$root"/fixtures/*.qd; do
+            name="$(basename "$src" .qd)"; out="$root/native-$name"
+            set +e
+            "$QD260" compile "$src" --strict --clean --pdf --pdf-no-sandbox --chrome-path "$CHROME" --out "$out" --out-name probe \
+              > "evidence/native-v260/${name}.stdout" 2> "evidence/native-v260/${name}.stderr"
+            status=$?; set -e
+            echo "$status" > "evidence/native-v260/${name}.status"
+            if [[ "$status" -eq 0 ]]; then
+              pdf="$(find "$out" -type f -name '*.pdf' -print -quit)"; test -n "$pdf"
+              pdfinfo "$pdf" > "evidence/native-v260/${name}.pdfinfo.txt"
+              pdftotext -bbox-layout "$pdf" "evidence/native-v260/${name}.bbox.html"
+            fi
+          done
+
+      - name: Summarize observable evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee evidence/summary.txt
+          from pathlib import Path
+          from html import unescape
+          import json,re,xml.etree.ElementTree as ET
+          e=Path('evidence'); pat=re.compile(r'<pre id="qd-layout-dump">(.*?)</pre>',re.S)
+          def payload(p):
+            m=pat.search(p.read_text());
+            if not m: raise SystemExit(f'missing dump {p}')
+            return json.loads(unescape(m.group(1)))
+          def marks(p):
+            root=ET.fromstring(p.read_text()); out=[]
+            for x in root.iter():
+              if not x.tag.endswith('word'): continue
+              t=''.join(x.itertext()).strip()
+              if t.startswith('QD-'): out.append({'text':t,'xMin':x.attrib.get('xMin'),'yMin':x.attrib.get('yMin'),'xMax':x.attrib.get('xMax'),'yMax':x.attrib.get('yMax')})
+            return out
+          print('=== PRINT DOM ===')
+          for p in sorted((e/'dom').glob('*-print.html')):
+            rows=[]
+            for s in payload(p)['sections']:
+              rows.append({'index':s['index'],'hasHeading':s['hasHeading'],'text':s['text'][:80],'height':round(s['rect']['height'],3),'paddingTop':s['paddingTop'],'paddingBottom':s['paddingBottom'],'firstOffset':None if not s['first'] else round(s['first']['offsetFromSectionTop'],3)})
+            print(p.stem,json.dumps(rows,sort_keys=True))
+          print('=== PDF INFO ===')
+          for p in sorted((e/'pdfinfo').glob('*.txt')):
+            lines=[x for x in p.read_text().splitlines() if x.startswith(('Pages:','Page size:'))]
+            print(p.stem,' | '.join(lines))
+          print('=== PDF MARKERS ===')
+          for p in sorted((e/'bbox').glob('*.html')): print(p.stem,json.dumps(marks(p),sort_keys=True))
+          print('=== NATIVE V260 ===')
+          for p in sorted((e/'native-v260').glob('*.status')): print(p.stem,p.read_text().strip())
+          PY
+
+      - name: Upload clean-room evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: probe-352-v260-slides-pdf-v2-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
