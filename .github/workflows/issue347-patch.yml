@@ -1,6 +1,9 @@
 name: issue347-patch
 
 on:
+  push:
+    branches:
+      - feat/347-typst-output-targets
   workflow_dispatch:
 
 permissions:
