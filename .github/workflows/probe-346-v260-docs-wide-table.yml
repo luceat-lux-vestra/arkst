@@ -1,0 +1,121 @@
+name: Probe 346 v2.6 docs wide-table scrolling
+
+on:
+  push:
+    branches:
+      - probe/346-v260-docs-wide-table
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify exact Quarkdown v2.6.0 oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence unpack
+          curl -fL --retry 3 --retry-all-errors \
+            -o quarkdown-linux-x64.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
+          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  quarkdown-linux-x64.zip' | sha256sum -c - | tee evidence/sha256.txt
+          unzip -q quarkdown-linux-x64.zip -d unpack
+          qd="$(find unpack -type f -path '*/bin/quarkdown' -print -quit)"
+          if [[ -z "$qd" ]]; then
+            qd="$(find unpack -type f -name quarkdown -print -quit)"
+          fi
+          test -n "$qd"
+          chmod +x "$qd"
+          "$qd" --version | tee evidence/version.txt
+          printf '%s\n' "$qd" > "$RUNNER_TEMP/qd-path"
+
+      - name: Compile independently authored docs table fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          qd="$(cat "$RUNNER_TEMP/qd-path")"
+
+          cat > wide.qd <<'EOF'
+          .docname {Wide Table Probe}
+          .doctype {docs}
+
+          # Wide table
+
+          | Identifier | Alpha | Beta | Gamma | Delta | Epsilon | Zeta | Eta | Theta |
+          | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+          | row-1 | alpha-abcdefghijklmnopqrstuvwxyz | beta-abcdefghijklmnopqrstuvwxyz | gamma-abcdefghijklmnopqrstuvwxyz | delta-abcdefghijklmnopqrstuvwxyz | epsilon-abcdefghijklmnopqrstuvwxyz | zeta-abcdefghijklmnopqrstuvwxyz | eta-abcdefghijklmnopqrstuvwxyz | theta-abcdefghijklmnopqrstuvwxyz |
+          | row-2 | alpha-012345678901234567890123456789 | beta-012345678901234567890123456789 | gamma-012345678901234567890123456789 | delta-012345678901234567890123456789 | epsilon-012345678901234567890123456789 | zeta-012345678901234567890123456789 | eta-012345678901234567890123456789 | theta-012345678901234567890123456789 |
+          EOF
+
+          cat > narrow.qd <<'EOF'
+          .docname {Narrow Table Probe}
+          .doctype {docs}
+
+          # Narrow table
+
+          | Key | Value |
+          | --- | --- |
+          | A | one |
+          | B | two |
+          EOF
+
+          "$qd" c wide.qd --out "$PWD/out-wide" --out-name wide --pretty > evidence/wide.stdout 2> evidence/wide.stderr
+          "$qd" c narrow.qd --out "$PWD/out-narrow" --out-name narrow --pretty > evidence/narrow.stdout 2> evidence/narrow.stderr
+
+          find out-wide -type f -print | sort > evidence/wide-files.txt
+          find out-narrow -type f -print | sort > evidence/narrow-files.txt
+
+          wide_html="$(find out-wide -type f -name '*.html' -print -quit)"
+          narrow_html="$(find out-narrow -type f -name '*.html' -print -quit)"
+          test -n "$wide_html"
+          test -n "$narrow_html"
+          cp "$wide_html" evidence/wide.html
+          cp "$narrow_html" evidence/narrow.html
+
+          grep -n '<table' "$wide_html" | head -20 | tee evidence/wide-table-lines.txt
+          grep -n '<table' "$narrow_html" | head -20 | tee evidence/narrow-table-lines.txt
+
+          grep -RniE 'overflow-x[[:space:]]*:[[:space:]]*(auto|scroll)|overflow[[:space:]]*:[^;]*(auto|scroll)' out-wide \
+            | tee evidence/wide-overflow-matches.txt
+          test -s evidence/wide-overflow-matches.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def table_context(src: Path, dst: Path):
+              text = src.read_text(errors='replace')
+              idx = text.find('<table')
+              if idx < 0:
+                  raise SystemExit(f'no table in {src}')
+              start = max(0, idx - 1200)
+              end = min(len(text), idx + 3000)
+              dst.write_text(text[start:end])
+
+          wide = next(Path('out-wide').rglob('*.html'))
+          narrow = next(Path('out-narrow').rglob('*.html'))
+          table_context(wide, Path('evidence/wide-table-context.html'))
+          table_context(narrow, Path('evidence/narrow-table-context.html'))
+          PY
+
+          {
+            echo '=== wide files ==='
+            cat evidence/wide-files.txt
+            echo '=== overflow matches ==='
+            cat evidence/wide-overflow-matches.txt
+            echo '=== wide table context ==='
+            cat evidence/wide-table-context.html
+            echo
+            echo '=== narrow table context ==='
+            cat evidence/narrow-table-context.html
+          } | tee evidence/summary.txt
+
+      - name: Upload oracle evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: probe-346-v260-docs-wide-table-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
