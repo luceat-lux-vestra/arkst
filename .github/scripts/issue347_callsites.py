@@ -38,3 +38,64 @@ replace_once(
                     .as_slice();
 ''',
 )
+
+replace_once(
+    "crates/arkst-typst-subprocess/tests/focus_layout.rs",
+    "use arkst_typst::{TypstBackend, TypstInput};",
+    "use arkst_typst::{TypstBackend, TypstInput, TypstTarget};",
+)
+replace_once(
+    "crates/arkst-typst-subprocess/tests/focus_layout.rs",
+    '''            let output = backend
+                .compile(&TypstInput {
+                    source: typst,
+                    entry_path: "focus.qd".to_string(),
+                })
+                .expect("focus Typst must compile");
+            let pdf = output.pdf.expect("PDF output must be present");
+            assert!(pdf.starts_with(b"%PDF-"), "invalid PDF prefix");
+''',
+    '''            let output = backend
+                .compile(
+                    &TypstInput {
+                        source: typst,
+                        entry_path: "focus.qd".to_string(),
+                    },
+                    TypstTarget::Pdf,
+                )
+                .expect("focus Typst must compile");
+            let pdf = output
+                .single_artifact()
+                .expect("PDF output must contain exactly one artifact");
+            assert!(pdf.bytes.starts_with(b"%PDF-"), "invalid PDF prefix");
+''',
+)
+replace_once(
+    "crates/arkst-typst-subprocess/tests/focus_layout.rs",
+    '''        let output = backend
+            .compile(&TypstInput {
+                source: typst,
+                entry_path: "focus.qd".to_string(),
+            })
+            .expect("paged control Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+''',
+    '''        let output = backend
+            .compile(
+                &TypstInput {
+                    source: typst,
+                    entry_path: "focus.qd".to_string(),
+                },
+                TypstTarget::Pdf,
+            )
+            .expect("paged control Typst must compile");
+        assert!(output
+            .single_artifact()
+            .expect("PDF output must contain exactly one artifact")
+            .bytes
+            .starts_with(b"%PDF-"));
+''',
+)
