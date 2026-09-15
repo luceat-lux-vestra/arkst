@@ -82,6 +82,20 @@ jobs:
             | tee evidence/wide-overflow-matches.txt
           test -s evidence/wide-overflow-matches.txt
 
+          wide_global_css="$(find out-wide -type f -path '*/theme/global.css' -print -quit)"
+          narrow_global_css="$(find out-narrow -type f -path '*/theme/global.css' -print -quit)"
+          test -n "$wide_global_css"
+          test -n "$narrow_global_css"
+          cmp "$wide_global_css" "$narrow_global_css"
+          sha256sum "$wide_global_css" "$narrow_global_css" | tee evidence/global-css-sha256.txt
+          grep -n -B 6 -A 8 'overflow-x: auto' "$wide_global_css" | tee evidence/global-css-overflow-context.txt
+          test -s evidence/global-css-overflow-context.txt
+
+          wide_color_css="$(find out-wide -type f -path '*/theme/color/paperwhite/paperwhite.css' -print -quit)"
+          if [[ -n "$wide_color_css" ]]; then
+            grep -n -B 4 -A 6 'overflow-x: auto' "$wide_color_css" | tee evidence/color-css-overflow-context.txt || true
+          fi
+
           python3 - <<'PY'
           from pathlib import Path
 
@@ -105,6 +119,10 @@ jobs:
             cat evidence/wide-files.txt
             echo '=== overflow matches ==='
             cat evidence/wide-overflow-matches.txt
+            echo '=== global CSS overflow selector context ==='
+            cat evidence/global-css-overflow-context.txt
+            echo '=== global CSS hashes (wide/narrow must match) ==='
+            cat evidence/global-css-sha256.txt
             echo '=== wide table context ==='
             cat evidence/wide-table-context.html
             echo
