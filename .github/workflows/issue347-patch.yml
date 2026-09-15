@@ -28,8 +28,10 @@ jobs:
           components: rustfmt, clippy
       - name: Apply bounded patch
         run: python3 .github/scripts/issue347_patch.py
-      - name: Format
-        run: cargo fmt --all --check
+      - name: Normalize and verify formatting
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
       - name: Workspace check
         run: cargo check --workspace --all-targets --all-features --locked
       - name: Diff check
