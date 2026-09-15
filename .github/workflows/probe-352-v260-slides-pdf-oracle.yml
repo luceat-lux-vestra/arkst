@@ -1,0 +1,362 @@
+name: Probe 352 v2.6 slides PDF oracle
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/probe-352-v260-slides-pdf-oracle.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install artifact inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$chrome"
+          printf 'CHROME=%s\n' "$chrome" >> "$GITHUB_ENV"
+          "$chrome" --version
+
+      - name: Fetch exact official v2.5.1 and v2.6.0 distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/qd-2.5.1 /tmp/qd-2.6.0 evidence
+
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 \
+            -o /tmp/quarkdown-v2.5.1.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.5.1/quarkdown-linux-x64.zip
+          printf '%s  %s\n' \
+            '5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9' \
+            /tmp/quarkdown-v2.5.1.zip | sha256sum -c - | tee evidence/v251-sha256.txt
+          unzip -q /tmp/quarkdown-v2.5.1.zip -d /tmp/qd-2.5.1
+
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 \
+            -o /tmp/quarkdown-v2.6.0.zip \
+            https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
+          printf '%s  %s\n' \
+            '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4' \
+            /tmp/quarkdown-v2.6.0.zip | sha256sum -c - | tee evidence/v260-sha256.txt
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/qd-2.6.0
+
+          qd251="$(find /tmp/qd-2.5.1 -type f -name quarkdown -perm -111 -print -quit)"
+          qd260="$(find /tmp/qd-2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd251"
+          test -n "$qd260"
+          printf 'QD251=%s\nQD260=%s\n' "$qd251" "$qd260" >> "$GITHUB_ENV"
+          "$qd251" --version | tee evidence/v251-version.txt
+          "$qd260" --version | tee evidence/v260-version.txt
+
+      - name: Create independently authored slides fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p "$root/fixtures"
+
+          cat > "$root/fixtures/headerless-body.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-HEAD-ONE
+
+          Alpha body.
+
+          .pagebreak
+
+          QD-HEADERLESS-BODY
+
+          A body-only slide with no heading.
+
+          .pagebreak
+
+          # QD-HEAD-TWO
+
+          Omega body.
+          EOF
+
+          cat > "$root/fixtures/heading-only.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-HEADING-ONLY
+
+          .pagebreak
+
+          QD-BODY-ONLY
+          EOF
+
+          cat > "$root/fixtures/double-break.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          # QD-BEFORE-DOUBLE
+
+          Before.
+
+          .pagebreak
+          .pagebreak
+
+          QD-AFTER-DOUBLE
+          EOF
+
+          cat > "$root/fixtures/short-long.qd" <<'EOF'
+          .doctype {slides}
+          .autopagebreak maxdepth:{0}
+
+          QD-SHORT-BODY
+
+          Short.
+
+          .pagebreak
+
+          QD-LONG-BODY
+
+          Line one of a deliberately longer body.
+
+          Line two adds more vertical content.
+
+          Line three adds more vertical content.
+
+          Line four adds more vertical content.
+
+          Line five adds more vertical content.
+          EOF
+
+      - name: Compile HTML artifacts with both black-box versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          : > "$root/html.tsv"
+          for version in 251 260; do
+            qd_var="QD${version}"
+            qd="${!qd_var}"
+            for src in "$root"/fixtures/*.qd; do
+              name="$(basename "$src" .qd)"
+              out="$root/out-$version-$name"
+              "$qd" compile "$src" --strict --clean --pretty --out "$out" --out-name probe
+              html="$(find "$out" -type f -name '*.html' -print -quit)"
+              test -n "$html"
+              printf '%s|%s|%s|%s\n' "$version" "$name" "$out" "$html" >> "$root/html.tsv"
+            done
+          done
+          cat "$root/html.tsv" | tee evidence/html-paths.txt
+
+      - name: Instrument runtime slide geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('/tmp/slides-pdf-probe')
+          script = r'''<script>
+          window.addEventListener('load', () => {
+            setTimeout(() => {
+              const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+              const sections = [...document.querySelectorAll('.reveal .slides > section, .slides > section')];
+              const unique = [...new Set(sections)];
+              const rows = unique.map((s, index) => {
+                const r = s.getBoundingClientRect();
+                const cs = getComputedStyle(s);
+                const first = [...s.children].find(el => clean(el.innerText || el.textContent));
+                const fr = first ? first.getBoundingClientRect() : null;
+                return {
+                  index,
+                  text: clean(s.innerText).slice(0, 240),
+                  hasHeading: !!s.querySelector('h1,h2,h3,h4,h5,h6'),
+                  className: s.className,
+                  rect: {x:r.x,y:r.y,width:r.width,height:r.height},
+                  paddingTop: cs.paddingTop,
+                  paddingBottom: cs.paddingBottom,
+                  marginTop: cs.marginTop,
+                  marginBottom: cs.marginBottom,
+                  display: cs.display,
+                  justifyContent: cs.justifyContent,
+                  first: first && fr ? {
+                    tag: first.tagName,
+                    text: clean(first.innerText || first.textContent).slice(0, 120),
+                    x: fr.x, y: fr.y, width: fr.width, height: fr.height,
+                    offsetFromSectionTop: fr.y - r.y
+                  } : null
+                };
+              });
+              const payload = {
+                href: location.href,
+                viewport: {width: innerWidth, height: innerHeight},
+                body: {width: document.body.scrollWidth, height: document.body.scrollHeight},
+                sections: rows
+              };
+              const pre = document.createElement('pre');
+              pre.id = 'qd-layout-dump';
+              pre.textContent = JSON.stringify(payload);
+              document.body.appendChild(pre);
+            }, 1200);
+          });
+          </script>'''
+          out_rows = []
+          for row in (root / 'html.tsv').read_text().splitlines():
+              version, name, out_dir, html = row.split('|', 3)
+              p = Path(html)
+              text = p.read_text()
+              instrumented = p.with_name('probe-instrumented.html')
+              replaced, count = re.subn(r'</body\s*>', script + '</body>', text, count=1, flags=re.I)
+              if count != 1:
+                  raise SystemExit(f'could not instrument {p}')
+              instrumented.write_text(replaced)
+              out_rows.append('|'.join((version, name, out_dir, str(instrumented))))
+          (root / 'instrumented.tsv').write_text('\n'.join(out_rows) + '\n')
+          PY
+
+      - name: Capture normal and print-mode DOM plus same-Chrome PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p evidence/dom evidence/pdf evidence/bbox evidence/pdfinfo
+          port=8127
+
+          while IFS='|' read -r version name out html; do
+            server_log="/tmp/http-${version}-${name}.log"
+            python3 -m http.server "$port" --bind 127.0.0.1 --directory "$out" > "$server_log" 2>&1 &
+            server_pid=$!
+            trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+            sleep 1
+
+            for mode in normal print; do
+              suffix=''
+              if [[ "$mode" == print ]]; then suffix='?print-pdf'; fi
+              dump="evidence/dom/${version}-${name}-${mode}.html"
+              "$CHROME" --headless=new --no-sandbox --disable-gpu \
+                --user-data-dir="/tmp/chrome-${version}-${name}-${mode}" \
+                --window-size=1440,1000 --virtual-time-budget=5000 --dump-dom \
+                "http://127.0.0.1:${port}/probe-instrumented.html${suffix}" > "$dump" 2>/dev/null
+              grep -F 'qd-layout-dump' "$dump" >/dev/null
+            done
+
+            pdf="evidence/pdf/${version}-${name}.pdf"
+            "$CHROME" --headless=new --no-sandbox --disable-gpu \
+              --user-data-dir="/tmp/chrome-pdf-${version}-${name}" \
+              --virtual-time-budget=5000 --no-pdf-header-footer \
+              --print-to-pdf="$PWD/$pdf" \
+              "http://127.0.0.1:${port}/probe-instrumented.html?print-pdf" >/dev/null 2>&1
+            test -s "$pdf"
+            pdfinfo "$pdf" > "evidence/pdfinfo/${version}-${name}.txt"
+            pdftotext -bbox-layout "$pdf" "evidence/bbox/${version}-${name}.html"
+
+            kill "$server_pid"
+            wait "$server_pid" 2>/dev/null || true
+            trap - EXIT
+          done < "$root/instrumented.tsv"
+
+      - name: Probe official v2.6 native PDF exporter separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/slides-pdf-probe
+          mkdir -p evidence/native-v260
+          for src in "$root"/fixtures/*.qd; do
+            name="$(basename "$src" .qd)"
+            out="$root/native-v260-$name"
+            set +e
+            "$QD260" compile "$src" --strict --clean --pdf --pdf-no-sandbox \
+              --chrome-path "$CHROME" --out "$out" --out-name probe \
+              > "evidence/native-v260/${name}.stdout" \
+              2> "evidence/native-v260/${name}.stderr"
+            status=$?
+            set -e
+            printf '%s\n' "$status" > "evidence/native-v260/${name}.status"
+            if [[ "$status" -eq 0 ]]; then
+              pdf="$(find "$out" -type f -name '*.pdf' -print -quit)"
+              test -n "$pdf"
+              pdfinfo "$pdf" > "evidence/native-v260/${name}.pdfinfo.txt"
+              pdftotext -bbox-layout "$pdf" "evidence/native-v260/${name}.bbox.html"
+            fi
+          done
+
+      - name: Summarize observable geometry and text positions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee evidence/summary.txt
+          from pathlib import Path
+          from html import unescape
+          import json, re, xml.etree.ElementTree as ET
+
+          evidence = Path('evidence')
+          dump_re = re.compile(r'<pre id="qd-layout-dump">(.*?)</pre>', re.S)
+
+          def dom_payload(path):
+              text = path.read_text()
+              m = dump_re.search(text)
+              if not m:
+                  raise SystemExit(f'missing runtime payload in {path}')
+              return json.loads(unescape(m.group(1)))
+
+          def words(path):
+              root = ET.fromstring(path.read_text())
+              result = []
+              for word in root.iter():
+                  if not word.tag.endswith('word'):
+                      continue
+                  text = ''.join(word.itertext()).strip()
+                  if text.startswith('QD-'):
+                      result.append({
+                          'text': text,
+                          'xMin': word.attrib.get('xMin'),
+                          'yMin': word.attrib.get('yMin'),
+                          'xMax': word.attrib.get('xMax'),
+                          'yMax': word.attrib.get('yMax'),
+                      })
+              return result
+
+          print('=== runtime print-mode section geometry ===')
+          for path in sorted((evidence / 'dom').glob('*-print.html')):
+              payload = dom_payload(path)
+              rows = []
+              for s in payload['sections']:
+                  rows.append({
+                      'index': s['index'],
+                      'hasHeading': s['hasHeading'],
+                      'text': s['text'][:80],
+                      'height': round(s['rect']['height'], 3),
+                      'paddingTop': s['paddingTop'],
+                      'paddingBottom': s['paddingBottom'],
+                      'firstOffset': None if not s['first'] else round(s['first']['offsetFromSectionTop'], 3),
+                  })
+              print(path.stem, json.dumps(rows, sort_keys=True))
+
+          print('=== same-Chrome PDF metadata ===')
+          for path in sorted((evidence / 'pdfinfo').glob('*.txt')):
+              lines = [line for line in path.read_text().splitlines() if line.startswith(('Pages:', 'Page size:'))]
+              print(path.stem, ' | '.join(lines))
+
+          print('=== QD marker PDF coordinates ===')
+          for path in sorted((evidence / 'bbox').glob('*.html')):
+              print(path.stem, json.dumps(words(path), sort_keys=True))
+
+          print('=== v2.6 native exporter statuses ===')
+          for path in sorted((evidence / 'native-v260').glob('*.status')):
+              print(path.stem, path.read_text().strip())
+          PY
+
+      - name: Upload clean-room oracle evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: probe-352-v260-slides-pdf-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
