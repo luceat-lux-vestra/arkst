@@ -72,16 +72,44 @@ jobs:
           set -euo pipefail
           cd /tmp/v260-table-probe
           echo '=== TABLE STRUCTURE: NARROW ==='
-          grep -RniE -C 2 '<table|table-container|table-wrapper|overflow-x|overflow:' out-narrow --include='*.html' --include='*.css' || true
+          grep -RniE -C 2 '<table|table-scroll-area|overflow-x|overflow:' out-narrow --include='*.html' --include='*.css' || true
           echo '=== TABLE STRUCTURE: WIDE ==='
-          grep -RniE -C 2 '<table|table-container|table-wrapper|overflow-x|overflow:' out-wide --include='*.html' --include='*.css' || true
+          grep -RniE -C 2 '<table|table-scroll-area|overflow-x|overflow:' out-wide --include='*.html' --include='*.css' || true
+          echo '=== GENERATED SCRIPT REFERENCE ==='
+          grep -RniE -C 1 'table-scroll-area' out-wide --include='*.js' || true
           echo '=== WIDE MARKER LOCATION ==='
           grep -RniE -C 3 'ThisIsAnIntentionallyVeryLongUnbreakableToken' out-wide --include='*.html' || true
-          echo '=== CSS OVERFLOW RULES ==='
-          grep -RniE -C 3 'overflow-x|overflow[[:space:]]*:' out-wide --include='*.css' --include='*.html' || true
           test "$(find out-wide -type f -name '*.html' | wc -l)" -ge 1
           test "$(grep -Ril 'ThisIsAnIntentionallyVeryLongUnbreakableToken' out-wide --include='*.html' | wc -l)" -ge 1
-          test "$(grep -RilE 'overflow-x|overflow[[:space:]]*:' out-wide --include='*.css' --include='*.html' | wc -l)" -ge 1
+          grep -Rqs '.quarkdown-docs .table-scroll-area' out-wide --include='*.css'
+          grep -Rqs 'overflow-x: auto' out-wide --include='*.css'
+      - name: Observe rendered DOM wrapper with bundled browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$BROWSER"
+          "$BROWSER" --version
+          "$BROWSER" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --allow-file-access-from-files \
+            --virtual-time-budget=3000 \
+            --dump-dom \
+            file:///tmp/v260-table-probe/out-wide/wide/index.html \
+            > /tmp/v260-table-probe/rendered-wide.html
+          echo '=== RENDERED TABLE WRAPPER ==='
+          grep -nE -C 3 'table-scroll-area|<table' /tmp/v260-table-probe/rendered-wide.html
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path('/tmp/v260-table-probe/rendered-wide.html').read_text()
+          assert 'table-scroll-area' in html
+          assert re.search(r'class="[^"]*table-scroll-area[^"]*"[^>]*>\s*<table', html, re.S), html[:5000]
+          assert 'ThisIsAnIntentionallyVeryLongUnbreakableToken_A' in html
+          PY
       - name: Upload observable artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -89,4 +117,5 @@ jobs:
           path: |
             /tmp/v260-table-probe/out-narrow
             /tmp/v260-table-probe/out-wide
+            /tmp/v260-table-probe/rendered-wide.html
           if-no-files-found: error
