@@ -1,0 +1,91 @@
+name: v2.6 docs wide-table oracle probe
+
+on:
+  push:
+    branches:
+      - probe/346-v260-docs-wide-table-scroll
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v260-docs-wide-table-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download and verify official Quarkdown v2.6.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL -o /tmp/quarkdown.zip https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip
+          echo '5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4  /tmp/quarkdown.zip' | sha256sum -c -
+          rm -rf /tmp/qd && mkdir -p /tmp/qd
+          unzip -q /tmp/quarkdown.zip -d /tmp/qd
+          QD="$(find /tmp/qd -type f -name quarkdown -perm -111 | head -n1)"
+          test -n "$QD"
+          echo "QD=$QD" >> "$GITHUB_ENV"
+          "$QD" --version
+      - name: Compile independent docs table fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/v260-table-probe && mkdir -p /tmp/v260-table-probe
+          cd /tmp/v260-table-probe
+          cat > narrow.qd <<'EOF'
+          .docname {Narrow table probe}
+          .doctype {docs}
+
+          # Narrow
+
+          | Key | Value |
+          | --- | --- |
+          | A | B |
+          | C | D |
+          EOF
+          cat > wide.qd <<'EOF'
+          .docname {Wide table probe}
+          .doctype {docs}
+
+          # Wide
+
+          | A | B | C | D | E | F | G | H |
+          | --- | --- | --- | --- | --- | --- | --- | --- |
+          | ThisIsAnIntentionallyVeryLongUnbreakableToken_AAAAAAAAAAAAAAAAAAAAAAAAAAAAA | ThisIsAnIntentionallyVeryLongUnbreakableToken_BBBBBBBBBBBBBBBBBBBBBBBBBBBBB | ThisIsAnIntentionallyVeryLongUnbreakableToken_CCCCCCCCCCCCCCCCCCCCCCCCCCCCC | ThisIsAnIntentionallyVeryLongUnbreakableToken_DDDDDDDDDDDDDDDDDDDDDDDDDDDDD | ThisIsAnIntentionallyVeryLongUnbreakableToken_EEEEEEEEEEEEEEEEEEEEEEEEEEEEE | ThisIsAnIntentionallyVeryLongUnbreakableToken_FFFFFFFFFFFFFFFFFFFFFFFFFFFFF | ThisIsAnIntentionallyVeryLongUnbreakableToken_GGGGGGGGGGGGGGGGGGGGGGGGGGGGG | ThisIsAnIntentionallyVeryLongUnbreakableToken_HHHHHHHHHHHHHHHHHHHHHHHHHHHHH |
+          EOF
+          "$QD" c narrow.qd -o out-narrow --out-name narrow --strict --pretty
+          "$QD" c wide.qd -o out-wide --out-name wide --strict --pretty
+          echo '=== NARROW FILES ==='
+          find out-narrow -maxdepth 5 -type f -print | sort
+          echo '=== WIDE FILES ==='
+          find out-wide -maxdepth 5 -type f -print | sort
+      - name: Inspect generated HTML and CSS only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/v260-table-probe
+          echo '=== TABLE STRUCTURE: NARROW ==='
+          grep -RniE -C 2 '<table|table-container|table-wrapper|overflow-x|overflow:' out-narrow --include='*.html' --include='*.css' || true
+          echo '=== TABLE STRUCTURE: WIDE ==='
+          grep -RniE -C 2 '<table|table-container|table-wrapper|overflow-x|overflow:' out-wide --include='*.html' --include='*.css' || true
+          echo '=== WIDE MARKER LOCATION ==='
+          grep -RniE -C 3 'ThisIsAnIntentionallyVeryLongUnbreakableToken' out-wide --include='*.html' || true
+          echo '=== CSS OVERFLOW RULES ==='
+          grep -RniE -C 3 'overflow-x|overflow[[:space:]]*:' out-wide --include='*.css' --include='*.html' || true
+          test "$(find out-wide -type f -name '*.html' | wc -l)" -ge 1
+          test "$(grep -Ril 'ThisIsAnIntentionallyVeryLongUnbreakableToken' out-wide --include='*.html' | wc -l)" -ge 1
+          test "$(grep -RilE 'overflow-x|overflow[[:space:]]*:' out-wide --include='*.css' --include='*.html' | wc -l)" -ge 1
+      - name: Upload observable artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v260-docs-wide-table-observable-artifacts
+          path: |
+            /tmp/v260-table-probe/out-narrow
+            /tmp/v260-table-probe/out-wide
+          if-no-files-found: error
