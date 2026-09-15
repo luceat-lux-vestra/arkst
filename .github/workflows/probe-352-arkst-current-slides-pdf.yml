@@ -1,0 +1,89 @@
+name: Probe 352 current Arkst slides PDF
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/probe-352-arkst-current-slides-pdf.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install PDF inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+
+      - name: Create independently authored current-surface fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/arkst-slides-probe evidence
+          cat > /tmp/arkst-slides-probe/current.qd <<'EOF'
+          .doctype {slides}
+
+          QD-ARKST-HEADERLESS-FIRST
+
+          Body-only first slide before the first automatic heading boundary.
+
+          # QD-ARKST-HEADED-SECOND
+
+          Second slide body.
+          EOF
+
+      - name: Build current Arkst Typst source and in-process PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p arkst-cli --locked -- \
+            build /tmp/arkst-slides-probe/current.qd \
+            --format typst --output /tmp/arkst-slides-probe/current.typ
+          cargo run -p arkst-cli --features typst-inprocess --locked -- \
+            build /tmp/arkst-slides-probe/current.qd \
+            --format pdf --backend in-process --output /tmp/arkst-slides-probe/current.pdf
+          test -s /tmp/arkst-slides-probe/current.typ
+          test -s /tmp/arkst-slides-probe/current.pdf
+          cp /tmp/arkst-slides-probe/current.typ evidence/current.typ
+          cp /tmp/arkst-slides-probe/current.pdf evidence/current.pdf
+
+      - name: Capture current Arkst PDF contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          pdfinfo evidence/current.pdf | tee evidence/pdfinfo.txt
+          pdftotext -bbox-layout evidence/current.pdf evidence/bbox.html
+          {
+            echo '=== generated Typst ==='
+            cat evidence/current.typ
+            echo '=== PDF contract ==='
+            grep -E '^(Pages|Page size):' evidence/pdfinfo.txt
+            echo '=== marker coordinates ==='
+            python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root=ET.fromstring(Path('evidence/bbox.html').read_text())
+          for page_no,page in enumerate([x for x in root.iter() if x.tag.endswith('page')],1):
+              for word in page.iter():
+                  if not word.tag.endswith('word'): continue
+                  text=''.join(word.itertext()).strip()
+                  if text.startswith('QD-ARKST-'):
+                      print(page_no,text,word.attrib.get('xMin'),word.attrib.get('yMin'),word.attrib.get('xMax'),word.attrib.get('yMax'))
+          PY
+          } | tee evidence/summary.txt
+
+      - name: Upload current-surface evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: probe-352-arkst-current-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
