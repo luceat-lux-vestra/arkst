@@ -23,9 +23,9 @@ jobs:
           cargo fmt --all
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
+          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/evaluator.rs crates/arkst-markdown/src/parser.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
           if ! git diff --cached --quiet; then
-            git commit -m 'feat(compat): add typed complete page geometry'
+            git commit -m 'fix(compat): preserve consecutive explicit page breaks'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
           cargo check --workspace --all-targets --locked
