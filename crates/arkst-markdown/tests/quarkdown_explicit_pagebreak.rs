@@ -29,6 +29,21 @@ fn consecutive_triple_angle_boundaries_remain_distinct_semantic_breaks() {
 }
 
 #[test]
+fn consecutive_crlf_boundaries_preserve_distinct_source_spans() {
+    let qd = parse_qd("FIRST\r\n\r\n<<<\r\n<<<\r\n\r\nSECOND\r\n");
+    assert_eq!(page_break_spans(&qd.nodes), vec![(9, 12), (14, 17)]);
+}
+
+#[test]
+fn mixed_paragraph_is_not_partially_promoted_to_pagebreaks() {
+    let qd = parse_qd("<<<\nordinary text\n");
+    assert!(
+        page_break_spans(&qd.nodes).is_empty(),
+        "mixed paragraph content must remain ordinary content rather than partially converting"
+    );
+}
+
+#[test]
 fn code_fence_shields_triple_angle_from_pagebreak_recognition() {
     let qd = parse_qd("```text\n<<<\n```\n");
     assert!(page_break_spans(&qd.nodes).is_empty());
