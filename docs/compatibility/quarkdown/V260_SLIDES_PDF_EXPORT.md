@@ -157,6 +157,7 @@ Parser boundaries are deliberately narrow:
 - `<<<` promotion applies only in Quarkdown mode;
 - source spans are preserved;
 - consecutive physical `<<<` lines become distinct boundaries;
+- LF and CRLF marker lines retain bounded source spans without newline bytes;
 - fenced code containing `<<<` is not promoted;
 - Markdown `---` remains a thematic break;
 - a mixed paragraph is not partially promoted;
@@ -176,20 +177,21 @@ The Typst adapter owns the renderer-specific policy. Its order is pinned as:
 
 This keeps default/focus interaction testable without conflating theme-specific coordinates with backend-neutral semantics.
 
-## Candidate regression and adversarial evidence
+## Regression and adversarial evidence
 
-The candidate has targeted executable proof for the bounded contract:
+The substantive implementation candidate `aca8143a8f158bbe3411d4df13bf14303b822f0c` passed the bounded engineering proof before this evidence document was finalized:
 
 | Evidence | Result |
 |---|---:|
 | page geometry semantic/rollback/serde tests | 6/6 pass |
 | existing page-alignment regression tests | 6/6 pass |
 | `.slides` gating/nullability/rollback/shadowing/serde tests | 6/6 pass |
-| explicit-break parser boundary tests | 6 cases defined; final candidate rerun pending after latest hardening commit |
+| explicit-break parser boundary/adversarial tests | 6/6 pass |
 | explicit-break IR/evaluator/fail-closed/shadowing/serde tests | 4/4 pass |
 | Typst slides prelude/ordering/weak-break tests | 5/5 pass |
 | existing automatic-pagebreak artifact regression | 5/5 pass |
 | real in-process Typst PDF artifact matrix | 8/8 pass |
+| subprocess/in-process slides backend parity with pinned Typst 0.15.1 | pass |
 
 The 8-case real-PDF matrix covers:
 
@@ -202,20 +204,29 @@ The 8-case real-PDF matrix covers:
 - short and long body-only slides without accidental pagination;
 - default layout, omitted/nullable `.slides`, explicit center true/false, and `focus` retaining the expected page contract.
 
-A dedicated `slides_backend_parity` integration test also compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, `focus`, and explicit page geometry. This test requires the pinned Typst 0.15.1 executable and therefore remains **UNVERIFIED until the restored standard CI runs it with `ARKST_REQUIRE_TYPST=1`**.
+The dedicated `slides_backend_parity` integration test compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, `focus`, and explicit page geometry. Production CI ran it against pinned Typst 0.15.1 on Linux, macOS, and Windows.
 
-## Remaining completion gate
+## Production verification record
 
-The migration checklist row must remain unchecked until the final PR candidate has:
+The substantive candidate `aca8143a8f158bbe3411d4df13bf14303b822f0c` passed the restored production workflows with no temporary development workflow or patch machinery present in the PR diff:
 
-- temporary development workflow/patch machinery removed;
-- the repository's production CI restored unchanged apart from intentional permanent test coverage;
-- subprocess/in-process slides backend parity passing with pinned Typst 0.15.1;
-- WASM compatibility passing for the backend-neutral IR/state additions;
-- fresh Linux/macOS/Windows workspace tests;
-- fresh fmt, clippy, docs, license, compatibility, and MSRV required contexts;
-- strict review against the final immutable candidate HEAD.
+- CI run `35149202882` — success: fmt and repository policy/security/ruleset checks, clippy, docs, license, WASM, and Linux/macOS/Windows workspace tests; all three platforms installed pinned Typst 0.15.1 and passed the dedicated backend-parity step;
+- Markdown compatibility run `35149202874` — success: checked-in corpora, generated/reference provenance regeneration, differential corpus and PDF smoke harness, and independent result identity;
+- MSRV run `35149202921` — success on Rust 1.92.0 with locked workspace/all-target/all-feature check;
+- Reference JVM run `35149202881` — success with the pinned Temurin 25 oracle and external differential verification;
+- CodeQL run `35149202854` — success for both Actions and Rust analysis;
+- Docs Checks run `35149202852` — success;
+- Dependency review run `35149202853` — success.
 
-Any HEAD change after that gate begins invalidates the evidence and requires a fresh gate.
+The final documentation/checklist commit changes only evidence bookkeeping, so the strict merge gate is rerun on that resulting PR HEAD before merge. A HEAD move after that gate again invalidates the final gate evidence.
 
-Arkst needs behavioral equivalence at its owned PDF boundary. It does not claim Quarkdown's exact CSS, DOM, Chromium, or theme-coordinate implementation, and any unobserved meaning of the release-note phrase "more polished layout" remains `UNKNOWN` rather than guessed.
+## Residual boundaries
+
+Arkst has behavioral evidence for the bounded v2.6 slides PDF contract it owns. It does **not** claim Quarkdown's exact CSS, DOM, Chromium, theme-coordinate implementation, or every presentation feature. In particular:
+
+- the unobserved remainder of the release-note phrase "more polished layout" remains `UNKNOWN` rather than guessed;
+- native v2.5.1 PDF geometry remains `UNKNOWN`;
+- the broader #175/#178/#185 baseline work remains separately owned and is not closed by this migration slice;
+- browser/Chromium exporter internals remain outside Arkst's current Typst-native PDF surface as documented separately.
+
+Those boundaries do not block the v2.6 migration row because the applicable Arkst-owned behavior is explicitly typed, regression-tested, artifact-tested, backend-parity-tested, and cross-platform verified.
