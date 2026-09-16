@@ -3304,6 +3304,7 @@ mod tests {
                 },
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
+                page_geometry: None,
                 slides: None,
             },
             ..IrMetadata::default()
@@ -3432,6 +3433,7 @@ mod tests {
             },
             auto_page_break_max_depth: None,
             page_alignment: None,
+            page_geometry: None,
             slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
