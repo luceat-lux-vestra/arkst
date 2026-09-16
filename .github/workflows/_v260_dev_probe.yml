@@ -45,10 +45,9 @@ jobs:
               )
 
           if 'WireNode::PageBreak' not in s:
-              wire = '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    Math {'''
               s = once(
                   s,
-                  wire,
+                  '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    Math {''',
                   '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    PageBreak {\n        span: SourceSpan,\n    },\n    Math {''',
                   'WireNode::PageBreak',
               )
@@ -83,6 +82,24 @@ jobs:
                   '        | IrNode::ThematicBreak { .. }\n        | IrNode::Math { .. } => {}',
                   '        | IrNode::ThematicBreak { .. }\n        | IrNode::PageBreak { .. }\n        | IrNode::Math { .. } => {}',
                   'collect_node_sources PageBreak',
+              )
+
+          first_fixture = '''                auto_page_break_max_depth: Some(2),\n                page_alignment: None,\n            },\n            ..IrMetadata::default()'''
+          if first_fixture in s:
+              s = once(
+                  s,
+                  first_fixture,
+                  '''                auto_page_break_max_depth: Some(2),\n                page_alignment: None,\n                slides: None,\n            },\n            ..IrMetadata::default()''',
+                  'metadata fixture slides',
+              )
+
+          second_fixture = '''            auto_page_break_max_depth: None,\n            page_alignment: None,\n        };\n        let serialized = serde_json::to_string(&state)'''
+          if second_fixture in s:
+              s = once(
+                  s,
+                  second_fixture,
+                  '''            auto_page_break_max_depth: None,\n            page_alignment: None,\n            slides: None,\n        };\n        let serialized = serde_json::to_string(&state)''',
+                  'ordered state fixture slides',
               )
 
           p.write_text(s)
