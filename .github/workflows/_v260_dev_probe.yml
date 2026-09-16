@@ -5,34 +5,188 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect-engine:
+  patch-semantic:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-      - name: Show evaluator and parser ownership hooks
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply evaluator parser and Typst semantic patch
         shell: bash
         run: |
           set -euo pipefail
-          show() {
-            file="$1"; needle="$2"; before="${3:-40}"; after="${4:-100}"
-            echo "=== $file :: $needle ==="
-            line=$(grep -nF "$needle" "$file" | head -1 | cut -d: -f1 || true)
-            if [ -n "$line" ]; then
-              start=$((line > before ? line - before : 1)); end=$((line + after))
-              sed -n "${start},${end}p" "$file"
-            fi
-          }
-          show crates/arkst-engine/src/evaluator.rs 'enum NativeDispatchOwner' 20 170
-          show crates/arkst-engine/src/evaluator.rs 'fn preflight_native_binding' 20 150
-          show crates/arkst-engine/src/evaluator.rs 'let signature = match name {' 15 180
-          show crates/arkst-engine/src/evaluator.rs 'fn evaluate_document_state_builtin' 10 320
-          show crates/arkst-engine/src/evaluator.rs 'if name == "pageformat"' 20 110
-          show crates/arkst-engine/src/evaluator.rs 'struct DocumentState {' 10 160
-          show crates/arkst-engine/src/evaluator.rs 'fn ir_node_source_span' 5 80
-          show crates/arkst-engine/src/evaluator.rs 'fn rebase_dynamic_node' 5 120
-          show crates/arkst-markdown/src/parser.rs 'struct FrontendParserExtension' 10 90
+          python3 <<'PY'
+          from pathlib import Path
+
+          def once(s, old, new, label):
+              n=s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, found {n}')
+              return s.replace(old,new,1)
+
+          # Markdown AST: explicit semantic boundary.
+          p=Path('crates/arkst-markdown/src/ast.rs'); s=p.read_text()
+          if 'PageBreak {\n        span: ByteSpan,' not in s:
+              s=once(s,
+                  '    ThematicBreak {\n        span: ByteSpan,\n    },\n',
+                  '    ThematicBreak {\n        span: ByteSpan,\n    },\n    /// Quarkdown explicit page boundary (`<<<`).\n    PageBreak {\n        span: ByteSpan,\n    },\n',
+                  'AST PageBreak')
+          p.write_text(s)
+
+          # Quarkdown-only whole-block <<< normalization.
+          p=Path('crates/arkst-markdown/src/parser.rs'); s=p.read_text()
+          marker=''') -> Vec<Block> {\n    match block {\n        Block::DirectiveCall {'''
+          if 'source.get(span.start..span.end).is_some_and(|text| text.trim() == "<<<")' not in s:
+              repl=''' ) -> Vec<Block> {'''.lstrip()
+              # exact function-body insertion preserving signature
+              old=''') -> Vec<Block> {\n    match block {\n        Block::DirectiveCall {'''
+              new=''') -> Vec<Block> {\n    if let Block::Paragraph { span, .. } = block {\n        if source\n            .get(span.start..span.end)\n            .is_some_and(|text| text.trim() == "<<<")\n        {\n            return vec![Block::PageBreak { span: *span }];\n        }\n    }\n    match block {\n        Block::DirectiveCall {'''
+              s=once(s,old,new,'normalize <<<')
+          p.write_text(s)
+
+          # AST -> typed IR.
+          p=Path('crates/arkst-engine/src/ast_to_ir.rs'); s=p.read_text()
+          if 'Block::PageBreak { span } => Some(IrNode::PageBreak' not in s:
+              s=once(s,
+                  '        Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {\n            span: byte_to_source_span(span, source_id),\n        }),\n',
+                  '        Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {\n            span: byte_to_source_span(span, source_id),\n        }),\n        Block::PageBreak { span } => Some(IrNode::PageBreak {\n            span: byte_to_source_span(span, source_id),\n        }),\n',
+                  'ast_to_ir PageBreak')
+          p.write_text(s)
+
+          # Evaluator document state, transaction, native ownership and typed content.
+          p=Path('crates/arkst-engine/src/evaluator.rs'); s=p.read_text()
+          if 'IrSlidesConfiguration' not in s.split('use arkst_markdown::Mode;',1)[0]:
+              s=once(s,
+                  '    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,\n',
+                  '    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,\n',
+                  'noop import anchor')
+              # add type at tail of same use list
+              s=once(s,
+                  '    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,\n};',
+                  '    IrSlidesConfiguration, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,\n};',
+                  'IrSlidesConfiguration import')
+
+          if 'slides: Option<IrSlidesConfiguration>' not in s:
+              s=once(s,
+                  '    page_alignment: Option<IrDocumentAlignment>,\n    localization_tables: LocalizationTables,\n',
+                  '    page_alignment: Option<IrDocumentAlignment>,\n    slides: Option<IrSlidesConfiguration>,\n    localization_tables: LocalizationTables,\n',
+                  'DocumentState slides field')
+              s=once(s,
+                  '            page_alignment: None,\n            localization_tables: seeded_localization_tables(),\n',
+                  '            page_alignment: None,\n            slides: None,\n            localization_tables: seeded_localization_tables(),\n',
+                  'DocumentState default slides')
+              s=once(s,
+                  '            page_alignment: snapshot.page_alignment,\n            localization_tables: seeded_localization_tables(),\n',
+                  '            page_alignment: snapshot.page_alignment,\n            slides: snapshot.slides,\n            localization_tables: seeded_localization_tables(),\n',
+                  'DocumentState from snapshot slides')
+              s=once(s,
+                  '            page_alignment: self.page_alignment,\n        }\n',
+                  '            page_alignment: self.page_alignment,\n            slides: self.slides,\n        }\n',
+                  'DocumentState snapshot slides')
+
+          if '    Slides,\n    LocalizationTables,' not in s:
+              s=once(s,
+                  '    PageAlignment,\n    LocalizationTables,\n',
+                  '    PageAlignment,\n    Slides,\n    LocalizationTables,\n',
+                  'DocumentStateField Slides')
+          if 'Slides(Option<IrSlidesConfiguration>)' not in s:
+              s=once(s,
+                  '    PageAlignment(Option<IrDocumentAlignment>),\n    LocalizationTables(LocalizationTableUndo),\n',
+                  '    PageAlignment(Option<IrDocumentAlignment>),\n    Slides(Option<IrSlidesConfiguration>),\n    LocalizationTables(LocalizationTableUndo),\n',
+                  'DocumentStateUndo Slides')
+          if 'DocumentStateUndo::Slides(previous) => state.slides = previous' not in s:
+              s=once(s,
+                  '            DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,\n',
+                  '            DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,\n            DocumentStateUndo::Slides(previous) => state.slides = previous,\n',
+                  'restore slides')
+          if 'fn set_slides_configuration' not in s:
+              needle='    fn append_document_author(&self, name: String) {'
+              setter='''    fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {\n        self.record_document_state_undo(DocumentStateField::Slides, || {\n            (DocumentStateUndo::Slides(self.document_state.borrow().slides), 0)\n        });\n        self.document_state.borrow_mut().slides = value;\n    }\n\n'''
+              s=once(s,needle,setter+needle,'slides setter')
+
+          # Native ownership inventories.
+          if '    PageBreak,\n    Whitespace,' not in s:
+              s=once(s,
+                  '    Br,\n    Whitespace,\n',
+                  '    Br,\n    PageBreak,\n    Whitespace,\n',
+                  'PageBreak owner enum')
+          if '"slides",\n    "captionposition"' not in s:
+              s=once(s,
+                  '    "theme",\n    "captionposition",\n];',
+                  '    "theme",\n    "slides",\n    "captionposition",\n];',
+                  'slides document-state native')
+          if 'const PAGE_BREAK_NATIVE_NAMES' not in s:
+              s=once(s,
+                  'const BR_NATIVE_NAMES: &[&str] = &["br"];\n',
+                  'const BR_NATIVE_NAMES: &[&str] = &["br"];\nconst PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];\n',
+                  'PageBreak names')
+              inv='''    NativeOwnerInventory {\n        owner: NativeDispatchOwner::Br,\n        names: BR_NATIVE_NAMES,\n    },\n'''
+              s=once(s,inv,inv+'''    NativeOwnerInventory {\n        owner: NativeDispatchOwner::PageBreak,\n        names: PAGE_BREAK_NATIVE_NAMES,\n    },\n''','PageBreak inventory')
+          if 'fn is_page_break(name: &str)' not in s:
+              s=once(s,
+                  'fn is_whitespace(name: &str) -> bool {\n    has_native_owner(name, NativeDispatchOwner::Whitespace)\n}\n',
+                  'fn is_page_break(name: &str) -> bool {\n    has_native_owner(name, NativeDispatchOwner::PageBreak)\n}\n\nfn is_whitespace(name: &str) -> bool {\n    has_native_owner(name, NativeDispatchOwner::Whitespace)\n}\n',
+                  'is_page_break helper')
+
+          # Signatures: bounded center-only slides and zero-arg pagebreak.
+          if '"slides" => (' not in s:
+              s=once(s,
+                  '        "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),\n',
+                  '        "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),\n        "slides" => (\n            vec![ParameterMetadata::optional("center")],\n            BodyPolicy::Reject,\n        ),\n        "pagebreak" => (Vec::new(), BodyPolicy::Reject),\n',
+                  'slides/pagebreak signatures')
+
+          # Source-defined state shadowing for .slides at both precedence sites.
+          s=s.replace('                | "noautopagebreak"\n        ) && context.get_function(name).is_some();',
+                      '                | "noautopagebreak"\n                | "slides"\n        ) && context.get_function(name).is_some();')
+
+          # Slides state evaluation before generic document getters.
+          if 'if name == "slides" {' not in s:
+              anchor='''        if name == "noautopagebreak" {\n            context.set_auto_page_break_max_depth(Some(0));\n            return CallOutcome::NoValue;\n        }\n'''
+              slides='''        if name == "slides" {\n            if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {\n                diagnostics.push(document_state_conversion_error(\n                    "`.slides` is only valid for slides documents".to_string(),\n                    *span,\n                ));\n                return CallOutcome::Failed;\n            }\n            let Some(binding_plan) = binding_plan else {\n                return CallOutcome::Failed;\n            };\n            let evaluated_positional = match self.evaluate_invocation_values(\n                positional_args, span, diagnostics, context, first_origin,\n            ) {\n                Ok(values) => values,\n                Err(outcome) => return outcome,\n            };\n            let evaluated_named = match self.evaluate_invocation_named(named_args, span, diagnostics, context) {\n                Ok(values) => values,\n                Err(outcome) => return outcome,\n            };\n            let bound = match bind_evaluated_arguments(\n                binding_plan,\n                evaluated_positional\n                    .into_iter()\n                    .zip(positional_args.iter())\n                    .map(|(value, source)| (value, value_source_span(source, span)))\n                    .collect(),\n                evaluated_named,\n                None,\n                *span,\n            ) {\n                Ok(bound) => bound,\n                Err(error) => {\n                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));\n                    return CallOutcome::Failed;\n                }\n            };\n            let center = match bound.slots.into_iter().next() {\n                Some(BoundSlot::Explicit { value, span: argument_span }) => {\n                    if matches!(value.value, IrValue::None) {\n                        None\n                    } else {\n                        match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {\n                            Ok(ScalarValue::Boolean(value)) => Some(value),\n                            Ok(_) => {\n                                diagnostics.push(document_state_conversion_error(\n                                    "`.slides center` must be boolean or none".to_string(),\n                                    argument_span,\n                                ));\n                                return CallOutcome::Failed;\n                            }\n                            Err(error) => {\n                                diagnostics.push(conversion_failure_diagnostic(\n                                    value_conversion::ConversionFailure::new(\n                                        error, Some(argument_span), Some("center"),\n                                        bound.parameters.first().and_then(|parameter| parameter.name_span), *span,\n                                    ),\n                                    Some("`.slides`"),\n                                ));\n                                return CallOutcome::Failed;\n                            }\n                        }\n                    }\n                }\n                _ => None,\n            };\n            context.set_slides_configuration(Some(IrSlidesConfiguration { center }));\n            return CallOutcome::NoValue;\n        }\n\n'''
+              s=once(s,anchor,slides+anchor,'slides evaluator')
+
+          # Pagebreak dispatch after document-state dispatch and before other owners.
+          if 'if is_page_break(name) && context.get_function(name).is_none()' not in s:
+              anchor='''        if is_localization(name) && context.get_function(name).is_none() {'''
+              dispatch='''        if is_page_break(name) && context.get_function(name).is_none() {\n            let Some(_binding_plan) = native_binding_plan.as_ref() else {\n                return CallOutcome::Failed;\n            };\n            return CallOutcome::Value(IrValue::Content(vec![IrNode::PageBreak { span: *span }]));\n        }\n\n'''
+              s=once(s,anchor,dispatch+anchor,'pagebreak dispatch')
+
+          # New node provenance handling.
+          s=s.replace('        | IrNode::ThematicBreak { span }\n        | IrNode::Math { span, .. } => *span,',
+                      '        | IrNode::ThematicBreak { span }\n        | IrNode::PageBreak { span }\n        | IrNode::Math { span, .. } => *span,')
+          s=s.replace('        | IrNode::ThematicBreak { span }\n        | IrNode::Math { span, .. } => *span = source_span,',
+                      '        | IrNode::ThematicBreak { span }\n        | IrNode::PageBreak { span }\n        | IrNode::Math { span, .. } => *span = source_span,')
+          p.write_text(s)
+
+          # Typst typed weak break.
+          p=Path('crates/arkst-typst/src/lowering.rs'); s=p.read_text()
+          if 'IrNode::PageBreak { span }' not in s:
+              old='''            IrNode::ThematicBreak { span } => {\n                let before = self.output.len();\n                self.push_str("---\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
+              new=old+'''            IrNode::PageBreak { span } => {\n                let before = self.output.len();\n                self.push_str("#pagebreak(weak: true)\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
+              s=once(s,old,new,'Typst PageBreak lowering')
+          p.write_text(s)
+
+          # Slides renderer defaults and nullable center in the public Typst wrapper.
+          p=Path('crates/arkst-typst/src/focus_lowering.rs'); s=p.read_text()
+          if 'SLIDES_PAGE_WIDTH_PT' not in s:
+              old='''pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {\n    let (body, mut source_map) = lowering_base::lower_to_typst(doc);\n    let Some(prelude) = focus_prelude(doc) else {\n        return (body, source_map);\n    };\n\n    let offset = prelude.len();\n    for entry in &mut source_map {\n        entry.generated_start += offset;\n        entry.generated_end += offset;\n    }\n\n    let mut output = String::with_capacity(offset + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    (output, source_map)\n}\n\n/// Lower an Arkst IR document to Typst source without returning its source map.\npub fn lower_to_typst_code(doc: &IrDocument) -> String {\n    let body = lowering_base::lower_to_typst_code(doc);\n    let Some(prelude) = focus_prelude(doc) else {\n        return body;\n    };\n\n    let mut output = String::with_capacity(prelude.len() + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    output\n}\n'''
+              new='''pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {\n    let (body, mut source_map) = lowering_base::lower_to_typst(doc);\n    let prelude = document_prelude(doc);\n    if prelude.is_empty() {\n        return (body, source_map);\n    }\n\n    let offset = prelude.len();\n    for entry in &mut source_map {\n        entry.generated_start += offset;\n        entry.generated_end += offset;\n    }\n\n    let mut output = String::with_capacity(offset + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    (output, source_map)\n}\n\n/// Lower an Arkst IR document to Typst source without returning its source map.\npub fn lower_to_typst_code(doc: &IrDocument) -> String {\n    let body = lowering_base::lower_to_typst_code(doc);\n    let prelude = document_prelude(doc);\n    if prelude.is_empty() {\n        return body;\n    }\n\n    let mut output = String::with_capacity(prelude.len() + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    output\n}\n\n// Quarkdown v2.6 distributed-runtime PDF observation. These are adapter\n// defaults for slides, not backend-neutral semantic constants.\nconst SLIDES_PAGE_WIDTH_PT: f64 = 749.04;\nconst SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;\n\nfn document_prelude(doc: &IrDocument) -> String {\n    let state = &doc.metadata.document_state;\n    let mut prelude = String::new();\n    if state.document_type == IrDocumentType::Slides {\n        prelude.push_str(&format!(\n            "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\\n"\n        ));\n        match state.slides.and_then(|slides| slides.center) {\n            Some(true) => prelude.push_str("#set align(horizon)\\n"),\n            Some(false) => prelude.push_str("#set align(top)\\n"),\n            None => {}\n        }\n    }\n    if let Some(focus) = focus_prelude(doc) {\n        prelude.push_str(&focus);\n    }\n    prelude\n}\n'''
+              s=once(s,old,new,'Typst document prelude')
+          p.write_text(s)
+          PY
+
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --locked
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git diff --quiet; then
+            git add crates/arkst-markdown/src/ast.rs crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
+            git commit -m 'compat(v2.6): implement slides layout and explicit page breaks'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
