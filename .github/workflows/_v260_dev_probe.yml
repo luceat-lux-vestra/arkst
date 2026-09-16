@@ -3,47 +3,27 @@ on:
   pull_request:
     branches: [main]
 permissions:
-  contents: write
+  contents: read
 jobs:
-  patch-and-inspect:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  inspect-pageformat:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-      - name: Patch exhaustive test matches, verify workspace, inspect pageformat
+          persist-credentials: false
+      - name: Inspect bounded pageformat and size conversion
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-          files = [
-              Path('crates/arkst-markdown/tests/quarkdown_v2_5_1.rs'),
-              Path('crates/arkst-markdown/tests/empty_inline_text.rs'),
-          ]
-          for p in files:
-              s = p.read_text()
-              if 'Block::PageBreak { span }' not in s:
-                  old = '| Block::ThematicBreak { span }\n'
-                  if old not in s:
-                      raise SystemExit(f'{p}: thematic-break span anchor missing')
-                  s = s.replace(old, old + '        | Block::PageBreak { span }\n', 1)
-                  p.write_text(s)
-          PY
-          cargo fmt --all
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git diff --quiet; then
-            git add crates/arkst-markdown/tests/quarkdown_v2_5_1.rs crates/arkst-markdown/tests/empty_inline_text.rs
-            git commit -m 'test(compat): cover pagebreak AST in legacy invariants'
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          echo '=== PAGEFORMAT REFERENCES ==='
+          grep -nF 'pageformat' crates/arkst-engine/src/evaluator.rs
+          line=$(grep -nF 'if name == "pageformat"' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1 || true)
+          if [ -n "$line" ]; then
+            start=$((line > 80 ? line - 80 : 1)); end=$((line + 260)); sed -n "${start},${end}p" crates/arkst-engine/src/evaluator.rs
           fi
-          cargo check --workspace --all-targets --locked
-          line=$(grep -nF 'if name == "pageformat"' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
-          start=$((line > 60 ? line - 60 : 1)); end=$((line + 220))
-          echo '=== PAGEFORMAT ==='
-          sed -n "${start},${end}p" crates/arkst-engine/src/evaluator.rs
-          echo '=== SIZE CONVERSION HOOKS ==='
-          grep -nF 'DomainTarget::Size' crates/arkst-engine/src/evaluator.rs || true
-          grep -nF 'convert_domain_with_origin' crates/arkst-engine/src/evaluator.rs | head -20 || true
+          echo '=== PAGE ALIGNMENT SETTER ==='
+          line=$(grep -nF 'fn set_page_alignment' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1 || true)
+          if [ -n "$line" ]; then start=$((line-20)); end=$((line+60)); sed -n "${start},${end}p" crates/arkst-engine/src/evaluator.rs; fi
+          echo '=== SIZE CONVERSION ==='
+          grep -nF 'convert_domain_with_origin' crates/arkst-engine/src/evaluator.rs | head -30 || true
+          grep -nF 'DomainTarget::Size' crates/arkst-engine/src/evaluator.rs | head -30 || true
