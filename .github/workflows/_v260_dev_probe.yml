@@ -14,20 +14,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Show evaluator integration points
+      - name: Show bounded integration helpers
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== evaluate_document_state_builtin ==='
-          line=$(grep -n 'fn evaluate_document_state_builtin' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
-          sed -n "$((line-20)),$((line+240))p" crates/arkst-engine/src/evaluator.rs
-          echo '=== pageformat ==='
-          grep -n -B20 -A140 'name == "pageformat"' crates/arkst-engine/src/evaluator.rs || true
-          echo '=== document state ==='
-          line=$(grep -n '^struct DocumentState' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
-          sed -n "$((line-80)),$((line+260))p" crates/arkst-engine/src/evaluator.rs
-          echo '=== native signatures ==='
-          line=$(grep -n '^const DOCUMENT_STATE_NATIVE_NAMES' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
-          sed -n "$((line-20)),$((line+180))p" crates/arkst-engine/src/evaluator.rs
-          echo '=== parser conversion ==='
-          grep -n -B15 -A90 'matches_extension_kind!(arena, node, QuarkdownBlock)' crates/arkst-markdown/src/parser.rs | head -220
+          for pattern in 'fn evaluate_page_alignment_builtin' 'fn set_page_alignment' 'enum DocumentStateField' 'enum DocumentStateUndo' 'fn rollback_document_state' 'let signature = match name' 'fn evaluate_call'; do
+            echo "=== $pattern ==="
+            line=$(grep -n "$pattern" crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1 || true)
+            if [ -n "$line" ]; then sed -n "$((line-30)),$((line+180))p" crates/arkst-engine/src/evaluator.rs; fi
+          done
+          echo '=== boolean conversions ==='
+          grep -n -B8 -A20 'convert_boolean\|scalar_boolean\|Boolean' crates/arkst-engine/src/evaluator.rs | head -260 || true
+          echo '=== parser setup ==='
+          grep -n -B20 -A50 'Box::new(QuarkdownBlockParser)' crates/arkst-markdown/src/parser.rs
