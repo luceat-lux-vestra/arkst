@@ -70,7 +70,10 @@ fn focus_plain_and_slides_lower_to_real_typst_pdf() {
             .find("// Arkst Quarkdown v2.6 focus layout\n")
             .expect("focus prelude");
         if document_type == "plain" {
-            assert_eq!(focus, 0, "plain focus must preserve the existing output prefix: {typst}");
+            assert_eq!(
+                focus, 0,
+                "plain focus must preserve the existing output prefix: {typst}"
+            );
             assert!(
                 !typst.contains("#set page(width: 749.04pt, height: 546pt)"),
                 "plain focus must not acquire slides page geometry: {typst}"
