@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Apply evaluator parser and Typst semantic patch
+      - name: Apply and persist semantic slice, then full-check
         shell: bash
         run: |
           set -euo pipefail
@@ -86,10 +86,13 @@ jobs:
               s=once(s,'        | IrNode::ThematicBreak { .. }\n        | IrNode::Math { .. } => return None,','        | IrNode::ThematicBreak { .. }\n        | IrNode::PageBreak { .. }\n        | IrNode::Math { .. } => return None,','builtins pagebreak')
           p.write_text(s)
 
+          p=Path('tools/markdown-compat/src/main.rs'); s=p.read_text()
+          if 'Block::PageBreak { .. } => CanonicalNode::new("page_break")' not in s:
+              s=once(s,'        Block::ThematicBreak { .. } => CanonicalNode::new("thematic_break"),\n','        Block::ThematicBreak { .. } => CanonicalNode::new("thematic_break"),\n        Block::PageBreak { .. } => CanonicalNode::new("page_break"),\n','compat PageBreak')
+          p.write_text(s)
+
           p=Path('crates/arkst-typst/src/lowering.rs'); s=p.read_text()
           if 'IrNode::PageBreak { span }' not in s:
-              o='''            IrNode::ThematicBreak { span } => {\n                let before = self.output.len();\n                self.push_str("---\\n");\n                if span.source_id != SourceId(0) { self.record_span(*span, self.output.len() - before); }\n            }\n'''
-              # formatted source has multiline if; use exact original instead
               o='''            IrNode::ThematicBreak { span } => {\n                let before = self.output.len();\n                self.push_str("---\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
               n=o+'''            IrNode::PageBreak { span } => {\n                let before = self.output.len();\n                self.push_str("#pagebreak(weak: true)\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
               s=once(s,o,n,'typst pagebreak')
@@ -104,11 +107,11 @@ jobs:
           PY
           cargo fmt --all
           cargo fmt --all -- --check
-          cargo check --workspace --all-targets --locked
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if ! git diff --quiet; then
-            git add crates/arkst-markdown/src/ast.rs crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-engine/src/builtins.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
+            git add crates/arkst-markdown/src/ast.rs crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-engine/src/evaluator.rs crates/arkst-engine/src/builtins.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs tools/markdown-compat/src/main.rs
             git commit -m 'compat(v2.6): implement slides layout and explicit page breaks'
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
+          cargo check --workspace --all-targets --locked
