@@ -1,0 +1,31 @@
+name: v260 dev probe
+
+on:
+  push:
+    branches: [feat/v260-slides-pdf]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show evaluator integration points
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== evaluate_document_state_builtin ==='
+          line=$(grep -n 'fn evaluate_document_state_builtin' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
+          sed -n "$((line-20)),$((line+240))p" crates/arkst-engine/src/evaluator.rs
+          echo '=== pageformat ==='
+          grep -n -B20 -A140 'name == "pageformat"' crates/arkst-engine/src/evaluator.rs || true
+          echo '=== document state ==='
+          line=$(grep -n '^struct DocumentState' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
+          sed -n "$((line-80)),$((line+260))p" crates/arkst-engine/src/evaluator.rs
+          echo '=== native signatures ==='
+          line=$(grep -n '^const DOCUMENT_STATE_NATIVE_NAMES' crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1)
+          sed -n "$((line-20)),$((line+180))p" crates/arkst-engine/src/evaluator.rs
+          echo '=== parser conversion ==='
+          grep -n -B15 -A90 'matches_extension_kind!(arena, node, QuarkdownBlock)' crates/arkst-markdown/src/parser.rs | head -220
