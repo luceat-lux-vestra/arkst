@@ -1,41 +1,36 @@
 # Quarkdown v2.6 slides PDF export compatibility
 
-Issue: #352. Parent migration checklist: #311. Disposable clean-room oracles: #353 and #355.
+Issue: #352. Parent migration checklist: #311. Disposable clean-room oracles: #353 and #355. Implementation candidate: #358.
 
 ## Decision
 
-The Quarkdown v2.6 `slides` PDF-export changes are **applicable to Arkst's current output surface**, but current Arkst is observably divergent from the v2.6 target and the migration row remains incomplete.
+The Quarkdown v2.6 `slides` PDF-export changes are **applicable to Arkst's owned output surface**. The pre-implementation Arkst path was observably divergent from the v2.6 target because `.doctype {slides}` fell through to Typst's A4 portrait default and had no slides-specific document-layout contract.
 
-This is not the same ownership result as the v2.6 Chromium-export adapter classification in `V260_PDF_EXPORT_ADAPTER.md`. Arkst does not own Quarkdown's browser adapter, but Arkst **does** already own a `.doctype {slides}` → Typst → PDF path. A slides-PDF output invariant therefore cannot be classified current-surface N/A merely because the two projects use different renderers.
+PR #358 implements the bounded Arkst-owned contract needed for this migration row without importing Quarkdown renderer implementation details into generic compiler state:
 
-The relevant outstanding baseline subcontracts are already tracked by existing owners:
+- #175 bounded subcontract: typed complete `(width, height)` page geometry plus explicit `.pageformat` override ownership;
+- #178 bounded subcontract: document-type-gated `.slides` state with nullable vertical centering;
+- #185 bounded subcontract: typed explicit `.pagebreak` / `<<<` boundaries;
+- Typst ownership: slides default PDF geometry, vertical-centering lowering, weak explicit page boundaries, and final PDF artifact production.
 
-- #175 owns document-wide typed layout / `.pageformat` state, document-type defaults, and their Typst/PDF consumption;
-- #178 owns document-type-gated `.slides` configuration, including nullable vertical centering and slide-capable renderer behavior;
-- #185 owns explicit `.pagebreak` / `<<<` content breaks, which are needed to reproduce general interior headerless-slide boundaries in Arkst.
+The broader #175/#178/#185 issues remain open for their unrelated baseline scope. This migration slice does not claim controls, speaker notes, transitions, partial/selector page-format semantics, math, or code presentation support.
 
-This classification does **not** require every unrelated part of #175/#178/#185 to land before work can proceed. It requires the applicable subcontracts to be defined rather than bypassed with a v2.6-only special case.
-
-The implemented v2.6 H1/H2 automatic page-break slice (#332/#334) remains valid and bounded. It is orthogonal evidence and does not establish general slides layout or PDF parity.
+The Chromium-export adapter remains current-surface N/A as documented in `V260_PDF_EXPORT_ADAPTER.md`; that does not make slides layout N/A because Arkst itself owns `.doctype {slides}` → Typst → PDF.
 
 ## Official v2.6 claim
 
-The official Quarkdown v2.6.0 release notes state that PDF artifacts generated from `slides` documents have a more polished layout and that blank/headerless slides are spaced correctly.
+The official Quarkdown v2.6.0 release notes describe improved `slides` PDF layout and correct spacing for blank/headerless slides. That statement is treated as an output-level compatibility claim only.
 
-That language is intentionally treated as an output-level compatibility claim. It does not identify a backend-neutral semantic field or a concrete geometry that Arkst may infer without observation.
-
-The exact complete set of changes covered by the phrase **"more polished layout" is UNKNOWN** under the allowed clean-room evidence. The migration must not reconstruct unspecified upstream layout rules by guesswork.
-
-The release note says `Blank (headerless)`. The black-box evidence below pins **headerless/body-only slides**. It does not establish an invariant that adjacent breaks must synthesize an empty-content PDF page.
+The exact complete meaning of **"more polished layout" remains UNKNOWN** beyond the clean-room observations below. Arkst does not infer unspecified CSS, DOM, browser, or theme behavior from that phrase.
 
 ## Clean-room evidence identity
 
-No Quarkdown implementation source was inspected for this slice. Evidence used only:
+No Quarkdown implementation source was inspected for this slice. Evidence was limited to:
 
 - official v2.6.0 release notes;
 - official distributed v2.5.1 and v2.6.0 Linux x64 binaries as black boxes;
 - independently authored fixtures;
-- generated presentation artifacts, runtime layout observations, and produced PDFs.
+- generated presentation artifacts, observable runtime layout, and produced PDFs.
 
 Pinned distributions:
 
@@ -62,45 +57,38 @@ Current-Arkst run:
 
 ### Adversarial follow-up (#355)
 
-Strict review found that the first oracle had not covered the full risk matrix from #352, so a second disposable probe tested automatic H1/H2 boundaries, consecutive interior headerless slides, adjacent explicit breaks, and `focus` as a separate layout control.
-
 Final successful HEAD: `5ec5b46f0b788940eb1e19402ef3fc5ab1970c33`.
 
 - workflow run `35044127244` — success;
 - artifact `10426002679`;
 - artifact digest `sha256:872d53115459c5018ce39eee618f8b55b6481d015d4f14b45e692362e4e8cdbe`.
 
-Both #353 and #355 were closed unmerged after evidence capture.
+Both disposable oracle PRs were closed unmerged after evidence capture.
 
-## Observed v2.5.1 → v2.6.0 presentation delta
+## Reference observations
 
-### Headerless/body-only runtime spacing
+### Headerless/body-only spacing
 
-The generated presentation artifacts expose a repeatable change for the probed layouts:
+For the bounded generated-presentation fixtures:
 
-- v2.5.1 body-only/headerless sections have computed `padding-top: 0px`;
-- v2.6 body-only/headerless sections have computed `padding-top: 48px`;
-- the independent `short-long` and `heading-only` controls reproduce the difference;
-- the adversarial `consecutive-headerless` fixture creates two distinct interior body-only sections: both are `0px` in v2.5.1 and both independently become `48px` in v2.6;
-- under v2.6 `focus`, the probed body-only section also has `padding-top: 48px`, while its final PDF marker placement differs slightly from the default layout.
+- v2.5.1 body-only/headerless sections expose computed `padding-top: 0px`;
+- v2.6.0 body-only/headerless sections expose computed `padding-top: 48px`;
+- two consecutive interior body-only sections independently show the same 0→48px runtime change;
+- the v2.6 `focus` control also reports `48px`, while its final PDF marker position differs from the default layout.
 
-The observed `48px` value is a **reference-renderer output fact for the bounded fixtures**, not an Arkst IR constant. Arkst must not copy it into backend-neutral state without separate semantic evidence.
+`48px` is a **reference-renderer observation**, not a backend-neutral semantic value. PR #358 deliberately does not store it in Arkst IR or evaluator state.
 
-### Adjacent breaks are not an empty-slide invariant
+### Explicit adjacent breaks
 
-The adversarial fixture with two adjacent explicit `.pagebreak` calls produces only two rendered sections in both v2.5.1 and v2.6.0. The v2.6 native PDF likewise contains only two pages.
+Two adjacent explicit `.pagebreak` calls produce two rendered sections in both v2.5.1 and v2.6.0, and the v2.6 native PDF contains two pages. The evidence therefore rejects an implementation that manufactures an empty page between adjacent breaks.
 
-Therefore this evidence does not define “blank” as an empty-content page created by repeated break commands. The pinned compatibility concern is headerless/body-only slide layout. Explicit break semantics remain #185-owned because Arkst needs them to express interior/consecutive headerless cases, not because adjacent breaks must create empty pages.
+### Automatic H1/H2 boundaries
 
-### Automatic H1/H2 boundaries remain separate
+A default `slides` fixture containing one H1 and two H2 headings produces one rendered section in v2.5.1 and three sections in v2.6.0; the v2.6 native PDF contains three pages. This remains the already-implemented #332/#334 behavior and is regression evidence for #358 rather than a duplicate implementation.
 
-The default `slides` fixture containing one H1 and two H2 headings is one rendered section in v2.5.1 and three sections in v2.6.0. The v2.6 native PDF has three pages.
+### Native v2.6 PDF geometry
 
-That result agrees with the already-implemented #332/#334 contract. It is regression evidence that the PDF-layout investigation does not redefine automatic heading boundaries; it is not a second implementation requirement for this row.
-
-## Official v2.6 native PDF observations
-
-The official v2.6 native PDF exporter succeeds for the initial and adversarial fixtures. Representative results include:
+Representative official v2.6 results:
 
 | Fixture | Pages | Page size |
 |---|---:|---|
@@ -112,90 +100,122 @@ The official v2.6 native PDF exporter succeeds for the initial and adversarial f
 | `auto-headings` | 3 | `749.04 x 546 pt` |
 | `focus-headerless` | 1 | `749.04 x 546 pt` |
 
-For the default-layout consecutive-headerless fixture, both body-only markers appear at approximately `y=36.779295 pt`; headed markers appear separately at approximately `y=40.889647 pt`. In the `focus` body-only fixture, the marker appears at approximately `y=37.261198 pt`.
+The v2.5.1 manual distribution could not produce a usable native PDF in the runner because its Puppeteer dependency was unavailable. Native v2.5.1 PDF geometry therefore remains **UNKNOWN**. The evidence does not claim that page dimensions changed between v2.5.1 and v2.6.0.
 
-These PDF coordinates and the runtime `48px` inset are **separate observations**. The oracle does not establish an exact CSS-pixel-to-PDF-coordinate causal or unit mapping. In particular, a usable v2.5.1 native-PDF control could not be produced in the runner, so the runtime 0→48px delta must not be restated as a measured native-PDF coordinate delta.
+## Pre-implementation Arkst divergence
 
-The v2.5.1 manual distribution's PDF command returned process status 0 in the runner but emitted a Puppeteer-missing diagnostic and produced no PDF artifact. Native v2.5.1 PDF page geometry and marker coordinates therefore remain **UNKNOWN** in this environment. Process exit status alone is not treated as successful artifact evidence.
-
-The initial oracle also attempted direct headless-Chrome `--print-to-pdf` against generated HTML. That path did not reproduce Quarkdown/Reveal pagination, so its PDF page counts and marker results are excluded from the compatibility conclusion.
-
-## Current Arkst artifact
-
-A separate oracle compiled this independent current-surface fixture through `arkst-cli` and the in-process Typst backend:
-
-```quarkdown
-.doctype {slides}
-
-QD-ARKST-HEADERLESS-FIRST
-
-Body-only first slide before the first automatic heading boundary.
-
-# QD-ARKST-HEADED-SECOND
-
-Second slide body.
-```
-
-Current Arkst lowering emits materially:
-
-```typst
-QD-ARKST-HEADERLESS-FIRST
-
-Body-only first slide before the first automatic heading boundary.
-
-#pagebreak(weak: true)
-= QD-ARKST-HEADED-SECOND
-
-Second slide body.
-```
-
-There is no generic slide page-geometry or slide-layout prelude in this output. The subprocess backend also feeds the generated Typst source to the official Typst compiler without adding a slide-layout wrapper, so this is not an in-process-only omission.
-
-The real Typst 0.15.1 PDF artifact is:
+Before #358, an independently authored Arkst fixture lowered to ordinary Typst content plus automatic weak heading breaks, with no slide page-geometry/layout prelude. Typst 0.15.1 therefore produced:
 
 - 2 pages;
-- `595.276 x 841.89 pt` (A4 portrait);
-- headerless marker on page 1 at approximately `x=70.866`, `y=68.270`;
-- headed marker on page 2 at approximately `x=70.866`, `y=67.032`.
+- `595.276 x 841.89 pt` A4 portrait;
+- no target-specific slide page geometry.
 
-This proves a **current Arkst → v2.6 target divergence** in the owned slides/PDF surface. It does **not** prove that Quarkdown's page dimensions themselves changed from v2.5.1 to v2.6.0; native v2.5.1 PDF geometry is unknown here. The A4 result therefore identifies a missing baseline slide-layout contract that must be reconciled when implementing target conformance, rather than a measured v2.6-specific page-size delta.
+That established a current Arkst → v2.6 target divergence. It did not establish any v2.5.1 → v2.6 page-size delta.
 
-## Risk and ownership boundary
+## Candidate contract in #358
 
-The evidence is specifically designed to prevent several incorrect implementations:
+### Backend-neutral state
 
-- **Renderer constant leakage:** `48px` must not become generic evaluator/IR state.
-- **False N/A:** Arkst already owns slides→PDF output, so renderer choice does not remove the compatibility obligation.
-- **Theme overgeneralization:** `focus` retains the runtime headerless inset but has different final PDF placement; exact coordinates are layout-specific evidence.
-- **Baseline/delta conflation:** Arkst A4 versus v2.6 presentation geometry is a target divergence, not proof of a v2.6 page-size change.
-- **Blank/empty conflation:** adjacent breaks do not create an empty slide in the observed reference behavior.
-- **Automatic-break regression:** H1/H2 sectioning remains the separately owned #334 behavior.
+Arkst now preserves only source-level semantics in shared IR:
 
-The applicable outstanding subcontracts are:
+- `IrPageGeometry { width: IrSize, height: IrSize }` for a complete explicit pair;
+- `IrSlidesConfiguration { center: Option<bool> }` for the bounded `.slides` contract;
+- `IrNode::PageBreak` for explicit semantic page boundaries.
 
-1. #175: establish the document/page geometry and document-type default contract needed by the Typst/PDF path instead of relying accidentally on Typst's A4 default;
-2. #178: establish slides-specific configuration and target-aware layout policy, including the relationship between default layout and vertical centering;
-3. #185: provide explicit page-break content semantics needed to construct and test general interior/consecutive headerless slides;
-4. the Typst/PDF output path: consume those contracts and implement the evidenced v2.6 output behavior without importing Reveal/CSS implementation details into generic compiler semantics.
+Serialization is backward-compatible for older state shapes because the new document-state fields are optional/defaulted. Explicit state round-trips through the wire representation.
 
-Future whole-document HTML ownership under #320/#347 may need its own conformance tests, but it is not a reason to declare the current Typst/PDF behavior N/A.
+No `48px`, PDF coordinate, CSS class, Reveal-specific layout object, or renderer implementation detail is stored in generic state.
 
-## Completion criteria
+### `.pageformat` bounded ownership
 
-The v2.6 migration-checklist row remains unchecked until the applicable baseline subcontracts are implemented and the Arkst-owned PDF path has target-specific conformance evidence.
+For this migration slice, Arkst claims only a complete explicit width/height pair and its combination with the already-supported alignment field. A later complete pair replaces the previous pair.
 
-At minimum, future regression/adversarial tests should cover:
+Unsupported partial width/height, nullable component, named-size/orientation/selector combinations remain outside this bounded subcontract and do not silently mutate the last committed geometry. Failed conversion rolls back nested document-state writes.
 
-- default `slides` page geometry rather than accidental Typst defaults;
-- headed and body-only/headerless slides;
-- multiple consecutive interior headerless/body-only slides using explicit boundaries once #185 supplies them;
-- adjacent explicit breaks without fabricating an empty page unless separately evidenced;
-- automatic H1/H2 heading boundaries without accidental extra pages, preserving #334;
-- short and long body-only slides;
-- default layout versus `focus` as separate renderer/layout evidence;
-- interaction with the supported `.slides` centering/default-layout contract once the applicable #178 subcontract lands;
-- real PDF page count, page dimensions, and content-position invariants on the Arkst backend.
+Renderer resolution order is:
 
-Arkst needs behavioral equivalence at its owned PDF boundary, not Quarkdown's exact CSS classes, DOM structure, or browser implementation.
+1. explicit complete Arkst page geometry, when present;
+2. otherwise the Typst slides default evidenced from the v2.6 reference, `749.04pt x 546pt`.
 
-Any part of the release-note phrase "more polished layout" that is not pinned by clean-room evidence must remain `UNKNOWN`; it cannot be converted into guessed geometry during implementation.
+### `.slides(center:)` bounded ownership
+
+The native `.slides` initializer is accepted only when the final document type is `slides`. Its bounded centering contract is:
+
+- omitted `center` → `None`, preserving renderer/default layout policy;
+- explicit `.none` → `None`;
+- `true` → typed `Some(true)` and Typst `#set align(horizon)`;
+- `false` → typed `Some(false)` and Typst `#set align(top)`.
+
+Malformed Boolean conversion fails closed and preserves the last committed state. Nested document-state writes are rolled back if the outer conversion fails. A source-defined function named `slides` retains precedence over the native initializer.
+
+### Explicit break ownership
+
+Both `.pagebreak` and Quarkdown `<<<` lower to typed `IrNode::PageBreak` and then to Typst `#pagebreak(weak: true)`.
+
+Parser boundaries are deliberately narrow:
+
+- `<<<` promotion applies only in Quarkdown mode;
+- source spans are preserved;
+- consecutive physical `<<<` lines become distinct boundaries;
+- fenced code containing `<<<` is not promoted;
+- Markdown `---` remains a thematic break;
+- a mixed paragraph is not partially promoted;
+- malformed `.pagebreak` arguments fail closed;
+- a source-defined `pagebreak` function retains precedence.
+
+Weak lowering is required by the observed adjacent-break and leading-page behavior: repeated boundaries do not fabricate an empty page when the current page is already empty.
+
+### Typst prelude ordering
+
+The Typst adapter owns the renderer-specific policy. Its order is pinned as:
+
+1. explicit or slides-default page geometry;
+2. explicit slides vertical-centering override, if any;
+3. `focus` layout prelude, if selected;
+4. document content and weak semantic boundaries.
+
+This keeps default/focus interaction testable without conflating theme-specific coordinates with backend-neutral semantics.
+
+## Candidate regression and adversarial evidence
+
+The candidate has targeted executable proof for the bounded contract:
+
+| Evidence | Result |
+|---|---:|
+| page geometry semantic/rollback/serde tests | 6/6 pass |
+| existing page-alignment regression tests | 6/6 pass |
+| `.slides` gating/nullability/rollback/shadowing/serde tests | 6/6 pass |
+| explicit-break parser boundary tests | 6 cases defined; final candidate rerun pending after latest hardening commit |
+| explicit-break IR/evaluator/fail-closed/shadowing/serde tests | 4/4 pass |
+| Typst slides prelude/ordering/weak-break tests | 5/5 pass |
+| existing automatic-pagebreak artifact regression | 5/5 pass |
+| real in-process Typst PDF artifact matrix | 8/8 pass |
+
+The 8-case real-PDF matrix covers:
+
+- slides default geometry `749.04 x 546 pt`;
+- explicit `10in x 5in` override producing `720 x 360 pt`;
+- `.pagebreak` plus `<<<` producing three real pages;
+- adjacent explicit breaks producing two pages rather than an empty intermediate page;
+- heading-at-start plus H1/H2 automatic boundaries without a leading empty page;
+- first body-only plus consecutive interior body-only slides;
+- short and long body-only slides without accidental pagination;
+- default layout, omitted/nullable `.slides`, explicit center true/false, and `focus` retaining the expected page contract.
+
+A dedicated `slides_backend_parity` integration test also compares in-process and subprocess Typst PDF page counts and MediaBox geometry across explicit boundaries, centered layout, `focus`, and explicit page geometry. This test requires the pinned Typst 0.15.1 executable and therefore remains **UNVERIFIED until the restored standard CI runs it with `ARKST_REQUIRE_TYPST=1`**.
+
+## Remaining completion gate
+
+The migration checklist row must remain unchecked until the final PR candidate has:
+
+- temporary development workflow/patch machinery removed;
+- the repository's production CI restored unchanged apart from intentional permanent test coverage;
+- subprocess/in-process slides backend parity passing with pinned Typst 0.15.1;
+- WASM compatibility passing for the backend-neutral IR/state additions;
+- fresh Linux/macOS/Windows workspace tests;
+- fresh fmt, clippy, docs, license, compatibility, and MSRV required contexts;
+- strict review against the final immutable candidate HEAD.
+
+Any HEAD change after that gate begins invalidates the evidence and requires a fresh gate.
+
+Arkst needs behavioral equivalence at its owned PDF boundary. It does not claim Quarkdown's exact CSS, DOM, Chromium, or theme-coordinate implementation, and any unobserved meaning of the release-note phrase "more polished layout" remains `UNKNOWN` rather than guessed.
