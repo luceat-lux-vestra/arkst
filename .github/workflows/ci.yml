@@ -8,24 +8,25 @@ permissions:
   contents: write
 
 jobs:
-  dev-page-geometry:
+  cleanup-v260-dev:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Apply bounded page geometry patch
+          fetch-depth: 0
+      - name: Restore production CI and remove temporary development machinery
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/dev_v260_page_geometry_patch.py
-          cargo fmt --all
+          git fetch origin main:refs/remotes/origin/main
+          git checkout origin/main -- .github/workflows/ci.yml
+          rm -f .github/workflows/_v260_dev_probe.yml
+          rm -f tools/dev_v260_page_geometry_patch.py
+          cargo fmt --all --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/evaluator.rs crates/arkst-markdown/src/parser.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
-          if ! git diff --cached --quiet; then
-            git commit -m 'fix(compat): preserve consecutive explicit page breaks'
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
-          fi
-          cargo check --workspace --all-targets --locked
+          git add .github/workflows/ci.yml .github/workflows/_v260_dev_probe.yml tools/dev_v260_page_geometry_patch.py
+          git commit -m 'chore: remove v2.6 development workflow machinery'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
