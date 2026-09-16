@@ -5,114 +5,34 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-ir:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  inspect-engine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-      - name: Apply slides/pagebreak IR patch
+          persist-credentials: false
+      - name: Show evaluator and parser ownership hooks
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def once(s, old, new, label):
-              n = s.count(old)
-              if n != 1:
-                  raise SystemExit(f'{label}: expected 1 occurrence, found {n}')
-              return s.replace(old, new, 1)
-
-          p = Path('crates/arkst-ir/src/lib.rs')
-          s = p.read_text()
-
-          if 'pub struct IrSlidesConfiguration' not in s:
-              marker = '''/// Backend-neutral document-global horizontal alignment.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\npub enum IrDocumentAlignment {'''
-              slides = '''/// Backend-neutral slides document configuration.\n///\n/// `center: None` preserves the renderer/theme default. Renderer-specific\n/// geometry and offsets remain backend-owned.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]\npub struct IrSlidesConfiguration {\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub center: Option<bool>,\n}\n\n'''
-              s = once(s, marker, slides + marker, 'IrSlidesConfiguration insertion')
-
-          if 'pub slides: Option<IrSlidesConfiguration>' not in s:
-              s = once(
-                  s,
-                  '    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub page_alignment: Option<IrDocumentAlignment>,\n}',
-                  '    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub page_alignment: Option<IrDocumentAlignment>,\n    /// Slides-specific document configuration. `None` means no `.slides` setter committed state.\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub slides: Option<IrSlidesConfiguration>,\n}',
-                  'IrDocumentState.slides',
-              )
-
-          if 'WireNode::PageBreak' not in s:
-              s = once(
-                  s,
-                  '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    Math {''',
-                  '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    PageBreak {\n        span: SourceSpan,\n    },\n    Math {''',
-                  'WireNode::PageBreak',
-              )
-
-          if '/// Explicit semantic page boundary.' not in s:
-              s = once(
-                  s,
-                  '    /// A thematic break (horizontal rule).\n    ThematicBreak { span: SourceSpan },\n    /// Math expression (inline or display).',
-                  '    /// A thematic break (horizontal rule).\n    ThematicBreak { span: SourceSpan },\n    /// Explicit semantic page boundary. Backends choose their page-break primitive.\n    PageBreak { span: SourceSpan },\n    /// Math expression (inline or display).',
-                  'IrNode::PageBreak',
-              )
-
-          if 'IrNode::PageBreak { span } => WireNode::PageBreak' not in s:
-              s = once(
-                  s,
-                  '        IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },\n',
-                  '        IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },\n        IrNode::PageBreak { span } => WireNode::PageBreak { span: *span },\n',
-                  'node_to_wire PageBreak',
-              )
-
-          if 'WireNode::PageBreak { span } => IrNode::PageBreak' not in s:
-              s = once(
-                  s,
-                  '        WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },\n',
-                  '        WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },\n        WireNode::PageBreak { span } => IrNode::PageBreak { span },\n',
-                  'wire_node_to_ir PageBreak',
-              )
-
-          if '| IrNode::PageBreak { .. }' not in s:
-              s = once(
-                  s,
-                  '        | IrNode::ThematicBreak { .. }\n        | IrNode::Math { .. } => {}',
-                  '        | IrNode::ThematicBreak { .. }\n        | IrNode::PageBreak { .. }\n        | IrNode::Math { .. } => {}',
-                  'collect_node_sources PageBreak',
-              )
-
-          first_fixture = '''                auto_page_break_max_depth: Some(2),\n                page_alignment: None,\n            },\n            ..IrMetadata::default()'''
-          if first_fixture in s:
-              s = once(
-                  s,
-                  first_fixture,
-                  '''                auto_page_break_max_depth: Some(2),\n                page_alignment: None,\n                slides: None,\n            },\n            ..IrMetadata::default()''',
-                  'metadata fixture slides',
-              )
-
-          second_fixture = '''            auto_page_break_max_depth: None,\n            page_alignment: None,\n        };\n        let serialized = serde_json::to_string(&state)'''
-          if second_fixture in s:
-              s = once(
-                  s,
-                  second_fixture,
-                  '''            auto_page_break_max_depth: None,\n            page_alignment: None,\n            slides: None,\n        };\n        let serialized = serde_json::to_string(&state)''',
-                  'ordered state fixture slides',
-              )
-
-          p.write_text(s)
-          PY
-
-          cargo fmt --all
-          cargo fmt --all -- --check
-          cargo check -p arkst-ir --all-targets --locked
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git diff --quiet; then
-            git add crates/arkst-ir/src/lib.rs
-            git commit -m 'compat(v2.6): add typed slides and pagebreak IR'
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
-          fi
+          show() {
+            file="$1"; needle="$2"; before="${3:-40}"; after="${4:-100}"
+            echo "=== $file :: $needle ==="
+            line=$(grep -nF "$needle" "$file" | head -1 | cut -d: -f1 || true)
+            if [ -n "$line" ]; then
+              start=$((line > before ? line - before : 1)); end=$((line + after))
+              sed -n "${start},${end}p" "$file"
+            fi
+          }
+          show crates/arkst-engine/src/evaluator.rs 'enum NativeDispatchOwner' 20 170
+          show crates/arkst-engine/src/evaluator.rs 'fn preflight_native_binding' 20 150
+          show crates/arkst-engine/src/evaluator.rs 'let signature = match name {' 15 180
+          show crates/arkst-engine/src/evaluator.rs 'fn evaluate_document_state_builtin' 10 320
+          show crates/arkst-engine/src/evaluator.rs 'if name == "pageformat"' 20 110
+          show crates/arkst-engine/src/evaluator.rs 'struct DocumentState {' 10 160
+          show crates/arkst-engine/src/evaluator.rs 'fn ir_node_source_span' 5 80
+          show crates/arkst-engine/src/evaluator.rs 'fn rebase_dynamic_node' 5 120
+          show crates/arkst-markdown/src/parser.rs 'struct FrontendParserExtension' 10 90
