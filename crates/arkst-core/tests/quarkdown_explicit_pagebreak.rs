@@ -42,9 +42,7 @@ fn malformed_pagebreak_invocation_fails_closed_without_emitting_boundary() {
 
 #[test]
 fn source_defined_pagebreak_shadows_native_boundary() {
-    let result = compile_source(
-        ".function {pagebreak}\n    SHADOW-BREAK\n\n.pagebreak\n",
-    );
+    let result = compile_source(".function {pagebreak}\n    SHADOW-BREAK\n\n.pagebreak\n");
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(page_break_count(&result), 0);
     assert!(
@@ -62,5 +60,8 @@ fn pagebreak_ir_round_trips_through_wire_format() {
     let encoded = serde_json::to_value(&result.ir).expect("serialize pagebreak IR");
     let decoded: arkst_core::ir::IrDocument =
         serde_json::from_value(encoded).expect("deserialize pagebreak IR");
-    assert!(matches!(decoded.nodes.as_slice(), [IrNode::PageBreak { .. }]));
+    assert!(matches!(
+        decoded.nodes.as_slice(),
+        [IrNode::PageBreak { .. }]
+    ));
 }

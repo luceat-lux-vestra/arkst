@@ -54,7 +54,10 @@ fn explicit_page_geometry_overrides_slides_default_before_alignment() {
         },
     });
     let code = lower_to_typst_code(&doc);
-    assert!(code.starts_with("#set page(width: 10in, height: 5in)\n"), "{code}");
+    assert!(
+        code.starts_with("#set page(width: 10in, height: 5in)\n"),
+        "{code}"
+    );
     assert!(!code.contains("749.04pt"), "{code}");
     assert!(
         code.find("#set page").expect("page prelude")

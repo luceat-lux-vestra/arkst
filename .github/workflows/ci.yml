@@ -1,33 +1,229 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_TOOLCHAIN: 1.98.0
+
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  cleanup-v260-dev:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  fmt:
+    name: fmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-      - name: Format candidate, restore production CI, and remove temporary development machinery
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - run: cargo fmt --all --check
+      - name: Verify fail-closed distribution policy
+        run: |
+          python3 tools/ci/test_verify_distribution_policy.py
+          python3 tools/ci/verify_distribution_policy.py
+      - name: Verify supported workflow YAML shape
+        run: |
+          python3 tools/ci/test_verify_workflow_shape.py
+          python3 tools/ci/verify_workflow_shape.py
+      - name: Verify lockfile-fail-closed Cargo policy
+        run: |
+          python3 tools/ci/test_verify_locked_cargo_policy.py
+          python3 tools/ci/verify_locked_cargo_policy.py
+      - name: Verify research Cargo containment
+        run: |
+          python3 tools/ci/test_verify_cargo_graph_ownership.py
+          python3 tools/ci/verify_cargo_graph_ownership.py
+      - name: Test merge-gate policy verifier
+        run: python3 tools/ci/test_verify_gate_policy.py
+      - name: Test upstream metadata-ingestion guards
+        run: python3 tools/ci/test_upstream_quarkdown_ingestion.py
+      - name: Verify generated/reference-data provenance contract
+        run: |
+          python3 tools/ci/test_reference_provenance.py
+          python3 tools/verify_reference_provenance.py
+      - name: Test deterministic workflow-security policy
+        run: |
+          python3 tools/ci/test_verify_workflow_security.py
+          python3 tools/ci/verify_workflow_security.py
+      - name: Test recurring hardening drift audit
+        run: |
+          python3 tools/ci/test_hardening_drift_audit.py
+          python3 tools/ci/test_hardening_drift_live.py
+      - name: Install pinned actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_ARCHIVE_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_ARCHIVE_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP/actionlint" actionlint
+          "$RUNNER_TEMP/actionlint/actionlint" -version
+          "$RUNNER_TEMP/actionlint/actionlint" -color
+      - name: Run pinned zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          inputs: .github/workflows
+          version: 1.29.0
+          config: zizmor.yml
+          advanced-security: false
+          online-audits: false
+          annotations: false
+      - name: Verify merge-gate policy and live ruleset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ruleset_id="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets" \
+            --jq '.[] | select(.name == "Protect main") | .id')"
+          if [ -z "$ruleset_id" ]; then
+            echo "Protect main ruleset not found" >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/rulesets/${ruleset_id}" \
+            > "$RUNNER_TEMP/protect-main-ruleset.json"
+          python3 tools/ci/verify_gate_policy.py verify \
+            --ruleset-json "$RUNNER_TEMP/protect-main-ruleset.json"
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install Typst 0.15.1 (pinned)
+        uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
+        with:
+          typst-version: 0.15.1
+      - name: Test default CLI feature boundary
+        run: cargo test --locked -p arkst-cli --no-default-features
+      - name: Test (Typst required)
+        run: cargo test --locked --workspace --all-targets --all-features
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+      - name: Test Typst backend parity
+        run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
+        env:
+          ARKST_REQUIRE_TYPST: "1"
+      - name: Verify CLI dependency feature boundary
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          set -euo pipefail
-          cargo fmt --all
-          git fetch origin main:refs/remotes/origin/main
-          git checkout origin/main -- .github/workflows/ci.yml
-          rm -f .github/workflows/_v260_dev_probe.yml
-          rm -f tools/dev_v260_page_geometry_patch.py
-          cargo fmt --all --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'chore: finalize v2.6 slides PDF candidate'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          default_tree="$(mktemp)"
+          feature_tree="$(mktemp)"
+          cargo tree --locked -p arkst-cli --no-default-features > "$default_tree"
+          if grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v|arkst-typst-inprocess' "$default_tree"; then
+            echo "default arkst-cli unexpectedly contains the in-process Typst graph"
+            sed -n '1,240p' "$default_tree"
+            exit 1
+          fi
+          cargo tree --locked -p arkst-cli --no-default-features --features typst-inprocess > "$feature_tree"
+          grep -Eq 'arkst-typst-inprocess' "$feature_tree"
+          grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
+      - name: Smoke-test public examples
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          cargo build --locked -p arkst-cli
+          mkdir -p target/example-smoke
+          for input in \
+            examples/markdown/basic.md \
+            examples/markdown/gfm.md \
+            examples/markdown/bounded-html.md \
+            examples/hello/main.qd
+          do
+            name="$(basename "${input%.*}")"
+            target/debug/arkst check "$input"
+            target/debug/arkst build "$input" --output "target/example-smoke/${name}.typ"
+            target/debug/arkst build "$input" --format pdf --output "target/example-smoke/${name}.pdf"
+          done
+
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features
+
+  doc:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo doc --locked --workspace --all-features --no-deps
+
+  deny:
+    name: license
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: tools/spikes/typst-in-process/Cargo.toml
+          command: check
+          arguments: --all-features
+          command-arguments: advisories sources

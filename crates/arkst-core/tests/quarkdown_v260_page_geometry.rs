@@ -1,6 +1,4 @@
-use arkst_core::ir::{
-    IrDocumentAlignment, IrDocumentState, IrPageGeometry, IrSize, IrSizeUnit,
-};
+use arkst_core::ir::{IrDocumentAlignment, IrDocumentState, IrPageGeometry, IrSize, IrSizeUnit};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
 fn compile_source(source: &str) -> arkst_core::CompileResult {
@@ -14,7 +12,11 @@ fn compile_source(source: &str) -> arkst_core::CompileResult {
     compile(&project, &CompileOptions::default())
 }
 
-fn assert_geometry(result: &arkst_core::CompileResult, width: (f64, IrSizeUnit), height: (f64, IrSizeUnit)) {
+fn assert_geometry(
+    result: &arkst_core::CompileResult,
+    width: (f64, IrSizeUnit),
+    height: (f64, IrSizeUnit),
+) {
     let geometry = result
         .ir
         .metadata
@@ -30,11 +32,7 @@ fn assert_geometry(result: &arkst_core::CompileResult, width: (f64, IrSizeUnit),
 fn complete_width_height_pageformat_commits_typed_geometry() {
     let result = compile_source(".pageformat width:{10in} height:{5in}\n");
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert_geometry(
-        &result,
-        (10.0, IrSizeUnit::In),
-        (5.0, IrSizeUnit::In),
-    );
+    assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
     assert!(result.ir.nodes.is_empty(), "setter must not emit content");
 }
 
@@ -44,24 +42,14 @@ fn later_complete_geometry_replaces_the_previous_pair() {
         ".pageformat width:{10in} height:{5in}\n.pageformat width:{8in} height:{4in}\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert_geometry(
-        &result,
-        (8.0, IrSizeUnit::In),
-        (4.0, IrSizeUnit::In),
-    );
+    assert_geometry(&result, (8.0, IrSizeUnit::In), (4.0, IrSizeUnit::In));
 }
 
 #[test]
 fn geometry_and_alignment_can_commit_atomically_in_one_bounded_call() {
-    let result = compile_source(
-        ".pageformat width:{10in} height:{5in} alignment:{end}\n",
-    );
+    let result = compile_source(".pageformat width:{10in} height:{5in} alignment:{end}\n");
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert_geometry(
-        &result,
-        (10.0, IrSizeUnit::In),
-        (5.0, IrSizeUnit::In),
-    );
+    assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
     assert_eq!(
         result.ir.metadata.document_state.page_alignment,
         Some(IrDocumentAlignment::End)
@@ -80,11 +68,7 @@ fn unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state() 
         let result = compile_source(&format!(
             ".pageformat width:{{10in}} height:{{5in}}\n{unsupported}"
         ));
-        assert_geometry(
-            &result,
-            (10.0, IrSizeUnit::In),
-            (5.0, IrSizeUnit::In),
-        );
+        assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
     }
 }
 
@@ -102,11 +86,7 @@ fn failed_geometry_conversion_rolls_back_nested_document_state_writes() {
         Some(3),
         "outer pageformat failure must roll back nested document-state mutation"
     );
-    assert_geometry(
-        &result,
-        (10.0, IrSizeUnit::In),
-        (5.0, IrSizeUnit::In),
-    );
+    assert_geometry(&result, (10.0, IrSizeUnit::In), (5.0, IrSizeUnit::In));
 }
 
 #[test]

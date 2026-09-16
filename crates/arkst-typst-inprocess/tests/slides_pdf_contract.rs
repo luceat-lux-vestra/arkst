@@ -90,18 +90,14 @@ fn explicit_complete_pageformat_geometry_overrides_slides_default() {
 
 #[test]
 fn explicit_pagebreak_and_triple_angle_boundaries_produce_real_pdf_pages() {
-    let pdf = compile_pdf(
-        ".doctype {slides}\n\nFIRST\n\n.pagebreak\n\nSECOND\n\n<<<\n\nTHIRD\n",
-    );
+    let pdf = compile_pdf(".doctype {slides}\n\nFIRST\n\n.pagebreak\n\nSECOND\n\n<<<\n\nTHIRD\n");
     assert_eq!(page_count(&pdf), 3);
     assert_default_slide_geometry(&pdf);
 }
 
 #[test]
 fn adjacent_explicit_breaks_do_not_fabricate_an_empty_pdf_page() {
-    let pdf = compile_pdf(
-        ".doctype {slides}\n\nFIRST\n\n.pagebreak\n.pagebreak\n\nSECOND\n",
-    );
+    let pdf = compile_pdf(".doctype {slides}\n\nFIRST\n\n.pagebreak\n.pagebreak\n\nSECOND\n");
     assert_eq!(page_count(&pdf), 2);
 }
 
@@ -126,9 +122,7 @@ fn short_and_long_body_only_slides_do_not_gain_accidental_pages() {
     let long_body = std::iter::repeat_n("LONG-BODY-CONTENT", 80)
         .collect::<Vec<_>>()
         .join(" ");
-    let source = format!(
-        ".doctype {{slides}}\n\nSHORT\n\n<<<\n\n{long_body}\n"
-    );
+    let source = format!(".doctype {{slides}}\n\nSHORT\n\n<<<\n\n{long_body}\n");
     let pdf = compile_pdf(&source);
     assert_eq!(page_count(&pdf), 2);
     assert_default_slide_geometry(&pdf);

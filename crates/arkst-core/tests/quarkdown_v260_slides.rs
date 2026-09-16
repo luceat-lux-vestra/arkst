@@ -53,7 +53,11 @@ fn slides_configuration_is_document_type_gated_and_nullable() {
 #[test]
 fn slides_center_boolean_values_commit_typed_state() {
     let centered = compile_source(".doctype {slides}\n.slides center:{true}\n");
-    assert!(centered.diagnostics.is_empty(), "{:?}", centered.diagnostics);
+    assert!(
+        centered.diagnostics.is_empty(),
+        "{:?}",
+        centered.diagnostics
+    );
     assert_eq!(center(&centered), Some(true));
 
     let top = compile_source(".doctype {slides}\n.slides center:{false}\n");
@@ -63,9 +67,8 @@ fn slides_center_boolean_values_commit_typed_state() {
 
 #[test]
 fn invalid_center_preserves_last_committed_slides_configuration() {
-    let result = compile_source(
-        ".doctype {slides}\n.slides center:{true}\n.slides center:{INVALID}\n",
-    );
+    let result =
+        compile_source(".doctype {slides}\n.slides center:{true}\n.slides center:{INVALID}\n");
     assert!(
         !result.diagnostics.is_empty(),
         "invalid boolean conversion must fail"
@@ -113,9 +116,7 @@ fn slides_wire_is_backward_compatible_and_explicit_when_set() {
     assert!(restored.slides.is_none());
 
     let explicit = IrDocumentState {
-        slides: Some(IrSlidesConfiguration {
-            center: Some(true),
-        }),
+        slides: Some(IrSlidesConfiguration { center: Some(true) }),
         ..IrDocumentState::default()
     };
     let value = serde_json::to_value(&explicit).expect("serialize explicit state");
