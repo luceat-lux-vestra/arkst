@@ -51,10 +51,16 @@ const SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;
 fn document_prelude(doc: &IrDocument) -> String {
     let state = &doc.metadata.document_state;
     let mut prelude = String::new();
-    if state.document_type == IrDocumentType::Slides {
+    if let Some(geometry) = state.page_geometry.as_ref() {
+        let width = lowering_base::lower_size(&geometry.width);
+        let height = lowering_base::lower_size(&geometry.height);
+        prelude.push_str(&format!("#set page(width: {width}, height: {height})\n"));
+    } else if state.document_type == IrDocumentType::Slides {
         prelude.push_str(&format!(
             "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
         ));
+    }
+    if state.document_type == IrDocumentType::Slides {
         match state.slides.and_then(|slides| slides.center) {
             Some(true) => prelude.push_str("#set align(horizon)\n"),
             Some(false) => prelude.push_str("#set align(top)\n"),

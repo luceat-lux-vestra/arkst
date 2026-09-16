@@ -421,7 +421,7 @@ pub struct IrMetadata {
 ///
 /// This is deliberately plain serializable data. Evaluator runtime carriers,
 /// such as shared mutable handles, never cross into the IR boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrDocumentState {
     /// The document's current `.docname`, or an empty string when unset.
     pub name: String,
@@ -464,9 +464,23 @@ pub struct IrDocumentState {
     /// alignment because `justify` is valid here but not for `.row`/`.column`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_alignment: Option<IrDocumentAlignment>,
+    /// Explicit complete page geometry selected by the bounded `.pageformat`
+    /// width/height slice. `None` preserves document-type/backend defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_geometry: Option<IrPageGeometry>,
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
+}
+
+/// Backend-neutral complete page geometry.
+///
+/// This stores only explicit semantic sizes. Document-type defaults and
+/// renderer-specific page dimensions remain backend-owned.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageGeometry {
+    pub width: IrSize,
+    pub height: IrSize,
 }
 
 /// Backend-neutral slides document configuration.

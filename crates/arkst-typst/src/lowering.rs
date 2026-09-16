@@ -1263,7 +1263,7 @@ impl LoweringContext {
     }
 }
 
-fn lower_size(size: &IrSize) -> String {
+pub(crate) fn lower_size(size: &IrSize) -> String {
     let (value, unit) = match size.unit {
         IrSizeUnit::Px => (size.value * 0.75, "pt"),
         IrSizeUnit::Pt => (size.value, "pt"),
