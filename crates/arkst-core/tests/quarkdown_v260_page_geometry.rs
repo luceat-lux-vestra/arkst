@@ -91,12 +91,7 @@ fn unsupported_partial_or_nullable_geometry_does_not_mutate_the_bounded_state() 
 #[test]
 fn failed_geometry_conversion_rolls_back_nested_document_state_writes() {
     let result = compile_source(
-        ".autopagebreak maxdepth:{3}\n\
-         .pageformat width:{10in} height:{5in}\n\
-         .function {badheight}\n\
-             .autopagebreak maxdepth:{1}\n\
-             invalid\n\n\
-         .pageformat width:{8in} height:{.badheight}\n",
+        ".autopagebreak maxdepth:{3}\n.pageformat width:{10in} height:{5in}\n.function {badheight}\n    .autopagebreak maxdepth:{1}\n    invalid\n\n.pageformat width:{8in} height:{.badheight}\n",
     );
     assert!(
         !result.diagnostics.is_empty(),
