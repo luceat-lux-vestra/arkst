@@ -14,16 +14,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Show bounded integration helpers
+      - name: Show remaining integration hooks
         shell: bash
         run: |
           set -euo pipefail
-          for pattern in 'fn evaluate_page_alignment_builtin' 'fn set_page_alignment' 'enum DocumentStateField' 'enum DocumentStateUndo' 'fn rollback_document_state' 'let signature = match name' 'fn evaluate_call'; do
+          for pattern in 'struct ContentRangeBlockParser' 'struct QuarkdownBlockParser' 'impl BlockParser for QuarkdownBlockParser' 'impl BlockParser for ContentRangeBlockParser' 'DocumentStateUndo::PageAlignment' 'IrNode::ThematicBreak'; do
             echo "=== $pattern ==="
-            line=$(grep -n "$pattern" crates/arkst-engine/src/evaluator.rs | head -1 | cut -d: -f1 || true)
-            if [ -n "$line" ]; then sed -n "$((line-30)),$((line+180))p" crates/arkst-engine/src/evaluator.rs; fi
+            grep -n -B40 -A120 "$pattern" crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/evaluator.rs crates/arkst-ir/src/lib.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-typst/src/lowering.rs | head -300 || true
           done
-          echo '=== boolean conversions ==='
-          grep -n -B8 -A20 'convert_boolean\|scalar_boolean\|Boolean' crates/arkst-engine/src/evaluator.rs | head -260 || true
-          echo '=== parser setup ==='
-          grep -n -B20 -A50 'Box::new(QuarkdownBlockParser)' crates/arkst-markdown/src/parser.rs
