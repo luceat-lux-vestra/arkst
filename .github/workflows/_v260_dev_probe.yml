@@ -14,11 +14,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Show remaining integration hooks
+      - name: Show evaluator call boundary
         shell: bash
         run: |
           set -euo pipefail
-          for pattern in 'struct ContentRangeBlockParser' 'struct QuarkdownBlockParser' 'impl BlockParser for QuarkdownBlockParser' 'impl BlockParser for ContentRangeBlockParser' 'DocumentStateUndo::PageAlignment' 'IrNode::ThematicBreak'; do
-            echo "=== $pattern ==="
-            grep -n -B40 -A120 "$pattern" crates/arkst-markdown/src/parser.rs crates/arkst-engine/src/evaluator.rs crates/arkst-ir/src/lib.rs crates/arkst-engine/src/ast_to_ir.rs crates/arkst-typst/src/lowering.rs | head -300 || true
+          file=crates/arkst-engine/src/evaluator.rs
+          for needle in 'pageformat' 'struct DocumentState' 'enum DocumentStateUndo' 'fn evaluate_page_alignment_builtin'; do
+            echo "=== $needle ==="
+            line=$(grep -n "$needle" "$file" | head -1 | cut -d: -f1 || true)
+            if [ -n "$line" ]; then
+              start=$((line > 80 ? line - 80 : 1))
+              end=$((line + 220))
+              sed -n "${start},${end}p" "$file"
+            fi
           done
