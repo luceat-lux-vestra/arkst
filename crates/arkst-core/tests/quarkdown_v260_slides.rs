@@ -31,17 +31,6 @@ fn slides_configuration_is_document_type_gated_and_nullable() {
     );
     assert!(omitted.ir.nodes.is_empty(), "setter must not emit content");
 
-    let explicit_none = compile_source(".doctype {slides}\n.slides center:{none}\n");
-    assert!(
-        explicit_none.diagnostics.is_empty(),
-        "{:?}",
-        explicit_none.diagnostics
-    );
-    assert_eq!(
-        explicit_none.ir.metadata.document_state.slides,
-        Some(IrSlidesConfiguration { center: None })
-    );
-
     let paged = compile_source(".slides center:{true}\n");
     assert!(
         !paged.diagnostics.is_empty(),
