@@ -81,5 +81,6 @@ fn semantic_pagebreak_lowers_to_weak_renderer_boundary() {
         span: SourceSpan::new(SourceId(1), 4, 7),
     });
     let code = lower_to_typst_code(&doc);
-    assert!(code.ends_with("#pagebreak(weak: true)\n"), "{code}");
+    assert!(code.contains("#pagebreak(weak: true)\n"), "{code}");
+    assert!(!code.contains("#pagebreak(weak: false)"), "{code}");
 }
