@@ -14,17 +14,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Show evaluator call boundary
+      - name: Show exact implementation hooks
         shell: bash
         run: |
           set -euo pipefail
-          file=crates/arkst-engine/src/evaluator.rs
-          for needle in 'pageformat' 'struct DocumentState' 'enum DocumentStateUndo' 'fn evaluate_page_alignment_builtin'; do
-            echo "=== $needle ==="
+          show() {
+            file="$1"; needle="$2"; before="${3:-50}"; after="${4:-160}"
+            echo "=== $file :: $needle ==="
             line=$(grep -n "$needle" "$file" | head -1 | cut -d: -f1 || true)
             if [ -n "$line" ]; then
-              start=$((line > 80 ? line - 80 : 1))
-              end=$((line + 220))
+              start=$((line > before ? line - before : 1)); end=$((line + after))
               sed -n "${start},${end}p" "$file"
             fi
-          done
+          }
+          show crates/arkst-engine/src/evaluator.rs 'fn set_page_alignment' 30 90
+          show crates/arkst-engine/src/evaluator.rs 'DocumentStateUndo::PageAlignment' 70 100
+          show crates/arkst-engine/src/evaluator.rs 'fn ir_node_source_span' 20 100
+          show crates/arkst-engine/src/evaluator.rs 'fn rebase_dynamic_node' 20 180
+          show crates/arkst-markdown/src/parser.rs 'fn convert_block' 20 240
+          show crates/arkst-markdown/src/parser.rs 'fn node_span' 20 180
+          show crates/arkst-typst/src/lowering.rs 'IrNode::ThematicBreak' 80 120
+          show crates/arkst-ir/src/lib.rs 'fn node_to_wire' 20 240
+          show crates/arkst-ir/src/lib.rs 'fn wire_to_ir' 20 240
