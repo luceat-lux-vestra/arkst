@@ -64,13 +64,17 @@ fn assert_close(actual: f64, expected: f64) {
     );
 }
 
+fn assert_default_slide_geometry(pdf: &[u8]) {
+    let (width, height) = first_media_box(pdf);
+    assert_close(width, 749.04);
+    assert_close(height, 546.0);
+}
+
 #[test]
 fn slides_default_has_evidenced_v260_pdf_geometry() {
     let pdf = compile_pdf(".doctype {slides}\n\nSLIDES-DEFAULT-GEOMETRY\n");
     assert_eq!(page_count(&pdf), 1);
-    let (width, height) = first_media_box(&pdf);
-    assert_close(width, 749.04);
-    assert_close(height, 546.0);
+    assert_default_slide_geometry(&pdf);
 }
 
 #[test]
@@ -90,6 +94,7 @@ fn explicit_pagebreak_and_triple_angle_boundaries_produce_real_pdf_pages() {
         ".doctype {slides}\n\nFIRST\n\n.pagebreak\n\nSECOND\n\n<<<\n\nTHIRD\n",
     );
     assert_eq!(page_count(&pdf), 3);
+    assert_default_slide_geometry(&pdf);
 }
 
 #[test]
@@ -98,4 +103,48 @@ fn adjacent_explicit_breaks_do_not_fabricate_an_empty_pdf_page() {
         ".doctype {slides}\n\nFIRST\n\n.pagebreak\n.pagebreak\n\nSECOND\n",
     );
     assert_eq!(page_count(&pdf), 2);
+}
+
+#[test]
+fn heading_start_and_automatic_h1_h2_boundaries_have_no_leading_empty_page() {
+    let pdf = compile_pdf(".doctype {slides}\n\n# FIRST\n\n## SECOND\n");
+    assert_eq!(page_count(&pdf), 2);
+    assert_default_slide_geometry(&pdf);
+}
+
+#[test]
+fn first_and_consecutive_interior_body_only_slides_have_one_page_each() {
+    let pdf = compile_pdf(
+        ".doctype {slides}\n\nFIRST-BODY\n\n<<<\n\nINTERIOR-A\n\n<<<\n\nINTERIOR-B\n\n<<<\n\nLAST-BODY\n",
+    );
+    assert_eq!(page_count(&pdf), 4);
+    assert_default_slide_geometry(&pdf);
+}
+
+#[test]
+fn short_and_long_body_only_slides_do_not_gain_accidental_pages() {
+    let long_body = std::iter::repeat_n("LONG-BODY-CONTENT", 80)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let source = format!(
+        ".doctype {{slides}}\n\nSHORT\n\n<<<\n\n{long_body}\n"
+    );
+    let pdf = compile_pdf(&source);
+    assert_eq!(page_count(&pdf), 2);
+    assert_default_slide_geometry(&pdf);
+}
+
+#[test]
+fn default_focus_and_nullable_center_variants_preserve_slide_page_contract() {
+    for source in [
+        ".doctype {slides}\n\nDEFAULT\n",
+        ".doctype {slides}\n.slides\n\nNULLABLE-CENTER\n",
+        ".doctype {slides}\n.slides center:{true}\n\nCENTERED\n",
+        ".doctype {slides}\n.slides center:{false}\n\nTOP\n",
+        ".doctype {slides}\n.theme layout:{focus}\n\n# FOCUS\n",
+    ] {
+        let pdf = compile_pdf(source);
+        assert_eq!(page_count(&pdf), 1, "source:\n{source}");
+        assert_default_slide_geometry(&pdf);
+    }
 }
