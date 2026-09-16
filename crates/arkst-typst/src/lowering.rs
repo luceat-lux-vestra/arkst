@@ -352,6 +352,13 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrNode::PageBreak { span } => {
+                let before = self.output.len();
+                self.push_str("#pagebreak(weak: true)\n");
+                if span.source_id != SourceId(0) {
+                    self.record_span(*span, self.output.len() - before);
+                }
+            }
             IrNode::Math {
                 source,
                 display,

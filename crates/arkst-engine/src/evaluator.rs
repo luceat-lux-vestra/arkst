@@ -61,8 +61,9 @@ use arkst_ir::{
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
     IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,
-    IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
+    TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -464,6 +465,7 @@ struct DocumentState {
     caption_position: IrCaptionPositionInfo,
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
+    slides: Option<IrSlidesConfiguration>,
     localization_tables: LocalizationTables,
 }
 
@@ -480,6 +482,7 @@ impl Default for DocumentState {
             caption_position: Default::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
+            slides: None,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -498,6 +501,7 @@ impl DocumentState {
             caption_position: snapshot.caption_position,
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
+            slides: snapshot.slides,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -514,6 +518,7 @@ impl DocumentState {
             caption_position: self.caption_position,
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
+            slides: self.slides,
         }
     }
 }
@@ -754,6 +759,7 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::ChainedFunctionCall { span, .. }
         | IrNode::FunctionDeclaration { span, .. }
         | IrNode::ThematicBreak { span }
+        | IrNode::PageBreak { span }
         | IrNode::Math { span, .. } => *span,
         IrNode::TargetSpecificContent { content } => content.span,
         IrNode::Component { component } => component.span(),
@@ -879,6 +885,7 @@ enum DocumentStateField {
     CaptionPosition,
     AutoPageBreakMaxDepth,
     PageAlignment,
+    Slides,
     LocalizationTables,
 }
 
@@ -893,6 +900,7 @@ enum DocumentStateUndo {
     CaptionPosition(IrCaptionPositionInfo),
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
+    Slides(Option<IrSlidesConfiguration>),
     LocalizationTables(LocalizationTableUndo),
 }
 
@@ -1957,6 +1965,7 @@ impl<'a> EvaluationContext<'a> {
                 state.auto_page_break_max_depth = previous
             }
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
+            DocumentStateUndo::Slides(previous) => state.slides = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
                     match table {
@@ -2024,6 +2033,16 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_alignment = value;
+    }
+
+    fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
+        self.record_document_state_undo(DocumentStateField::Slides, || {
+            (
+                DocumentStateUndo::Slides(self.document_state.borrow().slides),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().slides = value;
     }
 
     fn append_document_author(&self, name: String) {
@@ -2994,6 +3013,7 @@ impl Evaluator {
                 | "theme"
                 | "autopagebreak"
                 | "noautopagebreak"
+                | "slides"
         ) && context.get_function(name).is_some();
         if context.get_function(name).is_some() && !is_document_state(name) {
             return Ok(None);
@@ -3356,6 +3376,7 @@ impl Evaluator {
                 | "theme"
                 | "autopagebreak"
                 | "noautopagebreak"
+                | "slides"
         ) && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
@@ -3370,6 +3391,13 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
             );
+        }
+
+        if is_page_break(name) && context.get_function(name).is_none() {
+            let Some(_binding_plan) = native_binding_plan.as_ref() else {
+                return CallOutcome::Failed;
+            };
+            return CallOutcome::Value(IrValue::Content(vec![IrNode::PageBreak { span: *span }]));
         }
 
         if is_localization(name) && context.get_function(name).is_none() {
@@ -5538,6 +5566,95 @@ impl Evaluator {
                 binding_plan,
                 first_origin,
             );
+        }
+
+        if name == "slides" {
+            if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+                diagnostics.push(document_state_conversion_error(
+                    "`.slides` is only valid for slides documents".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            let Some(binding_plan) = binding_plan else {
+                return CallOutcome::Failed;
+            };
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(v) => v,
+                Err(o) => return o,
+            };
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(v) => v,
+                    Err(o) => return o,
+                };
+            let bound = match bind_evaluated_arguments(
+                binding_plan,
+                evaluated_positional
+                    .into_iter()
+                    .zip(positional_args.iter())
+                    .map(|(value, source)| (value, value_source_span(source, span)))
+                    .collect(),
+                evaluated_named,
+                None,
+                *span,
+            ) {
+                Ok(v) => v,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    return CallOutcome::Failed;
+                }
+            };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
+            let center = match bound.slots.into_iter().next() {
+                Some(BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                }) => {
+                    if matches!(value.value, IrValue::None) {
+                        None
+                    } else {
+                        match value_conversion::convert_scalar_with_origin(
+                            &value,
+                            ScalarTarget::Boolean,
+                        ) {
+                            Ok(ScalarValue::Boolean(value)) => Some(value),
+                            Ok(_) => {
+                                diagnostics.push(document_state_conversion_error(
+                                    "`.slides center` must be boolean or none".to_string(),
+                                    argument_span,
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(argument_span),
+                                        Some("center"),
+                                        parameter_span,
+                                        *span,
+                                    ),
+                                    Some("`.slides`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        }
+                    }
+                }
+                _ => None,
+            };
+            context.set_slides_configuration(Some(IrSlidesConfiguration { center }));
+            return CallOutcome::NoValue;
         }
 
         if name == "noautopagebreak" {
@@ -12426,6 +12543,7 @@ pub(crate) enum NativeDispatchOwner {
     Container,
     Landscape,
     Br,
+    PageBreak,
     Whitespace,
     StackedLayout,
     Range,
@@ -12454,6 +12572,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "dockeywords",
     "doclang",
     "theme",
+    "slides",
     "captionposition",
 ];
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
@@ -12479,6 +12598,7 @@ const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
+const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
 const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
 const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
 const RANGE_NATIVE_NAMES: &[&str] = &["range"];
@@ -12569,6 +12689,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
         names: BR_NATIVE_NAMES,
     },
     NativeOwnerInventory {
+        owner: NativeDispatchOwner::PageBreak,
+        names: PAGE_BREAK_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
         owner: NativeDispatchOwner::Whitespace,
         names: WHITESPACE_NATIVE_NAMES,
     },
@@ -12657,6 +12781,10 @@ fn is_landscape(name: &str) -> bool {
 
 fn is_br(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Br)
+}
+
+fn is_page_break(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::PageBreak)
 }
 
 fn is_whitespace(name: &str) -> bool {
@@ -13638,6 +13766,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::BindFinal,
         ),
         "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),
+        "slides" => (
+            vec![ParameterMetadata::optional("center")],
+            BodyPolicy::Reject,
+        ),
+        "pagebreak" => (Vec::new(), BodyPolicy::Reject),
         "docname" | "docdescription" => (
             vec![ParameterMetadata::optional("value").named(false)],
             BodyPolicy::BindFinal,
@@ -17316,6 +17449,7 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
         IrNode::CodeBlock { span, .. }
         | IrNode::RawHtml { span, .. }
         | IrNode::ThematicBreak { span }
+        | IrNode::PageBreak { span }
         | IrNode::Math { span, .. } => *span = source_span,
         IrNode::TargetSpecificContent { content } => content.span = source_span,
         IrNode::Component { component } => rebase_dynamic_component(component, source_span),

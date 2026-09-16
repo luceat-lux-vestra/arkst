@@ -767,6 +767,14 @@ fn normalize_block(
     source: &str,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Vec<Block> {
+    if let Block::Paragraph { span, .. } = block {
+        if source
+            .get(span.start..span.end)
+            .is_some_and(|text| text.trim() == "<<<")
+        {
+            return vec![Block::PageBreak { span: *span }];
+        }
+    }
     match block {
         Block::DirectiveCall {
             name,

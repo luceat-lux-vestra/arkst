@@ -16,16 +16,15 @@ const PRELUDE_MARKER: &str = "// Arkst Quarkdown v2.6 focus layout\n";
 /// v2.6 `focus` layout adaptation when the evaluated document state requests it.
 pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {
     let (body, mut source_map) = lowering_base::lower_to_typst(doc);
-    let Some(prelude) = focus_prelude(doc) else {
+    let prelude = document_prelude(doc);
+    if prelude.is_empty() {
         return (body, source_map);
-    };
-
+    }
     let offset = prelude.len();
     for entry in &mut source_map {
         entry.generated_start += offset;
         entry.generated_end += offset;
     }
-
     let mut output = String::with_capacity(offset + body.len());
     output.push_str(&prelude);
     output.push_str(&body);
@@ -35,14 +34,37 @@ pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {
 /// Lower an Arkst IR document to Typst source without returning its source map.
 pub fn lower_to_typst_code(doc: &IrDocument) -> String {
     let body = lowering_base::lower_to_typst_code(doc);
-    let Some(prelude) = focus_prelude(doc) else {
+    let prelude = document_prelude(doc);
+    if prelude.is_empty() {
         return body;
-    };
-
+    }
     let mut output = String::with_capacity(prelude.len() + body.len());
     output.push_str(&prelude);
     output.push_str(&body);
     output
+}
+
+// v2.6 distributed-runtime PDF observation; renderer adapter defaults only.
+const SLIDES_PAGE_WIDTH_PT: f64 = 749.04;
+const SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;
+
+fn document_prelude(doc: &IrDocument) -> String {
+    let state = &doc.metadata.document_state;
+    let mut prelude = String::new();
+    if state.document_type == IrDocumentType::Slides {
+        prelude.push_str(&format!(
+            "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\n"
+        ));
+        match state.slides.and_then(|slides| slides.center) {
+            Some(true) => prelude.push_str("#set align(horizon)\n"),
+            Some(false) => prelude.push_str("#set align(top)\n"),
+            None => {}
+        }
+    }
+    if let Some(focus) = focus_prelude(doc) {
+        prelude.push_str(&focus);
+    }
+    prelude
 }
 
 fn focus_prelude(doc: &IrDocument) -> Option<String> {

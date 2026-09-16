@@ -172,6 +172,9 @@ fn block_to_ir(
         Block::ThematicBreak { span } => Some(IrNode::ThematicBreak {
             span: byte_to_source_span(span, source_id),
         }),
+        Block::PageBreak { span } => Some(IrNode::PageBreak {
+            span: byte_to_source_span(span, source_id),
+        }),
         Block::DirectiveCall {
             name,
             name_span,

@@ -1020,6 +1020,7 @@ fn canonical_block(block: &Block) -> Option<CanonicalNode> {
         Block::CodeBlock { info, source, .. } => CanonicalNode::value("code_block", source.clone())
             .attr("info", info.clone().unwrap_or_default()),
         Block::ThematicBreak { .. } => CanonicalNode::new("thematic_break"),
+        Block::PageBreak { .. } => CanonicalNode::new("page_break"),
         Block::RawHtml { source, .. } => {
             CanonicalNode::value("raw_html", source.clone()).attr("context", "block")
         }

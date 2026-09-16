@@ -1043,6 +1043,7 @@ fn append_node_plain_text(node: &IrNode, output: &mut String) -> Option<()> {
         | IrNode::RawHtml { .. }
         | IrNode::TargetSpecificContent { .. }
         | IrNode::ThematicBreak { .. }
+        | IrNode::PageBreak { .. }
         | IrNode::Math { .. } => return None,
     }
     Some(())
