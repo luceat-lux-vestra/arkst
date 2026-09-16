@@ -80,6 +80,7 @@ fn assert_block(source: &str, block: &Block) {
         }
         Block::CodeBlock { span, .. }
         | Block::ThematicBreak { span }
+        | Block::PageBreak { span }
         | Block::RawHtml { span, .. }
         | Block::Unsupported { span, .. }
         | Block::Metadata { span, .. }
