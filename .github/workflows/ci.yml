@@ -16,10 +16,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-      - name: Restore production CI and remove temporary development machinery
+      - name: Format candidate, restore production CI, and remove temporary development machinery
         shell: bash
         run: |
           set -euo pipefail
+          cargo fmt --all
           git fetch origin main:refs/remotes/origin/main
           git checkout origin/main -- .github/workflows/ci.yml
           rm -f .github/workflows/_v260_dev_probe.yml
@@ -27,6 +28,6 @@ jobs:
           cargo fmt --all --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/ci.yml .github/workflows/_v260_dev_probe.yml tools/dev_v260_page_geometry_patch.py
-          git commit -m 'chore: remove v2.6 development workflow machinery'
+          git add -A
+          git commit -m 'chore: finalize v2.6 slides PDF candidate'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
