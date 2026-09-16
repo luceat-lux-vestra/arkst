@@ -1,8 +1,8 @@
 name: v260 dev probe
 
 on:
-  push:
-    branches: [feat/v260-slides-pdf]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
