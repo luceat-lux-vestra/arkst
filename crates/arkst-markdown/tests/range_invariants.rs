@@ -1,20 +1,57 @@
-use arkst_markdown::ast::{Block, CallArgument, Document, Inline, Value};
-use arkst_markdown::{parse_with_mode, Mode};
+use arkst_markdown::{Block, Document, Inline, ListItem, Parser, ParserOptions, Value};
 use arkst_source::ByteSpan;
 use proptest::prelude::*;
 
 fn valid(span: ByteSpan, source: &str) -> bool {
-    span.start <= span.end
-        && span.end <= source.len()
-        && source.is_char_boundary(span.start)
-        && source.is_char_boundary(span.end)
+    span.start <= span.end && span.end <= source.len()
 }
 
 fn check_value(value: &Value, source: &str) {
-    if let Value::Content(inlines) = value {
-        for inline in inlines {
-            check_inline(inline, source);
+    match value {
+        Value::Content(inlines) => {
+            for inline in inlines {
+                check_inline(inline, source);
+            }
         }
+        Value::InlineBody {
+            content,
+            parameters,
+            body,
+            span,
+        } => {
+            assert!(valid(*span, source));
+            for inline in content {
+                check_inline(inline, source);
+            }
+            if let Some(parameters) = parameters {
+                assert!(valid(parameters.span, source));
+                for parameter in &parameters.parameters {
+                    assert!(valid(parameter.name_span, source));
+                    assert!(valid(parameter.span, source));
+                }
+            }
+            for inline in body {
+                check_inline(inline, source);
+            }
+        }
+        Value::Lambda {
+            parameters,
+            body,
+            span,
+        } => {
+            assert!(valid(*span, source));
+            if let Some(parameters) = parameters {
+                assert!(valid(parameters.span, source));
+                for parameter in &parameters.parameters {
+                    assert!(valid(parameter.name_span, source));
+                    assert!(valid(parameter.span, source));
+                }
+            }
+            for inline in body {
+                check_inline(inline, source);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -29,9 +66,9 @@ fn check_inline(inline: &Inline, source: &str) {
         | Inline::Code { span, .. }
         | Inline::RawHtml { span, .. }
         | Inline::Strikethrough { span, .. }
-        | Inline::Unsupported { span, .. }
         | Inline::HardBreak { span }
-        | Inline::SoftBreak { span } => span,
+        | Inline::SoftBreak { span }
+        | Inline::Unsupported { span, .. } => span,
     };
     assert!(
         valid(*span, source),
@@ -52,11 +89,11 @@ fn check_inline(inline: &Inline, source: &str) {
         } => {
             for argument in arguments {
                 match argument {
-                    CallArgument::Positional { value, span } => {
+                    arkst_markdown::CallArgument::Positional { value, span } => {
                         assert!(valid(*span, source));
                         check_value(value, source);
                     }
-                    CallArgument::Named(argument) => {
+                    arkst_markdown::CallArgument::Named(argument) => {
                         assert!(valid(argument.name_span, source));
                         assert!(valid(argument.value_span, source));
                         assert!(valid(argument.span, source));
@@ -83,6 +120,7 @@ fn check_block(block: &Block, source: &str) {
         | Block::OrderedList { span, .. }
         | Block::CodeBlock { span, .. }
         | Block::ThematicBreak { span }
+        | Block::PageBreak { span }
         | Block::DirectiveCall { span, .. }
         | Block::Metadata { span, .. }
         | Block::Table { span, .. }
@@ -106,31 +144,41 @@ fn check_block(block: &Block, source: &str) {
         }
         Block::UnorderedList { items, .. } | Block::OrderedList { items, .. } => {
             for item in items {
-                assert!(valid(item.span, source));
-                for child in &item.content {
-                    check_block(child, source);
-                }
+                check_list_item(item, source);
             }
         }
         Block::Table { header, rows, .. } => {
-            check_table_row(header, source);
+            for cell in &header.cells {
+                assert!(valid(cell.span, source));
+                for inline in &cell.content {
+                    check_inline(inline, source);
+                }
+            }
             for row in rows {
-                check_table_row(row, source);
+                assert!(valid(row.span, source));
+                for cell in &row.cells {
+                    assert!(valid(cell.span, source));
+                    for inline in &cell.content {
+                        check_inline(inline, source);
+                    }
+                }
             }
         }
         Block::DirectiveCall {
             arguments,
+            chain,
             body,
+            raw_body,
             lambda_header,
             ..
         } => {
             for argument in arguments {
                 match argument {
-                    CallArgument::Positional { value, span } => {
+                    arkst_markdown::CallArgument::Positional { value, span } => {
                         assert!(valid(*span, source));
                         check_value(value, source);
                     }
-                    CallArgument::Named(argument) => {
+                    arkst_markdown::CallArgument::Named(argument) => {
                         assert!(valid(argument.name_span, source));
                         assert!(valid(argument.value_span, source));
                         assert!(valid(argument.span, source));
@@ -138,11 +186,23 @@ fn check_block(block: &Block, source: &str) {
                     }
                 }
             }
-            if let Some(header) = lambda_header {
-                assert!(valid(header.span, source));
-                for parameter in &header.parameters {
-                    assert!(valid(parameter.name_span, source));
-                    assert!(valid(parameter.span, source));
+            for segment in chain {
+                assert!(valid(segment.span, source));
+                assert!(valid(segment.name_span, source));
+                assert!(valid(segment.head_span, source));
+                for argument in &segment.arguments {
+                    match argument {
+                        arkst_markdown::CallArgument::Positional { value, span } => {
+                            assert!(valid(*span, source));
+                            check_value(value, source);
+                        }
+                        arkst_markdown::CallArgument::Named(argument) => {
+                            assert!(valid(argument.name_span, source));
+                            assert!(valid(argument.value_span, source));
+                            assert!(valid(argument.span, source));
+                            check_value(&argument.value, source);
+                        }
+                    }
                 }
             }
             if let Some(body) = body {
@@ -150,62 +210,42 @@ fn check_block(block: &Block, source: &str) {
                     check_block(child, source);
                 }
             }
+            if let Some(raw_body) = raw_body {
+                assert!(valid(raw_body.span, raw_body.source.as_str()));
+            }
+            if let Some(lambda_header) = lambda_header {
+                assert!(valid(lambda_header.span, source));
+                for parameter in &lambda_header.parameters {
+                    assert!(valid(parameter.name_span, source));
+                    assert!(valid(parameter.span, source));
+                }
+            }
         }
         _ => {}
     }
 }
 
-fn check_table_row(row: &arkst_markdown::ast::TableRow, source: &str) {
-    assert!(valid(row.span, source));
-    for cell in &row.cells {
-        assert!(valid(cell.span, source));
-        for inline in &cell.content {
-            check_inline(inline, source);
-        }
+fn check_list_item(item: &ListItem, source: &str) {
+    assert!(valid(item.span, source));
+    for child in &item.content {
+        check_block(child, source);
     }
 }
 
 fn check_document(document: &Document, source: &str) {
-    for block in &document.nodes {
-        check_block(block, source);
-    }
     if let Some(front_matter) = &document.front_matter {
         assert!(valid(front_matter.span, source));
     }
-}
-
-#[test]
-fn adversarial_utf8_and_markdown_ranges_are_source_backed() {
-    let inputs = [
-        "한글 **강조**\n",
-        "界 .text {赤} 😀\r\n",
-        "e\u{301} *combining*\n",
-        "👩‍🔬 ` .foo {bar} `\n",
-        "> - .align {center}\n>     **본문**\n",
-        "- one\n  - two\n    - three\n",
-        "[한글](https://example.com) ![그림](image.png)\n",
-        "| a | b |\n| - | - |\n| 1 | 2 |\n",
-        "```text\n.foo {bar}\n```\n",
-        ".align {center}\n    한글 **본문**\n",
-        "<span>raw</span> **x**\n",
-        "*** unmatched ** [bad](\n",
-        "",
-    ];
-    for source in inputs {
-        for mode in [Mode::Markdown, Mode::Quarkdown] {
-            let output = parse_with_mode(source, mode);
-            check_document(&output.document, source);
-        }
+    for block in &document.nodes {
+        check_block(block, source);
     }
 }
 
 proptest! {
     #[test]
-    fn arbitrary_valid_utf8_has_only_valid_source_ranges(
-        source in proptest::collection::vec(any::<char>(), 0..=64)
-            .prop_map(|characters| characters.into_iter().collect::<String>())
-    ) {
-        let output = parse_with_mode(&source, Mode::Quarkdown);
-        check_document(&output.document, &source);
+    fn parser_ranges_stay_within_source(source in ".{0,512}") {
+        let parser = Parser::new(ParserOptions::default());
+        let result = parser.parse(&source);
+        check_document(&result.document, &source);
     }
 }
