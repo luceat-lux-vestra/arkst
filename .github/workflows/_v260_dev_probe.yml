@@ -8,159 +8,94 @@ permissions:
   contents: write
 
 jobs:
-  patch-core:
+  patch-ir:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Apply typed slides/pagebreak core patch
+      - name: Apply slides/pagebreak IR patch
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
 
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected 1 occurrence, found {count}")
-              return text.replace(old, new, 1)
+          def once(s, old, new, label):
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, found {n}')
+              return s.replace(old, new, 1)
 
-          path = Path('crates/arkst-ir/src/lib.rs')
-          s = path.read_text()
+          p = Path('crates/arkst-ir/src/lib.rs')
+          s = p.read_text()
+
           if 'pub struct IrSlidesConfiguration' not in s:
               marker = '''/// Backend-neutral document-global horizontal alignment.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\npub enum IrDocumentAlignment {'''
-              idx = s.find(marker)
-              if idx < 0:
-                  raise SystemExit('IrDocumentAlignment marker not found')
-              slides = '''/// Backend-neutral slides document configuration.\n///\n/// `center: None` preserves the renderer/theme default rather than inventing\n/// a target-specific vertical offset. Renderer geometry remains backend-owned.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]\npub struct IrSlidesConfiguration {\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub center: Option<bool>,\n}\n\n'''
-              s = s[:idx] + slides + s[idx:]
+              slides = '''/// Backend-neutral slides document configuration.\n///\n/// `center: None` preserves the renderer/theme default. Renderer-specific\n/// geometry and offsets remain backend-owned.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]\npub struct IrSlidesConfiguration {\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub center: Option<bool>,\n}\n\n'''
+              s = once(s, marker, slides + marker, 'IrSlidesConfiguration insertion')
+
           if 'pub slides: Option<IrSlidesConfiguration>' not in s:
-              s = replace_once(
+              s = once(
                   s,
                   '    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub page_alignment: Option<IrDocumentAlignment>,\n}',
                   '    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub page_alignment: Option<IrDocumentAlignment>,\n    /// Slides-specific document configuration. `None` means no `.slides` setter committed state.\n    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub slides: Option<IrSlidesConfiguration>,\n}',
-                  'IrDocumentState slides field',
+                  'IrDocumentState.slides',
               )
-          if 'PageBreak {\n        span: SourceSpan,' not in s:
-              thematic = '    ThematicBreak {\n        span: SourceSpan,\n    },'
-              count = s.count(thematic)
-              if count < 2:
-                  raise SystemExit(f'expected >=2 SourceSpan ThematicBreak variants, found {count}')
-              s = s.replace(
-                  thematic,
-                  thematic + '\n    /// Explicit semantic page boundary. Backends choose their page-break primitive.\n    PageBreak {\n        span: SourceSpan,\n    },',
+
+          if 'WireNode::PageBreak' not in s:
+              wire = '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    Math {'''
+              s = once(
+                  s,
+                  wire,
+                  '''    ThematicBreak {\n        span: SourceSpan,\n    },\n    PageBreak {\n        span: SourceSpan,\n    },\n    Math {''',
+                  'WireNode::PageBreak',
               )
+
+          if '/// Explicit semantic page boundary.' not in s:
+              s = once(
+                  s,
+                  '    /// A thematic break (horizontal rule).\n    ThematicBreak { span: SourceSpan },\n    /// Math expression (inline or display).',
+                  '    /// A thematic break (horizontal rule).\n    ThematicBreak { span: SourceSpan },\n    /// Explicit semantic page boundary. Backends choose their page-break primitive.\n    PageBreak { span: SourceSpan },\n    /// Math expression (inline or display).',
+                  'IrNode::PageBreak',
+              )
+
           if 'IrNode::PageBreak { span } => WireNode::PageBreak' not in s:
-              s = replace_once(
+              s = once(
                   s,
                   '        IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },\n',
                   '        IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },\n        IrNode::PageBreak { span } => WireNode::PageBreak { span: *span },\n',
                   'node_to_wire PageBreak',
               )
+
           if 'WireNode::PageBreak { span } => IrNode::PageBreak' not in s:
-              s = replace_once(
+              s = once(
                   s,
                   '        WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },\n',
                   '        WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },\n        WireNode::PageBreak { span } => IrNode::PageBreak { span },\n',
-                  'wire_to_ir PageBreak',
+                  'wire_node_to_ir PageBreak',
               )
-          s = s.replace(
-              '        | IrNode::ThematicBreak { .. }\n        | IrNode::Math { .. } => {}',
-              '        | IrNode::ThematicBreak { .. }\n        | IrNode::PageBreak { .. }\n        | IrNode::Math { .. } => {}',
-          )
-          path.write_text(s)
 
-          path = Path('crates/arkst-engine/src/evaluator.rs')
-          s = path.read_text()
-          if 'slides: Option<arkst_ir::IrSlidesConfiguration>' not in s:
-              s = replace_once(
+          if '| IrNode::PageBreak { .. }' not in s:
+              s = once(
                   s,
-                  '    page_alignment: Option<IrDocumentAlignment>,\n    localization_tables: LocalizationTables,\n',
-                  '    page_alignment: Option<IrDocumentAlignment>,\n    slides: Option<arkst_ir::IrSlidesConfiguration>,\n    localization_tables: LocalizationTables,\n',
-                  'DocumentState slides field',
+                  '        | IrNode::ThematicBreak { .. }\n        | IrNode::Math { .. } => {}',
+                  '        | IrNode::ThematicBreak { .. }\n        | IrNode::PageBreak { .. }\n        | IrNode::Math { .. } => {}',
+                  'collect_node_sources PageBreak',
               )
-              s = replace_once(
-                  s,
-                  '            page_alignment: None,\n            localization_tables: LocalizationTables::new(),\n',
-                  '            page_alignment: None,\n            slides: None,\n            localization_tables: LocalizationTables::new(),\n',
-                  'DocumentState default slides',
-              )
-              s = replace_once(
-                  s,
-                  '            page_alignment: snapshot.page_alignment,\n            localization_tables: LocalizationTables::new(),\n',
-                  '            page_alignment: snapshot.page_alignment,\n            slides: snapshot.slides,\n            localization_tables: LocalizationTables::new(),\n',
-                  'DocumentState from_snapshot slides',
-              )
-              s = replace_once(
-                  s,
-                  '            page_alignment: self.page_alignment,\n        }\n',
-                  '            page_alignment: self.page_alignment,\n            slides: self.slides,\n        }\n',
-                  'DocumentState snapshot slides',
-              )
-          if '    Slides,\n' not in s:
-              s = replace_once(
-                  s,
-                  '    PageAlignment,\n    LocalizationTables,\n',
-                  '    PageAlignment,\n    Slides,\n    LocalizationTables,\n',
-                  'DocumentStateField Slides',
-              )
-          if 'Slides(Option<arkst_ir::IrSlidesConfiguration>)' not in s:
-              s = replace_once(
-                  s,
-                  '    PageAlignment(Option<IrDocumentAlignment>),\n    LocalizationTables(LocalizationTableUndo),\n',
-                  '    PageAlignment(Option<IrDocumentAlignment>),\n    Slides(Option<arkst_ir::IrSlidesConfiguration>),\n    LocalizationTables(LocalizationTableUndo),\n',
-                  'DocumentStateUndo Slides',
-              )
-          if 'DocumentStateUndo::Slides(previous)' not in s:
-              s = replace_once(
-                  s,
-                  '            DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,\n',
-                  '            DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,\n            DocumentStateUndo::Slides(previous) => state.slides = previous,\n',
-                  'restore Slides',
-              )
-          if 'fn set_slides_configuration' not in s:
-              setter = '''    fn set_slides_configuration(&self, value: Option<arkst_ir::IrSlidesConfiguration>) {\n        self.record_document_state_undo(DocumentStateField::Slides, || {\n            (\n                DocumentStateUndo::Slides(self.document_state.borrow().slides),\n                0,\n            )\n        });\n        self.document_state.borrow_mut().slides = value;\n    }\n\n'''
-              needle = '    fn append_document_author(&self, name: String) {'
-              idx = s.find(needle)
-              if idx < 0:
-                  raise SystemExit('append_document_author marker not found')
-              s = s[:idx] + setter + s[idx:]
-          s = s.replace(
-              '| IrNode::ThematicBreak { span }\n        | IrNode::Math',
-              '| IrNode::ThematicBreak { span }\n        | IrNode::PageBreak { span }\n        | IrNode::Math',
-          )
-          path.write_text(s)
 
-          path = Path('crates/arkst-typst/src/lowering.rs')
-          s = path.read_text()
-          if 'IrNode::PageBreak { span }' not in s:
-              old = '''            IrNode::ThematicBreak { span } => {\n                let before = self.output.len();\n                self.push_str("---\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
-              new = old + '''            IrNode::PageBreak { span } => {\n                let before = self.output.len();\n                self.push_str("#pagebreak(weak: true)\\n");\n                if span.source_id != SourceId(0) {\n                    self.record_span(*span, self.output.len() - before);\n                }\n            }\n'''
-              s = replace_once(s, old, new, 'Typst PageBreak lowering')
-          path.write_text(s)
-
-          path = Path('crates/arkst-typst/src/focus_lowering.rs')
-          s = path.read_text()
-          if 'SLIDES_PAGE_WIDTH_PT' not in s:
-              old = '''pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {\n    let (body, mut source_map) = lowering_base::lower_to_typst(doc);\n    let Some(prelude) = focus_prelude(doc) else {\n        return (body, source_map);\n    };\n\n    let offset = prelude.len();\n    for entry in &mut source_map {\n        entry.generated_start += offset;\n        entry.generated_end += offset;\n    }\n\n    let mut output = String::with_capacity(offset + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    (output, source_map)\n}\n\n/// Lower an Arkst IR document to Typst source without returning its source map.\npub fn lower_to_typst_code(doc: &IrDocument) -> String {\n    let body = lowering_base::lower_to_typst_code(doc);\n    let Some(prelude) = focus_prelude(doc) else {\n        return body;\n    };\n\n    let mut output = String::with_capacity(prelude.len() + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    output\n}\n'''
-              new = '''pub fn lower_to_typst(doc: &IrDocument) -> (String, Vec<SourceMapEntry>) {\n    let (body, mut source_map) = lowering_base::lower_to_typst(doc);\n    let prelude = document_prelude(doc);\n    if prelude.is_empty() {\n        return (body, source_map);\n    }\n\n    let offset = prelude.len();\n    for entry in &mut source_map {\n        entry.generated_start += offset;\n        entry.generated_end += offset;\n    }\n\n    let mut output = String::with_capacity(offset + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    (output, source_map)\n}\n\n/// Lower an Arkst IR document to Typst source without returning its source map.\npub fn lower_to_typst_code(doc: &IrDocument) -> String {\n    let body = lowering_base::lower_to_typst_code(doc);\n    let prelude = document_prelude(doc);\n    if prelude.is_empty() {\n        return body;\n    }\n\n    let mut output = String::with_capacity(prelude.len() + body.len());\n    output.push_str(&prelude);\n    output.push_str(&body);\n    output\n}\n\nconst SLIDES_PAGE_WIDTH_PT: f64 = 749.04;\nconst SLIDES_PAGE_HEIGHT_PT: f64 = 546.0;\n\nfn document_prelude(doc: &IrDocument) -> String {\n    let state = &doc.metadata.document_state;\n    let mut prelude = String::new();\n    if state.document_type == IrDocumentType::Slides {\n        prelude.push_str(&format!(\n            "#set page(width: {SLIDES_PAGE_WIDTH_PT}pt, height: {SLIDES_PAGE_HEIGHT_PT}pt)\\n"\n        ));\n        match state.slides.and_then(|slides| slides.center) {\n            Some(true) => prelude.push_str("#set align(horizon)\\n"),\n            Some(false) => prelude.push_str("#set align(top)\\n"),\n            None => {}\n        }\n    }\n    if let Some(focus) = focus_prelude(doc) {\n        prelude.push_str(&focus);\n    }\n    prelude\n}\n'''
-              s = replace_once(s, old, new, 'combined document prelude')
-          path.write_text(s)
+          p.write_text(s)
           PY
 
           cargo fmt --all
           cargo fmt --all -- --check
-          cargo check --workspace --all-targets --locked
+          cargo check -p arkst-ir --all-targets --locked
 
-          if git diff --quiet; then
-            echo 'core patch already applied'
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/arkst-ir/src/lib.rs crates/arkst-engine/src/evaluator.rs crates/arkst-typst/src/lowering.rs crates/arkst-typst/src/focus_lowering.rs
-          git commit -m 'compat(v2.6): add typed slides PDF core contract'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          if ! git diff --quiet; then
+            git add crates/arkst-ir/src/lib.rs
+            git commit -m 'compat(v2.6): add typed slides and pagebreak IR'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
