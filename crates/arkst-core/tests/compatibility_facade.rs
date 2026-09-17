@@ -23,7 +23,7 @@ fn compatibility_facade_preserves_module_paths_and_type_identity() {
 #[test]
 fn compatibility_facade_preserves_existing_behavior() {
     let profile = arkst_core::compatibility::profile::CompatibilityProfile::default();
-    assert_eq!(profile.name, "quarkdown-v2.5");
+    assert_eq!(profile.name, "quarkdown-v2.6");
     assert!(!profile.strict);
     assert_eq!(
         arkst_core::compatibility::diagnostics::unsupported_feature("foo"),
