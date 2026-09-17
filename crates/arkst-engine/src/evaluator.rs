@@ -13178,7 +13178,9 @@ fn inspectable_native_function(name: &str) -> bool {
     crate::library_inspection::V260_STDLIB_FUNCTION_ORDER.contains(&name)
         && !is_deferred(name)
         && (builtins::lookup(name).is_some()
-            || native_binding_parameters(name).is_some()
+            || BESPOKE_NATIVE_OWNERS
+                .iter()
+                .any(|inventory| inventory.names.contains(&name))
             || matches!(name, "pageformat" | "code" | "extend" | "function"))
 }
 
