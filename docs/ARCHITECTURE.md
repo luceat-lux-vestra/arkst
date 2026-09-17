@@ -1156,7 +1156,7 @@ max_materialized_elements = 1000000 # R10 evaluator default
 max_evaluation_depth = 256 # R10 evaluator default
 
 [compatibility]
-profile = "quarkdown-v2.5" # illustrative profile value
+profile = "quarkdown-v2.6" # illustrative profile value
 strict = false
 ```
 

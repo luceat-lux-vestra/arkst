@@ -5,13 +5,21 @@ Quarkdown-compatible feature implementation.
 
 ## Reference Baseline
 
-- **Reference version:** Quarkdown **v2.5.1** (released 2026-08-12;
-  `iamgio/quarkdown` tag `v2.5.1`)
-- **Resolved upstream tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`
+- **Reference version:** Quarkdown **v2.6.0** (released 2026-09-08;
+  `iamgio/quarkdown` tag `v2.6.0`)
+- **Resolved upstream tag commit:** `22f3c1169d0b1356fb51d8f43e1833d3d815aab1`
 - **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)
-- **Current verified baseline:** v2.5.1; current implementation is partial
-- **Historical evidence retained:** v2.5.0 sources below remain part of the
+- **Current verified baseline:** v2.6.0; current implementation is partial and evidence-backed
+- **Historical evidence retained:** v2.5.1 and v2.5.0 sources below remain part of the
   provenance record and are not deleted by this adaptation review
+
+v2.6.0 adaptation provenance is summarized in
+[`V260_BASELINE_PROMOTION.md`](V260_BASELINE_PROMOTION.md) and
+[`V260_MIGRATION_CHECKLIST.md`](V260_MIGRATION_CHECKLIST.md). The v2.6
+adaptation used public release/user documentation, official release metadata,
+independently authored fixtures, and clean-room black-box observations. The
+pre-existing v2.5.1 source citations below are retained as historical evidence
+for unchanged slices and are not reclassified as v2.6 source inspection.
 
 ## Primary Sources
 

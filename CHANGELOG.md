@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quarkdown v2.6.0 verified-baseline promotion (#311):** After the bounded
+  v2.6 release-delta checklist, clean-room black-box evidence, full repository
+  conformance/regression CI, Linux/macOS/Windows pinned-Typst backend parity,
+  WASM/MSRV gates, and provenance reconciliation, the active verified baseline
+  advances from v2.5.1 to v2.6.0. Historical v2.5.1 audits, fixtures, and source
+  citations remain immutable provenance for unchanged slices. This promotion
+  does not claim complete Quarkdown surface support; only evidence-backed
+  compatibility-matrix rows are support claims.
+
 - **Arkst GitHub Release CLI contract (#233):** The canonical distribution
   inventory now approves only the `arkst` binary from `arkst-cli` for GitHub
   Releases. Every Cargo workspace package remains `publish = false`,

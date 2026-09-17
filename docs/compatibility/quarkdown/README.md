@@ -2,8 +2,8 @@
 
 ## Status
 
-- **Specification version:** 0.5 (verified baseline v2.5.1)
-- **Reference upstream:** Quarkdown v2.5.1
+- **Specification version:** 0.6 (verified baseline v2.6.0)
+- **Reference upstream:** Quarkdown v2.6.0
 - **Compatibility target:** complete public-language/document-semantics compatibility
 - **Current verified compatibility:** partial; only evidence-backed matrix rows are claims
 
@@ -26,6 +26,14 @@ The current implementation is partial. A feature being documented upstream is
 not evidence that Arkst supports it, while a feature not yet implemented is
 not thereby outside the long-term language target. The tracked target and
 verified baseline are distinct; see [Upstream Evolution](#upstream-evolution).
+
+The verified baseline was promoted to v2.6.0 only after the release-delta
+checklist, full repository conformance/regression CI, cross-platform Typst
+backend parity, and provenance reconciliation recorded in
+[`V260_BASELINE_PROMOTION.md`](V260_BASELINE_PROMOTION.md). Historical v2.5.1
+audits and source citations remain provenance for the unchanged slices they
+originally established; baseline promotion does not turn unsupported matrix
+rows into support claims.
 
 Issue #156 is the cross-audit canonical view for the v2.5.1 status, evidence
 layers, ownership handoffs, backlog dependencies, and implementation order:

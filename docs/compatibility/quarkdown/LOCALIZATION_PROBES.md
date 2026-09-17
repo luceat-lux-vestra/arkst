@@ -19,8 +19,9 @@ without fetching anything upstream.
 
 ## Release identity
 
-- Release: `iamgio/quarkdown` tag `v2.5.1` (same pinned release as
-  `docs/compatibility/quarkdown/upstream.toml`'s `supported_baseline`).
+- Release: `iamgio/quarkdown` tag `v2.5.1` (historical pinned baseline when
+  these probes were recorded; the current `supported_baseline` is declared
+  separately in `docs/compatibility/quarkdown/upstream.toml`).
 - Release API: `https://api.github.com/repos/iamgio/quarkdown/releases/tags/v2.5.1`
 - Two platform archives were used (both fetched directly from the GitHub
   release; SHA-256 is the release API's reported asset `digest`, verified
