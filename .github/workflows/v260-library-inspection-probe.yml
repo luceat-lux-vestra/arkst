@@ -78,14 +78,29 @@ jobs:
               QD-FUNCTIONEXISTS-UNKNOWN-FALSE
           QD
 
-          cat > "$root/functionexists-source-defined.qd" <<'QD'
+          cat > "$root/source-defined-registry.qd" <<'QD'
           .function {qd_probe_user_function_195}
               QD-USER-FUNCTION-BODY
 
           .if {.functionexists {qd_probe_user_function_195}}
-              QD-FUNCTIONEXISTS-SOURCE-TRUE
+              QD-SOURCE-FUNCTIONEXISTS-TRUE
           .ifnot {.functionexists {qd_probe_user_function_195}}
-              QD-FUNCTIONEXISTS-SOURCE-FALSE
+              QD-SOURCE-FUNCTIONEXISTS-FALSE
+
+          QD-SOURCE-LIBRARIES-BEGIN
+          .foreach {.libraries}
+              QD-SOURCE-LIBRARY:[.1]
+          QD-SOURCE-LIBRARIES-END
+
+          .if {.libexists {__func__qd_probe_user_function_195}}
+              QD-SOURCE-PSEUDO-LIBEXISTS-TRUE
+          .ifnot {.libexists {__func__qd_probe_user_function_195}}
+              QD-SOURCE-PSEUDO-LIBEXISTS-FALSE
+
+          QD-SOURCE-PSEUDO-FUNCTIONS-BEGIN
+          .foreach {.libfunctions {__func__qd_probe_user_function_195}}
+              QD-SOURCE-PSEUDO-FUNCTION:[.1]
+          QD-SOURCE-PSEUDO-FUNCTIONS-END
           QD
 
           for name in std stdlib Math Libraries qd_probe_missing_library_195; do
@@ -158,6 +173,21 @@ jobs:
           .foreach {.libfunctions {probe195}}
               QD-EXT-AFTER-FUNCTION:[.1]
           QD-EXT-AFTER-FUNCTIONS-END
+
+          .if {.libexists {__func__qd_probe_external_one_195}}
+              QD-EXT-PSEUDO-ONE-LIBEXISTS-TRUE
+          .ifnot {.libexists {__func__qd_probe_external_one_195}}
+              QD-EXT-PSEUDO-ONE-LIBEXISTS-FALSE
+
+          QD-EXT-PSEUDO-ONE-FUNCTIONS-BEGIN
+          .foreach {.libfunctions {__func__qd_probe_external_one_195}}
+              QD-EXT-PSEUDO-ONE-FUNCTION:[.1]
+          QD-EXT-PSEUDO-ONE-FUNCTIONS-END
+
+          QD-EXT-PSEUDO-TWO-FUNCTIONS-BEGIN
+          .foreach {.libfunctions {__func__qd_probe_external_two_195}}
+              QD-EXT-PSEUDO-TWO-FUNCTION:[.1]
+          QD-EXT-PSEUDO-TWO-FUNCTIONS-END
           QD
 
       - name: Compile and print observable output
@@ -204,4 +234,35 @@ jobs:
                   print(part)
           PY
             fi
+          done
+
+      - name: Probe enumeration repeatability across fresh processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/library-inspection-probe
+          for i in 1 2 3 4 5; do
+            out="$root/repeat-$i"
+            "$QD" compile "$root/libfunctions-stdlib.qd" --strict --clean --pretty --out "$out" --out-name probe >/dev/null 2>"$root/repeat-$i.stderr"
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            python3 - "$html" "$i" <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import hashlib
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+              def handle_data(self, data):
+                  text = data.strip()
+                  if text.startswith('[') and text.endswith(']'):
+                      self.parts.append(text[1:-1])
+
+          parser = Text()
+          parser.feed(Path(sys.argv[1]).read_text())
+          payload = '\n'.join(parser.parts).encode()
+          print(f'QD-ORDER-RUN-{sys.argv[2]} count={len(parser.parts)} sha256={hashlib.sha256(payload).hexdigest()} first={parser.parts[:8]} last={parser.parts[-8:]}')
+          PY
           done
