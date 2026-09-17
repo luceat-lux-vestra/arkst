@@ -1,0 +1,124 @@
+name: Quarkdown v2.6 library inspection black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v260-library-inspection-probe-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Record public CLI library options
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$QD" compile --help | sed -n '/lib/Ip' || true
+
+      - name: Create independently-authored fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/library-inspection-probe
+          mkdir -p "$root"
+
+          cat > "$root/libraries.qd" <<'QD'
+          QD-LIBRARIES-BEGIN
+          .foreach {.libraries}
+              QD-LIBRARY:[.1]
+          QD-LIBRARIES-END
+          QD
+
+          cat > "$root/functionexists-native-known.qd" <<'QD'
+          QD-FUNCTIONEXISTS-NATIVE-KNOWN:[.functionexists {uppercase}]
+          QD
+
+          cat > "$root/functionexists-native-inspection.qd" <<'QD'
+          QD-FUNCTIONEXISTS-NATIVE-INSPECTION:[.functionexists {libexists}]
+          QD
+
+          cat > "$root/functionexists-unknown.qd" <<'QD'
+          QD-FUNCTIONEXISTS-UNKNOWN:[.functionexists {qd_probe_missing_function_195}]
+          QD
+
+          cat > "$root/functionexists-source-defined.qd" <<'QD'
+          .function {qd_probe_user_function_195}
+              QD-USER-FUNCTION-BODY
+
+          QD-FUNCTIONEXISTS-SOURCE:[.functionexists {qd_probe_user_function_195}]
+          QD
+
+          for name in std stdlib Math Libraries qd_probe_missing_library_195; do
+            cat > "$root/libexists-$name.qd" <<QD
+          QD-LIBEXISTS-${name}:[.libexists {${name}}]
+          QD
+          done
+
+      - name: Compile and print observable output
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/library-inspection-probe
+          for src in "$root"/*.qd; do
+            name="$(basename "$src" .qd)"
+            out="$root/out-$name"
+            set +e
+            "$QD" compile "$src" --strict --clean --pretty --out "$out" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
+            rc=$?
+            set -e
+            printf '\n=== CASE %s exit=%s ===\n' "$name" "$rc"
+            printf '%s\n' '--- stderr ---'
+            sed -n '1,80p' "$root/$name.stderr"
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              printf '%s\n' '--- rendered text ---'
+              python3 - "$html" <<'PY'
+          from html import unescape
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+              def handle_data(self, data):
+                  text = data.strip()
+                  if text:
+                      self.parts.append(text)
+
+          parser = Text()
+          parser.feed(Path(sys.argv[1]).read_text())
+          for part in parser.parts:
+              if part.startswith('QD-'):
+                  print(part)
+          PY
+            fi
+          done
