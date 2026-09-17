@@ -45,7 +45,7 @@ jobs:
           cat > "$root/stdlib.qd" <<'QD'
           QD-ORDER-BEGIN
           .foreach {.libfunctions {stdlib}}
-              .1
+              QD-ORDER-ITEM:[.1]
           QD-ORDER-END
           QD
 
@@ -79,9 +79,9 @@ jobs:
 
           parser = Text()
           parser.feed(Path(sys.argv[1]).read_text())
-          begin = parser.parts.index('QD-ORDER-BEGIN')
-          end = parser.parts.index('QD-ORDER-END')
-          names = parser.parts[begin + 1:end]
+          names = [p[1:-1] for p in parser.parts if p.startswith('[') and p.endswith(']')]
+          if not names:
+              raise SystemExit(f'no function names extracted: {parser.parts[:30]!r}')
           payload = '\n'.join(names) + '\n'
           Path(sys.argv[2]).write_text(payload)
           digest = hashlib.sha256(payload.encode()).hexdigest()
