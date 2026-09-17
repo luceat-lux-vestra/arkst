@@ -47,7 +47,10 @@ fn special_language_owned_functions_are_reported_when_arkst_supports_them() {
         source_id,
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(paragraph_texts(&result), vec!["true", "true", "true", "true"]);
+    assert_eq!(
+        paragraph_texts(&result),
+        vec!["true", "true", "true", "true"]
+    );
 }
 
 #[test]
@@ -65,11 +68,9 @@ fn malformed_extra_and_unknown_named_arguments_fail_without_registry_mutation() 
     let source = ".libraries {extra}\n.libexists nope:{stdlib}\n.libraries";
     let (result, diagnostics) = evaluate(source, source_id);
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-    assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id))
-    );
+    assert!(diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id)));
     assert_eq!(paragraph_texts(&result), vec!["stdlib"]);
 }
 
@@ -78,6 +79,9 @@ fn structured_name_conversion_fails_closed_with_source_provenance() {
     let source_id = SourceId(73);
     let (result, diagnostics) = evaluate(".libexists {.pair {a} {b}}\n.libraries", source_id);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].primary.map(|span| span.source_id), Some(source_id));
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
+    );
     assert_eq!(paragraph_texts(&result), vec!["stdlib"]);
 }

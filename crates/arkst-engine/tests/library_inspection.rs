@@ -22,7 +22,10 @@ fn document(source: &str, source_id: SourceId) -> IrDocument {
     document
 }
 
-fn evaluate_plain(source: &str, source_id: SourceId) -> (IrDocument, Vec<arkst_diagnostics::Diagnostic>) {
+fn evaluate_plain(
+    source: &str,
+    source_id: SourceId,
+) -> (IrDocument, Vec<arkst_diagnostics::Diagnostic>) {
     arkst_engine::evaluator::Evaluator::new().evaluate(&document(source, source_id))
 }
 
@@ -159,7 +162,10 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
         "extend",
         "pageformat",
     ] {
-        assert!(names.iter().any(|name| name == supported), "missing {supported}: {names:?}");
+        assert!(
+            names.iter().any(|name| name == supported),
+            "missing {supported}: {names:?}"
+        );
     }
     assert!(!names.iter().any(|name| name == "paragraphstyle"));
     assert!(!names.iter().any(|name| name == "llmstxt"));
@@ -265,7 +271,10 @@ fn failed_library_include_rolls_back_container_functions_and_pseudo_libraries() 
     let source = ".include {broken}\n.libexists {broken}\n.libexists {__func__ghost}\n.functionexists {ghost}\n.libraries";
     let (result, diagnostics) = evaluate_with_env(source, main, &env);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].primary.map(|span| span.source_id), Some(broken));
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(broken)
+    );
     assert_eq!(
         paragraph_texts(&result),
         vec!["false", "false", "false", "stdlib"]
@@ -293,7 +302,10 @@ fn inspection_is_case_sensitive() {
         &env,
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(paragraph_texts(&result), vec!["true", "false", "true", "false"]);
+    assert_eq!(
+        paragraph_texts(&result),
+        vec!["true", "false", "true", "false"]
+    );
 }
 
 #[test]
@@ -301,7 +313,10 @@ fn malformed_arguments_are_source_backed_and_do_not_mutate_registry() {
     let source_id = SourceId(50);
     let (result, diagnostics) = evaluate_plain(".libexists\n.libraries", source_id);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].primary.map(|span| span.source_id), Some(source_id));
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
+    );
     assert_eq!(paragraph_texts(&result), vec!["stdlib"]);
 }
 

@@ -213,10 +213,6 @@ pub(crate) fn function_library_name(name: &str) -> String {
     format!("{FUNCTION_LIBRARY_PREFIX}{name}")
 }
 
-pub(crate) fn function_name_from_library(library: &str) -> Option<&str> {
-    library.strip_prefix(FUNCTION_LIBRARY_PREFIX)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +268,5 @@ mod tests {
         assert_eq!(function.visible_name(), "__func__hello");
         assert_eq!(function.function_name(), Some("hello"));
         assert!(function.matches_visible_name("__func__hello"));
-        assert_eq!(function_name_from_library("__func__hello"), Some("hello"));
     }
 }
