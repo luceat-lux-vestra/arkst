@@ -1,6 +1,6 @@
 # Quarkdown v2.6.0 verified-baseline promotion
 
-Canonical migration tracker: #311.
+Canonical migration tracker: #311. Promotion PR: #359.
 
 ## Promotion decision
 
