@@ -1,0 +1,140 @@
+name: Quarkdown v2.6 logger black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official v2.6.0 distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/iamgio/quarkdown/releases/download/v2.6.0/quarkdown-linux-x64.zip'
+          expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4'
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o /tmp/quarkdown-v2.6.0.zip "$url"
+          printf '%s  %s\n' "$expected" /tmp/quarkdown-v2.6.0.zip | sha256sum -c -
+          mkdir -p /tmp/quarkdown-v2.6.0
+          unzip -q /tmp/quarkdown-v2.6.0.zip -d /tmp/quarkdown-v2.6.0
+          qd="$(find /tmp/quarkdown-v2.6.0 -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe severity output channels and return visibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197
+          mkdir -p "$root"
+          cat > "$root/log.qd" <<'QD'
+          before-log
+          .log {QD197_LOG}
+          after-log
+          QD
+          cat > "$root/debug.qd" <<'QD'
+          before-debug
+          .debug {QD197_DEBUG}
+          after-debug
+          QD
+          cat > "$root/error.qd" <<'QD'
+          before-error
+          .error {QD197_ERROR}
+          after-error
+          QD
+          cat > "$root/ordered.qd" <<'QD'
+          visible-before
+          .log {QD197_ORDER_LOG}
+          visible-middle-1
+          .debug {QD197_ORDER_DEBUG}
+          visible-middle-2
+          .error {QD197_ORDER_ERROR}
+          visible-after
+          QD
+
+          for fixture in log debug error ordered; do
+            for strict in default strict; do
+              out="$root/out-$fixture-$strict"
+              stdout="$root/$fixture-$strict.stdout"
+              stderr="$root/$fixture-$strict.stderr"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$strict" = strict ]; then args+=(--strict); fi
+              set +e
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+              rc=$?
+              set -e
+              printf 'QD197-RUN fixture=%s mode=%s rc=%s\n' "$fixture" "$strict" "$rc"
+              printf '%s\n' "QD197-STDOUT-BEGIN $fixture $strict"
+              cat "$stdout"
+              printf '%s\n' "QD197-STDOUT-END $fixture $strict"
+              printf '%s\n' "QD197-STDERR-BEGIN $fixture $strict"
+              cat "$stderr"
+              printf '%s\n' "QD197-STDERR-END $fixture $strict"
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" "$fixture" "$strict" <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re, sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts=[]
+                  self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          p=Text()
+          p.feed(Path(sys.argv[1]).read_text())
+          text=" ".join(" ".join(p.parts).split())
+          markers=re.findall(r'(?:visible|before|after|middle)[-A-Za-z0-9]*|QD197_[A-Z0-9_]+', text)
+          print(f"QD197-HTML fixture={sys.argv[2]} mode={sys.argv[3]} markers={markers!r}")
+          PY
+              else
+                printf 'QD197-HTML fixture=%s mode=%s NONE\n' "$fixture" "$strict"
+              fi
+            done
+          done
+
+      - name: Probe message conversion and repeated calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-values
+          mkdir -p "$root"
+          cat > "$root/values.qd" <<'QD'
+          .log {first}
+          .log {second}
+          .debug {third}
+          .log {42}
+          .debug {true}
+          QD
+          set +e
+          "$QD" compile "$root/values.qd" --clean --pretty --out "$root/out" --out-name probe >"$root/stdout" 2>"$root/stderr"
+          rc=$?
+          set -e
+          printf 'QD197-VALUES rc=%s\n' "$rc"
+          printf '%s\n' 'QD197-VALUES-STDOUT-BEGIN'
+          cat "$root/stdout"
+          printf '%s\n' 'QD197-VALUES-STDOUT-END'
+          printf '%s\n' 'QD197-VALUES-STDERR-BEGIN'
+          cat "$root/stderr"
+          printf '%s\n' 'QD197-VALUES-STDERR-END'
