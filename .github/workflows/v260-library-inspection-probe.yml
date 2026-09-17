@@ -57,6 +57,7 @@ jobs:
           from pathlib import Path
           from html.parser import HTMLParser
           import hashlib
+          import re
           import sys
 
           class Text(HTMLParser):
@@ -71,17 +72,15 @@ jobs:
                   if tag in ('script', 'style') and self.skip:
                       self.skip -= 1
               def handle_data(self, data):
-                  if self.skip:
-                      return
-                  text = data.strip()
-                  if text:
-                      self.parts.append(text)
+                  if not self.skip:
+                      self.parts.append(data)
 
           parser = Text()
           parser.feed(Path(sys.argv[1]).read_text())
-          names = [p[1:-1] for p in parser.parts if p.startswith('[') and p.endswith(']')]
+          visible = '\n'.join(parser.parts)
+          names = re.findall(r'QD-ORDER-ITEM:\s*\[([^\]]+)\]', visible)
           if not names:
-              raise SystemExit(f'no function names extracted: {parser.parts[:30]!r}')
+              raise SystemExit('no function names extracted from visible HTML text')
           payload = '\n'.join(names) + '\n'
           Path(sys.argv[2]).write_text(payload)
           digest = hashlib.sha256(payload.encode()).hexdigest()
