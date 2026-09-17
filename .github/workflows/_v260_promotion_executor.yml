@@ -1,0 +1,152 @@
+name: v2.6 baseline promotion executor
+
+on:
+  push:
+    branches:
+      - compat/v260-baseline-promotion
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: github.actor == 'luceat-lux-vestra'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out promotion branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: compat/v260-baseline-promotion
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply fail-closed baseline promotion
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{path}: expected {count} occurrence(s), found {actual}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          replace(
+              "docs/compatibility/quarkdown/upstream.toml",
+              'supported_baseline = "v2.5.1"',
+              'supported_baseline = "v2.6.0"',
+          )
+          replace(
+              "crates/arkst-compat/src/profile.rs",
+              '"quarkdown-v2.5"',
+              '"quarkdown-v2.6"',
+              count=2,
+          )
+          replace(
+              "README.md",
+              "The current verified baseline is referenced against Quarkdown v2.5.1",
+              "The current verified baseline is referenced against Quarkdown v2.6.0",
+          )
+          replace(
+              "docs/ARCHITECTURE.md",
+              'profile = "quarkdown-v2.5" # illustrative profile value',
+              'profile = "quarkdown-v2.6" # illustrative profile value',
+          )
+
+          replace(
+              "docs/compatibility/quarkdown/README.md",
+              "- **Specification version:** 0.5 (verified baseline v2.5.1)\n- **Reference upstream:** Quarkdown v2.5.1",
+              "- **Specification version:** 0.6 (verified baseline v2.6.0)\n- **Reference upstream:** Quarkdown v2.6.0",
+          )
+          replace(
+              "docs/compatibility/quarkdown/README.md",
+              "The current implementation is partial. A feature being documented upstream is\nnot evidence that Arkst supports it, while a feature not yet implemented is\nnot thereby outside the long-term language target. The tracked target and\nverified baseline are distinct; see [Upstream Evolution](#upstream-evolution).",
+              "The current implementation is partial. A feature being documented upstream is\nnot evidence that Arkst supports it, while a feature not yet implemented is\nnot thereby outside the long-term language target. The tracked target and\nverified baseline are distinct; see [Upstream Evolution](#upstream-evolution).\n\nThe verified baseline was promoted to v2.6.0 only after the release-delta\nchecklist, full repository conformance/regression CI, cross-platform Typst\nbackend parity, and provenance reconciliation recorded in\n[`V260_BASELINE_PROMOTION.md`](V260_BASELINE_PROMOTION.md). Historical v2.5.1\naudits and source citations remain provenance for the unchanged slices they\noriginally established; baseline promotion does not turn unsupported matrix\nrows into support claims.",
+          )
+
+          replace(
+              "docs/compatibility/quarkdown/SPEC_SOURCES.md",
+              "- **Reference version:** Quarkdown **v2.5.1** (released 2026-08-12;\n  `iamgio/quarkdown` tag `v2.5.1`)\n- **Resolved upstream tag commit:** `107ec3a9482f10d6f90d7580f8409b46a719d18e`\n- **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)\n- **Current verified baseline:** v2.5.1; current implementation is partial\n- **Historical evidence retained:** v2.5.0 sources below remain part of the\n  provenance record and are not deleted by this adaptation review",
+              "- **Reference version:** Quarkdown **v2.6.0** (released 2026-09-08;\n  `iamgio/quarkdown` tag `v2.6.0`)\n- **Resolved upstream tag commit:** `22f3c1169d0b1356fb51d8f43e1833d3d815aab1`\n- **Compatibility target:** complete public-language and document-observable semantic compatibility (ADR 0016)\n- **Current verified baseline:** v2.6.0; current implementation is partial and evidence-backed\n- **Historical evidence retained:** v2.5.1 and v2.5.0 sources below remain part of the\n  provenance record and are not deleted by this adaptation review",
+          )
+          replace(
+              "docs/compatibility/quarkdown/SPEC_SOURCES.md",
+              "## Primary Sources\n",
+              "v2.6.0 adaptation provenance is summarized in\n[`V260_BASELINE_PROMOTION.md`](V260_BASELINE_PROMOTION.md) and\n[`V260_MIGRATION_CHECKLIST.md`](V260_MIGRATION_CHECKLIST.md). The v2.6\nadaptation used public release/user documentation, official release metadata,\nindependently authored fixtures, and clean-room black-box observations. The\npre-existing v2.5.1 source citations below are retained as historical evidence\nfor unchanged slices and are not reclassified as v2.6 source inspection.\n\n## Primary Sources\n",
+          )
+
+          replace(
+              "docs/compatibility/quarkdown/LOCALIZATION_PROBES.md",
+              "- Release: `iamgio/quarkdown` tag `v2.5.1` (same pinned release as\n  `docs/compatibility/quarkdown/upstream.toml`'s `supported_baseline`).",
+              "- Release: `iamgio/quarkdown` tag `v2.5.1` (historical pinned baseline when\n  these probes were recorded; the current `supported_baseline` is declared\n  separately in `docs/compatibility/quarkdown/upstream.toml`).",
+          )
+
+          replace(
+              "fixtures/quarkdown-conformance/README.md",
+              "The corpus is intentionally bounded. Its 20 cases provide independent parser,\nevaluator, document-state, value, and IR evidence for the slices listed in the\ncase metadata; they do not imply that every public v2.5.1 surface is supported\nor output-equivalent. The `localization-family` case covers the conformance-level\nlocalization slice; Unicode casing and word-boundary edge cases are additionally\ngated by the pinned Reference JVM differential rather than duplicated as corpus\nfixtures. The canonical status for the complete audited surface is",
+              "The corpus is intentionally bounded. Its 20 core cases provide independent\nparser, evaluator, document-state, value, and IR evidence for the slices listed\nin the case metadata; many intentionally retain their original v2.5.1\nspecification-source identity as historical provenance for unchanged behavior.\nThey do not imply that every public surface in the current v2.6.0 verified\nbaseline is supported or output-equivalent. The v2.6.0 release-delta suites and\ncross-platform backend evidence are summarized in\n`docs/compatibility/quarkdown/V260_BASELINE_PROMOTION.md`. The\n`localization-family` case covers the conformance-level localization slice;\nUnicode casing and word-boundary edge cases are additionally gated by the\npinned Reference JVM differential rather than duplicated as corpus fixtures.\nThe canonical status for the complete audited surface is",
+          )
+
+          replace(
+              "docs/compatibility/quarkdown/V260_MIGRATION_CHECKLIST.md",
+              "- [ ] Full conformance suite and cross-platform CI.\n- [ ] Compatibility documentation/provenance reconciliation.\n- [ ] Repository-wide verified baseline promoted from v2.5.1 to v2.6.0 only after every row above is either implemented/evidenced or explicitly classified as not applicable with owner-bound evidence.",
+              "- [x] Full conformance suite and cross-platform CI — the production repository suite, Linux/macOS/Windows pinned-Typst backend parity, WASM, MSRV, Markdown compatibility, Reference JVM, docs, license, dependency review, and CodeQL gates are summarized in `V260_BASELINE_PROMOTION.md`.\n- [x] Compatibility documentation/provenance reconciliation — active baseline declarations are reconciled in `V260_BASELINE_PROMOTION.md`; historical v2.5.1 audit/source evidence is preserved rather than bulk-rewritten.\n- [x] Repository-wide verified baseline promoted from v2.5.1 to v2.6.0 after every release-delta row above was implemented/evidenced or explicitly classified as current-surface N/A with owner-bound evidence; `upstream.toml`, the default compatibility profile, and active compatibility documentation now agree on v2.6.0.",
+          )
+
+          replace(
+              "CHANGELOG.md",
+              "### Added\n\n",
+              "### Added\n\n- **Quarkdown v2.6.0 verified-baseline promotion (#311):** After the bounded\n  v2.6 release-delta checklist, clean-room black-box evidence, full repository\n  conformance/regression CI, Linux/macOS/Windows pinned-Typst backend parity,\n  WASM/MSRV gates, and provenance reconciliation, the active verified baseline\n  advances from v2.5.1 to v2.6.0. Historical v2.5.1 audits, fixtures, and source\n  citations remain immutable provenance for unchanged slices. This promotion\n  does not claim complete Quarkdown surface support; only evidence-backed\n  compatibility-matrix rows are support claims.\n\n",
+          )
+
+          promotion = """# Quarkdown v2.6.0 verified-baseline promotion\n\nCanonical migration tracker: #311.\n\n## Promotion decision\n\nArkst's verified Quarkdown compatibility baseline is promoted from **v2.5.1**\nto **v2.6.0**. This is a release-identity and evidence-baseline promotion, not\na claim that every public Quarkdown surface is implemented. The compatibility\nmatrix remains authoritative: only rows with their stated evidence level are\nsupport claims, and existing unsupported/partial rows remain compatibility\ndebt.\n\nThe v2.6.0 clean-room release identity used by the adaptation work is:\n\n- upstream tag: `v2.6.0`\n- upstream tag commit: `22f3c1169d0b1356fb51d8f43e1833d3d815aab1`\n- official Linux x64 archive SHA-256:\n  `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`\n\nNo Quarkdown v2.6 implementation source is used as implementation evidence for\nthis migration. Public user-facing documentation, official release metadata,\nindependently authored fixtures, and black-box observations are the permitted\nv2.6 evidence sources.\n\n## Release-delta closure\n\nThe canonical `V260_MIGRATION_CHECKLIST.md` records each public v2.6 delta and\nits bounded owner/evidence:\n\n- collection `.prepended` / `.appended`: #319;\n- `.doclang` English display-name and release-scoped locale acceptance:\n  `V260_DOCLANG.md`;\n- `.code(callouts:)`: #326 / `V260_CODE_CALLOUTS.md`;\n- `focus` layout: #330 / `V260_FOCUS_LAYOUT.md`;\n- slides H1/H2 auto page breaks and override: #334 /\n  `V260_AUTOPAGEBREAK.md`;\n- row/column omitted-alignment inheritance: #340 /\n  `V260_STACK_ALIGNMENT_INHERITANCE.md`;\n- Chromium-family PDF-export adapter delta: current Typst-native surface N/A,\n  #344 / `V260_PDF_EXPORT_ADAPTER.md`;\n- docs wide-table HTML scrolling: current output surface N/A, #349 /\n  `V260_DOCS_WIDE_TABLE_SCROLLING.md`;\n- slides PDF geometry/layout/boundaries: #358 /\n  `V260_SLIDES_PDF_EXPORT.md`;\n- `quarkdown create` slides starter: current CLI surface N/A, #356 /\n  `V260_CREATE_SLIDES_STARTER.md`.\n\nCurrent-surface N/A classifications are not permanent exclusions; their\ndocuments name the future ownership trigger.\n\n## Full conformance and cross-platform gate\n\nThe final slides migration candidate was reviewed at PR #358 head\n`c1684e4341ece05e121837df7b49a7dba717113a` and squash-merged as main commit\n`5723af8ec49806f09bc7c79a0b4a76acd5cd081b`. On that exact candidate, the\nproduction CI matrix passed `fmt`, `clippy`, `docs`, `license`, `wasm`, and the\nfull workspace tests on Ubuntu, macOS, and Windows. Each OS installed pinned\nTypst 0.15.1 and passed the subprocess/in-process backend-parity step. The same\nhead also passed Markdown compatibility/provenance, MSRV, Reference JVM,\nCodeQL, Docs Checks, and dependency review.\n\nAfter the squash merge, all six main-push workflows for\n`5723af8ec49806f09bc7c79a0b4a76acd5cd081b` completed successfully, providing\npost-merge regression evidence before baseline metadata is changed.\n\nThe dedicated v2.6 suites additionally exercise release-specific malformed\ninputs, source-defined shadowing, transactional state behavior, serde/backward\ncompatibility where state/IR changed, WASM-sensitive backend-neutral changes,\nand real PDF page-count/geometry/output behavior for the applicable slices.\n\n## Provenance reconciliation\n\nPromotion changes only declarations that mean **current verified baseline**:\n\n- `docs/compatibility/quarkdown/upstream.toml`;\n- `crates/arkst-compat` default compatibility-profile label;\n- root/compatibility active status documentation and architecture example;\n- the v2.6 migration checklist and this promotion record.\n\nHistorical v2.5.1 audits, ADRs, research records, regression-test names,\nconformance `specification_source` identifiers, source links, and changelog\nentries are deliberately retained. A v2.5.1 citation remains correct evidence\nfor an unchanged slice; rewriting it to v2.6 would falsify provenance. Stale\ncross-references that described v2.5.1 as the *current* `supported_baseline` are\nreworded as historical evidence.\n\n## Gate rule\n\nThe promotion PR must run the complete protected-branch gate again after these\nmetadata/documentation changes. A changed promotion HEAD invalidates prior gate\nevidence. The baseline is considered promoted only after that exact-head gate\npasses and the promotion PR is squash-merged.\n\nThis closes the v2.6 release migration only. It does **not** mark M3 or the\nbroader long-term full-compatibility program complete.\n"""
+          Path("docs/compatibility/quarkdown/V260_BASELINE_PROMOTION.md").write_text(promotion)
+          PY
+
+      - name: Verify active baseline consistency
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          checks = {
+              "docs/compatibility/quarkdown/upstream.toml": 'supported_baseline = "v2.6.0"',
+              "crates/arkst-compat/src/profile.rs": 'name: "quarkdown-v2.6".into()',
+              "README.md": "current verified baseline is referenced against Quarkdown v2.6.0",
+              "docs/compatibility/quarkdown/README.md": "verified baseline v2.6.0",
+              "docs/compatibility/quarkdown/SPEC_SOURCES.md": "**Current verified baseline:** v2.6.0",
+              "docs/ARCHITECTURE.md": 'profile = "quarkdown-v2.6"',
+          }
+          for path, needle in checks.items():
+              text = Path(path).read_text()
+              if needle not in text:
+                  raise SystemExit(f"active baseline mismatch: {path}: {needle!r}")
+
+          checklist = Path("docs/compatibility/quarkdown/V260_MIGRATION_CHECKLIST.md").read_text()
+          if "- [ ]" in checklist:
+              raise SystemExit("v2.6 migration checklist still contains open rows")
+          PY
+          git diff --check
+
+      - name: Test promoted baseline contracts
+        shell: bash
+        run: |
+          cargo test --locked -p arkst-compat
+          cargo test --locked -p arkst-test-support
+
+      - name: Commit promotion without executor
+        shell: bash
+        run: |
+          rm .github/workflows/_v260_promotion_executor.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md docs/ARCHITECTURE.md \
+            crates/arkst-compat/src/profile.rs \
+            fixtures/quarkdown-conformance/README.md \
+            docs/compatibility/quarkdown
+          git add -u .github/workflows/_v260_promotion_executor.yml
+          git status --short
+          git commit -m "compat(v2.6): promote verified baseline"
+          git push origin HEAD:compat/v260-baseline-promotion
