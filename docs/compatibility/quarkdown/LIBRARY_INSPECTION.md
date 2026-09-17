@@ -1,9 +1,10 @@
 # Quarkdown library inspection contract
 
 Issue: #195  
-Baseline: Quarkdown v2.6.0
+Baseline: Quarkdown v2.6.0  
+Canonical #151 status: `PARTIAL`
 
-This document defines Arkst's bounded evaluator contract for `.libraries`, `.libexists`, `.functionexists`, and `.libfunctions`.
+This document defines Arkst's bounded evaluator contract for `.libraries`, `.libexists`, `.functionexists`, and `.libfunctions`. The runtime-inspection contract itself is implemented, but the compatibility rows remain `PARTIAL` while Arkst's supported callable stdlib is smaller than Quarkdown's registered stdlib.
 
 ## Clean-room evidence
 

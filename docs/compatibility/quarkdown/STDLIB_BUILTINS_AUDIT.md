@@ -381,14 +381,22 @@ and [Logger.kt](https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d758
 These are general-language public declarations, not scalar aliases that can
 be inferred from existing arithmetic dispatch. Their observable contracts
 include context/library lookup, localization table mutation/read, and
-host/logging side effects. The seven library-inspection and logger names have
-no approved equivalent native owner in the current engine and remain
-`UNSUPPORTED`. The [#196](https://github.com/luceat-lux-vestra/arkst/issues/196)
-localization names are now a bounded `SUPPORTED_SEMANTICS` evaluator slice;
-[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) owns library
-inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
-owns logger/diagnostic behavior. The common resolver prerequisite completed under #188 and native host ingestion
-completed under #298/#302; residual host/resource implementation is coordinated through #190/#191, while the global-read incompatibility is an accepted fail-closed policy divergence recorded under completed #296/#300.
+host/logging side effects. The four library-inspection names now have the
+bounded evaluator-native contract implemented by
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195): one ordered
+in-memory registry view, exact/case-sensitive existence checks, source-function
+pseudo-libraries, source-backed binding/conversion diagnostics, and
+transactional rollback, with no host/provider discovery. Their canonical rows
+remain `PARTIAL`, because Quarkdown v2.6 exposes all 164 registered stdlib
+names while Arkst intentionally reports only functions its evaluator can
+actually call. The three logger/diagnostic names remain `UNSUPPORTED` under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197). The
+[#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
+names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
+resolver prerequisite completed under #188 and native host ingestion completed
+under #298/#302; residual host/resource implementation is coordinated through
+#190/#191, while the global-read incompatibility is an accepted fail-closed
+policy divergence recorded under completed #296/#300.
 
 ### Bounded #196 localization contract
 
@@ -499,7 +507,7 @@ checked against pinned declarations and current pipeline evidence:
 | empty iterable, out-of-range index, or missing dictionary key | access returns the declared None/fallback shape; other operations retain operation-specific empty behavior | access/fallback and empty aggregate cases are tested; #194 provides the bounded `.get` lookup contract |
 | incompatible comparison or unsupported natural order | comparison/sort fails rather than inventing an order | typed comparisons and sorted key checks fail with source spans |
 | callback or nested callback failure | failure propagates; callback state must not partially commit | existing evaluator callback/sort snapshots cover bounded paths; canonical flow is #150 |
-| unknown library/function lookup | lookup failure is observable, not an empty successful result | #195 owns the UNSUPPORTED library-inspection family; no fake result is added |
+| unknown library/function lookup | existence checks return false; unknown `.libfunctions` returns an empty collection | #195 implements the bounded in-memory inspection contract with exact names and no provider/host discovery; rows remain PARTIAL because stdlib visibility is support-filtered |
 | arithmetic domain/error condition | numeric operation behavior is retained per operation | existing numeric tests cover bounded f64 behavior; no universal error rewrite is claimed |
 | invalid selector result | selector result must be comparable and conversion-valid | sorted rejects None, unsupported, and heterogeneous keys and restores state |
 
@@ -541,20 +549,23 @@ separately.
 | SUPPORTED_END_TO_END | 0 |
 | SUPPORTED_SEMANTICS | 46 |
 | PARSED_ONLY | 0 |
-| PARTIAL | 6 |
-| UNSUPPORTED | 7 |
+| PARTIAL | 10 |
+| UNSUPPORTED | 3 |
 | DEFERRED | 0 |
 | BLOCKED | 0 |
 | UNKNOWN | 0 |
 | NOT_APPLICABLE | 1 |
 
-The six PARTIAL names are sorted, range, plaintext, otherwise, ifpresent, and
-takeif. The seven UNSUPPORTED names are libexists, functionexists, libraries,
-libfunctions, log, debug, and error. Localization and localize are the two
-new `SUPPORTED_SEMANTICS` rows owned by #196.
-The one NOT_APPLICABLE inventory row is none because its value taxonomy
-belongs to #149. The 46 SUPPORTED_SEMANTICS rows are bounded engine semantic
-claims; none is promoted to SUPPORTED_END_TO_END.
+The ten PARTIAL names are sorted, range, plaintext, otherwise, ifpresent,
+takeif, libexists, functionexists, libraries, and libfunctions. The four
+library-inspection rows are bounded runtime-inspection implementations under
+#195 but cannot claim full stdlib visibility parity while Arkst intentionally
+filters out upstream names it cannot call. The three UNSUPPORTED names are
+log, debug, and error. Localization and localize remain the two
+`SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
+row is none because its value taxonomy belongs to #149. The 46
+SUPPORTED_SEMANTICS rows are bounded engine semantic claims; none is promoted
+to SUPPORTED_END_TO_END.
 
 ## Corrections and reconciliation
 
@@ -604,12 +615,14 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 closes the cohesive Unicode string-semantics gap. The two
-remaining #151 unsupported families are real pinned gaps with bounded owners:
-[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for
-library inspection and [#197](https://github.com/luceat-lux-vestra/arkst/issues/197)
-for logger/diagnostic builtins. Implementation order follows the dependency
-bands in #156; #196 is the completed bounded localization slice.
+Issue #172 closes the cohesive Unicode string-semantics gap. The remaining
+#151 `UNSUPPORTED` family is logger/diagnostic behavior under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197). Library
+inspection under [#195](https://github.com/luceat-lux-vestra/arkst/issues/195)
+now has a completed bounded evaluator contract and is classified `PARTIAL`
+until Arkst's callable stdlib surface converges with the upstream registry.
+Implementation order follows the dependency bands in #156; #196 is the
+completed bounded localization slice.
 Existing issues are reused:
 
 - #149 and #165–#167 for value, binding, conversion, diagnostics, and
@@ -622,18 +635,19 @@ Existing issues are reused:
 Remaining implementation questions are the full DynamicValue conversion
 matrix, exact diagnostics/atomicity deltas for currently bounded semantics,
 and sorted selector/conversion edge cases. Dictionary lookup is now a bounded
-semantic implementation. Library inspection, localization, and logger
-ownership are no longer open reconciliation questions; #195–#197 own those
-bounded contracts and their host/resource coordination is explicit. This
-audit does not select the next implementation or alter the #157–#169 order.
+semantic implementation. Library inspection now has a bounded #195 evaluator
+implementation; its residual PARTIAL status is caused by the wider unimplemented
+stdlib callable surface rather than missing provider/host inspection. Localization
+and logger ownership remain explicit under #196/#197. This audit does not
+select the next implementation or alter the #157–#169 order.
 
 For #156, the usable reconciliation input is:
 
 - pinned public surface: 162;
 - #151-owned inventory: 60;
 - cross-owned/excluded: 102;
-- #151 status counts: 46 SUPPORTED_SEMANTICS, 6 PARTIAL,
-  7 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
+- #151 status counts: 46 SUPPORTED_SEMANTICS, 10 PARTIAL,
+  3 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
   categories;
 - newly recovered omission: isnone as an explicit general predicate;
 - corrected prior omission: llmstxt is public, #155-owned, and excluded from

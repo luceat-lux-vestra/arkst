@@ -171,6 +171,16 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         ("functionexists", "#195", "library inspection"),
         ("libraries", "#195", "library inspection"),
         ("libfunctions", "#195", "library inspection"),
+    ] {
+        let row = stdlib_row(name);
+        assert_eq!(row[4], "PARTIAL", "wrong #151 status for {name}");
+        assert!(STDLIB_AUDIT.contains(name), "#151 audit omits {name}");
+        assert!(STDLIB_AUDIT.contains(issue), "#151 audit omits {issue} for {name}");
+        assert!(RECONCILIATION.contains(issue), "reconciliation omits {issue} for {family}");
+        assert!(RECONCILIATION.contains(family));
+    }
+
+    for (name, issue, family) in [
         ("log", "#197", "logger"),
         ("debug", "#197", "logger"),
         ("error", "#197", "logger"),
@@ -178,14 +188,8 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         let row = stdlib_row(name);
         assert_eq!(row[4], "UNSUPPORTED", "wrong #151 status for {name}");
         assert!(STDLIB_AUDIT.contains(name), "#151 audit omits {name}");
-        assert!(
-            STDLIB_AUDIT.contains(issue),
-            "#151 audit omits {issue} for {name}"
-        );
-        assert!(
-            RECONCILIATION.contains(issue),
-            "reconciliation omits {issue} for {family}"
-        );
+        assert!(STDLIB_AUDIT.contains(issue), "#151 audit omits {issue} for {name}");
+        assert!(RECONCILIATION.contains(issue), "reconciliation omits {issue} for {family}");
         assert!(RECONCILIATION.contains(family));
     }
 }
