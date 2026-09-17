@@ -36,216 +36,24 @@ jobs:
           printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
           "$qd" --version
 
-      - name: Record public CLI library options
+      - name: Probe stdlib enumeration repeatability
         shell: bash
         run: |
           set -euo pipefail
-          "$QD" compile --help | sed -n '/lib/Ip' || true
-
-      - name: Create independently-authored fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          root=/tmp/library-inspection-probe
-          libdir=/tmp/library-inspection-libs
-          mkdir -p "$root" "$libdir"
-
-          cat > "$root/libraries.qd" <<'QD'
-          QD-LIBRARIES-BEGIN
-          .foreach {.libraries}
-              QD-LIBRARY:[.1]
-          QD-LIBRARIES-END
-          QD
-
-          cat > "$root/functionexists-native-known.qd" <<'QD'
-          .if {.functionexists {uppercase}}
-              QD-FUNCTIONEXISTS-NATIVE-KNOWN-TRUE
-          .ifnot {.functionexists {uppercase}}
-              QD-FUNCTIONEXISTS-NATIVE-KNOWN-FALSE
-          QD
-
-          cat > "$root/functionexists-native-inspection.qd" <<'QD'
-          .if {.functionexists {libexists}}
-              QD-FUNCTIONEXISTS-NATIVE-INSPECTION-TRUE
-          .ifnot {.functionexists {libexists}}
-              QD-FUNCTIONEXISTS-NATIVE-INSPECTION-FALSE
-          QD
-
-          cat > "$root/functionexists-unknown.qd" <<'QD'
-          .if {.functionexists {qd_probe_missing_function_195}}
-              QD-FUNCTIONEXISTS-UNKNOWN-TRUE
-          .ifnot {.functionexists {qd_probe_missing_function_195}}
-              QD-FUNCTIONEXISTS-UNKNOWN-FALSE
-          QD
-
-          cat > "$root/source-defined-registry.qd" <<'QD'
-          .function {qd_probe_user_function_195}
-              QD-USER-FUNCTION-BODY
-
-          .if {.functionexists {qd_probe_user_function_195}}
-              QD-SOURCE-FUNCTIONEXISTS-TRUE
-          .ifnot {.functionexists {qd_probe_user_function_195}}
-              QD-SOURCE-FUNCTIONEXISTS-FALSE
-
-          QD-SOURCE-LIBRARIES-BEGIN
-          .foreach {.libraries}
-              QD-SOURCE-LIBRARY:[.1]
-          QD-SOURCE-LIBRARIES-END
-
-          .if {.libexists {__func__qd_probe_user_function_195}}
-              QD-SOURCE-PSEUDO-LIBEXISTS-TRUE
-          .ifnot {.libexists {__func__qd_probe_user_function_195}}
-              QD-SOURCE-PSEUDO-LIBEXISTS-FALSE
-
-          QD-SOURCE-PSEUDO-FUNCTIONS-BEGIN
-          .foreach {.libfunctions {__func__qd_probe_user_function_195}}
-              QD-SOURCE-PSEUDO-FUNCTION:[.1]
-          QD-SOURCE-PSEUDO-FUNCTIONS-END
-          QD
-
-          for name in std stdlib Math Libraries qd_probe_missing_library_195; do
-            cat > "$root/libexists-$name.qd" <<QD
-          .if {.libexists {${name}}}
-              QD-LIBEXISTS-${name}-TRUE
-          .ifnot {.libexists {${name}}}
-              QD-LIBEXISTS-${name}-FALSE
-          QD
-          done
-
-          cat > "$root/libfunctions-stdlib.qd" <<'QD'
-          QD-LIBFUNCTIONS-STDLIB-BEGIN
+          root=/tmp/library-order-probe
+          mkdir -p "$root"
+          cat > "$root/stdlib.qd" <<'QD'
+          QD-ORDER-BEGIN
           .foreach {.libfunctions {stdlib}}
-              QD-STDLIB-FUNCTION:[.1]
-          QD-LIBFUNCTIONS-STDLIB-END
+              .1
+          QD-ORDER-END
           QD
 
-          cat > "$root/libfunctions-unknown.qd" <<'QD'
-          QD-LIBFUNCTIONS-UNKNOWN-BEGIN
-          .foreach {.libfunctions {qd_probe_missing_library_195}}
-              QD-UNKNOWN-FUNCTION:[.1]
-          QD-LIBFUNCTIONS-UNKNOWN-END
-          QD
-
-          cat > "$libdir/probe195.qd" <<'QD'
-          .function {qd_probe_external_one_195}
-              QD-EXTERNAL-ONE
-
-          .function {qd_probe_external_two_195}
-              QD-EXTERNAL-TWO
-          QD
-
-          cat > "$root/ext-before-include.qd" <<'QD'
-          QD-EXT-BEFORE-LIBRARIES-BEGIN
-          .foreach {.libraries}
-              QD-EXT-BEFORE-LIBRARY:[.1]
-          QD-EXT-BEFORE-LIBRARIES-END
-
-          .if {.libexists {probe195}}
-              QD-EXT-BEFORE-LIBEXISTS-TRUE
-          .ifnot {.libexists {probe195}}
-              QD-EXT-BEFORE-LIBEXISTS-FALSE
-
-          .if {.functionexists {qd_probe_external_one_195}}
-              QD-EXT-BEFORE-FUNCTIONEXISTS-TRUE
-          .ifnot {.functionexists {qd_probe_external_one_195}}
-              QD-EXT-BEFORE-FUNCTIONEXISTS-FALSE
-          QD
-
-          cat > "$root/ext-after-include.qd" <<'QD'
-          .include {probe195}
-
-          QD-EXT-AFTER-LIBRARIES-BEGIN
-          .foreach {.libraries}
-              QD-EXT-AFTER-LIBRARY:[.1]
-          QD-EXT-AFTER-LIBRARIES-END
-
-          .if {.libexists {probe195}}
-              QD-EXT-AFTER-LIBEXISTS-TRUE
-          .ifnot {.libexists {probe195}}
-              QD-EXT-AFTER-LIBEXISTS-FALSE
-
-          .if {.functionexists {qd_probe_external_one_195}}
-              QD-EXT-AFTER-FUNCTIONEXISTS-TRUE
-          .ifnot {.functionexists {qd_probe_external_one_195}}
-              QD-EXT-AFTER-FUNCTIONEXISTS-FALSE
-
-          QD-EXT-AFTER-FUNCTIONS-BEGIN
-          .foreach {.libfunctions {probe195}}
-              QD-EXT-AFTER-FUNCTION:[.1]
-          QD-EXT-AFTER-FUNCTIONS-END
-
-          .if {.libexists {__func__qd_probe_external_one_195}}
-              QD-EXT-PSEUDO-ONE-LIBEXISTS-TRUE
-          .ifnot {.libexists {__func__qd_probe_external_one_195}}
-              QD-EXT-PSEUDO-ONE-LIBEXISTS-FALSE
-
-          QD-EXT-PSEUDO-ONE-FUNCTIONS-BEGIN
-          .foreach {.libfunctions {__func__qd_probe_external_one_195}}
-              QD-EXT-PSEUDO-ONE-FUNCTION:[.1]
-          QD-EXT-PSEUDO-ONE-FUNCTIONS-END
-
-          QD-EXT-PSEUDO-TWO-FUNCTIONS-BEGIN
-          .foreach {.libfunctions {__func__qd_probe_external_two_195}}
-              QD-EXT-PSEUDO-TWO-FUNCTION:[.1]
-          QD-EXT-PSEUDO-TWO-FUNCTIONS-END
-          QD
-
-      - name: Compile and print observable output
-        shell: bash
-        run: |
-          set -euo pipefail
-          root=/tmp/library-inspection-probe
-          libdir=/tmp/library-inspection-libs
-          for src in "$root"/*.qd; do
-            name="$(basename "$src" .qd)"
-            out="$root/out-$name"
-            extra=()
-            case "$name" in
-              ext-*) extra=(--libs "$libdir") ;;
-            esac
-            set +e
-            "$QD" compile "$src" "${extra[@]}" --strict --clean --pretty --out "$out" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
-            rc=$?
-            set -e
-            printf '\n=== CASE %s exit=%s ===\n' "$name" "$rc"
-            printf '%s\n' '--- stderr ---'
-            sed -n '1,100p' "$root/$name.stderr"
-            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
-            if [ -n "$html" ]; then
-              printf '%s\n' '--- rendered text ---'
-              python3 - "$html" <<'PY'
-          from pathlib import Path
-          from html.parser import HTMLParser
-          import sys
-
-          class Text(HTMLParser):
-              def __init__(self):
-                  super().__init__()
-                  self.parts = []
-              def handle_data(self, data):
-                  text = data.strip()
-                  if text:
-                      self.parts.append(text)
-
-          parser = Text()
-          parser.feed(Path(sys.argv[1]).read_text())
-          for part in parser.parts:
-              if part.startswith('QD-') or part.startswith('['):
-                  print(part)
-          PY
-            fi
-          done
-
-      - name: Probe enumeration repeatability across fresh processes
-        shell: bash
-        run: |
-          set -euo pipefail
-          root=/tmp/library-inspection-probe
           for i in 1 2 3 4 5; do
-            out="$root/repeat-$i"
-            "$QD" compile "$root/libfunctions-stdlib.qd" --strict --clean --pretty --out "$out" --out-name probe >/dev/null 2>"$root/repeat-$i.stderr"
+            out="$root/out-$i"
+            "$QD" compile "$root/stdlib.qd" --strict --clean --pretty --out "$out" --out-name probe >/dev/null 2>"$root/$i.stderr"
             html="$(find "$out" -type f -name '*.html' -print -quit)"
-            python3 - "$html" "$i" <<'PY'
+            python3 - "$html" "$root/$i.txt" "$i" <<'PY'
           from pathlib import Path
           from html.parser import HTMLParser
           import hashlib
@@ -255,14 +63,33 @@ jobs:
               def __init__(self):
                   super().__init__()
                   self.parts = []
+                  self.skip = 0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ('script', 'style'):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ('script', 'style') and self.skip:
+                      self.skip -= 1
               def handle_data(self, data):
+                  if self.skip:
+                      return
                   text = data.strip()
-                  if text.startswith('[') and text.endswith(']'):
-                      self.parts.append(text[1:-1])
+                  if text:
+                      self.parts.append(text)
 
           parser = Text()
           parser.feed(Path(sys.argv[1]).read_text())
-          payload = '\n'.join(parser.parts).encode()
-          print(f'QD-ORDER-RUN-{sys.argv[2]} count={len(parser.parts)} sha256={hashlib.sha256(payload).hexdigest()} first={parser.parts[:8]} last={parser.parts[-8:]}')
+          begin = parser.parts.index('QD-ORDER-BEGIN')
+          end = parser.parts.index('QD-ORDER-END')
+          names = parser.parts[begin + 1:end]
+          payload = '\n'.join(names) + '\n'
+          Path(sys.argv[2]).write_text(payload)
+          digest = hashlib.sha256(payload.encode()).hexdigest()
+          print(f'QD-ORDER-RUN-{sys.argv[3]} count={len(names)} sha256={digest} first={names[:8]} last={names[-8:]}')
           PY
           done
+
+          cmp "$root/1.txt" "$root/2.txt"
+          cmp "$root/1.txt" "$root/3.txt"
+          cmp "$root/1.txt" "$root/4.txt"
+          cmp "$root/1.txt" "$root/5.txt"
