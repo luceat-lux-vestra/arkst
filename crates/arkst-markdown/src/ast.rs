@@ -66,6 +66,10 @@ pub enum Block {
     ThematicBreak {
         span: ByteSpan,
     },
+    /// Quarkdown explicit page boundary (`<<<`).
+    PageBreak {
+        span: ByteSpan,
+    },
     DirectiveCall {
         name: String,
         name_span: ByteSpan,

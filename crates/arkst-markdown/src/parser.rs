@@ -761,12 +761,42 @@ fn parse_source(source: &str, mode: Mode, profile: MarkdownProfile) -> ParseOutp
     }
 }
 
+fn explicit_page_break_spans(source: &str, span: ByteSpan) -> Option<Vec<ByteSpan>> {
+    let text = source.get(span.start..span.end)?;
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for raw_line in text.split_inclusive('\n') {
+        let line = raw_line
+            .strip_suffix('\n')
+            .unwrap_or(raw_line)
+            .strip_suffix('\r')
+            .unwrap_or_else(|| raw_line.strip_suffix('\n').unwrap_or(raw_line));
+        if line.trim() != "<<<" {
+            return None;
+        }
+        spans.push(ByteSpan::new(
+            span.start + offset,
+            span.start + offset + line.len(),
+        ));
+        offset += raw_line.len();
+    }
+    (!spans.is_empty()).then_some(spans)
+}
+
 fn normalize_block(
     block: &mut Block,
     body_line_ranges: &BodyLineRanges,
     source: &str,
     diagnostics: &mut Vec<ParserDiagnostic>,
 ) -> Vec<Block> {
+    if let Block::Paragraph { span, .. } = block {
+        if let Some(spans) = explicit_page_break_spans(source, *span) {
+            return spans
+                .into_iter()
+                .map(|span| Block::PageBreak { span })
+                .collect();
+        }
+    }
     match block {
         Block::DirectiveCall {
             name,

@@ -60,9 +60,10 @@ use arkst_ir::{
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPair, IrParameter,
-    IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment,
-    IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageGeometry,
+    IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
+    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
+    NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -464,6 +465,8 @@ struct DocumentState {
     caption_position: IrCaptionPositionInfo,
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
+    page_geometry: Option<IrPageGeometry>,
+    slides: Option<IrSlidesConfiguration>,
     localization_tables: LocalizationTables,
 }
 
@@ -480,6 +483,8 @@ impl Default for DocumentState {
             caption_position: Default::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
+            page_geometry: None,
+            slides: None,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -498,6 +503,8 @@ impl DocumentState {
             caption_position: snapshot.caption_position,
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
+            page_geometry: snapshot.page_geometry.clone(),
+            slides: snapshot.slides,
             localization_tables: seeded_localization_tables(),
         }
     }
@@ -514,6 +521,8 @@ impl DocumentState {
             caption_position: self.caption_position,
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
+            page_geometry: self.page_geometry.clone(),
+            slides: self.slides,
         }
     }
 }
@@ -754,6 +763,7 @@ fn ir_node_source_span(node: &IrNode) -> SourceSpan {
         | IrNode::ChainedFunctionCall { span, .. }
         | IrNode::FunctionDeclaration { span, .. }
         | IrNode::ThematicBreak { span }
+        | IrNode::PageBreak { span }
         | IrNode::Math { span, .. } => *span,
         IrNode::TargetSpecificContent { content } => content.span,
         IrNode::Component { component } => component.span(),
@@ -879,6 +889,8 @@ enum DocumentStateField {
     CaptionPosition,
     AutoPageBreakMaxDepth,
     PageAlignment,
+    PageGeometry,
+    Slides,
     LocalizationTables,
 }
 
@@ -893,6 +905,8 @@ enum DocumentStateUndo {
     CaptionPosition(IrCaptionPositionInfo),
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
+    PageGeometry(Option<IrPageGeometry>),
+    Slides(Option<IrSlidesConfiguration>),
     LocalizationTables(LocalizationTableUndo),
 }
 
@@ -1957,6 +1971,8 @@ impl<'a> EvaluationContext<'a> {
                 state.auto_page_break_max_depth = previous
             }
             DocumentStateUndo::PageAlignment(previous) => state.page_alignment = previous,
+            DocumentStateUndo::PageGeometry(previous) => state.page_geometry = previous,
+            DocumentStateUndo::Slides(previous) => state.slides = previous,
             DocumentStateUndo::LocalizationTables(previous) => {
                 for (name, table) in previous {
                     match table {
@@ -2024,6 +2040,26 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().page_alignment = value;
+    }
+
+    fn set_page_geometry(&self, value: Option<IrPageGeometry>) {
+        self.record_document_state_undo(DocumentStateField::PageGeometry, || {
+            (
+                DocumentStateUndo::PageGeometry(self.document_state.borrow().page_geometry.clone()),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().page_geometry = value;
+    }
+
+    fn set_slides_configuration(&self, value: Option<IrSlidesConfiguration>) {
+        self.record_document_state_undo(DocumentStateField::Slides, || {
+            (
+                DocumentStateUndo::Slides(self.document_state.borrow().slides),
+                0,
+            )
+        });
+        self.document_state.borrow_mut().slides = value;
     }
 
     fn append_document_author(&self, name: String) {
@@ -2994,6 +3030,7 @@ impl Evaluator {
                 | "theme"
                 | "autopagebreak"
                 | "noautopagebreak"
+                | "slides"
         ) && context.get_function(name).is_some();
         if context.get_function(name).is_some() && !is_document_state(name) {
             return Ok(None);
@@ -3276,14 +3313,12 @@ impl Evaluator {
         if name == "pageformat"
             && context.get_function(name).is_none()
             && positional_args.is_empty()
-            && named_args.len() == 1
-            && named_args[0].name == "alignment"
-            && !matches!(&named_args[0].value, IrValue::None)
+            && bounded_pageformat_shape(named_args)
             && body.is_none()
             && raw_body.is_none()
             && lambda_parameters.is_none()
         {
-            return self.evaluate_page_alignment_builtin(named_args, span, diagnostics, context);
+            return self.evaluate_page_format_builtin(named_args, span, diagnostics, context);
         }
 
         let native_binding_plan = match self.preflight_native_binding(
@@ -3356,6 +3391,7 @@ impl Evaluator {
                 | "theme"
                 | "autopagebreak"
                 | "noautopagebreak"
+                | "slides"
         ) && context.get_function(name).is_some();
         if is_document_state(name) && !source_defined_shadowable_document_state {
             return self.evaluate_document_state_builtin(
@@ -3370,6 +3406,13 @@ impl Evaluator {
                 native_binding_plan.as_ref(),
                 first_origin,
             );
+        }
+
+        if is_page_break(name) && context.get_function(name).is_none() {
+            let Some(_binding_plan) = native_binding_plan.as_ref() else {
+                return CallOutcome::Failed;
+            };
+            return CallOutcome::Value(IrValue::Content(vec![IrNode::PageBreak { span: *span }]));
         }
 
         if is_localization(name) && context.get_function(name).is_none() {
@@ -5416,7 +5459,7 @@ impl Evaluator {
         CallOutcome::NoValue
     }
 
-    fn evaluate_page_alignment_builtin(
+    fn evaluate_page_format_builtin(
         &self,
         named_args: &[IrNamedArg],
         span: &SourceSpan,
@@ -5428,31 +5471,92 @@ impl Evaluator {
                 Ok(values) => values,
                 Err(outcome) => return outcome,
             };
-        let Some(argument) = evaluated_named.into_iter().next() else {
-            return CallOutcome::Unresolved;
-        };
-        let candidate_span = argument.arg.span;
-        let value = InvocationValue {
-            value: argument.arg.value,
-            origin: argument.origin,
-        };
-        let alignment = match value_conversion::convert_document_alignment_with_origin(&value) {
-            Ok(value) => value,
-            Err(error) => {
-                diagnostics.push(conversion_failure_diagnostic(
-                    value_conversion::ConversionFailure::new(
-                        error,
-                        Some(candidate_span),
-                        Some("alignment"),
-                        None,
-                        *span,
-                    ),
-                    Some("`.pageformat`"),
-                ));
-                return CallOutcome::Failed;
+
+        let mut alignment = None;
+        let mut width = None;
+        let mut height = None;
+        for argument in evaluated_named {
+            let candidate_span = argument.arg.span;
+            let parameter = argument.arg.name.clone();
+            let value = InvocationValue {
+                value: argument.arg.value,
+                origin: argument.origin,
+            };
+            match parameter.as_str() {
+                "alignment" => {
+                    alignment = Some(
+                        match value_conversion::convert_document_alignment_with_origin(&value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(candidate_span),
+                                        Some("alignment"),
+                                        None,
+                                        *span,
+                                    ),
+                                    Some("`.pageformat`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        },
+                    );
+                }
+                "width" | "height" => {
+                    let size = match value_conversion::convert_domain_with_origin(
+                        &value,
+                        value_conversion::DomainTarget::Size,
+                    ) {
+                        Ok(value_conversion::DomainValue::Size(value)) => value,
+                        Ok(_) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    value_conversion::ConversionError::UnsupportedValue {
+                                        target: value_conversion::ConversionTarget::Size,
+                                    },
+                                    Some(candidate_span),
+                                    Some(parameter.clone()),
+                                    None,
+                                    *span,
+                                ),
+                                Some("`.pageformat`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                        Err(error) => {
+                            diagnostics.push(conversion_failure_diagnostic(
+                                value_conversion::ConversionFailure::new(
+                                    error,
+                                    Some(candidate_span),
+                                    Some(parameter.clone()),
+                                    None,
+                                    *span,
+                                ),
+                                Some("`.pageformat`"),
+                            ));
+                            return CallOutcome::Failed;
+                        }
+                    };
+                    if parameter == "width" {
+                        width = Some(size);
+                    } else {
+                        height = Some(size);
+                    }
+                }
+                _ => unreachable!("bounded pageformat shape rejected unknown parameter"),
             }
-        };
-        context.set_page_alignment(Some(alignment));
+        }
+
+        // Candidate evaluation and conversion complete before either bounded
+        // state slot is published. The outer invocation transaction restores
+        // nested document-state writes on any failure.
+        if let Some(alignment) = alignment {
+            context.set_page_alignment(Some(alignment));
+        }
+        if let (Some(width), Some(height)) = (width, height) {
+            context.set_page_geometry(Some(IrPageGeometry { width, height }));
+        }
         CallOutcome::NoValue
     }
 
@@ -5538,6 +5642,95 @@ impl Evaluator {
                 binding_plan,
                 first_origin,
             );
+        }
+
+        if name == "slides" {
+            if context.document_state.borrow().document_type != arkst_ir::IrDocumentType::Slides {
+                diagnostics.push(document_state_conversion_error(
+                    "`.slides` is only valid for slides documents".to_string(),
+                    *span,
+                ));
+                return CallOutcome::Failed;
+            }
+            let Some(binding_plan) = binding_plan else {
+                return CallOutcome::Failed;
+            };
+            let evaluated_positional = match self.evaluate_invocation_values(
+                positional_args,
+                span,
+                diagnostics,
+                context,
+                first_origin,
+            ) {
+                Ok(v) => v,
+                Err(o) => return o,
+            };
+            let evaluated_named =
+                match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                    Ok(v) => v,
+                    Err(o) => return o,
+                };
+            let bound = match bind_evaluated_arguments(
+                binding_plan,
+                evaluated_positional
+                    .into_iter()
+                    .zip(positional_args.iter())
+                    .map(|(value, source)| (value, value_source_span(source, span)))
+                    .collect(),
+                evaluated_named,
+                None,
+                *span,
+            ) {
+                Ok(v) => v,
+                Err(error) => {
+                    diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                    return CallOutcome::Failed;
+                }
+            };
+            let parameter_span = bound
+                .parameters
+                .first()
+                .and_then(|parameter| parameter.name_span);
+            let center = match bound.slots.into_iter().next() {
+                Some(BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                }) => {
+                    if matches!(value.value, IrValue::None) {
+                        None
+                    } else {
+                        match value_conversion::convert_scalar_with_origin(
+                            &value,
+                            ScalarTarget::Boolean,
+                        ) {
+                            Ok(ScalarValue::Boolean(value)) => Some(value),
+                            Ok(_) => {
+                                diagnostics.push(document_state_conversion_error(
+                                    "`.slides center` must be boolean or none".to_string(),
+                                    argument_span,
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                            Err(error) => {
+                                diagnostics.push(conversion_failure_diagnostic(
+                                    value_conversion::ConversionFailure::new(
+                                        error,
+                                        Some(argument_span),
+                                        Some("center"),
+                                        parameter_span,
+                                        *span,
+                                    ),
+                                    Some("`.slides`"),
+                                ));
+                                return CallOutcome::Failed;
+                            }
+                        }
+                    }
+                }
+                _ => None,
+            };
+            context.set_slides_configuration(Some(IrSlidesConfiguration { center }));
+            return CallOutcome::NoValue;
         }
 
         if name == "noautopagebreak" {
@@ -12426,6 +12619,7 @@ pub(crate) enum NativeDispatchOwner {
     Container,
     Landscape,
     Br,
+    PageBreak,
     Whitespace,
     StackedLayout,
     Range,
@@ -12454,6 +12648,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "dockeywords",
     "doclang",
     "theme",
+    "slides",
     "captionposition",
 ];
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
@@ -12479,6 +12674,7 @@ const ALIGN_NATIVE_NAMES: &[&str] = &["align"];
 const CONTAINER_NATIVE_NAMES: &[&str] = &["container"];
 const LANDSCAPE_NATIVE_NAMES: &[&str] = &["landscape"];
 const BR_NATIVE_NAMES: &[&str] = &["br"];
+const PAGE_BREAK_NATIVE_NAMES: &[&str] = &["pagebreak"];
 const WHITESPACE_NATIVE_NAMES: &[&str] = &["whitespace"];
 const STACKED_LAYOUT_NATIVE_NAMES: &[&str] = &["row", "column", "grid"];
 const RANGE_NATIVE_NAMES: &[&str] = &["range"];
@@ -12567,6 +12763,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Br,
         names: BR_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::PageBreak,
+        names: PAGE_BREAK_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Whitespace,
@@ -12659,6 +12859,10 @@ fn is_br(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Br)
 }
 
+fn is_page_break(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::PageBreak)
+}
+
 fn is_whitespace(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Whitespace)
 }
@@ -12732,6 +12936,25 @@ fn bind_whitespace_arguments(
         width: slots.next().and_then(to_argument),
         height: slots.next().and_then(to_argument),
     })
+}
+
+fn bounded_pageformat_shape(named_args: &[IrNamedArg]) -> bool {
+    let mut width = false;
+    let mut height = false;
+    let mut alignment = false;
+    for argument in named_args {
+        let seen = match argument.name.as_str() {
+            "width" => &mut width,
+            "height" => &mut height,
+            "alignment" => &mut alignment,
+            _ => return false,
+        };
+        if *seen || matches!(&argument.value, IrValue::None) {
+            return false;
+        }
+        *seen = true;
+    }
+    (width && height) || (alignment && !width && !height)
 }
 
 fn convert_whitespace_size(
@@ -13638,6 +13861,11 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
             BodyPolicy::BindFinal,
         ),
         "noautopagebreak" => (Vec::new(), BodyPolicy::Reject),
+        "slides" => (
+            vec![ParameterMetadata::optional("center")],
+            BodyPolicy::Reject,
+        ),
+        "pagebreak" => (Vec::new(), BodyPolicy::Reject),
         "docname" | "docdescription" => (
             vec![ParameterMetadata::optional("value").named(false)],
             BodyPolicy::BindFinal,
@@ -17316,6 +17544,7 @@ fn rebase_dynamic_node(node: &mut IrNode, source_span: SourceSpan) {
         IrNode::CodeBlock { span, .. }
         | IrNode::RawHtml { span, .. }
         | IrNode::ThematicBreak { span }
+        | IrNode::PageBreak { span }
         | IrNode::Math { span, .. } => *span = source_span,
         IrNode::TargetSpecificContent { content } => content.span = source_span,
         IrNode::Component { component } => rebase_dynamic_component(component, source_span),

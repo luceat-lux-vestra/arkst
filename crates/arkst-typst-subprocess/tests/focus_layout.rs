@@ -66,10 +66,27 @@ fn compile_focus(document_type: &str) -> String {
 fn focus_plain_and_slides_lower_to_real_typst_pdf() {
     for document_type in ["plain", "slides"] {
         let typst = compile_focus(document_type);
-        assert!(
-            typst.starts_with("// Arkst Quarkdown v2.6 focus layout\n"),
-            "{typst}"
-        );
+        let focus = typst
+            .find("// Arkst Quarkdown v2.6 focus layout\n")
+            .expect("focus prelude");
+        if document_type == "plain" {
+            assert_eq!(
+                focus, 0,
+                "plain focus must preserve the existing output prefix: {typst}"
+            );
+            assert!(
+                !typst.contains("#set page(width: 749.04pt, height: 546pt)"),
+                "plain focus must not acquire slides page geometry: {typst}"
+            );
+        } else {
+            let page = typst
+                .find("#set page(width: 749.04pt, height: 546pt)\n")
+                .expect("slides page prelude");
+            assert!(
+                page < focus,
+                "slides page geometry must be established before focus layout: {typst}"
+            );
+        }
         assert!(typst.contains("#show heading.where(level: 1)"), "{typst}");
         assert!(typst.contains("#show heading.where(level: 2)"), "{typst}");
         assert!(typst.contains("fill: rgb(27, 24, 24, 90%)"), "{typst}");

@@ -207,6 +207,7 @@ fn collect_node_sources(node: &IrNode, sources: &mut SourceTable) -> Result<(), 
         | IrNode::RawHtml { .. }
         | IrNode::TargetSpecificContent { .. }
         | IrNode::ThematicBreak { .. }
+        | IrNode::PageBreak { .. }
         | IrNode::Math { .. } => {}
     }
     Ok(())
@@ -420,7 +421,7 @@ pub struct IrMetadata {
 ///
 /// This is deliberately plain serializable data. Evaluator runtime carriers,
 /// such as shared mutable handles, never cross into the IR boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrDocumentState {
     /// The document's current `.docname`, or an empty string when unset.
     pub name: String,
@@ -463,6 +464,33 @@ pub struct IrDocumentState {
     /// alignment because `justify` is valid here but not for `.row`/`.column`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_alignment: Option<IrDocumentAlignment>,
+    /// Explicit complete page geometry selected by the bounded `.pageformat`
+    /// width/height slice. `None` preserves document-type/backend defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_geometry: Option<IrPageGeometry>,
+    /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slides: Option<IrSlidesConfiguration>,
+}
+
+/// Backend-neutral complete page geometry.
+///
+/// This stores only explicit semantic sizes. Document-type defaults and
+/// renderer-specific page dimensions remain backend-owned.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IrPageGeometry {
+    pub width: IrSize,
+    pub height: IrSize,
+}
+
+/// Backend-neutral slides document configuration.
+///
+/// `center: None` preserves the renderer/theme default. Renderer-specific
+/// geometry and offsets remain backend-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrSlidesConfiguration {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<bool>,
 }
 
 /// Backend-neutral document-global horizontal alignment.
@@ -911,6 +939,9 @@ enum WireNode {
     ThematicBreak {
         span: SourceSpan,
     },
+    PageBreak {
+        span: SourceSpan,
+    },
     Math {
         source: String,
         display: bool,
@@ -1301,6 +1332,7 @@ fn node_to_wire(node: &IrNode, sources: &SourceTable) -> Result<WireNode, String
             span: *span,
         },
         IrNode::ThematicBreak { span } => WireNode::ThematicBreak { span: *span },
+        IrNode::PageBreak { span } => WireNode::PageBreak { span: *span },
         IrNode::Math {
             source,
             display,
@@ -1759,6 +1791,7 @@ fn wire_node_to_ir(node: WireNode, sources: Option<&[SourceText]>) -> Result<IrN
             span,
         },
         WireNode::ThematicBreak { span } => IrNode::ThematicBreak { span },
+        WireNode::PageBreak { span } => IrNode::PageBreak { span },
         WireNode::Math {
             source,
             display,
@@ -2173,6 +2206,8 @@ pub enum IrNode {
     },
     /// A thematic break (horizontal rule).
     ThematicBreak { span: SourceSpan },
+    /// Explicit semantic page boundary. Backends choose their page-break primitive.
+    PageBreak { span: SourceSpan },
     /// Math expression (inline or display).
     Math {
         source: String,
@@ -3269,6 +3304,8 @@ mod tests {
                 },
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
+                page_geometry: None,
+                slides: None,
             },
             ..IrMetadata::default()
         };
@@ -3396,6 +3433,8 @@ mod tests {
             },
             auto_page_break_max_depth: None,
             page_alignment: None,
+            page_geometry: None,
+            slides: None,
         };
         let serialized = serde_json::to_string(&state).expect("ordered author state serializes");
         assert_eq!(

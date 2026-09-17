@@ -83,6 +83,7 @@ fn check_block(block: &Block, source: &str) {
         | Block::OrderedList { span, .. }
         | Block::CodeBlock { span, .. }
         | Block::ThematicBreak { span }
+        | Block::PageBreak { span }
         | Block::DirectiveCall { span, .. }
         | Block::Metadata { span, .. }
         | Block::Table { span, .. }

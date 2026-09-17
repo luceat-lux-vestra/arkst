@@ -28,6 +28,7 @@ fn assert_block_spans(block: &Block, source: &str) {
         | Block::Table { span, .. }
         | Block::CodeBlock { span, .. }
         | Block::ThematicBreak { span }
+        | Block::PageBreak { span }
         | Block::DirectiveCall { span, .. }
         | Block::Metadata { span, .. }
         | Block::RawHtml { span, .. }
