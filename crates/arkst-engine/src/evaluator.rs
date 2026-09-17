@@ -13179,7 +13179,7 @@ fn inspectable_native_function(name: &str) -> bool {
         && !is_deferred(name)
         && (builtins::lookup(name).is_some()
             || native_binding_parameters(name).is_some()
-            || matches!(name, "pageformat" | "code" | "extend"))
+            || matches!(name, "pageformat" | "code" | "extend" | "function"))
 }
 
 fn inspectable_stdlib_functions() -> Vec<String> {
