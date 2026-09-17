@@ -1556,10 +1556,11 @@ impl<'a> EvaluationContext<'a> {
         let Some(function) = entry.function_name() else {
             return Vec::new();
         };
-        self.get_function(function)
-            .is_some()
-            .then(|| vec![function.to_string()])
-            .unwrap_or_default()
+        if self.get_function(function).is_some() {
+            vec![function.to_string()]
+        } else {
+            Vec::new()
+        }
     }
 
     fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
