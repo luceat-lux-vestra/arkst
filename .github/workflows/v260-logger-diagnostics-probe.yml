@@ -138,3 +138,97 @@ jobs:
           printf '%s\n' 'QD197-VALUES-STDERR-BEGIN'
           cat "$root/stderr"
           printf '%s\n' 'QD197-VALUES-STDERR-END'
+
+      - name: Probe CLI debug controls and isolated scalar messages
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-second
+          mkdir -p "$root"
+          printf '%s\n' 'QD197-ROOT-HELP-BEGIN'
+          "$QD" --help | grep -Ei 'debug|verbose|log|trace' || true
+          printf '%s\n' 'QD197-ROOT-HELP-END'
+          printf '%s\n' 'QD197-COMPILE-HELP-BEGIN'
+          "$QD" compile --help | grep -Ei 'debug|verbose|log|trace|strict' || true
+          printf '%s\n' 'QD197-COMPILE-HELP-END'
+
+          cat > "$root/log-text.qd" <<'QD'
+          before
+          .log {QD197_ISO_LOG_TEXT}
+          after
+          QD
+          cat > "$root/log-number.qd" <<'QD'
+          before
+          .log {42}
+          after
+          QD
+          cat > "$root/debug-text.qd" <<'QD'
+          before
+          .debug {QD197_ISO_DEBUG_TEXT}
+          after
+          QD
+          cat > "$root/debug-number.qd" <<'QD'
+          before
+          .debug {42}
+          after
+          QD
+          cat > "$root/error-number.qd" <<'QD'
+          before
+          .error {42}
+          after
+          QD
+          cat > "$root/repeated.qd" <<'QD'
+          .log {QD197_REPEAT_ONE}
+
+          .log {QD197_REPEAT_TWO}
+
+          .debug {QD197_REPEAT_DEBUG}
+          QD
+
+          for fixture in log-text log-number debug-text debug-number error-number repeated; do
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-ISO fixture=%s rc=%s\n' "$fixture" "$rc"
+            printf 'QD197-ISO-STDOUT %s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD197-ISO-STDERR %s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+          done
+
+          root_help="$("$QD" --help 2>&1 || true)"
+          compile_help="$("$QD" compile --help 2>&1 || true)"
+          debug_args=()
+          if grep -q -- '--debug' <<<"$compile_help"; then
+            debug_args=(--debug)
+          elif grep -q -- '--verbose' <<<"$compile_help"; then
+            debug_args=(--verbose)
+          elif grep -q -- '--debug' <<<"$root_help"; then
+            debug_args=(--debug compile)
+          elif grep -q -- '--verbose' <<<"$root_help"; then
+            debug_args=(--verbose compile)
+          fi
+          if [ "${#debug_args[@]}" -gt 0 ]; then
+            if [ "${debug_args[-1]}" = compile ]; then
+              args=("${debug_args[@]}" "$root/debug-text.qd" --clean --pretty --out "$root/out-debug-enabled" --out-name probe)
+            else
+              args=(compile "$root/debug-text.qd" --clean --pretty --out "$root/out-debug-enabled" --out-name probe "${debug_args[@]}")
+            fi
+            set +e
+            "$QD" "${args[@]}" >"$root/debug-enabled.stdout" 2>"$root/debug-enabled.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-DEBUG-ENABLED args=%q rc=%s\n' "${debug_args[*]}" "$rc"
+            printf 'QD197-DEBUG-ENABLED-STDOUT ['
+            tr '\n' '|' <"$root/debug-enabled.stdout"
+            printf ']\n'
+            printf 'QD197-DEBUG-ENABLED-STDERR ['
+            tr '\n' '|' <"$root/debug-enabled.stderr"
+            printf ']\n'
+          else
+            printf '%s\n' 'QD197-DEBUG-ENABLED no-debug-or-verbose-cli-flag'
+          fi
