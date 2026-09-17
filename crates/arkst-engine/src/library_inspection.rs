@@ -175,6 +175,40 @@ pub(crate) const V260_STDLIB_FUNCTION_ORDER: &[&str] = &[
 pub(crate) const STDLIB_LIBRARY: &str = "stdlib";
 pub(crate) const FUNCTION_LIBRARY_PREFIX: &str = "__func__";
 
+/// One evaluator-visible registration after the implicit `stdlib` entry.
+///
+/// Container libraries and function pseudo-libraries share one ordered stream
+/// because the v2.6 oracle exposes them in registration order. This is runtime
+/// state only; it does not add a second provider/package registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RegistryEntry {
+    Container(String),
+    Function(String),
+}
+
+impl RegistryEntry {
+    pub(crate) fn visible_name(&self) -> String {
+        match self {
+            Self::Container(name) => name.clone(),
+            Self::Function(name) => function_library_name(name),
+        }
+    }
+
+    pub(crate) fn function_name(&self) -> Option<&str> {
+        match self {
+            Self::Container(_) => None,
+            Self::Function(name) => Some(name),
+        }
+    }
+
+    pub(crate) fn matches_visible_name(&self, name: &str) -> bool {
+        match self {
+            Self::Container(container) => container == name,
+            Self::Function(function) => function_library_name(function) == name,
+        }
+    }
+}
+
 pub(crate) fn function_library_name(name: &str) -> String {
     format!("{FUNCTION_LIBRARY_PREFIX}{name}")
 }
@@ -226,5 +260,18 @@ mod tests {
                 "startswith",
             ]
         );
+    }
+
+    #[test]
+    fn registry_entry_names_match_oracle_shapes() {
+        let container = RegistryEntry::Container("alpha".into());
+        let function = RegistryEntry::Function("hello".into());
+        assert_eq!(container.visible_name(), "alpha");
+        assert_eq!(container.function_name(), None);
+        assert!(container.matches_visible_name("alpha"));
+        assert_eq!(function.visible_name(), "__func__hello");
+        assert_eq!(function.function_name(), Some("hello"));
+        assert!(function.matches_visible_name("__func__hello"));
+        assert_eq!(function_name_from_library("__func__hello"), Some("hello"));
     }
 }
