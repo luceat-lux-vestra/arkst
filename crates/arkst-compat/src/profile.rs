@@ -9,7 +9,7 @@ pub struct CompatibilityProfile {
 impl Default for CompatibilityProfile {
     fn default() -> Self {
         Self {
-            name: "quarkdown-v2.5".into(),
+            name: "quarkdown-v2.6".into(),
             strict: false,
         }
     }
@@ -35,7 +35,7 @@ mod tests {
     fn default_profile_matches_reference_baseline() {
         let profile = CompatibilityProfile::default();
 
-        assert_eq!(profile.name, "quarkdown-v2.5");
+        assert_eq!(profile.name, "quarkdown-v2.6");
         assert!(!profile.strict);
     }
 }
