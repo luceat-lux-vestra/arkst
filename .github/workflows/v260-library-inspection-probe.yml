@@ -92,3 +92,82 @@ jobs:
           cmp "$root/1.txt" "$root/3.txt"
           cmp "$root/1.txt" "$root/4.txt"
           cmp "$root/1.txt" "$root/5.txt"
+
+      - name: Probe loaded library and pseudo-library ordering
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/library-registry-order
+          libs="$root/libs"
+          mkdir -p "$libs"
+          cat > "$libs/alpha.qd" <<'QD'
+          .function {alpha_first}
+              alpha-first
+          .function {alpha_second}
+              alpha-second
+          QD
+          cat > "$libs/beta.qd" <<'QD'
+          .function {beta_only}
+              beta-only
+          QD
+
+          cat > "$root/beta-alpha.qd" <<'QD'
+          .function {local_first}
+              local-first
+          .function {local_second}
+              local-second
+          .include {beta}
+          .include {alpha}
+          QD-LIB-BEGIN
+          .foreach {.libraries}
+              QD-LIB-ITEM:[.1]
+          QD-LIB-END
+          QD
+
+          cat > "$root/alpha-beta.qd" <<'QD'
+          .function {local_first}
+              local-first
+          .function {local_second}
+              local-second
+          .include {alpha}
+          .include {beta}
+          QD-LIB-BEGIN
+          .foreach {.libraries}
+              QD-LIB-ITEM:[.1]
+          QD-LIB-END
+          QD
+
+          for fixture in beta-alpha alpha-beta; do
+            out="$root/out-$fixture"
+            "$QD" compile "$root/$fixture.qd" --strict --clean --pretty --libs "$libs" --out "$out" --out-name probe >/dev/null 2>"$root/$fixture.stderr"
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            python3 - "$html" "$fixture" <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+                  self.skip = 0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ('script', 'style'):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ('script', 'style') and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          parser = Text()
+          parser.feed(Path(sys.argv[1]).read_text())
+          visible = '\n'.join(parser.parts)
+          names = re.findall(r'QD-LIB-ITEM:\s*\[([^\]]+)\]', visible)
+          if not names:
+              raise SystemExit('no library names extracted from visible HTML text')
+          print(f'QD-LIB-ORDER-{sys.argv[2]} count={len(names)} names={names!r}')
+          PY
+          done
