@@ -47,7 +47,8 @@ jobs:
         run: |
           set -euo pipefail
           root=/tmp/library-inspection-probe
-          mkdir -p "$root"
+          libdir=/tmp/library-inspection-libs
+          mkdir -p "$root" "$libdir"
 
           cat > "$root/libraries.qd" <<'QD'
           QD-LIBRARIES-BEGIN
@@ -57,50 +58,132 @@ jobs:
           QD
 
           cat > "$root/functionexists-native-known.qd" <<'QD'
-          QD-FUNCTIONEXISTS-NATIVE-KNOWN:[.functionexists {uppercase}]
+          .if {.functionexists {uppercase}}
+              QD-FUNCTIONEXISTS-NATIVE-KNOWN-TRUE
+          .ifnot {.functionexists {uppercase}}
+              QD-FUNCTIONEXISTS-NATIVE-KNOWN-FALSE
           QD
 
           cat > "$root/functionexists-native-inspection.qd" <<'QD'
-          QD-FUNCTIONEXISTS-NATIVE-INSPECTION:[.functionexists {libexists}]
+          .if {.functionexists {libexists}}
+              QD-FUNCTIONEXISTS-NATIVE-INSPECTION-TRUE
+          .ifnot {.functionexists {libexists}}
+              QD-FUNCTIONEXISTS-NATIVE-INSPECTION-FALSE
           QD
 
           cat > "$root/functionexists-unknown.qd" <<'QD'
-          QD-FUNCTIONEXISTS-UNKNOWN:[.functionexists {qd_probe_missing_function_195}]
+          .if {.functionexists {qd_probe_missing_function_195}}
+              QD-FUNCTIONEXISTS-UNKNOWN-TRUE
+          .ifnot {.functionexists {qd_probe_missing_function_195}}
+              QD-FUNCTIONEXISTS-UNKNOWN-FALSE
           QD
 
           cat > "$root/functionexists-source-defined.qd" <<'QD'
           .function {qd_probe_user_function_195}
               QD-USER-FUNCTION-BODY
 
-          QD-FUNCTIONEXISTS-SOURCE:[.functionexists {qd_probe_user_function_195}]
+          .if {.functionexists {qd_probe_user_function_195}}
+              QD-FUNCTIONEXISTS-SOURCE-TRUE
+          .ifnot {.functionexists {qd_probe_user_function_195}}
+              QD-FUNCTIONEXISTS-SOURCE-FALSE
           QD
 
           for name in std stdlib Math Libraries qd_probe_missing_library_195; do
             cat > "$root/libexists-$name.qd" <<QD
-          QD-LIBEXISTS-${name}:[.libexists {${name}}]
+          .if {.libexists {${name}}}
+              QD-LIBEXISTS-${name}-TRUE
+          .ifnot {.libexists {${name}}}
+              QD-LIBEXISTS-${name}-FALSE
           QD
           done
+
+          cat > "$root/libfunctions-stdlib.qd" <<'QD'
+          QD-LIBFUNCTIONS-STDLIB-BEGIN
+          .foreach {.libfunctions {stdlib}}
+              QD-STDLIB-FUNCTION:[.1]
+          QD-LIBFUNCTIONS-STDLIB-END
+          QD
+
+          cat > "$root/libfunctions-unknown.qd" <<'QD'
+          QD-LIBFUNCTIONS-UNKNOWN-BEGIN
+          .foreach {.libfunctions {qd_probe_missing_library_195}}
+              QD-UNKNOWN-FUNCTION:[.1]
+          QD-LIBFUNCTIONS-UNKNOWN-END
+          QD
+
+          cat > "$libdir/probe195.qd" <<'QD'
+          .function {qd_probe_external_one_195}
+              QD-EXTERNAL-ONE
+
+          .function {qd_probe_external_two_195}
+              QD-EXTERNAL-TWO
+          QD
+
+          cat > "$root/ext-before-include.qd" <<'QD'
+          QD-EXT-BEFORE-LIBRARIES-BEGIN
+          .foreach {.libraries}
+              QD-EXT-BEFORE-LIBRARY:[.1]
+          QD-EXT-BEFORE-LIBRARIES-END
+
+          .if {.libexists {probe195}}
+              QD-EXT-BEFORE-LIBEXISTS-TRUE
+          .ifnot {.libexists {probe195}}
+              QD-EXT-BEFORE-LIBEXISTS-FALSE
+
+          .if {.functionexists {qd_probe_external_one_195}}
+              QD-EXT-BEFORE-FUNCTIONEXISTS-TRUE
+          .ifnot {.functionexists {qd_probe_external_one_195}}
+              QD-EXT-BEFORE-FUNCTIONEXISTS-FALSE
+          QD
+
+          cat > "$root/ext-after-include.qd" <<'QD'
+          .include {probe195}
+
+          QD-EXT-AFTER-LIBRARIES-BEGIN
+          .foreach {.libraries}
+              QD-EXT-AFTER-LIBRARY:[.1]
+          QD-EXT-AFTER-LIBRARIES-END
+
+          .if {.libexists {probe195}}
+              QD-EXT-AFTER-LIBEXISTS-TRUE
+          .ifnot {.libexists {probe195}}
+              QD-EXT-AFTER-LIBEXISTS-FALSE
+
+          .if {.functionexists {qd_probe_external_one_195}}
+              QD-EXT-AFTER-FUNCTIONEXISTS-TRUE
+          .ifnot {.functionexists {qd_probe_external_one_195}}
+              QD-EXT-AFTER-FUNCTIONEXISTS-FALSE
+
+          QD-EXT-AFTER-FUNCTIONS-BEGIN
+          .foreach {.libfunctions {probe195}}
+              QD-EXT-AFTER-FUNCTION:[.1]
+          QD-EXT-AFTER-FUNCTIONS-END
+          QD
 
       - name: Compile and print observable output
         shell: bash
         run: |
           set -euo pipefail
           root=/tmp/library-inspection-probe
+          libdir=/tmp/library-inspection-libs
           for src in "$root"/*.qd; do
             name="$(basename "$src" .qd)"
             out="$root/out-$name"
+            extra=()
+            case "$name" in
+              ext-*) extra=(--libs "$libdir") ;;
+            esac
             set +e
-            "$QD" compile "$src" --strict --clean --pretty --out "$out" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
+            "$QD" compile "$src" "${extra[@]}" --strict --clean --pretty --out "$out" --out-name probe >"$root/$name.stdout" 2>"$root/$name.stderr"
             rc=$?
             set -e
             printf '\n=== CASE %s exit=%s ===\n' "$name" "$rc"
             printf '%s\n' '--- stderr ---'
-            sed -n '1,80p' "$root/$name.stderr"
+            sed -n '1,100p' "$root/$name.stderr"
             html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
             if [ -n "$html" ]; then
               printf '%s\n' '--- rendered text ---'
               python3 - "$html" <<'PY'
-          from html import unescape
           from pathlib import Path
           from html.parser import HTMLParser
           import sys
@@ -117,7 +200,7 @@ jobs:
           parser = Text()
           parser.feed(Path(sys.argv[1]).read_text())
           for part in parser.parts:
-              if part.startswith('QD-'):
+              if part.startswith('QD-') or part.startswith('['):
                   print(part)
           PY
             fi
