@@ -67,8 +67,9 @@ capability boundary:
 - an absent key returns `IrValue::None`;
 - omitting the snapshot fails closed with source-backed `E3004`;
 - an explicit empty snapshot is authorized and every lookup is absent;
-- no platform-neutral crate calls `std::env` or falls back to cwd/process
-  state;
+- no production core/evaluator environment path calls `std::env` or falls
+  back to cwd/process state; test-only oracle harnesses are not runtime
+  authority;
 - repeated evaluations can use different snapshots without hidden global state;
 - public WASM/embedder exposure remains #191-owned.
 
