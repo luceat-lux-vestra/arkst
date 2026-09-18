@@ -127,6 +127,18 @@ fn initial_registry_is_stdlib_only_and_unknowns_fail_closed() {
 }
 
 #[test]
+fn logger_native_owners_are_visible_to_function_inspection() {
+    let source_id = SourceId(1978);
+    let (result, diagnostics) = evaluate_plain(
+        ".functionexists {log}\n.functionexists {debug}\n.functionexists {error}",
+        source_id,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(paragraph_texts(&result), vec!["true", "true", "true"]);
+}
+
+#[test]
 fn source_functions_publish_pseudo_libraries_in_declaration_order() {
     let source_id = SourceId(2);
     let source = ".function {local_first}\n    first\n.function {local_second}\n    second\n.libraries\n.libfunctions {__func__local_first}\n.functionexists {local_second}";

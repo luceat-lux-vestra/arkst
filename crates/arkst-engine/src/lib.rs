@@ -174,6 +174,36 @@ pub trait LoadableLibraryProvider {
     fn loadable_library(&self, name: &str) -> Option<LoadableLibrarySource>;
 }
 
+/// Semantic severity/category of one Quarkdown logger event.
+///
+/// These values are evaluator semantics only. They do not imply stdout,
+/// stderr, a process logger, or any other host destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Log,
+    Debug,
+}
+
+/// One source-backed logger event emitted by evaluator semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogEvent {
+    pub level: LogLevel,
+    pub message: String,
+    pub span: arkst_source::SourceSpan,
+}
+
+/// Explicit host sink for Quarkdown logger events.
+///
+/// The evaluator never discovers or writes ambient process streams. A host
+/// that wants `.log` / `.debug` observability may inject this sink for the
+/// evaluation. `.log` requires an explicit sink, while `.debug` remains a
+/// silent no-op when no sink is present, matching the observed v2.6 CLI
+/// default. `.error` is represented only as a structured compiler diagnostic
+/// so failure semantics never depend on host logging.
+pub trait LogSink {
+    fn emit(&self, event: &LogEvent);
+}
+
 /// Logical root requested by a resource-aware evaluator operation.
 ///
 /// The engine sees source identities only. Project composition remains

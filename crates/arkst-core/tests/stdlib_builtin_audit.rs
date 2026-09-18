@@ -246,7 +246,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .count(),
         46
     );
-    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 10);
+    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 13);
     for name in ["capitalize", "startswith"] {
         assert_eq!(
             owned.iter().find(|row| row[0] == name).map(|row| row[4]),
@@ -261,9 +261,16 @@ fn canonical_status_and_owner_counts_are_explicit() {
             "library inspection remains PARTIAL while stdlib visibility is support-filtered for {name}"
         );
     }
+    for name in ["log", "debug", "error"] {
+        assert_eq!(
+            owned.iter().find(|row| row[0] == name).map(|row| row[4]),
+            Some("PARTIAL"),
+            "logger diagnostics remain PARTIAL while CLI/output parity is bounded for {name}"
+        );
+    }
     assert_eq!(
         owned.iter().filter(|row| row[4] == "UNSUPPORTED").count(),
-        3
+        0
     );
     let get = owned
         .iter()
