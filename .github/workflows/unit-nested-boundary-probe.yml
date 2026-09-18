@@ -91,17 +91,29 @@ jobs:
           .p
           QD
 
-          cat > "$root/repeated-unit-inspect.qd" <<'QD'
+          cat > "$root/repeated-unit-booleans.qd" <<'QD'
           .function {f}
-              .debug {QD371_INSPECT_A}
-              .debug {QD371_INSPECT_B}
+              .debug {QD371_BOOL_A}
+              .debug {QD371_BOOL_B}
           .var {x} {.f}
+          .var {u} {.debug {QD371_BOOL_UNIT}}
           isnone:.string {.isnone {.x}}
-          string:[.string {.x}]
           equals-none:.string {.equals {.x} to:{.none}}
+          equals-unit:.string {.equals {.x} to:{.u}}
+          equals-self:.string {.equals {.x} to:{.x}}
           QD
 
-          fixtures=(unit-then-content content-then-unit repeated-unit pair-unit-none repeated-unit-inspect)
+          cat > "$root/repeated-unit-string.qd" <<'QD'
+          .function {f}
+              .debug {QD371_STRING_A}
+              .debug {QD371_STRING_B}
+          .var {x} {.f}
+          before
+          string:.string {.x}
+          after
+          QD
+
+          fixtures=(unit-then-content content-then-unit repeated-unit pair-unit-none repeated-unit-booleans repeated-unit-string)
 
           for fixture in "${fixtures[@]}"; do
             for mode in default strict; do
