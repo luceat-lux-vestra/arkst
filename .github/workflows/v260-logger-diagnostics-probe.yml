@@ -290,3 +290,80 @@ jobs:
               printf 'QD197-SHAPE-HTML fixture=%s NONE\n' "$fixture"
             fi
           done
+
+      - name: Probe return values and failure propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-return
+          mkdir -p "$root"
+
+          cat > "$root/log-chain.qd" <<'QD'
+          before
+          .log {QD197_CHAIN_LOG}::isnone
+          after
+          QD
+          cat > "$root/debug-chain.qd" <<'QD'
+          before
+          .debug {QD197_CHAIN_DEBUG}::isnone
+          after
+          QD
+          cat > "$root/error-chain.qd" <<'QD'
+          before
+          .error {QD197_CHAIN_ERROR}::isnone
+          after
+          QD
+          cat > "$root/log-variable.qd" <<'QD'
+          .var {x} {.log {QD197_VAR_LOG}}
+          value:.x
+          QD
+          cat > "$root/debug-variable.qd" <<'QD'
+          .var {x} {.debug {QD197_VAR_DEBUG}}
+          value:.x
+          QD
+
+          for fixture in log-chain debug-chain error-chain log-variable debug-variable; do
+            for strict in default strict; do
+              out="$root/out-$fixture-$strict"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$strict" = strict ]; then args+=(--strict); fi
+              set +e
+              "$QD" "${args[@]}" >"$root/$fixture-$strict.stdout" 2>"$root/$fixture-$strict.stderr"
+              rc=$?
+              set -e
+              printf 'QD197-RETURN fixture=%s mode=%s rc=%s\n' "$fixture" "$strict" "$rc"
+              printf 'QD197-RETURN-STDOUT %s %s [' "$fixture" "$strict"
+              tr '\n' '|' <"$root/$fixture-$strict.stdout"
+              printf ']\n'
+              printf 'QD197-RETURN-STDERR %s %s [' "$fixture" "$strict"
+              tr '\n' '|' <"$root/$fixture-$strict.stderr"
+              printf ']\n'
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" "$fixture" "$strict" <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts=[]
+                  self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"): self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip: self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip: self.parts.append(data)
+
+          p=Text()
+          p.feed(Path(sys.argv[1]).read_text())
+          text=" ".join(" ".join(p.parts).split())
+          print(f"QD197-RETURN-HTML fixture={sys.argv[2]} mode={sys.argv[3]} text={text!r}")
+          PY
+              else
+                printf 'QD197-RETURN-HTML fixture=%s mode=%s NONE\n' "$fixture" "$strict"
+              fi
+            done
+          done
