@@ -268,7 +268,7 @@ closed, or treated as proof of complete v2.5.1 compatibility.
 
   #165/#166/#167 ──► #194 dictionary, #196 localization
        #195 library inspection: bounded in-memory slice complete (no #190 host dependency)
-       #197 logger: bounded evaluator/sink slice implemented; Unit/value residuals remain #197, host/public exposure #190/#191
+       #197 logger: bounded evaluator/sink + Unit value slice implemented; remaining dynamic-string/output residuals stay #197, host/public exposure #190/#191
        completed #188 resolver ──► #199 subdocumentgraph
        #184 also owns the #154 keybinding/loremipsum producer review
 
