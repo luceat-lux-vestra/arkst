@@ -15117,6 +15117,7 @@ fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
             (left.is_nan() && right.is_nan()) || left.total_cmp(right) == Ordering::Equal
         }
         (IrValue::Boolean(left), IrValue::Boolean(right)) => left == right,
+        (IrValue::Unit, IrValue::Unit) => true,
         (IrValue::None, IrValue::None) => true,
         (IrValue::Range(left), IrValue::Range(right)) => {
             left.start == right.start && left.end == right.end
@@ -20852,6 +20853,31 @@ mod tests {
     fn collection_distinct_and_groupvalues_are_stable_and_typed() {
         let evaluator = Evaluator::new();
         let operation_span = span(0, 80);
+
+        assert!(collection_values_equal(&IrValue::Unit, &IrValue::Unit));
+        assert!(!collection_values_equal(&IrValue::Unit, &IrValue::None));
+        assert!(!collection_values_equal(&IrValue::None, &IrValue::Unit));
+
+        let unit_input =
+            IrValue::Collection(vec![IrValue::Unit, IrValue::Unit, IrValue::None]);
+        let mut unit_diagnostics = Vec::new();
+        let mut unit_context = EvaluationContext::new();
+        let unit_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&unit_input),
+            &[],
+            &operation_span,
+            &mut unit_diagnostics,
+            &mut unit_context,
+        );
+        assert_eq!(
+            unit_distinct,
+            CallOutcome::Value(IrValue::Collection(vec![IrValue::Unit, IrValue::None]))
+        );
+        assert!(unit_diagnostics.is_empty(), "{unit_diagnostics:?}");
+
+        let pair_one = IrValue::Pair(IrPair {
         let pair_one = IrValue::Pair(IrPair {
             first: Box::new(IrValue::String("key".to_string())),
             second: Box::new(IrValue::Number(1.0)),
