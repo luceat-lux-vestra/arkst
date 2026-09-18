@@ -1,0 +1,176 @@
+name: Quarkdown logger Unit boolean black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          url="https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe Unit optionality and equality through explicit String observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qdunit-bool-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/log-isnone.qd" <<'QD'
+          .var {x} {.log {QDUNIT_BOOL_LOG_ISNONE}}
+          .var {r} {.isnone {.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/debug-isnone.qd" <<'QD'
+          .var {x} {.debug {QDUNIT_BOOL_DEBUG_ISNONE}}
+          .var {r} {.isnone {.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/log-equals-none.qd" <<'QD'
+          .var {x} {.log {QDUNIT_BOOL_LOG_EQUALS_NONE}}
+          .var {r} {.equals {.x} to:{.none}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/debug-equals-none.qd" <<'QD'
+          .var {x} {.debug {QDUNIT_BOOL_DEBUG_EQUALS_NONE}}
+          .var {r} {.equals {.x} to:{.none}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/log-equals-self.qd" <<'QD'
+          .var {x} {.log {QDUNIT_BOOL_LOG_EQUALS_SELF}}
+          .var {r} {.equals {.x} to:{.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/debug-equals-self.qd" <<'QD'
+          .var {x} {.debug {QDUNIT_BOOL_DEBUG_EQUALS_SELF}}
+          .var {r} {.equals {.x} to:{.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/control-none-isnone.qd" <<'QD'
+          .var {x} {.none}
+          .var {r} {.isnone {.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/control-text-isnone.qd" <<'QD'
+          .var {x} {text}
+          .var {r} {.isnone {.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/control-equals-self.qd" <<'QD'
+          .var {x} {text}
+          .var {r} {.equals {.x} to:{.x}}
+          result:.string {.r}
+          QD
+
+          cat > "$root/control-equals-different.qd" <<'QD'
+          .var {x} {left}
+          .var {y} {right}
+          .var {r} {.equals {.x} to:{.y}}
+          result:.string {.r}
+          QD
+
+          fixtures=(
+            log-isnone debug-isnone
+            log-equals-none debug-equals-none
+            log-equals-self debug-equals-self
+            control-none-isnone control-text-isnone
+            control-equals-self control-equals-different
+          )
+
+          for fixture in "${fixtures[@]}"; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$mode" = strict ]; then args+=(--strict); fi
+
+              set +e
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+              rc=$?
+              set -e
+
+              printf 'QDUNIT2-RUN version=%s fixture=%s mode=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$mode" "$rc"
+              printf 'QDUNIT2-STDOUT version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stdout"
+              printf ']\n'
+              printf 'QDUNIT2-STDERR version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stderr"
+              printf ']\n'
+
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" '${{ matrix.version }}' "$fixture" "$mode" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts = []
+                  self.skip = 0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script", "style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          parser = Text()
+          parser.feed(Path(sys.argv[1]).read_text())
+          text = " ".join(" ".join(parser.parts).split())
+          print(
+              f"QDUNIT2-HTML version={sys.argv[2]} fixture={sys.argv[3]} "
+              f"mode={sys.argv[4]} text={text!r}"
+          )
+          PY
+              else
+                printf 'QDUNIT2-HTML version=%s fixture=%s mode=%s NONE\n' '${{ matrix.version }}' "$fixture" "$mode"
+              fi
+            done
+          done
