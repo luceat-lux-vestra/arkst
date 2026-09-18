@@ -424,8 +424,12 @@ fn unit_string_projection_does_not_widen_generic_string_consumers() {
                 || diagnostic.message.contains(".log")),
         "{diagnostics:?}"
     );
+    let events = sink.events.borrow();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Debug);
+    assert_eq!(events[0].message, "unit");
     assert!(
-        sink.events.borrow().is_empty(),
+        events.iter().all(|event| event.level != LogLevel::Log),
         "Unit must not be coerced through logger message conversion"
     );
 }
