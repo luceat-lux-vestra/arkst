@@ -40,9 +40,11 @@ layers, ownership handoffs, backlog dependencies, and implementation order:
 [`RECONCILIATION.md`](RECONCILIATION.md). The detailed audit matrices and
 manifests linked below remain the row-level evidence authorities.
 
-The remaining #151 `UNSUPPORTED` families have cohesive implementation owners:
-[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) for library
-inspection, and
+The bounded library-inspection family is implemented by
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195); its clean-room
+v2.6 contract and non-goals are recorded in
+[`LIBRARY_INSPECTION.md`](LIBRARY_INSPECTION.md). The remaining #151
+`UNSUPPORTED` family owner is
 [#197](https://github.com/luceat-lux-vestra/arkst/issues/197) for logger /
 diagnostic builtins. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and

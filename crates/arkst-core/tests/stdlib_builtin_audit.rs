@@ -246,7 +246,7 @@ fn canonical_status_and_owner_counts_are_explicit() {
             .count(),
         46
     );
-    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 6);
+    assert_eq!(owned.iter().filter(|row| row[4] == "PARTIAL").count(), 10);
     for name in ["capitalize", "startswith"] {
         assert_eq!(
             owned.iter().find(|row| row[0] == name).map(|row| row[4]),
@@ -254,9 +254,16 @@ fn canonical_status_and_owner_counts_are_explicit() {
             "Unicode contract should be complete at the audited semantic boundary for {name}"
         );
     }
+    for name in ["libexists", "functionexists", "libraries", "libfunctions"] {
+        assert_eq!(
+            owned.iter().find(|row| row[0] == name).map(|row| row[4]),
+            Some("PARTIAL"),
+            "library inspection remains PARTIAL while stdlib visibility is support-filtered for {name}"
+        );
+    }
     assert_eq!(
         owned.iter().filter(|row| row[4] == "UNSUPPORTED").count(),
-        7
+        3
     );
     let get = owned
         .iter()

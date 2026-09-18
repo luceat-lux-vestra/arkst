@@ -802,6 +802,7 @@ struct EvaluationContext<'a> {
     variables: BTreeMap<String, VariableValue>,
     functions: BTreeMap<String, Rc<FunctionBinding>>,
     extension_targets: BTreeMap<ExtensionId, ExtensionOverlay>,
+    library_registry: Vec<crate::library_inspection::RegistryEntry>,
     lambda_scope: Option<LambdaScope>,
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
@@ -871,6 +872,9 @@ enum UndoKey {
         scope: usize,
         name: String,
     },
+    LibraryRegistry {
+        scope: usize,
+    },
     ExtensionTarget {
         scope: usize,
         extension: ExtensionId,
@@ -939,6 +943,11 @@ enum InvocationUndo {
         journal_floor: Option<usize>,
         previous: Option<Rc<FunctionBinding>>,
     },
+    LibraryRegistry {
+        scope: usize,
+        journal_floor: Option<usize>,
+        previous_len: usize,
+    },
     ExtensionTarget {
         scope: usize,
         extension: ExtensionId,
@@ -967,6 +976,7 @@ impl InvocationUndo {
                 scope: *scope,
                 name: name.clone(),
             },
+            Self::LibraryRegistry { scope, .. } => UndoKey::LibraryRegistry { scope: *scope },
             Self::ExtensionTarget {
                 scope, extension, ..
             } => UndoKey::ExtensionTarget {
@@ -982,7 +992,8 @@ impl InvocationUndo {
             Self::Variable { scope, .. }
             | Self::AssignedVariable { scope, .. }
             | Self::VariableOwner { scope, .. }
-            | Self::Function { scope, .. } => Some(*scope),
+            | Self::Function { scope, .. }
+            | Self::LibraryRegistry { scope, .. } => Some(*scope),
             Self::ExtensionTarget { scope, .. } => Some(*scope),
         }
     }
@@ -993,7 +1004,8 @@ impl InvocationUndo {
             Self::Variable { journal_floor, .. }
             | Self::AssignedVariable { journal_floor, .. }
             | Self::VariableOwner { journal_floor, .. }
-            | Self::Function { journal_floor, .. } => *journal_floor,
+            | Self::Function { journal_floor, .. }
+            | Self::LibraryRegistry { journal_floor, .. } => *journal_floor,
             Self::ExtensionTarget { journal_floor, .. } => *journal_floor,
         }
     }
@@ -1147,6 +1159,7 @@ impl<'a> EvaluationContext<'a> {
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             extension_targets: BTreeMap::new(),
+            library_registry: Vec::new(),
             lambda_scope: None,
             extension_invocation: None,
             resources: None,
@@ -1190,6 +1203,7 @@ impl<'a> EvaluationContext<'a> {
             variables: BTreeMap::new(),
             functions: BTreeMap::new(),
             extension_targets: BTreeMap::new(),
+            library_registry: Vec::new(),
             lambda_scope: None,
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
@@ -1313,6 +1327,7 @@ impl<'a> EvaluationContext<'a> {
             variables: self.variables.clone(),
             functions: self.functions.clone(),
             extension_targets: self.extension_targets.clone(),
+            library_registry: self.library_registry.clone(),
             lambda_scope: self.lambda_scope.clone(),
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
@@ -1456,6 +1471,98 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
+    fn record_library_registry_before(&self) {
+        if !self.should_journal_scope_write() {
+            return;
+        }
+        let scope = self.scope_key();
+        let journal_floor = self.journal_floor;
+        let key = UndoKey::LibraryRegistry { scope };
+        if self.transaction.borrow_mut().first_write(key) {
+            self.transaction
+                .borrow_mut()
+                .push(InvocationUndo::LibraryRegistry {
+                    scope,
+                    journal_floor,
+                    previous_len: self.library_registry.len(),
+                });
+        }
+    }
+
+    fn register_library_entry(&mut self, entry: crate::library_inspection::RegistryEntry) {
+        let visible_name = entry.visible_name();
+        if visible_name == crate::library_inspection::STDLIB_LIBRARY
+            || self.inspection_lib_exists(&visible_name)
+        {
+            return;
+        }
+        self.record_library_registry_before();
+        self.library_registry.push(entry);
+    }
+
+    fn register_container_library(&mut self, name: String) {
+        self.register_library_entry(crate::library_inspection::RegistryEntry::Container(name));
+    }
+
+    fn register_function_library(&mut self, name: String) {
+        self.register_library_entry(crate::library_inspection::RegistryEntry::Function(name));
+    }
+
+    fn collect_library_registry(
+        &self,
+        entries: &mut Vec<crate::library_inspection::RegistryEntry>,
+    ) {
+        if let Some(parent) = self.parent.as_deref() {
+            parent.collect_library_registry(entries);
+        }
+        for entry in &self.library_registry {
+            let name = entry.visible_name();
+            if !entries
+                .iter()
+                .any(|existing| existing.matches_visible_name(&name))
+            {
+                entries.push(entry.clone());
+            }
+        }
+    }
+
+    fn inspection_library_names(&self) -> Vec<String> {
+        let mut entries = Vec::new();
+        self.collect_library_registry(&mut entries);
+        let mut names = Vec::with_capacity(entries.len() + 1);
+        names.push(crate::library_inspection::STDLIB_LIBRARY.to_string());
+        names.extend(entries.into_iter().map(|entry| entry.visible_name()));
+        names
+    }
+
+    fn inspection_lib_exists(&self, name: &str) -> bool {
+        if name == crate::library_inspection::STDLIB_LIBRARY {
+            return true;
+        }
+        let mut entries = Vec::new();
+        self.collect_library_registry(&mut entries);
+        entries.iter().any(|entry| entry.matches_visible_name(name))
+    }
+
+    fn inspection_registered_functions(&self, library: &str) -> Vec<String> {
+        let mut entries = Vec::new();
+        self.collect_library_registry(&mut entries);
+        let Some(entry) = entries
+            .iter()
+            .find(|entry| entry.matches_visible_name(library))
+        else {
+            return Vec::new();
+        };
+        let Some(function) = entry.function_name() else {
+            return Vec::new();
+        };
+        if self.get_function(function).is_some() {
+            vec![function.to_string()]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn get_extension_target(&self, extension: &Rc<FunctionExtension>) -> FunctionTarget {
         let key = extension.id;
         self.extension_targets
@@ -1588,6 +1695,9 @@ impl<'a> EvaluationContext<'a> {
                     self.functions.remove(&name);
                 }
             },
+            InvocationUndo::LibraryRegistry { previous_len, .. } => {
+                self.library_registry.truncate(previous_len);
+            }
             InvocationUndo::ExtensionTarget {
                 extension,
                 previous,
@@ -1737,7 +1847,8 @@ impl<'a> EvaluationContext<'a> {
             capture,
             extension: None,
         });
-        self.replace_function_binding(name, binding);
+        self.replace_function_binding(name.clone(), binding);
+        self.register_function_library(name);
     }
 
     fn replace_function_binding(&mut self, name: String, binding: Rc<FunctionBinding>) {
@@ -1753,18 +1864,32 @@ impl<'a> EvaluationContext<'a> {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         self.collect_bindings(&mut variables, &mut functions);
+        let mut registry = Vec::new();
+        self.collect_library_registry(&mut registry);
+        let mut captured_functions = Vec::with_capacity(functions.len());
+        for entry in registry {
+            let Some(name) = entry.function_name() else {
+                continue;
+            };
+            if let Some(binding) = functions.remove(name) {
+                captured_functions.push(IrCapturedFunction {
+                    name: name.to_string(),
+                    callable: binding.as_callable(),
+                });
+            }
+        }
+        captured_functions.extend(functions.into_iter().map(|(name, binding)| {
+            IrCapturedFunction {
+                name,
+                callable: binding.as_callable(),
+            }
+        }));
         IrCallableCapture {
             variables: variables
                 .into_iter()
                 .map(|(name, value)| IrCapturedVariable { name, value })
                 .collect(),
-            functions: functions
-                .into_iter()
-                .map(|(name, binding)| IrCapturedFunction {
-                    name,
-                    callable: binding.as_callable(),
-                })
-                .collect(),
+            functions: captured_functions,
             resource_context: self.current_source.and_then(|current_source| {
                 self.resources
                     .is_some()
@@ -1806,8 +1931,9 @@ impl<'a> EvaluationContext<'a> {
             context.set_value(variable.name.clone(), variable.value.clone());
         }
         for function in &capture.functions {
+            let name = function.name.clone();
             context.functions.insert(
-                function.name.clone(),
+                name.clone(),
                 Rc::new(FunctionBinding {
                     parameters: LambdaParameters::from_ir(function.callable.parameters.clone()),
                     body: function.callable.body.clone(),
@@ -1816,6 +1942,7 @@ impl<'a> EvaluationContext<'a> {
                     extension: None,
                 }),
             );
+            context.register_function_library(name);
         }
         context
     }
@@ -1832,8 +1959,10 @@ impl<'a> EvaluationContext<'a> {
         let mut variables = BTreeMap::new();
         let mut functions = BTreeMap::new();
         let mut extension_targets = BTreeMap::new();
+        let mut library_registry = Vec::new();
         caller_context.collect_bindings(&mut variables, &mut functions);
         caller_context.collect_extension_targets(&mut extension_targets);
+        caller_context.collect_library_registry(&mut library_registry);
         let mut forwarded_variable_owners = BTreeSet::new();
         caller_context.collect_variable_owners(&mut forwarded_variable_owners);
         let journal_floor = caller_context
@@ -1850,6 +1979,7 @@ impl<'a> EvaluationContext<'a> {
                 .collect(),
             functions,
             extension_targets,
+            library_registry,
             lambda_scope: caller_context.visible_lambda_scope(),
             extension_invocation: caller_context.extension_invocation.clone(),
             // Provider objects are never captured. A callable may reuse the current
@@ -3335,6 +3465,20 @@ impl Evaluator {
             Ok(plan) => plan,
             Err(()) => return CallOutcome::Failed,
         };
+
+        if is_library_inspection(name) && context.get_function(name).is_none() {
+            return self.evaluate_library_inspection_builtin(
+                name,
+                positional_args,
+                named_args,
+                body,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+            );
+        }
 
         if is_conditional(name) {
             let Some(binding_plan) = native_binding_plan.as_ref() else {
@@ -5558,6 +5702,134 @@ impl Evaluator {
             context.set_page_geometry(Some(IrPageGeometry { width, height }));
         }
         CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_library_inspection_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        debug_assert!(
+            body.is_none(),
+            "inspection builtin bodies are rejected during binding"
+        );
+
+        if name == "libraries" {
+            if binding_plan
+                .bind::<InvocationValue>(&[], None, *span)
+                .is_err()
+            {
+                return CallOutcome::Failed;
+            }
+            return CallOutcome::Value(IrValue::Collection(
+                context
+                    .inspection_library_names()
+                    .into_iter()
+                    .map(IrValue::String)
+                    .collect(),
+            ));
+        }
+
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: argument,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let value = match builtins::scalar_string_conversion(&argument) {
+            Ok(value) => value,
+            Err(error) => {
+                let call = format!("`.{name}`");
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some(if name == "libfunctions" {
+                            "libraryName"
+                        } else {
+                            "name"
+                        }),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some(call.as_str()),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        match name {
+            "libexists" => {
+                CallOutcome::Value(IrValue::Boolean(context.inspection_lib_exists(&value)))
+            }
+            "functionexists" => CallOutcome::Value(IrValue::Boolean(
+                context.get_function(&value).is_some() || inspectable_native_function(&value),
+            )),
+            "libfunctions" if value == crate::library_inspection::STDLIB_LIBRARY => {
+                CallOutcome::Value(IrValue::Collection(
+                    inspectable_stdlib_functions()
+                        .into_iter()
+                        .map(IrValue::String)
+                        .collect(),
+                ))
+            }
+            "libfunctions" => CallOutcome::Value(IrValue::Collection(
+                context
+                    .inspection_registered_functions(&value)
+                    .into_iter()
+                    .map(IrValue::String)
+                    .collect(),
+            )),
+            _ => unreachable!("library inspection name was prevalidated"),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -8074,6 +8346,7 @@ impl Evaluator {
     ) -> CallOutcome {
         if let Some(loadable_libraries) = context.loadable_libraries {
             if let Some(library) = loadable_libraries.loadable_library(&reference) {
+                context.register_container_library(reference.clone());
                 return self.evaluate_loadable_library(
                     &reference,
                     library,
@@ -12628,6 +12901,7 @@ pub(crate) enum NativeDispatchOwner {
     DictionaryLookup,
     CollectionAccess,
     CollectionTransform,
+    LibraryInspection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12697,6 +12971,8 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
     "appended",
 ];
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
+const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
+    &["libexists", "functionexists", "libraries", "libfunctions"];
 const DEFERRED_NATIVE_NAMES: &[&str] = &["llmstxt"];
 
 static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
@@ -12800,6 +13076,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
         owner: NativeDispatchOwner::CollectionTransform,
         names: COLLECTION_TRANSFORM_NATIVE_NAMES,
     },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::LibraryInspection,
+        names: LIBRARY_INSPECTION_NATIVE_NAMES,
+    },
 ];
 
 #[cfg(test)]
@@ -12887,8 +13167,31 @@ fn is_resource(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Resource)
 }
 
+fn is_library_inspection(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::LibraryInspection)
+}
+
 fn is_deferred(name: &str) -> bool {
     DEFERRED_NATIVE_NAMES.contains(&name)
+}
+
+fn inspectable_native_function(name: &str) -> bool {
+    crate::library_inspection::V260_STDLIB_FUNCTION_ORDER.contains(&name)
+        && !is_deferred(name)
+        && (builtins::lookup(name).is_some()
+            || BESPOKE_NATIVE_OWNERS
+                .iter()
+                .any(|inventory| inventory.names.contains(&name))
+            || matches!(name, "pageformat" | "code" | "extend" | "function"))
+}
+
+fn inspectable_stdlib_functions() -> Vec<String> {
+    crate::library_inspection::V260_STDLIB_FUNCTION_ORDER
+        .iter()
+        .copied()
+        .filter(|name| inspectable_native_function(name))
+        .map(str::to_string)
+        .collect()
 }
 
 fn bind_whitespace_arguments(
@@ -13847,6 +14150,26 @@ fn is_collection_transform(name: &str) -> bool {
 }
 
 fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'static>>, BodyPolicy)> {
+    if name == "libraries" {
+        return Some((Vec::new(), BodyPolicy::Reject));
+    }
+    if matches!(name, "libexists" | "functionexists" | "libfunctions") {
+        let parameter_name = if name == "libfunctions" {
+            "libraryName"
+        } else {
+            "name"
+        };
+        return Some((
+            vec![ParameterMetadata {
+                name: parameter_name,
+                aliases: &[],
+                allows_named: true,
+                omission: invocation_binder::OmissionPolicy::Required,
+                name_span: None,
+            }],
+            BodyPolicy::Reject,
+        ));
+    }
     const AUTHOR_ALIASES: &[&str] = &["author"];
     const AUTHORS_ALIASES: &[&str] = &["authors"];
     const KEYWORDS_ALIASES: &[&str] = &["keywords"];
