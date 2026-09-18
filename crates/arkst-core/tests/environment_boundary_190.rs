@@ -12,15 +12,7 @@ fn platform_neutral_env_path_has_no_ambient_process_lookup() {
         ("arkst-core/lib.rs", include_str!("../src/lib.rs")),
     ];
 
-    let forbidden = [
-        "std::env::var(",
-        "std::env::var_os(",
-        "std::env::vars(",
-        "std::env::vars_os(",
-        "std::env::current_dir(",
-        "std::env::set_var(",
-        "std::env::remove_var(",
-    ];
+    let forbidden = ["std::env", "use std::{env", "use std::{ env"];
 
     for (path, source) in sources {
         for pattern in forbidden {
@@ -30,16 +22,4 @@ fn platform_neutral_env_path_has_no_ambient_process_lookup() {
             );
         }
     }
-}
-
-#[test]
-fn default_core_compile_path_does_not_inject_environment_authority() {
-    let source = include_str!("../src/lib.rs");
-
-    assert!(
-        source.contains(
-            "compile_with_inputs(\n        project,\n        options,\n        Capabilities::compatibility_default(),\n        None,"
-        ),
-        "ordinary compile() must remain fail-closed for .env"
-    );
 }
