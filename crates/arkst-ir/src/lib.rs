@@ -2540,8 +2540,7 @@ mod tests {
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline, IrLandscapeComponent,
         IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange, IrRawBody, IrSize,
-        IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
         TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};

@@ -20858,8 +20858,7 @@ mod tests {
         assert!(!collection_values_equal(&IrValue::Unit, &IrValue::None));
         assert!(!collection_values_equal(&IrValue::None, &IrValue::Unit));
 
-        let unit_input =
-            IrValue::Collection(vec![IrValue::Unit, IrValue::Unit, IrValue::None]);
+        let unit_input = IrValue::Collection(vec![IrValue::Unit, IrValue::Unit, IrValue::None]);
         let mut unit_diagnostics = Vec::new();
         let mut unit_context = EvaluationContext::new();
         let unit_distinct = collection_call(
