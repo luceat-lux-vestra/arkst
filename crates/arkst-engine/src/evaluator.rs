@@ -2493,6 +2493,7 @@ impl Evaluator {
     }
 
     /// Resource/library evaluation with an explicit runtime-message host sink.
+    #[allow(clippy::too_many_arguments)]
     pub fn evaluate_with_resources_and_libraries_and_runtime_message_sink_for_mode<
         R: ResourceProvider,
         L: LoadableLibraryProvider,
