@@ -43,10 +43,14 @@ manifests linked below remain the row-level evidence authorities.
 The bounded library-inspection family is implemented by
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195); its clean-room
 v2.6 contract and non-goals are recorded in
-[`LIBRARY_INSPECTION.md`](LIBRARY_INSPECTION.md). The remaining #151
-`UNSUPPORTED` family owner is
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197) for logger /
-diagnostic builtins. For #154, `.match` is #198-owned,
+[`LIBRARY_INSPECTION.md`](LIBRARY_INSPECTION.md). A bounded
+logger/diagnostic evaluator/sink slice is implemented under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197), with its v2.6
+contract and residual gaps recorded in
+[`LOGGER_DIAGNOSTICS.md`](LOGGER_DIAGNOSTICS.md). No #151-owned row remains
+`UNSUPPORTED`; the #195/#197 rows remain `PARTIAL`. #197 stays open for
+the observed `kotlin.Unit` return-value semantics, richer DynamicValue String
+formatting, and output/strict/public-binding parity gaps. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 the #188 resolver prerequisite for `.subdocumentgraph` is complete; producer/content/output remains blocked on #199.
 `.css` and `.cssproperties` remain unsupported with an explicit defer until a

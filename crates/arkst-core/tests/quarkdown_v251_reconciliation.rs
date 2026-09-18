@@ -192,7 +192,7 @@ fn reconciliation_maps_all_unresolved_stdlib_families_to_bounded_owners() {
         ("error", "#197", "logger"),
     ] {
         let row = stdlib_row(name);
-        assert_eq!(row[4], "UNSUPPORTED", "wrong #151 status for {name}");
+        assert_eq!(row[4], "PARTIAL", "wrong #151 status for {name}");
         assert!(STDLIB_AUDIT.contains(name), "#151 audit omits {name}");
         assert!(
             STDLIB_AUDIT.contains(issue),

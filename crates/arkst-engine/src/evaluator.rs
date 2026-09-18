@@ -51,8 +51,8 @@ use crate::value_conversion::{
 use crate::{ast_to_ir, builtins};
 use crate::{
     Capabilities, Capability, EvaluationLimits, IncludedSource, LoadableLibraryProvider,
-    LoadableLibrarySource, ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot,
-    ResourceText,
+    LoadableLibrarySource, LogEvent, LogLevel, LogSink, ResourceAccessError, ResourceEntryKind,
+    ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -807,6 +807,7 @@ struct EvaluationContext<'a> {
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
     loadable_libraries: Option<&'a dyn LoadableLibraryProvider>,
+    log_sink: Option<&'a dyn LogSink>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
@@ -1164,6 +1165,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: None,
             resources: None,
             loadable_libraries: None,
+            log_sink: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
             subdocument_root: None,
@@ -1208,6 +1210,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
+            log_sink: self.log_sink,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1332,6 +1335,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
+            log_sink: self.log_sink,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1991,6 +1995,7 @@ impl<'a> EvaluationContext<'a> {
             loadable_libraries: resource_context
                 .filter(|context| context.loadable_libraries)
                 .and(caller_context.loadable_libraries),
+            log_sink: caller_context.log_sink,
             metadata_defaults: if has_resource_context {
                 caller_context.metadata_defaults.clone()
             } else {
@@ -2515,6 +2520,20 @@ impl Evaluator {
         let mut context = EvaluationContext::with_limits(self.limits);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
+    /// Evaluates one document with an explicit platform-neutral logger sink.
+    ///
+    /// No ambient stdout/stderr or process logger is discovered. Supplying
+    /// this sink is the authorization boundary for `.log` and `.debug`.
+    pub fn evaluate_with_log_sink(
+        &self,
+        document: &IrDocument,
+        log_sink: &dyn LogSink,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_limits(self.limits);
+        context.log_sink = Some(log_sink);
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
 
     /// Evaluates an IR document with access to an explicit semantic resource
     /// provider. This legacy entry point preserves the historical Quarkdown
@@ -2597,6 +2616,38 @@ impl Evaluator {
             metadata_defaults,
             self.limits,
         );
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Resource/library evaluation with an explicit platform-neutral logger sink.
+    ///
+    /// This is the embedder-capable boundary used to prove that logger
+    /// authority follows evaluation context through loaded libraries without
+    /// serializing host objects into IR or callable captures.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_resources_and_libraries_and_log_sink_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        log_sink: &dyn LogSink,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        context.log_sink = Some(log_sink);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
@@ -3477,6 +3528,20 @@ impl Evaluator {
                 context,
                 native_binding_plan.as_ref(),
                 first_origin,
+            );
+        }
+        if is_logger(name) && context.get_function(name).is_none() {
+            return self.evaluate_logger_builtin(
+                name,
+                ordered_args,
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
             );
         }
 
@@ -5702,6 +5767,104 @@ impl Evaluator {
             context.set_page_geometry(Some(IrPageGeometry { width, height }));
         }
         CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_logger_builtin(
+        &self,
+        name: &str,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: argument,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let message = match builtins::scalar_string_conversion(&argument) {
+            Ok(message) => message,
+            Err(error) => {
+                let call = format!("`.{name}`");
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("message"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some(call.as_str()),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        match name {
+            "log" => {
+                let Some(log_sink) = context.log_sink else {
+                    diagnostics.push(logger_sink_unavailable(*span));
+                    return CallOutcome::Failed;
+                };
+                log_sink.emit(&LogEvent {
+                    level: LogLevel::Log,
+                    message,
+                    span: *span,
+                });
+                CallOutcome::NoValue
+            }
+            "debug" => {
+                if let Some(log_sink) = context.log_sink {
+                    log_sink.emit(&LogEvent {
+                        level: LogLevel::Debug,
+                        message,
+                        span: *span,
+                    });
+                }
+                CallOutcome::NoValue
+            }
+            "error" => {
+                diagnostics.push(logger_requested_error(message, *span));
+                CallOutcome::Failed
+            }
+            _ => unreachable!("logger name was prevalidated"),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -12902,6 +13065,7 @@ pub(crate) enum NativeDispatchOwner {
     CollectionAccess,
     CollectionTransform,
     LibraryInspection,
+    Logger,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12973,6 +13137,7 @@ const COLLECTION_ACCESS_NATIVE_NAMES: &[&str] = &[
 const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
     &["libexists", "functionexists", "libraries", "libfunctions"];
+const LOGGER_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
 const DEFERRED_NATIVE_NAMES: &[&str] = &["llmstxt"];
 
 static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
@@ -13080,6 +13245,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
         owner: NativeDispatchOwner::LibraryInspection,
         names: LIBRARY_INSPECTION_NATIVE_NAMES,
     },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Logger,
+        names: LOGGER_NATIVE_NAMES,
+    },
 ];
 
 #[cfg(test)]
@@ -13169,6 +13338,10 @@ fn is_resource(name: &str) -> bool {
 
 fn is_library_inspection(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::LibraryInspection)
+}
+
+fn is_logger(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Logger)
 }
 
 fn is_deferred(name: &str) -> bool {
@@ -14162,6 +14335,18 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         return Some((
             vec![ParameterMetadata {
                 name: parameter_name,
+                aliases: &[],
+                allows_named: true,
+                omission: invocation_binder::OmissionPolicy::Required,
+                name_span: None,
+            }],
+            BodyPolicy::Reject,
+        ));
+    }
+    if matches!(name, "log" | "debug" | "error") {
+        return Some((
+            vec![ParameterMetadata {
+                name: "message",
                 aliases: &[],
                 allows_named: true,
                 omission: invocation_binder::OmissionPolicy::Required,
@@ -15222,6 +15407,30 @@ fn implicit_parameter_error(
             "Provide the positional argument required by the implicit lambda parameter."
                 .to_string(),
         ],
+    }
+}
+
+fn logger_sink_unavailable(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3010".to_string(),
+        severity: Severity::Error,
+        message: "`.log` requires an explicit logger sink".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Inject a LogSink through the evaluator API; Arkst never writes logger builtins to ambient stdout/stderr.".to_string(),
+        ],
+    }
+}
+
+fn logger_requested_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3011".to_string(),
+        severity: Severity::Error,
+        message: format!("`.error`: {message}"),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec!["The document explicitly requested an error through `.error`.".to_string()],
     }
 }
 

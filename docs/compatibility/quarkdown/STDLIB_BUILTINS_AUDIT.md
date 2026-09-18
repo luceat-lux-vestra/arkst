@@ -389,14 +389,45 @@ pseudo-libraries, source-backed binding/conversion diagnostics, and
 transactional rollback, with no host/provider discovery. Their canonical rows
 remain `PARTIAL`, because Quarkdown v2.6 exposes all 164 registered stdlib
 names while Arkst intentionally reports only functions its evaluator can
-actually call. The three logger/diagnostic names remain `UNSUPPORTED` under
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197). The
+actually call. The three logger/diagnostic names now have the bounded #197
+evaluator contract and are `PARTIAL`: `.log` uses an explicit platform-neutral
+`LogSink` or fails deterministically with no ambient process stream,
+`.debug` is silent without a sink and emits a source-backed Debug event when
+one is supplied, and `.error` produces a structured source-backed evaluator
+diagnostic rather than host logging. Quarkdown's CLI stdout behavior, rendered
+error component, exact stderr text, strict exit code, `kotlin.Unit` value-context
+return semantics, richer DynamicValue-to-String formatting, and public
+WASM/embedder exposure remain outside this bounded claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
 under #298/#302; residual host/resource implementation is coordinated through
 #190/#191, while the global-read incompatibility is an accepted fail-closed
 policy divergence recorded under completed #296/#300.
+
+### Bounded #197 logger and diagnostic contract
+
+The clean-room v2.6 contract is recorded in
+[LOGGER_DIAGNOSTICS.md](LOGGER_DIAGNOSTICS.md). Disposable official-binary
+probes establish that `.log` writes converted messages to stdout with no
+standalone document output, `.debug` is silent in the distributed CLI, and
+capturing either result in value context yields `kotlin.Unit` rather than
+Quarkdown `none`. The probes also show richer upstream dynamic String
+formatting (for example Pair values) than Arkst's current scalar boundary.
+`.error` is a failed call that renders an error component while later content
+continues in non-strict mode; strict mode aborts the compile.
+
+Arkst keeps host effects outside the evaluator. `.log` requires an explicit
+`LogSink`; `.debug` validates/converts its argument and is a silent no-op
+without a sink; `.error` emits one structured `E3011` diagnostic and fails
+the call. Logger events are emitted synchronously in evaluation order with
+source provenance, malformed calls emit no events, and source-defined
+functions retain normal precedence over these native names. The three rows are
+`PARTIAL`, not `SUPPORTED_SEMANTICS`, because normal CLI stdout/error-card/
+strict-mode behavior, `kotlin.Unit` return semantics, richer dynamic-value
+String formatting, and #191 public WASM exposure are not claimed. #197 therefore
+remains open as the residual owner even though no #151 row is still
+`UNSUPPORTED`.
 
 ### Bounded #196 localization contract
 
@@ -549,19 +580,21 @@ separately.
 | SUPPORTED_END_TO_END | 0 |
 | SUPPORTED_SEMANTICS | 46 |
 | PARSED_ONLY | 0 |
-| PARTIAL | 10 |
-| UNSUPPORTED | 3 |
+| PARTIAL | 13 |
+| UNSUPPORTED | 0 |
 | DEFERRED | 0 |
 | BLOCKED | 0 |
 | UNKNOWN | 0 |
 | NOT_APPLICABLE | 1 |
 
-The ten PARTIAL names are sorted, range, plaintext, otherwise, ifpresent,
-takeif, libexists, functionexists, libraries, and libfunctions. The four
-library-inspection rows are bounded runtime-inspection implementations under
-#195 but cannot claim full stdlib visibility parity while Arkst intentionally
-filters out upstream names it cannot call. The three UNSUPPORTED names are
-log, debug, and error. Localization and localize remain the two
+The thirteen PARTIAL names are sorted, range, plaintext, otherwise, ifpresent,
+takeif, libexists, functionexists, libraries, libfunctions, log, debug, and
+error. The four library-inspection rows are bounded runtime-inspection
+implementations under #195 but cannot claim full stdlib visibility parity while
+Arkst intentionally filters out upstream names it cannot call. The three
+logger/diagnostic rows are bounded evaluator implementations under #197 but do
+not claim normal CLI stdout/error-card/strict-mode parity. No #151-owned row
+remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
 row is none because its value taxonomy belongs to #149. The 46
 SUPPORTED_SEMANTICS rows are bounded engine semantic claims; none is promoted
@@ -615,14 +648,14 @@ Reconciliation links:
 
 ## Backlog and #156 handoff
 
-Issue #172 closes the cohesive Unicode string-semantics gap. The remaining
-#151 `UNSUPPORTED` family is logger/diagnostic behavior under
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197). Library
-inspection under [#195](https://github.com/luceat-lux-vestra/arkst/issues/195)
-now has a completed bounded evaluator contract and is classified `PARTIAL`
-until Arkst's callable stdlib surface converges with the upstream registry.
-Implementation order follows the dependency bands in #156; #196 is the
-completed bounded localization slice.
+Issue #172 closes the cohesive Unicode string-semantics gap. No #151-owned row
+remains `UNSUPPORTED`. Library inspection under
+[#195](https://github.com/luceat-lux-vestra/arkst/issues/195) and
+logger/diagnostic behavior under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197) now have bounded
+evaluator contracts and remain `PARTIAL` for their explicitly documented
+parity gaps. Implementation order follows the dependency bands in #156; #196
+is the completed bounded localization slice.
 Existing issues are reused:
 
 - #149 and #165–#167 for value, binding, conversion, diagnostics, and
@@ -637,8 +670,12 @@ matrix, exact diagnostics/atomicity deltas for currently bounded semantics,
 and sorted selector/conversion edge cases. Dictionary lookup is now a bounded
 semantic implementation. Library inspection now has a bounded #195 evaluator
 implementation; its residual PARTIAL status is caused by the wider unimplemented
-stdlib callable surface rather than missing provider/host inspection. Localization
-and logger ownership remain explicit under #196/#197. This audit does not
+stdlib callable surface rather than missing provider/host inspection. The #197
+logger evaluator slice is also bounded; its residual PARTIAL status includes
+unmodeled `kotlin.Unit` value-context returns and richer upstream dynamic-value
+String formatting in addition to normal CLI/output and public embedder
+exposure. #197 remains open for those owned residuals rather than being treated
+as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
 
 For #156, the usable reconciliation input is:
@@ -646,8 +683,8 @@ For #156, the usable reconciliation input is:
 - pinned public surface: 162;
 - #151-owned inventory: 60;
 - cross-owned/excluded: 102;
-- #151 status counts: 46 SUPPORTED_SEMANTICS, 10 PARTIAL,
-  3 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
+- #151 status counts: 46 SUPPORTED_SEMANTICS, 13 PARTIAL,
+  0 UNSUPPORTED, 1 NOT_APPLICABLE, and zero in the other vocabulary
   categories;
 - newly recovered omission: isnone as an explicit general predicate;
 - corrected prior omission: llmstxt is public, #155-owned, and excluded from
