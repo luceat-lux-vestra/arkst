@@ -12,14 +12,15 @@ Disposable probe PRs #362 and #363 exercised only the official Quarkdown v2.6.0 
 
 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
 
-The later Unit/value correction used disposable PRs #367, #369, and #370 to
+The later Unit/value correction used disposable PRs #367, #369, #370, and #372 to
 compare the exact official v2.5.1 and v2.6.0 Linux x64 artifacts:
 
 - v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`
 - v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
 
 Those probes proved the same Unit output/value-context boundary in both
-versions. No Quarkdown implementation source, tests, or fixtures were inspected
+versions, including the callable-body distinction between one unconsumed Unit,
+repeated Unit statements (captureable empty content), and mixed Unit/content bodies. No Quarkdown implementation source, tests, or fixtures were inspected
 or copied for these probes.
 
 Observed behavior from probe runs 35284604253 / 35284697810 / 35302505118, with final return-value confirmation in run 35324039621 (job 105532850554):
@@ -43,7 +44,7 @@ Arkst evaluates and converts the required `message` argument through the shared 
 
 The platform-neutral evaluator never discovers or writes stdout, stderr, a process logger, environment state, filesystem state, or network state. A caller that wants `.log` observability must explicitly supply a `LogSink`.
 
-With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immediately at the call site. Event order is evaluation order. A successful call returns typed `IrValue::Unit` in value context. An unconsumed direct call suppresses Unit document output; capture, variable reference, source-defined function propagation, or `::string` can make the value observable as `kotlin.Unit`.
+With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immediately at the call site. Event order is evaluation order. A successful call returns typed `IrValue::Unit` in value context. An unconsumed direct call suppresses Unit document output; capture, variable reference, a source-defined callable with one otherwise-unconsumed Unit, or `::string` can make the value observable as `kotlin.Unit`. Two or more direct Unit statements in one callable instead produce a captureable empty-content value, while mixed Unit/content bodies retain the real content.
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
