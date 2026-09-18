@@ -536,7 +536,10 @@ enum CallableBodyValueAccumulator {
     /// contribute document output. Preserve it only if no observable value or
     /// content supersedes it in the callable body.
     SuppressedUnit,
-    Semantic { value: IrValue, span: SourceSpan },
+    Semantic {
+        value: IrValue,
+        span: SourceSpan,
+    },
     Content(Vec<IrNode>),
 }
 

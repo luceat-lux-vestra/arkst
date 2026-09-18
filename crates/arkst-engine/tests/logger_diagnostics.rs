@@ -371,7 +371,8 @@ fn unit_result_is_output_suppressed_for_direct_logger_calls_but_observable_after
 #[test]
 fn unit_result_propagates_through_functions_without_becoming_direct_output() {
     let source_id = SourceId(1984);
-    let source = ".function {silent}\n    .debug {inside}\n.silent\n.var {x} {.silent}\n.x\n.silent::string";
+    let source =
+        ".function {silent}\n    .debug {inside}\n.silent\n.var {x} {.silent}\n.x\n.silent::string";
     let (result, diagnostics) = evaluate_plain(source, source_id);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");

@@ -335,6 +335,7 @@ fn collect_value_sources(value: &IrValue, sources: &mut SourceTable) -> Result<(
         | IrValue::Color(_)
         | IrValue::Enum(_)
         | IrValue::Range(_)
+        | IrValue::Unit
         | IrValue::None => {}
     }
     Ok(())
@@ -1033,6 +1034,7 @@ enum WireValue {
     Dictionary(WireDictionary),
     Content(Vec<WireNode>),
     Component(WireComponent),
+    Unit,
     None,
     Callable(WireCallable),
     InlineBody(WireInlineBody),
@@ -1482,6 +1484,7 @@ fn value_to_wire(value: &IrValue, sources: &SourceTable) -> Result<WireValue, St
         IrValue::Component(component) => {
             WireValue::Component(component_to_wire(component, sources)?)
         }
+        IrValue::Unit => WireValue::Unit,
         IrValue::None => WireValue::None,
         IrValue::Callable(callable) => WireValue::Callable(callable_to_wire(callable, sources)?),
         IrValue::InlineBody(body) => WireValue::InlineBody(WireInlineBody {
@@ -1933,6 +1936,7 @@ fn wire_value_to_ir(value: WireValue, sources: Option<&[SourceText]>) -> Result<
         WireValue::Component(component) => {
             IrValue::Component(component_from_wire(component, sources)?)
         }
+        WireValue::Unit => IrValue::Unit,
         WireValue::None => IrValue::None,
         WireValue::Callable(callable) => IrValue::Callable(callable_from_wire(callable, sources)?),
         WireValue::InlineBody(body) => IrValue::InlineBody(IrInlineBody {
