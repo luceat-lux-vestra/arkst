@@ -2286,7 +2286,13 @@ mod tests {
                 .expect("Unit has an explicitly evidenced .string projection"),
             IrValue::String("kotlin.Unit".into())
         );
-        for name in ["uppercase", "lowercase", "capitalize", "isempty", "isnotempty"] {
+        for name in [
+            "uppercase",
+            "lowercase",
+            "capitalize",
+            "isempty",
+            "isnotempty",
+        ] {
             assert!(
                 evaluate(name, &[IrValue::Unit], &[], false).is_err(),
                 "{name} must not inherit the .string(Unit) exception"
