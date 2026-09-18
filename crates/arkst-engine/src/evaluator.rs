@@ -20878,7 +20878,6 @@ mod tests {
         assert!(unit_diagnostics.is_empty(), "{unit_diagnostics:?}");
 
         let pair_one = IrValue::Pair(IrPair {
-        let pair_one = IrValue::Pair(IrPair {
             first: Box::new(IrValue::String("key".to_string())),
             second: Box::new(IrValue::Number(1.0)),
             span: span(1, 5),
