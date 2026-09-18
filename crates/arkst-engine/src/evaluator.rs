@@ -536,6 +536,10 @@ enum CallableBodyValueAccumulator {
     /// contribute document output. Preserve it only if no observable value or
     /// content supersedes it in the callable body.
     SuppressedUnit,
+    /// Two or more direct Unit statements collapse to empty content in the
+    /// observed Quarkdown callable-body boundary: the value is captureable,
+    /// not None/Unit, stringifies to empty text, and contributes no output.
+    SuppressedUnits,
     Semantic {
         value: IrValue,
         span: SourceSpan,
@@ -550,7 +554,10 @@ impl CallableBodyValueAccumulator {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<(), CallOutcome> {
-        if matches!(self, Self::Empty | Self::SuppressedUnit) {
+        if matches!(
+            self,
+            Self::Empty | Self::SuppressedUnit | Self::SuppressedUnits
+        ) {
             *self = Self::Semantic { value, span };
             return Ok(());
         }
@@ -563,8 +570,10 @@ impl CallableBodyValueAccumulator {
     }
 
     fn append_suppressed_unit(&mut self) {
-        if matches!(self, Self::Empty) {
-            *self = Self::SuppressedUnit;
+        match self {
+            Self::Empty => *self = Self::SuppressedUnit,
+            Self::SuppressedUnit => *self = Self::SuppressedUnits,
+            Self::SuppressedUnits | Self::Semantic { .. } | Self::Content(_) => {}
         }
     }
 
@@ -572,6 +581,7 @@ impl CallableBodyValueAccumulator {
         match self {
             Self::Empty => CallOutcome::NoValue,
             Self::SuppressedUnit => CallOutcome::Value(IrValue::Unit),
+            Self::SuppressedUnits => CallOutcome::Value(IrValue::Content(Vec::new())),
             Self::Semantic { value, .. } => CallOutcome::Value(value),
             Self::Content(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
         }
@@ -582,7 +592,7 @@ impl CallableBodyValueAccumulator {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
         match self {
-            Self::Empty | Self::SuppressedUnit => Ok(Vec::new()),
+            Self::Empty | Self::SuppressedUnit | Self::SuppressedUnits => Ok(Vec::new()),
             Self::Semantic { value, span } => value_into_content_nodes(value, span, diagnostics),
             Self::Content(nodes) => Ok(nodes),
         }
