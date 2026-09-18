@@ -118,7 +118,7 @@ families are:
 | dynamic String/Identifier | Number/Integer/Boolean/Range/Size/Color/closed Enum | Conditionally accepted by the target parser and closed table |
 | static String | Number/Integer/Boolean/Range/Size/Color/closed Enum | Rejected in the bounded origin-aware path |
 | bounded scalar | String | Accepted by the bounded scalar string adapter |
-| Unit | String | Accepted as the exact `kotlin.Unit` projection; this conversion does not define equality identity |
+| Unit | explicit `.string` / observable output materialization | Projects as exact `kotlin.Unit` where independently evidenced; generic String-target coercion remains rejected and this projection does not define equality identity |
 | None | nullable/optional target | Accepted only where the target is nullable or optional |
 | Content/Collection/Pair/Dictionary/Callable/Component | unrelated scalar/domain target | Rejected; no implicit stringification |
 | Markdown list/dictionary/body | iterable/dictionary/content target | Accepted only by its explicit context-sensitive adapter |
