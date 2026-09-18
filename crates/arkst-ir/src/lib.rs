@@ -2557,6 +2557,37 @@ mod tests {
     }
 
     #[test]
+    fn document_wire_roundtrip_preserves_unit_as_distinct_from_none() {
+        let span = SourceSpan::new(SourceId(71), 4, 12);
+        let document = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "probe".to_string(),
+                positional_args: vec![IrValue::Unit, IrValue::None],
+                named_args: vec![IrNamedArg {
+                    name: "value".to_string(),
+                    name_span: span,
+                    value: IrValue::Unit,
+                    span,
+                }],
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span,
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_string(&document).expect("IrDocument serializes");
+        assert!(encoded.contains("\"Unit\""));
+        assert!(encoded.contains("\"None\""));
+
+        let decoded =
+            serde_json::from_str::<IrDocument>(&encoded).expect("IrDocument deserializes");
+        assert_eq!(decoded, document);
+    }
+
+    #[test]
     fn none_uses_the_stable_externally_tagged_serde_variant() {
         let encoded = serde_json::to_value(IrValue::None).expect("IrValue serializes");
         assert_eq!(encoded, serde_json::json!("None"));

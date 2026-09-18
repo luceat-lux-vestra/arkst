@@ -12,7 +12,15 @@ Disposable probe PRs #362 and #363 exercised only the official Quarkdown v2.6.0 
 
 `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
 
-No Quarkdown implementation source, tests, or fixtures were inspected or copied.
+The later Unit/value correction used disposable PRs #367, #369, and #370 to
+compare the exact official v2.5.1 and v2.6.0 Linux x64 artifacts:
+
+- v2.5.1: `5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9`
+- v2.6.0: `5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4`
+
+Those probes proved the same Unit output/value-context boundary in both
+versions. No Quarkdown implementation source, tests, or fixtures were inspected
+or copied for these probes.
 
 Observed behavior from probe runs 35284604253 / 35284697810 / 35302505118, with final return-value confirmation in run 35324039621 (job 105532850554):
 
@@ -35,17 +43,17 @@ Arkst evaluates and converts the required `message` argument through the shared 
 
 The platform-neutral evaluator never discovers or writes stdout, stderr, a process logger, environment state, filesystem state, or network state. A caller that wants `.log` observability must explicitly supply a `LogSink`.
 
-With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immediately at the call site. Event order is evaluation order. The current bounded implementation then returns evaluator `NoValue`; it does **not** yet model the upstream value-context `kotlin.Unit` result.
+With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immediately at the call site. Event order is evaluation order. A successful call returns typed `IrValue::Unit` in value context. An unconsumed direct call suppresses Unit document output; capture, variable reference, source-defined function propagation, or `::string` can make the value observable as `kotlin.Unit`.
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
-This is intentionally `PARTIAL`: the engine semantic boundary exists, but the normal CLI does not yet reproduce Quarkdown's stdout behavior and Arkst does not yet model the observed first-class `kotlin.Unit` return value. Returning a fabricated String or conflating Unit with `None`/evaluator `NoValue` is explicitly rejected. Host/CLI exposure remains coordinated with #190, value-model closure with #149, and public WASM/embedder exposure with #191.
+This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary, but the normal CLI still does not reproduce Quarkdown's stdout behavior and richer upstream DynamicValue-to-String formatting remains outside the bounded scalar adapter. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. Host/CLI exposure remains coordinated with #190 and public WASM/embedder exposure with #191. #368 records the value-model correction to #149.
 
 ### `.debug`
 
 Arkst validates and converts `message` identically to `.log`.
 
-If a `LogSink` is supplied, one source-backed `Debug` event is emitted. If no sink is supplied, the call is a silent no-op after successful binding/conversion, matching the observable v2.6 CLI default. As with `.log`, Arkst currently returns evaluator `NoValue` rather than modeling the observed value-context `kotlin.Unit`. This keeps the bounded implementation honest and leaves the value-model gap explicit.
+If a `LogSink` is supplied, one source-backed `Debug` event is emitted. If no sink is supplied, the call remains host-silent after successful binding/conversion, matching the observable CLI default. In either successful case the semantic result is typed `IrValue::Unit`; direct call output suppresses it, while value-context consumers can observe the same bounded Unit contract as `.log`.
 
 The optional explicit sink is an Arkst embedder boundary; it does not claim that Quarkdown exposes an equivalent public debug switch.
 
@@ -76,8 +84,8 @@ This contract does not:
 - add environment, filesystem, network, or plugin discovery;
 - complete #190 host/process capability work;
 - complete #191 public WASM/embedder bindings;
-- invent or stringify a fake Unit value in place of the observed `kotlin.Unit` result;
+- broaden the evidenced Unit contract into generalized JVM/Kotlin object emulation;
 - claim Quarkdown error-card rendering or strict-mode CLI parity;
-- claim exact upstream `kotlin.Unit` value semantics or rich DynamicValue-to-String formatting;
-- close #197 while those return/value and output-policy gaps remain;
+- claim rich DynamicValue-to-String formatting beyond the bounded scalar adapter;
+- close #197 while its dynamic-string, output/strict, and public-binding gaps remain;
 - claim M3 (#263) completion.
