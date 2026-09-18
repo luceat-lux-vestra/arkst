@@ -699,7 +699,7 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
-    if matches!(value.value, IrValue::Unit) {
+    if matches!(&value.value, IrValue::Unit) {
         return Ok(IrValue::String("kotlin.Unit".to_string()));
     }
     let text = scalar_string_argument_result(&value, "value").map_err(|error| {
