@@ -429,3 +429,17 @@ fn unit_string_projection_does_not_widen_generic_string_consumers() {
         "Unit must not be coerced through logger message conversion"
     );
 }
+
+
+#[test]
+fn repeated_unit_statements_collapse_to_empty_content_value() {
+    let source_id = SourceId(1988);
+    let source = ".function {multi}\n    .debug {a}\n    .debug {b}\n.multi\n.var {x} {.multi}\n.var {u} {.debug {single}}\n.isnone {.x}\n.equals {.x} to:{.none}\n.equals {.x} to:{.u}\n.equals {.x} to:{.x}\n.string {.x}";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        paragraph_texts(&result),
+        vec!["false", "false", "false", "true", ""]
+    );
+}
