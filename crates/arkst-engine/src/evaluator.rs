@@ -52,7 +52,7 @@ use crate::{ast_to_ir, builtins};
 use crate::{
     Capabilities, Capability, EvaluationLimits, IncludedSource, LoadableLibraryProvider,
     LoadableLibrarySource, ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot,
-    ResourceText,
+    ResourceText, RuntimeMessageEvent, RuntimeMessageLevel, RuntimeMessageSink,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -806,6 +806,7 @@ struct EvaluationContext<'a> {
     extension_invocation: Option<Rc<ExtensionInvocation>>,
     resources: Option<&'a dyn ResourceProvider>,
     loadable_libraries: Option<&'a dyn LoadableLibraryProvider>,
+    runtime_message_sink: Option<&'a dyn RuntimeMessageSink>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
@@ -1151,6 +1152,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: None,
             resources: None,
             loadable_libraries: None,
+            runtime_message_sink: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
             subdocument_root: None,
@@ -1194,6 +1196,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
+            runtime_message_sink: self.runtime_message_sink,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1317,6 +1320,7 @@ impl<'a> EvaluationContext<'a> {
             extension_invocation: self.extension_invocation.clone(),
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
+            runtime_message_sink: self.runtime_message_sink,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1861,6 +1865,9 @@ impl<'a> EvaluationContext<'a> {
             loadable_libraries: resource_context
                 .filter(|context| context.loadable_libraries)
                 .and(caller_context.loadable_libraries),
+            // Runtime message authority is invocation-time host state, not a
+            // lexical resource captured by the callable.
+            runtime_message_sink: caller_context.runtime_message_sink,
             metadata_defaults: if has_resource_context {
                 caller_context.metadata_defaults.clone()
             } else {
@@ -2386,6 +2393,21 @@ impl Evaluator {
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
+    /// Evaluates a document with an explicit runtime-message host sink.
+    ///
+    /// Sink presence is the capability grant for `.log` / `.debug`. The
+    /// evaluator itself never chooses stdout, stderr, or another host target.
+    pub fn evaluate_with_runtime_message_sink(
+        &self,
+        runtime_message_sink: &dyn RuntimeMessageSink,
+        document: &IrDocument,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_limits(self.limits);
+        context.runtime_message_sink = Some(runtime_message_sink);
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
     /// Evaluates an IR document with access to an explicit semantic resource
     /// provider. This legacy entry point preserves the historical Quarkdown
     /// evaluator assumption; callers that parsed another mode must use
@@ -2467,6 +2489,33 @@ impl Evaluator {
             metadata_defaults,
             self.limits,
         );
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Resource/library evaluation with an explicit runtime-message host sink.
+    pub fn evaluate_with_resources_and_libraries_and_runtime_message_sink_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        runtime_message_sink: &dyn RuntimeMessageSink,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        context.runtime_message_sink = Some(runtime_message_sink);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
