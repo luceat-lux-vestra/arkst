@@ -347,3 +347,102 @@ fn explicit_sink_propagates_through_loaded_libraries_and_function_calls() {
         ]
     );
 }
+
+#[test]
+fn unit_result_is_output_suppressed_for_direct_logger_calls_but_observable_after_capture() {
+    let source_id = SourceId(1983);
+    let sink = CollectingSink::default();
+    let source = ".log {direct}\n.var {x} {.log {captured}}\n.x";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(paragraph_texts(&result), vec!["kotlin.Unit"]);
+
+    let events = sink.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.level, event.message.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(LogLevel::Log, "direct"), (LogLevel::Log, "captured")]
+    );
+}
+
+#[test]
+fn unit_result_propagates_through_functions_without_becoming_direct_output() {
+    let source_id = SourceId(1984);
+    let source =
+        ".function {silent}\n    .debug {inside}\n.silent\n.var {x} {.silent}\n.x\n.silent::string";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(paragraph_texts(&result), vec!["kotlin.Unit", "kotlin.Unit"]);
+}
+
+#[test]
+fn suppressed_unit_does_not_pollute_later_callable_content() {
+    let source_id = SourceId(1985);
+    let source = ".function {mixed}\n    .debug {side-effect}\n    visible\n.mixed";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(paragraph_texts(&result), vec!["visible"]);
+}
+
+#[test]
+fn unit_optionality_equality_and_string_conversion_match_clean_room_contract() {
+    let source_id = SourceId(1986);
+    let source = ".var {u} {.debug {unit}}\n.isnone {.u}\n.equals {.u} to:{.none}\n.equals {.none} to:{.u}\n.equals {.u} to:{\"kotlin.Unit\"}\n.string {.u}";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        paragraph_texts(&result),
+        vec!["false", "true", "true", "false", "kotlin.Unit"]
+    );
+}
+
+#[test]
+fn unit_string_projection_does_not_widen_generic_string_consumers() {
+    let source_id = SourceId(1987);
+    let sink = CollectingSink::default();
+    let source = ".var {u} {.debug {unit}}\n.uppercase {.u}\n.log {.u}";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(paragraph_texts(&result).is_empty());
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id)),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.message.contains("adapt")
+                || diagnostic.message.contains(".log")),
+        "{diagnostics:?}"
+    );
+    let events = sink.events.borrow();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Debug);
+    assert_eq!(events[0].message, "unit");
+    assert!(
+        events.iter().all(|event| event.level != LogLevel::Log),
+        "Unit must not be coerced through logger message conversion"
+    );
+}
+
+#[test]
+fn repeated_unit_statements_collapse_to_empty_content_value() {
+    let source_id = SourceId(1988);
+    let source = ".function {multi}\n    .debug {a}\n    .debug {b}\n.multi\n.var {x} {.multi}\n.var {u} {.debug {single}}\n.isnone {.x}\n.equals {.x} to:{.none}\n.equals {.x} to:{.u}\n.equals {.x} to:{.x}\n.string {.x}";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        paragraph_texts(&result),
+        vec!["false", "false", "false", "true", ""]
+    );
+}

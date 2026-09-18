@@ -48,9 +48,11 @@ logger/diagnostic evaluator/sink slice is implemented under
 [#197](https://github.com/luceat-lux-vestra/arkst/issues/197), with its v2.6
 contract and residual gaps recorded in
 [`LOGGER_DIAGNOSTICS.md`](LOGGER_DIAGNOSTICS.md). No #151-owned row remains
-`UNSUPPORTED`; the #195/#197 rows remain `PARTIAL`. #197 stays open for
-the observed `kotlin.Unit` return-value semantics, richer DynamicValue String
-formatting, and output/strict/public-binding parity gaps. For #154, `.match` is #198-owned,
+`UNSUPPORTED`; the #195/#197 rows remain `PARTIAL`. #368/PR #371 correct
+the previously omitted Unit value category in #149, including the evidenced
+`kotlin.Unit` projection and direct-call suppression. #197 stays open for
+richer DynamicValue String formatting and output/strict/public-binding parity
+gaps. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 the #188 resolver prerequisite for `.subdocumentgraph` is complete; producer/content/output remains blocked on #199.
 `.css` and `.cssproperties` remain unsupported with an explicit defer until a

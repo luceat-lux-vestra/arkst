@@ -335,6 +335,7 @@ fn collect_value_sources(value: &IrValue, sources: &mut SourceTable) -> Result<(
         | IrValue::Color(_)
         | IrValue::Enum(_)
         | IrValue::Range(_)
+        | IrValue::Unit
         | IrValue::None => {}
     }
     Ok(())
@@ -1033,6 +1034,7 @@ enum WireValue {
     Dictionary(WireDictionary),
     Content(Vec<WireNode>),
     Component(WireComponent),
+    Unit,
     None,
     Callable(WireCallable),
     InlineBody(WireInlineBody),
@@ -1482,6 +1484,7 @@ fn value_to_wire(value: &IrValue, sources: &SourceTable) -> Result<WireValue, St
         IrValue::Component(component) => {
             WireValue::Component(component_to_wire(component, sources)?)
         }
+        IrValue::Unit => WireValue::Unit,
         IrValue::None => WireValue::None,
         IrValue::Callable(callable) => WireValue::Callable(callable_to_wire(callable, sources)?),
         IrValue::InlineBody(body) => WireValue::InlineBody(WireInlineBody {
@@ -1933,6 +1936,7 @@ fn wire_value_to_ir(value: WireValue, sources: Option<&[SourceText]>) -> Result<
         WireValue::Component(component) => {
             IrValue::Component(component_from_wire(component, sources)?)
         }
+        WireValue::Unit => IrValue::Unit,
         WireValue::None => IrValue::None,
         WireValue::Callable(callable) => IrValue::Callable(callable_from_wire(callable, sources)?),
         WireValue::InlineBody(body) => IrValue::InlineBody(IrInlineBody {
@@ -2508,6 +2512,13 @@ pub enum IrValue {
     /// A completed backend-neutral semantic component. Components remain
     /// typed values until an output boundary can materialize them losslessly.
     Component(IrComponent),
+    /// Quarkdown's observable Kotlin/JVM Unit result.
+    ///
+    /// Unit is a semantic value in value context. It is distinct from both
+    /// explicit `None` and an evaluator `NoValue` outcome. Direct function
+    /// call output may suppress Unit while captured/forwarded Unit remains
+    /// observable through the evaluator.
+    Unit,
     /// The Quarkdown language's explicit absence value.
     ///
     /// This is a semantic value, distinct from an evaluator `NoValue`
@@ -2528,12 +2539,53 @@ mod tests {
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange, IrRawBody, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
         TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
+
+    #[test]
+    fn unit_uses_the_stable_externally_tagged_serde_variant() {
+        let encoded = serde_json::to_value(IrValue::Unit).expect("IrValue serializes");
+        assert_eq!(encoded, serde_json::json!("Unit"));
+        assert_eq!(
+            serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
+            IrValue::Unit
+        );
+    }
+
+    #[test]
+    fn document_wire_roundtrip_preserves_unit_as_distinct_from_none() {
+        let span = SourceSpan::new(SourceId(71), 4, 12);
+        let document = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "probe".to_string(),
+                positional_args: vec![IrValue::Unit, IrValue::None],
+                named_args: vec![IrNamedArg {
+                    name: "value".to_string(),
+                    name_span: span,
+                    value: IrValue::Unit,
+                    span,
+                }],
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span,
+            }],
+            metadata: IrMetadata::default(),
+        };
+
+        let encoded = serde_json::to_string(&document).expect("IrDocument serializes");
+        assert!(encoded.contains("\"Unit\""));
+        assert!(encoded.contains("\"None\""));
+
+        let decoded =
+            serde_json::from_str::<IrDocument>(&encoded).expect("IrDocument deserializes");
+        assert_eq!(decoded, document);
+    }
 
     #[test]
     fn none_uses_the_stable_externally_tagged_serde_variant() {

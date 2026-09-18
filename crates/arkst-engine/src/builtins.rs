@@ -699,6 +699,9 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
+    if matches!(&value.value, IrValue::Unit) {
+        return Ok(IrValue::String("kotlin.Unit".to_string()));
+    }
     let text = scalar_string_argument_result(&value, "value").map_err(|error| {
         error.with_message("`.string` requires a scalar value that can adapt to text".to_string())
     })?;
@@ -985,6 +988,17 @@ fn values_equal(left: &IrValue, right: &IrValue) -> bool {
     if left == right {
         return true;
     }
+    // Clean-room v2.5.1/v2.6 evidence shows Unit and None compare equal in
+    // either direction even though Unit is not None (`.isnone(Unit)` is
+    // false) and Unit does not compare equal to its "kotlin.Unit" String
+    // projection. Keep this semantic equivalence separate from plain-text
+    // fallback so conversion does not become value identity.
+    if matches!(
+        (left, right),
+        (IrValue::Unit, IrValue::None) | (IrValue::None, IrValue::Unit)
+    ) {
+        return true;
+    }
     match (comparable_plain_text(left), comparable_plain_text(right)) {
         (Some(left), Some(right)) => left == right,
         _ => false,
@@ -1100,6 +1114,7 @@ pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
         | IrValue::Color(_)
         | IrValue::Enum(_)
         | IrValue::Component(_)
+        | IrValue::Unit
         | IrValue::None => None,
     }
 }
@@ -1536,7 +1551,7 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),
         IrValue::Number(value) => Some(value.to_string()),
-        IrValue::None => None,
+        IrValue::Unit | IrValue::None => None,
         IrValue::Range(_)
         | IrValue::Collection(_)
         | IrValue::Pair(_)
@@ -2264,6 +2279,34 @@ mod tests {
             )
             .expect("named string argument should bind"),
             IrValue::String("true".into())
+        );
+
+        assert_eq!(
+            evaluate("string", &[IrValue::Unit], &[], false)
+                .expect("Unit has an explicitly evidenced .string projection"),
+            IrValue::String("kotlin.Unit".into())
+        );
+        for name in [
+            "uppercase",
+            "lowercase",
+            "capitalize",
+            "isempty",
+            "isnotempty",
+        ] {
+            assert!(
+                evaluate(name, &[IrValue::Unit], &[], false).is_err(),
+                "{name} must not inherit the .string(Unit) exception"
+            );
+        }
+        assert!(
+            evaluate(
+                "concatenate",
+                &[IrValue::Unit, IrValue::String("x".into())],
+                &[],
+                false
+            )
+            .is_err(),
+            "generic string-family conversion must reject Unit"
         );
     }
 

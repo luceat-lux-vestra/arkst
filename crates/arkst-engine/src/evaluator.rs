@@ -532,7 +532,18 @@ impl DocumentState {
 /// that conversion necessary.
 enum CallableBodyValueAccumulator {
     Empty,
-    Semantic { value: IrValue, span: SourceSpan },
+    /// A direct function-call Unit result is a real return value but does not
+    /// contribute document output. Preserve it only if no observable value or
+    /// content supersedes it in the callable body.
+    SuppressedUnit,
+    /// Two or more direct Unit statements collapse to empty content in the
+    /// observed Quarkdown callable-body boundary: the value is captureable,
+    /// not None/Unit, stringifies to empty text, and contributes no output.
+    SuppressedUnits,
+    Semantic {
+        value: IrValue,
+        span: SourceSpan,
+    },
     Content(Vec<IrNode>),
 }
 
@@ -543,7 +554,10 @@ impl CallableBodyValueAccumulator {
         span: SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<(), CallOutcome> {
-        if matches!(self, Self::Empty) {
+        if matches!(
+            self,
+            Self::Empty | Self::SuppressedUnit | Self::SuppressedUnits
+        ) {
             *self = Self::Semantic { value, span };
             return Ok(());
         }
@@ -555,9 +569,19 @@ impl CallableBodyValueAccumulator {
         Ok(())
     }
 
+    fn append_suppressed_unit(&mut self) {
+        match self {
+            Self::Empty => *self = Self::SuppressedUnit,
+            Self::SuppressedUnit => *self = Self::SuppressedUnits,
+            Self::SuppressedUnits | Self::Semantic { .. } | Self::Content(_) => {}
+        }
+    }
+
     fn finish(self) -> CallOutcome {
         match self {
             Self::Empty => CallOutcome::NoValue,
+            Self::SuppressedUnit => CallOutcome::Value(IrValue::Unit),
+            Self::SuppressedUnits => CallOutcome::Value(IrValue::Content(Vec::new())),
             Self::Semantic { value, .. } => CallOutcome::Value(value),
             Self::Content(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
         }
@@ -568,7 +592,7 @@ impl CallableBodyValueAccumulator {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<IrNode>, CallOutcome> {
         match self {
-            Self::Empty => Ok(Vec::new()),
+            Self::Empty | Self::SuppressedUnit | Self::SuppressedUnits => Ok(Vec::new()),
             Self::Semantic { value, span } => value_into_content_nodes(value, span, diagnostics),
             Self::Content(nodes) => Ok(nodes),
         }
@@ -2992,6 +3016,13 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
+        let unit_is_observable_value_reference = is_variable_reference_call(
+            name,
+            positional_args,
+            named_args,
+            body.map(CallBody::Block),
+            context,
+        );
         match self.evaluate_call_value_with_ordered(
             name,
             ordered_args,
@@ -3004,6 +3035,9 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
+            CallOutcome::Value(IrValue::Unit) if !unit_is_observable_value_reference => {
+                CallOutcome::NoValue
+            }
             CallOutcome::Value(value) => {
                 match self.materialize_block_value(value, span, diagnostics) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
@@ -3063,6 +3097,13 @@ impl Evaluator {
             diagnostics.push(landscape_inline_materialization_error(*span));
             return Vec::new();
         }
+        let unit_is_observable_value_reference = is_variable_reference_call(
+            name,
+            positional_args,
+            named_args,
+            body.map(CallBody::Inline),
+            context,
+        );
         match self.evaluate_call_value_with_ordered(
             name,
             ordered_args,
@@ -3075,6 +3116,7 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
+            CallOutcome::Value(IrValue::Unit) if !unit_is_observable_value_reference => Vec::new(),
             CallOutcome::Value(value) => {
                 self.materialize_inline_value(Some(value), span, diagnostics)
             }
@@ -3287,6 +3329,7 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
+            CallOutcome::Value(IrValue::Unit) => CallOutcome::NoValue,
             CallOutcome::Value(value) => {
                 match self.materialize_block_value(value, span, diagnostics) {
                     Ok(nodes) => CallOutcome::Value(IrValue::Content(nodes)),
@@ -3317,6 +3360,7 @@ impl Evaluator {
             diagnostics,
             context,
         ) {
+            CallOutcome::Value(IrValue::Unit) => Vec::new(),
             CallOutcome::Value(value) => {
                 self.materialize_inline_value(Some(value), span, diagnostics)
             }
@@ -5847,7 +5891,7 @@ impl Evaluator {
                     message,
                     span: *span,
                 });
-                CallOutcome::NoValue
+                CallOutcome::Value(IrValue::Unit)
             }
             "debug" => {
                 if let Some(log_sink) = context.log_sink {
@@ -5857,7 +5901,7 @@ impl Evaluator {
                         span: *span,
                     });
                 }
-                CallOutcome::NoValue
+                CallOutcome::Value(IrValue::Unit)
             }
             "error" => {
                 diagnostics.push(logger_requested_error(message, *span));
@@ -11706,7 +11750,27 @@ impl Evaluator {
         let mut result = CallableBodyValueAccumulator::Empty;
         for node in nodes {
             let span = ir_node_source_span(node);
+            let suppress_unit_output = match node {
+                IrNode::FunctionCall {
+                    name,
+                    positional_args,
+                    named_args,
+                    body,
+                    ..
+                } => !is_variable_reference_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    body.as_deref().map(CallBody::Block),
+                    context,
+                ),
+                IrNode::ChainedFunctionCall { .. } => true,
+                _ => false,
+            };
             match self.evaluate_callable_statement_value(node, diagnostics, context) {
+                CallOutcome::Value(IrValue::Unit) if suppress_unit_output => {
+                    result.append_suppressed_unit();
+                }
                 CallOutcome::Value(value) => {
                     if let Err(outcome) = result.append_value(value, span, diagnostics) {
                         return outcome;
@@ -15063,6 +15127,7 @@ fn collection_values_equal(left: &IrValue, right: &IrValue) -> bool {
             (left.is_nan() && right.is_nan()) || left.total_cmp(right) == Ordering::Equal
         }
         (IrValue::Boolean(left), IrValue::Boolean(right)) => left == right,
+        (IrValue::Unit, IrValue::Unit) => true,
         (IrValue::None, IrValue::None) => true,
         (IrValue::Range(left), IrValue::Range(right)) => {
             left.start == right.start && left.end == right.end
@@ -17771,6 +17836,7 @@ fn scalar_to_text(
         IrValue::Number(number) => Ok(scalar_number_to_text(*number)),
         IrValue::Boolean(boolean) => Ok(boolean.to_string()),
         IrValue::Identifier(name) => Ok(name.clone()),
+        IrValue::Unit => Ok("kotlin.Unit".to_string()),
         IrValue::None => Ok("None".to_string()),
         IrValue::Content(_) => {
             diagnostics.push(iteration_error(
@@ -18299,6 +18365,7 @@ fn rebase_dynamic_value(value: &mut IrValue, source_span: SourceSpan) {
         | IrValue::Size(_)
         | IrValue::Color(_)
         | IrValue::Enum(_)
+        | IrValue::Unit
         | IrValue::None => {}
     }
 }
@@ -20796,6 +20863,29 @@ mod tests {
     fn collection_distinct_and_groupvalues_are_stable_and_typed() {
         let evaluator = Evaluator::new();
         let operation_span = span(0, 80);
+
+        assert!(collection_values_equal(&IrValue::Unit, &IrValue::Unit));
+        assert!(!collection_values_equal(&IrValue::Unit, &IrValue::None));
+        assert!(!collection_values_equal(&IrValue::None, &IrValue::Unit));
+
+        let unit_input = IrValue::Collection(vec![IrValue::Unit, IrValue::Unit, IrValue::None]);
+        let mut unit_diagnostics = Vec::new();
+        let mut unit_context = EvaluationContext::new();
+        let unit_distinct = collection_call(
+            &evaluator,
+            "distinct",
+            std::slice::from_ref(&unit_input),
+            &[],
+            &operation_span,
+            &mut unit_diagnostics,
+            &mut unit_context,
+        );
+        assert_eq!(
+            unit_distinct,
+            CallOutcome::Value(IrValue::Collection(vec![IrValue::Unit, IrValue::None]))
+        );
+        assert!(unit_diagnostics.is_empty(), "{unit_diagnostics:?}");
+
         let pair_one = IrValue::Pair(IrPair {
             first: Box::new(IrValue::String("key".to_string())),
             second: Box::new(IrValue::Number(1.0)),

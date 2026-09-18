@@ -739,7 +739,8 @@ pub(crate) fn convert_scalar_with_origin(
             IrValue::Number(value) => Ok(ScalarValue::String(number_to_text(*value))),
             IrValue::Boolean(value) => Ok(ScalarValue::String(value.to_string())),
             IrValue::Range(value) => Ok(ScalarValue::String(range_to_text(value))),
-            IrValue::None
+            IrValue::Unit
+            | IrValue::None
             | IrValue::Collection(_)
             | IrValue::Pair(_)
             | IrValue::Dictionary(_)
@@ -2518,6 +2519,7 @@ mod tests {
             ),
             Ok(ScalarValue::String("2..".into()))
         );
+        assert!(convert_scalar(&IrValue::Unit, ScalarTarget::String).is_err());
         assert!(convert_scalar(&IrValue::None, ScalarTarget::String).is_err());
         assert!(convert_scalar(&IrValue::Collection(Vec::new()), ScalarTarget::String).is_err());
     }

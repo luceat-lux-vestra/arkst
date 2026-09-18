@@ -394,9 +394,11 @@ evaluator contract and are `PARTIAL`: `.log` uses an explicit platform-neutral
 `LogSink` or fails deterministically with no ambient process stream,
 `.debug` is silent without a sink and emits a source-backed Debug event when
 one is supplied, and `.error` produces a structured source-backed evaluator
-diagnostic rather than host logging. Quarkdown's CLI stdout behavior, rendered
-error component, exact stderr text, strict exit code, `kotlin.Unit` value-context
-return semantics, richer DynamicValue-to-String formatting, and public
+diagnostic rather than host logging. #368/PR #371 adds the independently
+evidenced Unit value boundary for successful `.log`/`.debug` calls, including
+direct-call output suppression and the exact `kotlin.Unit` String projection.
+Quarkdown's CLI stdout behavior, rendered error component, exact stderr text,
+strict exit code, richer DynamicValue-to-String formatting, and public
 WASM/embedder exposure remain outside this bounded claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
@@ -424,10 +426,10 @@ the call. Logger events are emitted synchronously in evaluation order with
 source provenance, malformed calls emit no events, and source-defined
 functions retain normal precedence over these native names. The three rows are
 `PARTIAL`, not `SUPPORTED_SEMANTICS`, because normal CLI stdout/error-card/
-strict-mode behavior, `kotlin.Unit` return semantics, richer dynamic-value
-String formatting, and #191 public WASM exposure are not claimed. #197 therefore
-remains open as the residual owner even though no #151 row is still
-`UNSUPPORTED`.
+strict-mode behavior, richer dynamic-value String formatting, and #191 public
+WASM exposure are not claimed. The bounded Unit value/result semantics are
+covered by #368/PR #371. #197 therefore remains open for the remaining logger
+residuals even though no #151 row is still `UNSUPPORTED`.
 
 ### Bounded #196 localization contract
 
@@ -671,10 +673,11 @@ and sorted selector/conversion edge cases. Dictionary lookup is now a bounded
 semantic implementation. Library inspection now has a bounded #195 evaluator
 implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
-logger evaluator slice is also bounded; its residual PARTIAL status includes
-unmodeled `kotlin.Unit` value-context returns and richer upstream dynamic-value
-String formatting in addition to normal CLI/output and public embedder
-exposure. #197 remains open for those owned residuals rather than being treated
+logger evaluator slice is also bounded; #368/PR #371 models the independently
+evidenced Unit value-context results, while residual PARTIAL status still
+includes richer upstream dynamic-value String formatting in addition to normal
+CLI/output and public embedder exposure. #197 remains open for those owned
+residuals rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
 

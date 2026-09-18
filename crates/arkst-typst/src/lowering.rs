@@ -971,6 +971,16 @@ impl LoweringContext {
                 self.push_str(&escaped);
                 self.push('"');
             }
+            IrValue::Unit => {
+                // Unit is evaluator-owned semantic state. Normal successful
+                // evaluation either suppresses an unconsumed direct-call Unit
+                // or materializes a captured Unit as text before backend
+                // lowering. Never invent Typst Unit semantics for invalid
+                // pre-evaluation IR.
+                self.push_str(
+                    "panic(\"Arkst Unit reached Typst lowering without evaluator consumption\")",
+                );
+            }
             IrValue::None => {
                 // Semantic None remains distinct from the observable text
                 // materialized by the evaluator at an output boundary.
@@ -2845,6 +2855,28 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
         assert_eq!(code, "#figure(kind: \"table\")[content\n]\n\n");
+    }
+
+    #[test]
+    fn lower_pre_evaluation_unit_fails_closed_without_inventing_typst_semantics() {
+        let doc = IrDocument {
+            nodes: vec![IrNode::FunctionCall {
+                name: "show-value".into(),
+                positional_args: vec![IrValue::Unit],
+                named_args: Vec::new(),
+                ordered_args: None,
+                lambda_parameters: None,
+                body: None,
+                raw_body: None,
+                span: empty_span(),
+            }],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+        assert!(code.contains(
+            "panic(\"Arkst Unit reached Typst lowering without evaluator consumption\")"
+        ));
+        assert!(!code.contains("kotlin.Unit"));
     }
 
     #[test]
