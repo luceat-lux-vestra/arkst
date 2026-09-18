@@ -18354,6 +18354,7 @@ fn rebase_dynamic_value(value: &mut IrValue, source_span: SourceSpan) {
         | IrValue::Size(_)
         | IrValue::Color(_)
         | IrValue::Enum(_)
+        | IrValue::Unit
         | IrValue::None => {}
     }
 }

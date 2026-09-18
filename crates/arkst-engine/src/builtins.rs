@@ -1111,6 +1111,7 @@ pub(crate) fn plain_text_argument(value: &IrValue) -> Option<String> {
         | IrValue::Color(_)
         | IrValue::Enum(_)
         | IrValue::Component(_)
+        | IrValue::Unit
         | IrValue::None => None,
     }
 }
