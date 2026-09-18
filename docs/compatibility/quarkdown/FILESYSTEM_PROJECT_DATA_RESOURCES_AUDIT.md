@@ -230,7 +230,7 @@ and deliberately expose no host filename, native path, or timestamp state.
   #190 semantic boundary with caller-supplied immutable `EnvironmentInputs`:
   presence returns the exact injected String, absence returns `None`, and
   omitting the snapshot fails closed with source-backed `E3004`. Platform-neutral
-  code never calls `std::env`; ordinary compile/CLI evaluation therefore
+  production evaluation code never calls `std::env`; test-only oracle harnesses do not participate in language evaluation. Ordinary compile/CLI evaluation therefore
   remains deterministically denied rather than inheriting host process state.
 - Remote image/media and font URLs are real upstream network surfaces. The
   current Arkst policy rejects URI references and does not fetch them. The
@@ -306,7 +306,7 @@ or network access.
   residuals remain; coordinated with #181/#183 consumers;
 - [#190](https://github.com/luceat-lux-vestra/arkst/issues/190): **implemented
   bounded environment-input boundary**: explicit immutable injection,
-  present/absent semantics, deterministic denial, no ambient `std::env`, and
+  present/absent semantics, deterministic denial, no ambient `std::env` in production evaluation, and
   public core/native composition APIs; public WASM exposure remains #191;
 - [#191](https://github.com/luceat-lux-vestra/arkst/issues/191): deferred
   WASM project/resource binding;
