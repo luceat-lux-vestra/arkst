@@ -739,7 +739,8 @@ pub(crate) fn convert_scalar_with_origin(
             IrValue::Number(value) => Ok(ScalarValue::String(number_to_text(*value))),
             IrValue::Boolean(value) => Ok(ScalarValue::String(value.to_string())),
             IrValue::Range(value) => Ok(ScalarValue::String(range_to_text(value))),
-            IrValue::Unit | IrValue::None
+            IrValue::Unit
+            | IrValue::None
             | IrValue::Collection(_)
             | IrValue::Pair(_)
             | IrValue::Dictionary(_)
