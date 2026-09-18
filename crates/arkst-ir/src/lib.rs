@@ -2539,7 +2539,8 @@ mod tests {
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNode, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit,
+        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange, IrRawBody, IrSize,
+        IrSizeUnit,
         IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
         TargetSpecificContent,
     };
