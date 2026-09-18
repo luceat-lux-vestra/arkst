@@ -232,3 +232,61 @@ jobs:
           else
             printf '%s\n' 'QD197-DEBUG-ENABLED no-debug-or-verbose-cli-flag'
           fi
+
+      - name: Probe error value shape and continuation
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-error-shape
+          mkdir -p "$root"
+          cat > "$root/standalone.qd" <<'QD'
+          alpha
+          .error {QD197_SHAPE}
+          omega
+          QD
+          cat > "$root/inside-if.qd" <<'QD'
+          before
+          .if {true}
+              .error {QD197_IF_ERROR}
+          after
+          QD
+          cat > "$root/inside-function.qd" <<'QD'
+          .function {boom}
+              .error {QD197_FN_ERROR}
+          before
+          .boom
+          after
+          QD
+
+          for fixture in standalone inside-if inside-function; do
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-SHAPE fixture=%s rc=%s\n' "$fixture" "$rc"
+            printf 'QD197-SHAPE-STDOUT %s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD197-SHAPE-STDERR %s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              python3 - "$html" "$fixture" <<'PY'
+          from pathlib import Path
+          import re, sys
+          html=Path(sys.argv[1]).read_text()
+          marker="QD197_"
+          positions=[m.start() for m in re.finditer(marker, html)]
+          print(f"QD197-SHAPE-HTML fixture={sys.argv[2]} occurrences={len(positions)}")
+          for i,pos in enumerate(positions[:8]):
+              lo=max(0,pos-180)
+              hi=min(len(html),pos+260)
+              snippet=" ".join(html[lo:hi].split())
+              print(f"QD197-SHAPE-SNIP fixture={sys.argv[2]} index={i} text={snippet}")
+          PY
+            else
+              printf 'QD197-SHAPE-HTML fixture=%s NONE\n' "$fixture"
+            fi
+          done
