@@ -402,7 +402,6 @@ fn unit_optionality_equality_and_string_conversion_match_clean_room_contract() {
     );
 }
 
-
 #[test]
 fn unit_string_projection_does_not_widen_generic_string_consumers() {
     let source_id = SourceId(1987);
@@ -421,7 +420,8 @@ fn unit_string_projection_does_not_widen_generic_string_consumers() {
     assert!(
         diagnostics
             .iter()
-            .all(|diagnostic| diagnostic.message.contains("adapt") || diagnostic.message.contains(".log")),
+            .all(|diagnostic| diagnostic.message.contains("adapt")
+                || diagnostic.message.contains(".log")),
         "{diagnostics:?}"
     );
     assert!(
@@ -429,7 +429,6 @@ fn unit_string_projection_does_not_widen_generic_string_consumers() {
         "Unit must not be coerced through logger message conversion"
     );
 }
-
 
 #[test]
 fn repeated_unit_statements_collapse_to_empty_content_value() {
