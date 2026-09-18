@@ -173,6 +173,33 @@ pub trait LoadableLibraryProvider {
     fn loadable_library(&self, name: &str) -> Option<LoadableLibrarySource>;
 }
 
+/// Category of one evaluator runtime message event.
+///
+/// This is a semantic host-event category, not a process-stream selection.
+/// The evaluator never writes stdout/stderr directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMessageLevel {
+    Log,
+    Debug,
+    Error,
+}
+
+/// One source-backed runtime message produced by a Quarkdown logger builtin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMessageEvent {
+    pub level: RuntimeMessageLevel,
+    pub message: String,
+    pub span: arkst_source::SourceSpan,
+}
+
+/// Explicit host sink for evaluator runtime messages.
+///
+/// Supplying this sink is the capability grant. Platform-neutral engine code
+/// never discovers or opens process streams by itself.
+pub trait RuntimeMessageSink {
+    fn emit(&self, event: RuntimeMessageEvent);
+}
+
 /// Logical root requested by a resource-aware evaluator operation.
 ///
 /// The engine sees source identities only. Project composition remains
