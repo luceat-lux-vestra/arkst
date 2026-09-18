@@ -94,6 +94,19 @@ jobs:
           string:[.string {.env {ARKST_QD190_ABSENT}}]
           QD
 
+          cat > "$root/present-value.qd" <<'QD'
+          .var {x} {.env {ARKST_QD190_PRESENT}}
+          value:.x
+          equals:.string {.equals {.x} to:{"qd190-present-value"}}
+          isnone:.string {.isnone {.x}}
+          QD
+
+          cat > "$root/absent-value.qd" <<'QD'
+          .var {x} {.env {ARKST_QD190_ABSENT}}
+          isnone:.string {.isnone {.x}}
+          equals-none:.string {.equals {.x} to:{.none}}
+          QD
+
           unset ARKST_QD190_ABSENT || true
           export ARKST_QD190_PRESENT='qd190-present-value'
 
@@ -163,7 +176,7 @@ jobs:
           unset ARKST_QD190_ABSENT || true
           export ARKST_QD190_PRESENT='qd190-present-value'
 
-          for fixture in present absent; do
+          for fixture in present absent present-value absent-value; do
             for mode in default strict; do
               out="$root/out-allowed-$fixture-$mode"
               stdout="$root/allowed-$fixture-$mode.stdout"
