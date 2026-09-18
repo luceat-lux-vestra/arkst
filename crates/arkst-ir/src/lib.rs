@@ -2508,6 +2508,13 @@ pub enum IrValue {
     /// A completed backend-neutral semantic component. Components remain
     /// typed values until an output boundary can materialize them losslessly.
     Component(IrComponent),
+    /// Quarkdown's observable Kotlin/JVM Unit result.
+    ///
+    /// Unit is a semantic value in value context. It is distinct from both
+    /// explicit `None` and an evaluator `NoValue` outcome. Direct function
+    /// call output may suppress Unit while captured/forwarded Unit remains
+    /// observable through the evaluator.
+    Unit,
     /// The Quarkdown language's explicit absence value.
     ///
     /// This is a semantic value, distinct from an evaluator `NoValue`
@@ -2534,6 +2541,16 @@ mod tests {
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
+
+    #[test]
+    fn unit_uses_the_stable_externally_tagged_serde_variant() {
+        let encoded = serde_json::to_value(IrValue::Unit).expect("IrValue serializes");
+        assert_eq!(encoded, serde_json::json!("Unit"));
+        assert_eq!(
+            serde_json::from_value::<IrValue>(encoded).expect("IrValue deserializes"),
+            IrValue::Unit
+        );
+    }
 
     #[test]
     fn none_uses_the_stable_externally_tagged_serde_variant() {

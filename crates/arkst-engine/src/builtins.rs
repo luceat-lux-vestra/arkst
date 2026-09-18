@@ -985,6 +985,17 @@ fn values_equal(left: &IrValue, right: &IrValue) -> bool {
     if left == right {
         return true;
     }
+    // Clean-room v2.5.1/v2.6 evidence shows Unit and None compare equal in
+    // either direction even though Unit is not None (`.isnone(Unit)` is
+    // false) and Unit does not compare equal to its "kotlin.Unit" String
+    // projection. Keep this semantic equivalence separate from plain-text
+    // fallback so conversion does not become value identity.
+    if matches!(
+        (left, right),
+        (IrValue::Unit, IrValue::None) | (IrValue::None, IrValue::Unit)
+    ) {
+        return true;
+    }
     match (comparable_plain_text(left), comparable_plain_text(right)) {
         (Some(left), Some(right)) => left == right,
         _ => false,
@@ -1536,7 +1547,7 @@ pub(crate) fn adapt_string_argument(value: &IrValue) -> Option<String> {
         IrValue::String(text) | IrValue::Identifier(text) => Some(text.clone()),
         IrValue::Boolean(value) => Some(value.to_string()),
         IrValue::Number(value) => Some(value.to_string()),
-        IrValue::None => None,
+        IrValue::Unit | IrValue::None => None,
         IrValue::Range(_)
         | IrValue::Collection(_)
         | IrValue::Pair(_)
