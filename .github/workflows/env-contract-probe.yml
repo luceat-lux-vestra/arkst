@@ -1,0 +1,140 @@
+name: Quarkdown env black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: env-contract-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Capture CLI help
+        shell: bash
+        run: |
+          set +e
+          "$QD" --help > /tmp/qd-help.stdout 2>/tmp/qd-help.stderr
+          rc=$?
+          set -e
+          printf 'QD190-HELP-RC version=%s rc=%s\n' '${{ matrix.version }}' "$rc"
+          printf 'QD190-HELP-OUT version=%s [' '${{ matrix.version }}'
+          tr '\n' '|' </tmp/qd-help.stdout
+          printf ']\n'
+          printf 'QD190-HELP-ERR version=%s [' '${{ matrix.version }}'
+          tr '\n' '|' </tmp/qd-help.stderr
+          printf ']\n'
+
+      - name: Probe default present and absent env behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd190-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/present.qd" <<'QD'
+          direct:[.env {ARKST_QD190_PRESENT}]
+          isnone:.string {.isnone {.env {ARKST_QD190_PRESENT}}}
+          string:[.string {.env {ARKST_QD190_PRESENT}}]
+          QD
+
+          cat > "$root/absent.qd" <<'QD'
+          direct:[.env {ARKST_QD190_ABSENT}]
+          isnone:.string {.isnone {.env {ARKST_QD190_ABSENT}}}
+          string:[.string {.env {ARKST_QD190_ABSENT}}]
+          QD
+
+          unset ARKST_QD190_ABSENT || true
+          export ARKST_QD190_PRESENT='qd190-present-value'
+
+          for fixture in present absent; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$mode" = strict ]; then args+=(--strict); fi
+
+              set +e
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+              rc=$?
+              set -e
+
+              printf 'QD190-RUN version=%s fixture=%s mode=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$mode" "$rc"
+              printf 'QD190-STDOUT version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stdout"
+              printf ']\n'
+              printf 'QD190-STDERR version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stderr"
+              printf ']\n'
+
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" '${{ matrix.version }}' "$fixture" "$mode" <<'PY'
+from html.parser import HTMLParser
+from pathlib import Path
+import sys
+
+class Text(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.skip = 0
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self.skip += 1
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self.skip:
+            self.skip -= 1
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+p = Text()
+p.feed(Path(sys.argv[1]).read_text())
+text = " ".join(" ".join(p.parts).split())
+print(
+    f"QD190-HTML version={sys.argv[2]} fixture={sys.argv[3]} "
+    f"mode={sys.argv[4]} text={text!r}"
+)
+PY
+              else
+                printf 'QD190-HTML version=%s fixture=%s mode=%s NONE\n' '${{ matrix.version }}' "$fixture" "$mode"
+              fi
+            done
+          done
