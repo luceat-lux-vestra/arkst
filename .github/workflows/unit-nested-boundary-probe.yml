@@ -1,0 +1,151 @@
+name: Quarkdown Unit nested-boundary black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-nested-boundary-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe mixed callable and nested Unit boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd371nested-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/unit-then-content.qd" <<'QD'
+          .function {f}
+              .debug {QD371_UNIT_THEN_CONTENT}
+              visible
+          before
+          .f
+          after
+          QD
+
+          cat > "$root/content-then-unit.qd" <<'QD'
+          .function {f}
+              visible
+              .debug {QD371_CONTENT_THEN_UNIT}
+          before
+          .f
+          after
+          QD
+
+          cat > "$root/repeated-unit.qd" <<'QD'
+          .function {f}
+              .debug {QD371_REPEAT_A}
+              .debug {QD371_REPEAT_B}
+          before
+          .f
+          .var {x} {.f}
+          captured:.x
+          after
+          QD
+
+          cat > "$root/pair-unit-none.qd" <<'QD'
+          .var {u} {.debug {QD371_PAIR}}
+          .var {p} {.pair {.u} {.none}}
+          first:.p::first
+          second:.p::second
+          distinct-size:.p::distinct::size
+          pair:
+          .p
+          QD
+
+          fixtures=(unit-then-content content-then-unit repeated-unit pair-unit-none)
+
+          for fixture in "${fixtures[@]}"; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$mode" = strict ]; then args+=(--strict); fi
+
+              set +e
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+              rc=$?
+              set -e
+
+              printf 'QD371N-RUN version=%s fixture=%s mode=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$mode" "$rc"
+              printf 'QD371N-STDOUT version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stdout"
+              printf ']\n'
+              printf 'QD371N-STDERR version=%s fixture=%s mode=%s [' '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stderr"
+              printf ']\n'
+
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" '${{ matrix.version }}' "$fixture" "$mode" <<'PY'
+from html.parser import HTMLParser
+from pathlib import Path
+import sys
+
+class Text(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.skip = 0
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self.skip += 1
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self.skip:
+            self.skip -= 1
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+p = Text()
+p.feed(Path(sys.argv[1]).read_text())
+text = " ".join(" ".join(p.parts).split())
+print(
+    f"QD371N-HTML version={sys.argv[2]} fixture={sys.argv[3]} "
+    f"mode={sys.argv[4]} text={text!r}"
+)
+PY
+              else
+                printf 'QD371N-HTML version=%s fixture=%s mode=%s NONE\n' '${{ matrix.version }}' "$fixture" "$mode"
+              fi
+            done
+          done
