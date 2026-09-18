@@ -367,3 +367,76 @@ jobs:
               fi
             done
           done
+
+      - name: Probe error placeholder and binding failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-third
+          mkdir -p "$root"
+          cat > "$root/error-text.qd" <<'QD'
+          prefix
+          .error {QD197_EXACT_ERROR}
+          suffix
+          QD
+          cat > "$root/log-named.qd" <<'QD'
+          .log message:{QD197_NAMED_LOG}
+          QD
+          cat > "$root/debug-named.qd" <<'QD'
+          .debug message:{QD197_NAMED_DEBUG}
+          QD
+          cat > "$root/error-named.qd" <<'QD'
+          .error message:{QD197_NAMED_ERROR}
+          QD
+          cat > "$root/missing-log.qd" <<'QD'
+          .log
+          QD
+          cat > "$root/extra-log.qd" <<'QD'
+          .log {one} {two}
+          QD
+          cat > "$root/structured-log.qd" <<'QD'
+          .log {.pair {a} {b}}
+          QD
+
+          for fixture in error-text log-named debug-named error-named missing-log extra-log structured-log; do
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-BIND fixture=%s rc=%s\n' "$fixture" "$rc"
+            printf 'QD197-BIND-STDOUT %s [' "$fixture"; tr '\n' '|' <"$root/$fixture.stdout"; printf ']\n'
+            printf 'QD197-BIND-STDERR %s [' "$fixture"; tr '\n' '|' <"$root/$fixture.stderr"; printf ']\n'
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              python3 - "$html" "$fixture" <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts=[]
+                  self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          raw=Path(sys.argv[1]).read_text()
+          p=Text(); p.feed(raw)
+          text=" ".join(" ".join(p.parts).split())
+          print(f"QD197-BIND-HTML fixture={sys.argv[2]} text={text!r}")
+          needle="QD197_EXACT_ERROR"
+          if needle in raw:
+              i=raw.index(needle)
+              print("QD197-ERROR-RAW " + raw[max(0,i-220):i+len(needle)+300].replace("\n","\\n"))
+          PY
+          fi
+          done
