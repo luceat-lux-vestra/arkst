@@ -60,7 +60,9 @@ fn log_and_debug_require_explicit_sink_and_fail_closed_without_host_io() {
         arkst_engine::evaluator::Evaluator::new().evaluate(&document(source, source_id));
 
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-    assert!(diagnostics.iter().all(|diagnostic| diagnostic.code == "E3006"));
+    assert!(diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code == "E3006"));
     assert!(diagnostics
         .iter()
         .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id)));
@@ -83,9 +85,7 @@ fn explicit_sink_observes_log_debug_and_error_in_evaluation_order() {
     assert_eq!(events[1].message, "two");
     assert_eq!(events[2].level, RuntimeMessageLevel::Error);
     assert_eq!(events[2].message, "three");
-    assert!(events
-        .iter()
-        .all(|event| event.span.source_id == source_id));
+    assert!(events.iter().all(|event| event.span.source_id == source_id));
     drop(events);
 
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
@@ -124,7 +124,9 @@ fn malformed_logger_arguments_emit_no_host_event() {
     let (_, diagnostics) = arkst_engine::evaluator::Evaluator::new()
         .evaluate_with_runtime_message_sink(&sink, &document(source, source_id));
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-    assert!(diagnostics.iter().all(|diagnostic| diagnostic.code == "E3001"));
+    assert!(diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code == "E3001"));
     assert!(sink.events.borrow().is_empty());
 }
 
@@ -196,8 +198,8 @@ fn runtime_sink_propagates_through_user_functions_and_loaded_libraries() {
     let sink = RecordingSink::default();
     let source = ".function {local}\n    .log {from-local}\n.local\n.include {probe}\n.inside";
     let evaluator = arkst_engine::evaluator::Evaluator::new();
-    let (result, diagnostics) =
-        evaluator.evaluate_with_resources_and_libraries_and_runtime_message_sink_for_mode(
+    let (result, diagnostics) = evaluator
+        .evaluate_with_resources_and_libraries_and_runtime_message_sink_for_mode(
             &env,
             &env,
             &sink,
