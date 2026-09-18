@@ -1,0 +1,105 @@
+name: Quarkdown Unit equality black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe Unit equality matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd368eq-${{ matrix.version }}"
+          mkdir -p "$root"
+          cat > "$root/equality.qd" <<'QD'
+          .var {u} {.log {QD368_EQ_UNIT}}
+          .var {n} {.none}
+          unit-none:.string {.equals {.u} to:{.n}}
+          none-unit:.string {.equals {.n} to:{.u}}
+          unit-unit:.string {.equals {.u} to:{.u}}
+          unit-string:.string {.equals {.u} to:{"kotlin.Unit"}}
+          string-unit:.string {.equals {"kotlin.Unit"} to:{.u}}
+          unit-none-text:.string {.equals {.u} to:{"None"}}
+          none-text-unit:.string {.equals {"None"} to:{.u}}
+          unit-empty:.string {.equals {.u} to:{""}}
+          empty-unit:.string {.equals {""} to:{.u}}
+          unit-stringified-self:.string {.equals {.u} to:{.string {.u}}}
+          stringified-self-unit:.string {.equals {.string {.u}} to:{.u}}
+          QD
+
+          for mode in default strict; do
+            out="$root/out-$mode"
+            stdout="$root/$mode.stdout"
+            stderr="$root/$mode.stderr"
+            args=(compile "$root/equality.qd" --clean --pretty --out "$out" --out-name probe)
+            if [ "$mode" = strict ]; then args+=(--strict); fi
+            set +e
+            "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            printf 'QD368EQ-RUN version=%s mode=%s rc=%s\n' '${{ matrix.version }}' "$mode" "$rc"
+            printf 'QD368EQ-STDOUT version=%s mode=%s [' '${{ matrix.version }}' "$mode"
+            tr '\n' '|' <"$stdout"
+            printf ']\n'
+            printf 'QD368EQ-STDERR version=%s mode=%s [' '${{ matrix.version }}' "$mode"
+            tr '\n' '|' <"$stderr"
+            printf ']\n'
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              python3 - "$html" '${{ matrix.version }}' "$mode" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.parts=[]; self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"): self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip: self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip: self.parts.append(data)
+          p=Text(); p.feed(Path(sys.argv[1]).read_text())
+          text=" ".join(" ".join(p.parts).split())
+          print(f"QD368EQ-HTML version={sys.argv[2]} mode={sys.argv[3]} text={text!r}")
+          PY
+            else
+              printf 'QD368EQ-HTML version=%s mode=%s NONE\n' '${{ matrix.version }}' "$mode"
+            fi
+          done
