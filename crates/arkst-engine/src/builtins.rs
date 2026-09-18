@@ -699,6 +699,9 @@ fn evaluate_string(
     let value = arguments
         .remove(0)
         .ok_or_else(|| error("`.string` requires one value argument".to_string()))?;
+    if matches!(value.value, IrValue::Unit) {
+        return Ok(IrValue::String("kotlin.Unit".to_string()));
+    }
     let text = scalar_string_argument_result(&value, "value").map_err(|error| {
         error.with_message("`.string` requires a scalar value that can adapt to text".to_string())
     })?;
@@ -2276,6 +2279,28 @@ mod tests {
             )
             .expect("named string argument should bind"),
             IrValue::String("true".into())
+        );
+
+        assert_eq!(
+            evaluate("string", &[IrValue::Unit], &[], false)
+                .expect("Unit has an explicitly evidenced .string projection"),
+            IrValue::String("kotlin.Unit".into())
+        );
+        for name in ["uppercase", "lowercase", "capitalize", "isempty", "isnotempty"] {
+            assert!(
+                evaluate(name, &[IrValue::Unit], &[], false).is_err(),
+                "{name} must not inherit the .string(Unit) exception"
+            );
+        }
+        assert!(
+            evaluate(
+                "concatenate",
+                &[IrValue::Unit, IrValue::String("x".into())],
+                &[],
+                false
+            )
+            .is_err(),
+            "generic string-family conversion must reject Unit"
         );
     }
 
