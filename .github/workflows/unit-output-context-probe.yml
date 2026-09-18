@@ -1,0 +1,175 @@
+name: Quarkdown Unit output-context black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe Unit output/value-context boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd368-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/log-direct.qd" <<'QD'
+          before
+          .log {QD368_LOG_DIRECT}
+          after
+          QD
+
+          cat > "$root/debug-direct.qd" <<'QD'
+          before
+          .debug {QD368_DEBUG_DIRECT}
+          after
+          QD
+
+          cat > "$root/log-function-direct.qd" <<'QD'
+          .function {f}
+              .log {QD368_LOG_FN_DIRECT}
+          before
+          .f
+          after
+          QD
+
+          cat > "$root/debug-function-direct.qd" <<'QD'
+          .function {f}
+              .debug {QD368_DEBUG_FN_DIRECT}
+          before
+          .f
+          after
+          QD
+
+          cat > "$root/log-variable-direct.qd" <<'QD'
+          .var {x} {.log {QD368_LOG_VAR_DIRECT}}
+          before
+          .x
+          after
+          QD
+
+          cat > "$root/debug-variable-direct.qd" <<'QD'
+          .var {x} {.debug {QD368_DEBUG_VAR_DIRECT}}
+          before
+          .x
+          after
+          QD
+
+          cat > "$root/log-chain-string.qd" <<'QD'
+          before
+          .log {QD368_LOG_CHAIN}::string
+          after
+          QD
+
+          cat > "$root/debug-chain-string.qd" <<'QD'
+          before
+          .debug {QD368_DEBUG_CHAIN}::string
+          after
+          QD
+
+          cat > "$root/log-function-chain-string.qd" <<'QD'
+          .function {f}
+              .log {QD368_LOG_FN_CHAIN}
+          before
+          .f::string
+          after
+          QD
+
+          cat > "$root/debug-function-chain-string.qd" <<'QD'
+          .function {f}
+              .debug {QD368_DEBUG_FN_CHAIN}
+          before
+          .f::string
+          after
+          QD
+
+          fixtures=(
+            log-direct debug-direct
+            log-function-direct debug-function-direct
+            log-variable-direct debug-variable-direct
+            log-chain-string debug-chain-string
+            log-function-chain-string debug-function-chain-string
+          )
+
+          for fixture in "${fixtures[@]}"; do
+            out="$root/out-$fixture"
+            stdout="$root/$fixture.stdout"
+            stderr="$root/$fixture.stderr"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            printf 'QD368-RUN version=%s fixture=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD368-STDOUT version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$stdout"
+            printf ']\n'
+            printf 'QD368-STDERR version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$stderr"
+            printf ']\n'
+
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              python3 - "$html" '${{ matrix.version }}' "$fixture" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts=[]
+                  self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          p=Text()
+          p.feed(Path(sys.argv[1]).read_text())
+          text=" ".join(" ".join(p.parts).split())
+          print(f"QD368-HTML version={sys.argv[2]} fixture={sys.argv[3]} text={text!r}")
+          PY
+            else
+              printf 'QD368-HTML version=%s fixture=%s NONE\n' '${{ matrix.version }}' "$fixture"
+            fi
+          done
