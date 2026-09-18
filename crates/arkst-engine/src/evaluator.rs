@@ -3481,6 +3481,19 @@ impl Evaluator {
             );
         }
 
+        if is_runtime_message(name) && context.get_function(name).is_none() {
+            return self.evaluate_runtime_message_builtin(
+                name,
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+            );
+        }
+
         if is_html(name) {
             return self.evaluate_html(
                 positional_args,
@@ -5505,6 +5518,108 @@ impl Evaluator {
             ));
             return CallOutcome::Failed;
         }
+        CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_runtime_message_builtin(
+        &self,
+        name: &str,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: argument,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let message = match builtins::scalar_string_conversion(&argument) {
+            Ok(message) => message,
+            Err(error) => {
+                let call = format!("`.{name}`");
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("message"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some(call.as_str()),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let level = match name {
+            "log" => RuntimeMessageLevel::Log,
+            "debug" => RuntimeMessageLevel::Debug,
+            "error" => RuntimeMessageLevel::Error,
+            _ => unreachable!("runtime message name was prevalidated"),
+        };
+
+        if let Some(sink) = context.runtime_message_sink {
+            sink.emit(RuntimeMessageEvent {
+                level,
+                message: message.clone(),
+                span: *span,
+            });
+        } else if name != "error" {
+            diagnostics.push(runtime_message_sink_unavailable(name, *span));
+            return CallOutcome::Failed;
+        }
+
+        if name == "error" {
+            diagnostics.push(runtime_message_error(message, *span));
+            return CallOutcome::Failed;
+        }
+
         CallOutcome::NoValue
     }
 
@@ -12655,6 +12770,7 @@ pub(crate) enum NativeDispatchOwner {
     Conditional,
     DocumentState,
     Localization,
+    RuntimeMessage,
     Html,
     Markdown,
     Resource,
@@ -12701,6 +12817,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "captionposition",
 ];
 const LOCALIZATION_NATIVE_NAMES: &[&str] = &["localization", "localize"];
+const RUNTIME_MESSAGE_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
 const HTML_NATIVE_NAMES: &[&str] = &["html"];
 const MARKDOWN_NATIVE_NAMES: &[&str] = &["markdown"];
 const RESOURCE_NATIVE_NAMES: &[&str] = &[
@@ -12760,6 +12877,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Localization,
         names: LOCALIZATION_NATIVE_NAMES,
+    },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::RuntimeMessage,
+        names: RUNTIME_MESSAGE_NATIVE_NAMES,
     },
     NativeOwnerInventory {
         owner: NativeDispatchOwner::Html,
@@ -12922,6 +13043,10 @@ fn is_document_state(name: &str) -> bool {
 
 fn is_localization(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Localization)
+}
+
+fn is_runtime_message(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::RuntimeMessage)
 }
 
 fn is_html(name: &str) -> bool {
@@ -13959,6 +14084,10 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::required("key"),
                 ParameterMetadata::defaulted("separator"),
             ],
+            BodyPolicy::Reject,
+        ),
+        "log" | "debug" | "error" => (
+            vec![ParameterMetadata::required("message")],
             BodyPolicy::Reject,
         ),
         "if" | "ifnot" => (
@@ -16854,6 +16983,34 @@ fn html_argument_error_at(message: String, span: SourceSpan) -> Diagnostic {
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["`.html` accepts exactly one regular `content` String argument.".to_string()],
+    }
+}
+
+fn runtime_message_sink_unavailable(name: &str, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3006".to_string(),
+        severity: Severity::Error,
+        message: format!("RuntimeMessageSink capability is required for `.{name}`"),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Supply an explicit RuntimeMessageSink for this evaluation; the engine never writes process streams implicitly."
+                .to_string(),
+        ],
+    }
+}
+
+fn runtime_message_error(message: String, span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3006".to_string(),
+        severity: Severity::Error,
+        message: format!("`.error`: {message}"),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "The error builtin intentionally fails this invocation; document-level evaluation may continue with later nodes."
+                .to_string(),
+        ],
     }
 }
 
