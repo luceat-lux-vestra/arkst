@@ -401,3 +401,31 @@ fn unit_optionality_equality_and_string_conversion_match_clean_room_contract() {
         vec!["false", "true", "true", "false", "kotlin.Unit"]
     );
 }
+
+
+#[test]
+fn unit_string_projection_does_not_widen_generic_string_consumers() {
+    let source_id = SourceId(1987);
+    let sink = CollectingSink::default();
+    let source = ".var {u} {.debug {unit}}\n.uppercase {.u}\n.log {.u}";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(paragraph_texts(&result).is_empty());
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id)),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.message.contains("adapt") || diagnostic.message.contains(".log")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        sink.events.borrow().is_empty(),
+        "Unit must not be coerced through logger message conversion"
+    );
+}
