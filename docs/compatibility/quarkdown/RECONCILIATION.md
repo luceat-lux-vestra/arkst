@@ -102,7 +102,7 @@ status recorded by its owner.
 | `.read` | #155; `PARTIAL` | completed #188 logical resolver; completed #298 native host ingestion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative in-memory text and bounded line selection work. Absolute/global permission behavior is an accepted fail-closed divergence recorded under completed #296/#300; public WASM binding/parity is #191. |
 | `.json` | #155; `PARTIAL` | completed #188 resolver and #298 native host ingestion; #149 conversion; `POLICY_DIVERGENCE:global-read`; residual #191 | Source-relative in-memory JSON object/array/scalar behavior is evidenced. Full recursive conversion remains #149; global-read behavior is the accepted policy divergence and public WASM parity remains #191. |
 | `.include` | #155; `PARTIAL` | completed #188 resolver/nested identity and #298 native host ingestion; `POLICY_DIVERGENCE:global-read`; residual #191/#199 | Nested source identity, cycles/repeats, library dispatch, caller-relative callable resource bases, and explicit native `-l`/`--libs` ingestion are evidenced. Global-read behavior is the accepted policy divergence; public WASM binding and graph/output remain separate residual owners. |
-| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188/#298 prerequisites; completed #296 policy record; #189/#190/#191 consumers | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while language-facing breadth and WASM parity remain bounded by their explicit active owners. |
+| VirtualProject / ResourceProvider logical resource model | #155; `SUPPORTED_SEMANTICS` | completed #188/#298 prerequisites; completed #296 policy record; #189/#191 residual consumers; completed #190 environment-input contract | In-memory logical paths, source identity, project boundaries, deterministic provider contracts, and explicit native project/library ingestion are evidenced; the global-read incompatibility is an accepted fail-closed policy divergence, while language-facing breadth and WASM parity remain bounded by their explicit active owners. |
 | Typst entry/source-context contract | #155; `PARTIAL` | completed #187 strategy; completed #200 explicit selection; completed #201 parity evidence | The subprocess path remains the default and uses its explicit source context. The optional native in-process adapter maps the same `VirtualProject` boundary; the #187/#200/#201 backend strategy/selection/parity chain is completed historical evidence, not current follow-up ownership. |
 | WASM resource boundary | #155; `DEFERRED` | #191 M6/embedder boundary | Core/provider ideas are portable, but no public WASM resource API or native/WASM end-to-end equivalence exists. |
 
@@ -212,9 +212,9 @@ current blocker or follow-up owner.
 | [#198](https://github.com/luceat-lux-vestra/arkst/issues/198) | #154 → #150 / `.match` content transformation | Pattern/callback traversal and inline-content replacement; #181 remains shared infrastructure only. Depends on #165–#167 and coordinates output strategy with the completed #187 decision. | Completed #187 is no longer a blocker; proceed according to shared binding/atomicity and content/output prerequisites. |
 | [#199](https://github.com/luceat-lux-vestra/arkst/issues/199) | #154 / subdocument graph producer/output | `.subdocumentgraph` graph/content semantics and output. Hard dependency on #188 logical resolution; coordinates shared identifiers/indexing with #181 and the completed backend strategy with #187. | After completed #188 and the remaining content prerequisites; #187 is not an actionable blocker. |
 | [#187](https://github.com/luceat-lux-vestra/arkst/issues/187) | #155 → backend strategy | Completed re-evaluation: native in-process Typst is accepted as an optional adapter over `VirtualProject`; subprocess remains the default. #200 explicit native selection and #201 cross-platform parity evidence are also completed historical follow-ups. | Completed backend-strategy chain (#187/#200/#201); no actionable owner remains here. |
-| [#188](https://github.com/luceat-lux-vestra/arkst/issues/188) | #155 / logical project resource resolution | Completed common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity prerequisite. | Completed first resource implementation band; current residual resource work is owned by #189/#190/#191 and the applicable content/output owners. |
+| [#188](https://github.com/luceat-lux-vestra/arkst/issues/188) | #155 / logical project resource resolution | Completed common resolver, nested loading, `.read`, `.json`, `.include`, `.includeall`, `.pathtoroot`, and subdocument resource identity prerequisite. | Completed first resource implementation band; current residual resource work is owned by #189/#191 and the applicable content/output owners; #190 is the completed bounded environment-input contract. |
 | [#189](https://github.com/luceat-lux-vestra/arkst/issues/189) | #155 / project data and file identity | `.listfiles`, `.filename`, `.csv`, `.bibliography`; depends on completed #188 and coordinates with #181/#183. | Active data consumer owner after completed #188; exact per-row status remains in the filesystem manifest. |
-| [#190](https://github.com/luceat-lux-vestra/arkst/issues/190) | #155 / host capability boundary | Deterministic `.env` injection/denial and native/WASM contract; no `std::env`. It can be designed alongside #189 now that #187/#188 are completed, but must precede any environment-dependent exposure. | Parallel platform-contract band. |
+| [#190](https://github.com/luceat-lux-vestra/arkst/issues/190) | #155 / host capability boundary | Bounded deterministic `.env` contract implemented through immutable caller-supplied `EnvironmentInputs`: present String, absent None, E3004 when authority is omitted, no `std::env`, public core/native injection APIs, and repeated-evaluation isolation. Public WASM/embedder exposure remains #191. | Completed bounded semantic/native capability slice; `.env` stays `PARTIAL` only because the public WASM binding/parity layer is not #190-owned. |
 | [#191](https://github.com/luceat-lux-vestra/arkst/issues/191) | #155 / M6 WASM/embedder | WASM VirtualProject/resource boundary, provider exposure, diagnostics, and parity. It remains deferred to the WASM milestone; it is not immediately eligible because #156 completed. | Deferred. |
 
 The remaining #154 rows that are not assigned an implementation issue have an
@@ -249,7 +249,7 @@ closed, or treated as proof of complete v2.5.1 compatibility.
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
   #164 (completed)          #188 resolver              #190 capability
-        │                     (completed)                 │
+        │                     (completed)               (completed)
         ▼                        ▼                        │
       #163                    #189 data                 │
         │                        │                        │
@@ -272,8 +272,8 @@ closed, or treated as proof of complete v2.5.1 compatibility.
        completed #188 resolver ──► #199 subdocumentgraph
        #184 also owns the #154 keybinding/loremipsum producer review
 
-  #191: deferred WASM/embedder milestone after logical provider/capability
-        contracts and relevant parity evidence.
+  #191: deferred WASM/embedder milestone; #190's deterministic environment
+        capability contract is now a completed prerequisite.
 ```
 
 The graph distinguishes three relationships:
@@ -286,7 +286,7 @@ The graph distinguishes three relationships:
   should stabilize first. The #187 backend strategy is a completed historical
   sequencing prerequisite, not a current blocker.
 - **Parallelizable/deferred:** independent contracts can proceed in the same
-  band; #190 can proceed alongside current resource work, while #191 is
+  band; #190's environment-input contract is completed, while #191 remains
   deferred by the M6 platform milestone.
 
 ### #296 resource-permission close-out
@@ -297,8 +297,7 @@ The global-read policy reconciliation tracked by #296 is **complete** at #300 /
 Arkst deliberately keeps document-driven absolute/global host reads fail-closed rather than
 adding a second evaluator permission system. Canonical affected rows remain `PARTIAL`;
 `POLICY_DIVERGENCE:global-read` records this accepted compatibility/security divergence without leaving a
-closed issue as actionable ownership. #189/#190/#191 and content/output owners remain
-separate where their contracts are still open.
+closed issue as actionable ownership. #189/#191 and content/output owners remain separate where their contracts are still open; #190 is completed.
 
 ### #298 native host-ingestion close-out
 
