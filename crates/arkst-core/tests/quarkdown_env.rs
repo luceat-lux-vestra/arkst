@@ -50,7 +50,7 @@ fn default_compile_denies_env_instead_of_observing_host_process_state() {
 #[test]
 fn explicit_environment_snapshot_is_visible_and_absence_is_none() {
     let project = project(
-        ".var {value} {.env {ARKST_EXPLICIT}}\nvalue:.value\nmissing:.string {.isnone {.env {ARKST_MISSING}}}",
+        ".var {value} {.env {ARKST_EXPLICIT}}\nvalue:.value\n\nmissing:.string {.isnone {.env {ARKST_MISSING}}}",
     );
     let environment =
         EnvironmentInputs::from_iter([("ARKST_EXPLICIT".to_string(), "injected".to_string())]);
