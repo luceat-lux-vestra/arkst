@@ -485,9 +485,7 @@ fn emit_native_build_diagnostics(diagnostics: &[arkst_core::Diagnostic]) {
     }
 }
 
-fn ensure_no_fatal_build_errors(
-    diagnostics: &[arkst_core::Diagnostic],
-) -> anyhow::Result<()> {
+fn ensure_no_fatal_build_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyhow::Result<()> {
     let error_count = diagnostics
         .iter()
         .filter(|diagnostic| {
