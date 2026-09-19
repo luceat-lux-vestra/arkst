@@ -433,9 +433,10 @@ without a sink; `.error` emits one structured `E3011` diagnostic and fails
 the call. Logger events are emitted synchronously in evaluation order with
 source provenance, malformed calls emit no events, and source-defined
 functions retain normal precedence over these native names. The three rows are
-`PARTIAL`, not `SUPPORTED_SEMANTICS`, because `.error` error-card/stderr/
-strict-mode behavior, unreviewed logger String categories, Arkst-specific
-analysis-command logger output policy, and #191 public WASM exposure are not
+`PARTIAL`, not `SUPPORTED_SEMANTICS`, because strict-mode behavior, exact
+Quarkdown HTML/CSS error-card styling and unevidenced output contexts,
+unreviewed logger String categories, Arkst-specific analysis-command logger
+output policy, and #191 public WASM exposure are not
 claimed. The bounded Unit value/result semantics are
 covered by #368/PR #371. #197 therefore remains open for the remaining logger
 residuals even though no #151 row is still `UNSUPPORTED`.
@@ -604,9 +605,10 @@ error. The four library-inspection rows are bounded runtime-inspection
 implementations under #195 but cannot claim full stdlib visibility parity while
 Arkst intentionally filters out upstream names it cannot call. The three
 logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
-native `arkst build` `Log` stdout are implemented, but `.error` rendered/stderr/
-strict-mode behavior, Arkst-specific analysis-command logger output policy, and
-unreviewed logger String categories remain partial. No #151-owned row
+native `arkst build` `Log` stdout plus the clean-room-evidenced default/non-strict
+`.error` stderr/rendered continuation contract are implemented, but strict-mode
+behavior, exact HTML/CSS styling/unevidenced output contexts, Arkst-specific
+analysis-command logger output policy, and unreviewed logger String categories remain partial. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
 row is none because its value taxonomy belongs to #149. The 46
@@ -686,8 +688,8 @@ implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
 evidenced Unit value-context results, while residual PARTIAL status now covers unreviewed logger String categories,
-`.error` output/strict behavior, Arkst-specific analysis-command output policy,
-and public embedder exposure. #197 remains open for those owned residuals
+`.error` strict-mode plus exact-styling/unevidenced-output behavior, Arkst-specific
+analysis-command output policy, and public embedder exposure. #197 remains open for those owned residuals
 rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
