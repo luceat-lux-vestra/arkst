@@ -73,12 +73,7 @@ fn inspect_keeps_machine_output_unpolluted_by_unevidenced_logger_authority() {
     let input = dir.path().join("main.qd");
     fs::write(&input, ".log {must-not-prefix-ir}\n").unwrap();
 
-    let result = run(&[
-        os("inspect"),
-        input.as_os_str(),
-        os("--emit"),
-        os("ir"),
-    ]);
+    let result = run(&[os("inspect"), input.as_os_str(), os("--emit"), os("ir")]);
 
     assert!(!result.status.success());
     assert!(result.stdout.is_empty(), "{:?}", result.stdout);
