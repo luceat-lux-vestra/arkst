@@ -333,7 +333,12 @@ pub fn compile_with_capabilities(
     options: &CompileOptions,
     capabilities: Capabilities,
 ) -> CompileResult {
-    compile_with_inputs(project, options, capabilities, CompileEvaluationInput::Default)
+    compile_with_inputs(
+        project,
+        options,
+        capabilities,
+        CompileEvaluationInput::Default,
+    )
 }
 
 /// Compile an Arkst project with both explicit evaluator capabilities and an
@@ -424,24 +429,24 @@ fn compile_with_inputs(
             &ir,
             &metadata_defaults,
         ),
-        CompileEvaluationInput::Environment(environment) => {
-            evaluator.evaluate_with_resources_and_environment(
+        CompileEvaluationInput::Environment(environment) => evaluator
+            .evaluate_with_resources_and_environment(
                 &resource_provider,
                 source_id,
                 source_mode,
                 &ir,
                 &metadata_defaults,
                 environment,
-            )
-        }
-        CompileEvaluationInput::LogSink(log_sink) => evaluator.evaluate_with_resources_and_log_sink(
-            &resource_provider,
-            source_id,
-            source_mode,
-            &ir,
-            &metadata_defaults,
-            log_sink,
-        ),
+            ),
+        CompileEvaluationInput::LogSink(log_sink) => evaluator
+            .evaluate_with_resources_and_log_sink(
+                &resource_provider,
+                source_id,
+                source_mode,
+                &ir,
+                &metadata_defaults,
+                log_sink,
+            ),
     };
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
