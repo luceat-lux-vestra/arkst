@@ -69,6 +69,24 @@ jobs:
           outer-after
           QD
 
+          cat > "$root/align-error.qd" <<'QD'
+          outer-before
+          .align {center}
+              align-before
+              .error {QD197_NEST_ALIGN_ERROR}
+              align-after
+          outer-after
+          QD
+
+          cat > "$root/container-error.qd" <<'QD'
+          outer-before
+          .container
+              container-before
+              .error {QD197_NEST_CONTAINER_ERROR}
+              container-after
+          outer-after
+          QD
+
           cat > "$root/list-error.qd" <<'QD'
           outer-before
 
@@ -91,6 +109,24 @@ jobs:
               center-before
               .log {QD197_NEST_CENTER_LOG_CONTROL}
               center-after
+          outer-after
+          QD
+
+          cat > "$root/align-log-control.qd" <<'QD'
+          outer-before
+          .align {center}
+              align-before
+              .log {QD197_NEST_ALIGN_LOG_CONTROL}
+              align-after
+          outer-after
+          QD
+
+          cat > "$root/container-log-control.qd" <<'QD'
+          outer-before
+          .container
+              container-before
+              .log {QD197_NEST_CONTAINER_LOG_CONTROL}
+              container-after
           outer-after
           QD
 
@@ -254,12 +290,16 @@ jobs:
           }
 
           run_control center-log-control QD197_NEST_CENTER_LOG_CONTROL
+          run_control align-log-control QD197_NEST_ALIGN_LOG_CONTROL
+          run_control container-log-control QD197_NEST_CONTAINER_LOG_CONTROL
           run_control list-log-control QD197_NEST_LIST_LOG_CONTROL
           run_control blockquote-log-control QD197_NEST_BLOCKQUOTE_LOG_CONTROL
 
           for mode in default strict; do
             run_error direct-error QD197_NEST_DIRECT_ERROR "$mode"
             run_error center-error QD197_NEST_CENTER_ERROR "$mode"
+            run_error align-error QD197_NEST_ALIGN_ERROR "$mode"
+            run_error container-error QD197_NEST_CONTAINER_ERROR "$mode"
             run_error list-error QD197_NEST_LIST_ERROR "$mode"
             run_error blockquote-error QD197_NEST_BLOCKQUOTE_ERROR "$mode"
           done
