@@ -1,4 +1,5 @@
 use anyhow::Context;
+use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrNode};
 use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
 use std::cell::RefCell;
@@ -464,6 +465,95 @@ fn ensure_no_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyhow::Result<()
     Ok(())
 }
 
+const EXPLICIT_ERROR_HINT: &str = "The document explicitly requested an error through `.error`.";
+
+fn is_explicit_error_diagnostic(diagnostic: &arkst_core::Diagnostic) -> bool {
+    diagnostic.code == "E3011"
+        && matches!(&diagnostic.severity, arkst_core::Severity::Error)
+        && diagnostic
+            .hints
+            .iter()
+            .any(|hint| hint == EXPLICIT_ERROR_HINT)
+}
+
+fn emit_native_build_diagnostics(diagnostics: &[arkst_core::Diagnostic]) {
+    for diagnostic in diagnostics {
+        if is_explicit_error_diagnostic(diagnostic) {
+            eprintln!("{}", diagnostic.message);
+        } else {
+            eprintln!("{diagnostic:?}");
+        }
+    }
+}
+
+fn collect_explicit_error_components<'a>(
+    nodes: &'a [IrNode],
+    components: &mut Vec<&'a IrExplicitErrorComponent>,
+) {
+    for node in nodes {
+        if let IrNode::Component {
+            component: IrComponent::ExplicitError(error),
+        } = node
+        {
+            // Only the independently evidenced direct document-level error
+            // component is recoverable. Nested wrapper/list/blockquote output
+            // stays fail-closed until that output context is probed separately.
+            components.push(error);
+        }
+    }
+}
+
+fn explicit_error_diagnostic_matches_component(
+    diagnostic: &arkst_core::Diagnostic,
+    component: &IrExplicitErrorComponent,
+) -> bool {
+    diagnostic.primary == Some(component.span)
+        && diagnostic.message
+            == format!(
+                "Cannot call function error(String message) with arguments ({}): {}",
+                component.message, component.message
+            )
+}
+
+fn ensure_no_fatal_build_errors(
+    diagnostics: &[arkst_core::Diagnostic],
+    document: &IrDocument,
+) -> anyhow::Result<()> {
+    let mut components = Vec::new();
+    collect_explicit_error_components(&document.nodes, &mut components);
+
+    let mut fatal_errors = 0usize;
+    for diagnostic in diagnostics
+        .iter()
+        .filter(|diagnostic| matches!(&diagnostic.severity, arkst_core::Severity::Error))
+    {
+        if !is_explicit_error_diagnostic(diagnostic) {
+            fatal_errors += 1;
+            continue;
+        }
+
+        let Some(index) = components.iter().position(|component| {
+            explicit_error_diagnostic_matches_component(diagnostic, component)
+        }) else {
+            // A recoverable explicit-error diagnostic must have a concrete
+            // rendered semantic counterpart. Value-context or otherwise
+            // unmaterialized explicit errors stay fail-closed.
+            fatal_errors += 1;
+            continue;
+        };
+        components.remove(index);
+    }
+
+    // Likewise, never publish a document containing an explicit-error
+    // component without its structured diagnostic provenance.
+    fatal_errors += components.len();
+
+    if fatal_errors > 0 {
+        anyhow::bail!("found {} error(s)", fatal_errors);
+    }
+    Ok(())
+}
+
 /// Execute the `build` command: compile input to output format(s).
 ///
 /// `typst_path` selects the Typst executable used for PDF output. It is only
@@ -537,12 +627,11 @@ pub fn build_with_backend_and_libraries(
         .finish()
         .context("cannot write Quarkdown logger output to stdout")?;
 
-    for diag in &result.diagnostics {
-        eprintln!("{:?}", diag);
-    }
+    emit_native_build_diagnostics(&result.diagnostics);
 
-    // Fail on error diagnostics before writing output
-    ensure_no_errors(&result.diagnostics)?;
+    // Quarkdown default/non-strict `.error` is a rendered document component,
+    // not a build-aborting diagnostic. Every other error remains fail-closed.
+    ensure_no_fatal_build_errors(&result.diagnostics, &result.ir)?;
 
     let (typst_code, _source_map) = arkst_typst::lowering::lower_to_typst(&result.ir);
 
@@ -1171,6 +1260,52 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn build_error_classifier_requires_diagnostic_component_pairing() {
+        let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(197), 0, 13);
+        let explicit = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message:
+                "Cannot call function error(String message) with arguments (explicit): explicit"
+                    .to_string(),
+            primary: Some(span),
+            secondary: Vec::new(),
+            hints: vec![EXPLICIT_ERROR_HINT.to_string()],
+        };
+        let document = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::ExplicitError(IrExplicitErrorComponent {
+                    message: "explicit".to_string(),
+                    span,
+                }),
+            }],
+            metadata: Default::default(),
+        };
+        assert!(is_explicit_error_diagnostic(&explicit));
+        assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &document).is_ok());
+
+        let empty_document = IrDocument {
+            nodes: Vec::new(),
+            metadata: Default::default(),
+        };
+        assert!(
+            ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &empty_document).is_err()
+        );
+        assert!(ensure_no_fatal_build_errors(&[], &document).is_err());
+
+        let unrelated = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: "unrelated parser error".to_string(),
+            primary: None,
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        assert!(!is_explicit_error_diagnostic(&unrelated));
+        assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
     }
 
     #[test]

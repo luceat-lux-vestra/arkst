@@ -59,11 +59,11 @@ use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageGeometry,
-    IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
+    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrPageGeometry, IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -417,6 +417,74 @@ enum CallOutcome {
     NoValue,
     Failed,
     Unresolved,
+}
+
+fn component_contains_explicit_error(component: &IrComponent) -> bool {
+    match component {
+        IrComponent::ExplicitError(_) => true,
+        IrComponent::Stacked(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+        IrComponent::Container(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+        IrComponent::Landscape(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+    }
+}
+
+fn node_contains_explicit_error(node: &IrNode) -> bool {
+    match node {
+        IrNode::Component { component } => component_contains_explicit_error(component),
+        IrNode::Blockquote { content, .. } => content.iter().any(node_contains_explicit_error),
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
+            .iter()
+            .flat_map(|item| &item.nodes)
+            .any(node_contains_explicit_error),
+        _ => false,
+    }
+}
+
+fn value_contains_explicit_error(value: &IrValue) -> bool {
+    match value {
+        IrValue::Component(component) => component_contains_explicit_error(component),
+        IrValue::Content(nodes) => nodes.iter().any(node_contains_explicit_error),
+        IrValue::Collection(values) => values.iter().any(value_contains_explicit_error),
+        IrValue::Pair(pair) => {
+            value_contains_explicit_error(&pair.first)
+                || value_contains_explicit_error(&pair.second)
+        }
+        IrValue::Dictionary(dictionary) => dictionary.entries.iter().any(|pair| {
+            value_contains_explicit_error(&pair.first)
+                || value_contains_explicit_error(&pair.second)
+        }),
+        _ => false,
+    }
+}
+
+fn outcome_requires_rollback(outcome: &CallOutcome) -> bool {
+    matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved)
+        || matches!(outcome, CallOutcome::Value(value) if value_contains_explicit_error(value))
+}
+
+fn value_context_outcome(outcome: CallOutcome) -> CallOutcome {
+    match outcome {
+        CallOutcome::Value(value) if value_contains_explicit_error(&value) => CallOutcome::Failed,
+        outcome => outcome,
+    }
+}
+
+const EXPLICIT_ERROR_DIAGNOSTIC_HINT: &str =
+    "The document explicitly requested an error through `.error`.";
+
+fn is_explicit_error_diagnostic(diagnostic: &Diagnostic) -> bool {
+    diagnostic.code == "E3011"
+        && matches!(&diagnostic.severity, Severity::Error)
+        && diagnostic
+            .hints
+            .iter()
+            .any(|hint| hint == EXPLICIT_ERROR_DIAGNOSTIC_HINT)
 }
 
 type LocalizationTable = BTreeMap<String, BTreeMap<String, String>>;
@@ -3515,7 +3583,7 @@ impl Evaluator {
             ordered_args,
             implicit_argument,
         );
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(context);
         } else {
             checkpoint.commit(context);
@@ -4225,8 +4293,12 @@ impl Evaluator {
             }
             builtins::BuiltinBodyPolicy::BindEvaluatedContent => {
                 if let Some(call_body) = body {
-                    let body = match self.evaluate_call_body(call_body, &span, diagnostics, context)
-                    {
+                    let body = match self.evaluate_call_body_value_context(
+                        call_body,
+                        &span,
+                        diagnostics,
+                        context,
+                    ) {
                         CallOutcome::Value(value) => value,
                         outcome => return outcome,
                     };
@@ -6043,8 +6115,13 @@ impl Evaluator {
                 CallOutcome::Value(IrValue::Unit)
             }
             "error" => {
-                diagnostics.push(logger_requested_error(message, *span));
-                CallOutcome::Failed
+                diagnostics.push(logger_requested_error(message.clone(), *span));
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(
+                    IrExplicitErrorComponent {
+                        message,
+                        span: *span,
+                    },
+                )))
             }
             _ => unreachable!("logger name was prevalidated"),
         }
@@ -7837,7 +7914,7 @@ impl Evaluator {
                     }
                 }
             }
-            body => self.evaluate_call_body(body, span, diagnostics, context),
+            body => self.evaluate_call_body_value_context(body, span, diagnostics, context),
         }
     }
 
@@ -7904,7 +7981,7 @@ impl Evaluator {
                     };
                     IrValue::String(body_text)
                 } else {
-                    match self.evaluate_call_body(body, span, diagnostics, context) {
+                    match self.evaluate_call_body_value_context(body, span, diagnostics, context) {
                         CallOutcome::Value(value) => value,
                         outcome => return outcome,
                     }
@@ -8505,12 +8582,13 @@ impl Evaluator {
         let body_candidate = match body {
             Some(body) => {
                 let body_span = call_body_source_span(body, *span);
-                let value = match self.evaluate_call_body(body, span, diagnostics, context) {
-                    CallOutcome::Value(value) => value,
-                    CallOutcome::NoValue => IrValue::Content(Vec::new()),
-                    CallOutcome::Failed => return CallOutcome::Failed,
-                    CallOutcome::Unresolved => return CallOutcome::Unresolved,
-                };
+                let value =
+                    match self.evaluate_call_body_value_context(body, span, diagnostics, context) {
+                        CallOutcome::Value(value) => value,
+                        CallOutcome::NoValue => IrValue::Content(Vec::new()),
+                        CallOutcome::Failed => return CallOutcome::Failed,
+                        CallOutcome::Unresolved => return CallOutcome::Unresolved,
+                    };
                 Some(Candidate::Positional {
                     value,
                     span: body_span,
@@ -10330,14 +10408,16 @@ impl Evaluator {
             }
             let outcome =
                 self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
-            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
+            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue)
+                && !outcome_requires_rollback(&outcome)
+            {
                 for (name, value) in child.assigned_values() {
                     caller_context.apply_callable_assignment(name, value);
                 }
             }
             outcome
         };
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(caller_context);
         } else {
             checkpoint.commit(caller_context);
@@ -11616,7 +11696,7 @@ impl Evaluator {
                 )
             }
         };
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(context);
         } else {
             checkpoint.commit(context);
@@ -11656,7 +11736,8 @@ impl Evaluator {
                     })
                     .collect::<Vec<_>>();
                 if let Some(body) = body {
-                    match self.evaluate_call_body(*body, &span, diagnostics, context) {
+                    match self.evaluate_call_body_value_context(*body, &span, diagnostics, context)
+                    {
                         CallOutcome::Value(value) => values.push(value),
                         CallOutcome::NoValue => return CallOutcome::NoValue,
                         CallOutcome::Failed => return CallOutcome::Failed,
@@ -11694,7 +11775,8 @@ impl Evaluator {
                     })
                     .collect::<Vec<_>>();
                 let body_value = body.map(|body| {
-                    match self.evaluate_call_body(*body, &span, diagnostics, context) {
+                    match self.evaluate_call_body_value_context(*body, &span, diagnostics, context)
+                    {
                         CallOutcome::Value(value) => Ok(Candidate::Positional {
                             value: InvocationValue::static_value(value),
                             span: call_body_source_span(*body, span),
@@ -11829,7 +11911,12 @@ impl Evaluator {
                     })
                     .collect::<Vec<_>>();
                 if let Some(body) = body {
-                    let value = match self.evaluate_call_body(body, span, diagnostics, context) {
+                    let value = match self.evaluate_call_body_value_context(
+                        body,
+                        span,
+                        diagnostics,
+                        context,
+                    ) {
                         CallOutcome::Value(value) => value,
                         CallOutcome::NoValue => return Err(CallOutcome::NoValue),
                         CallOutcome::Failed => return Err(CallOutcome::Failed),
@@ -11841,7 +11928,12 @@ impl Evaluator {
             }
             LambdaParameters::Explicit(_parameters) => {
                 let body_value = if let Some(body) = body {
-                    let value = match self.evaluate_call_body(body, span, diagnostics, context) {
+                    let value = match self.evaluate_call_body_value_context(
+                        body,
+                        span,
+                        diagnostics,
+                        context,
+                    ) {
                         CallOutcome::Value(value) => value,
                         CallOutcome::NoValue => return Err(CallOutcome::NoValue),
                         CallOutcome::Failed => return Err(CallOutcome::Failed),
@@ -11911,6 +12003,13 @@ impl Evaluator {
                     result.append_suppressed_unit();
                 }
                 CallOutcome::Value(value) => {
+                    if value_contains_explicit_error(&value) {
+                        // Quarkdown's non-strict explicit error becomes the
+                        // callable result: earlier callable content is
+                        // discarded and later statements are not evaluated,
+                        // while the caller may continue after the invocation.
+                        return CallOutcome::Value(value);
+                    }
                     if let Err(outcome) = result.append_value(value, span, diagnostics) {
                         return outcome;
                     }
@@ -12028,6 +12127,9 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             outcome => return outcome,
         };
+        if value_contains_explicit_error(&value) {
+            return CallOutcome::Value(value);
+        }
 
         for (index, source_segment) in chain.iter().enumerate() {
             let mut positional_args = Vec::with_capacity(1 + source_segment.positional_args.len());
@@ -12099,6 +12201,9 @@ impl Evaluator {
             );
             match outcome {
                 CallOutcome::Value(next_value) => {
+                    if value_contains_explicit_error(&next_value) {
+                        return CallOutcome::Value(next_value);
+                    }
                     value = next_value;
                     value_origin = call_result_origin(&source_segment.name, context);
                 }
@@ -12158,21 +12263,60 @@ impl Evaluator {
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
     ) -> CallOutcome {
-        let before = diagnostics.len();
-        let value = match body {
+        match body {
             CallBody::Block(nodes) => {
-                IrValue::Content(self.evaluate_nodes(nodes, diagnostics, context))
+                let mut output = Vec::new();
+                for node in nodes {
+                    let before = diagnostics.len();
+                    let evaluated = self.evaluate_node(node, diagnostics, context);
+                    if diagnostics.len() != before {
+                        let new_diagnostics = &diagnostics[before..];
+                        if new_diagnostics.iter().all(is_explicit_error_diagnostic)
+                            && matches!(
+                                evaluated.as_slice(),
+                                [IrNode::Component {
+                                    component: IrComponent::ExplicitError(_)
+                                }]
+                            )
+                        {
+                            // In an evaluated block body, an explicit error
+                            // replaces earlier body output and terminates the
+                            // body. The enclosing invocation may still expose
+                            // the error component and its caller may continue.
+                            return CallOutcome::Value(IrValue::Content(evaluated));
+                        }
+                        return CallOutcome::Failed;
+                    }
+                    output.extend(evaluated);
+                }
+                CallOutcome::Value(IrValue::Content(output))
             }
-            CallBody::Inline(inlines) => IrValue::Content(vec![IrNode::Paragraph {
-                content: self.evaluate_inlines(inlines, diagnostics, context),
-                span: *span,
-            }]),
-        };
-        if diagnostics.len() == before {
-            CallOutcome::Value(value)
-        } else {
-            CallOutcome::Failed
+            CallBody::Inline(inlines) => {
+                let before = diagnostics.len();
+                let value = IrValue::Content(vec![IrNode::Paragraph {
+                    content: self.evaluate_inlines(inlines, diagnostics, context),
+                    span: *span,
+                }]);
+                if diagnostics.len() == before {
+                    CallOutcome::Value(value)
+                } else {
+                    CallOutcome::Failed
+                }
+            }
         }
+    }
+    /// Evaluates a call body when the result will be consumed as a semantic
+    /// value/argument rather than materialized directly as document output.
+    /// Explicit document errors are not ordinary values, so they fail closed
+    /// at this boundary instead of being forwarded to another consumer.
+    fn evaluate_call_body_value_context(
+        &self,
+        body: CallBody<'_>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        value_context_outcome(self.evaluate_call_body(body, span, diagnostics, context))
     }
 
     /// Resolves only a conditional's condition. Body and content arguments
@@ -12718,7 +12862,7 @@ impl Evaluator {
                     ..
                 }] = nodes.as_slice()
                 {
-                    return self.evaluate_call_value_with_ordered(
+                    return value_context_outcome(self.evaluate_call_value_with_ordered(
                         name,
                         ordered_args.as_deref(),
                         positional_args,
@@ -12729,7 +12873,7 @@ impl Evaluator {
                         span,
                         diagnostics,
                         context,
-                    );
+                    ));
                 }
                 if let [IrNode::ChainedFunctionCall {
                     head,
@@ -12739,14 +12883,14 @@ impl Evaluator {
                     ..
                 }] = nodes.as_slice()
                 {
-                    return self.evaluate_chain_value(
+                    return value_context_outcome(self.evaluate_chain_value(
                         head,
                         chain,
                         body.as_deref().map(CallBody::Block),
                         raw_body.as_ref(),
                         diagnostics,
                         context,
-                    );
+                    ));
                 }
                 let before = diagnostics.len();
                 let contains_declaration = nodes
@@ -12772,7 +12916,7 @@ impl Evaluator {
                     CallOutcome::Value(IrValue::Callable(callable))
                 }
             }
-            scalar => CallOutcome::Value(scalar.clone()),
+            scalar => value_context_outcome(CallOutcome::Value(scalar.clone())),
         }
     }
 
@@ -15667,10 +15811,12 @@ fn logger_requested_error(message: String, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3011".to_string(),
         severity: Severity::Error,
-        message: format!("`.error`: {message}"),
+        message: format!(
+            "Cannot call function error(String message) with arguments ({message}): {message}"
+        ),
         primary: Some(span),
         secondary: Vec::new(),
-        hints: vec!["The document explicitly requested an error through `.error`.".to_string()],
+        hints: vec![EXPLICIT_ERROR_DIAGNOSTIC_HINT.to_string()],
     }
 }
 
@@ -17108,7 +17254,7 @@ fn extension_body_value(
         ExtensionBodyPolicy::Reject => Ok(None),
         ExtensionBodyPolicy::AllowSeparate => Ok(None),
         ExtensionBodyPolicy::BindEvaluatedContent => {
-            match evaluator.evaluate_call_body(
+            match evaluator.evaluate_call_body_value_context(
                 owned_body_as_call_body(body),
                 &span,
                 diagnostics,
@@ -18200,14 +18346,18 @@ impl Evaluator {
         }
 
         if let Some(body) = body {
-            let outcome = match body {
-                CallBody::Block(nodes) => {
-                    self.evaluate_callable_body_value(nodes, diagnostics, context)
-                }
-                CallBody::Inline(inlines) => {
-                    self.evaluate_call_body(CallBody::Inline(inlines), span, diagnostics, context)
-                }
-            };
+            let outcome =
+                match body {
+                    CallBody::Block(nodes) => value_context_outcome(
+                        self.evaluate_callable_body_value(nodes, diagnostics, context),
+                    ),
+                    CallBody::Inline(inlines) => self.evaluate_call_body_value_context(
+                        CallBody::Inline(inlines),
+                        span,
+                        diagnostics,
+                        context,
+                    ),
+                };
             match outcome {
                 CallOutcome::Value(value) => {
                     context.assign_value(var_name, value);
@@ -18558,6 +18708,9 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
         IrComponent::Landscape(component) => {
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
+        }
+        IrComponent::ExplicitError(component) => {
+            component.span = source_span;
         }
     }
 }

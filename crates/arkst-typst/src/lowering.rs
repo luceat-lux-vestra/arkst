@@ -5,9 +5,9 @@
 
 use arkst_ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
-    IrDocument, IrDocumentAlignment, IrDocumentType, IrInline, IrLandscapeComponent,
-    IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -386,6 +386,20 @@ impl LoweringContext {
             IrComponent::Stacked(stacked) => self.lower_stacked(stacked),
             IrComponent::Container(container) => self.lower_container(container),
             IrComponent::Landscape(landscape) => self.lower_landscape(landscape),
+            IrComponent::ExplicitError(error) => self.lower_explicit_error(error),
+        }
+    }
+
+    fn lower_explicit_error(&mut self, component: &IrExplicitErrorComponent) {
+        let before = self.output.len();
+        self.push_str("#block[");
+        self.push_str("Error: error Cannot call function error (String message) with arguments (");
+        self.push_str(&escape_typst_text(&component.message));
+        self.push_str("): ");
+        self.push_str(&escape_typst_text(&component.message));
+        self.push_str("]\n");
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
         }
     }
 
@@ -1344,9 +1358,9 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDocument, IrInline, IrLandscapeComponent, IrListItem,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
+        IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
         IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
@@ -1412,6 +1426,15 @@ mod tests {
         }
     }
 
+    fn explicit_error_node(message: &str) -> IrNode {
+        IrNode::Component {
+            component: IrComponent::ExplicitError(IrExplicitErrorComponent {
+                message: message.to_string(),
+                span: empty_span(),
+            }),
+        }
+    }
+
     fn sized_container_node(
         width: Option<IrSize>,
         height: Option<IrSize>,
@@ -1428,6 +1451,19 @@ mod tests {
                 span: empty_span(),
             }),
         }
+    }
+
+    #[test]
+    fn lower_explicit_error_as_visible_backend_block() {
+        let doc = IrDocument {
+            nodes: vec![explicit_error_node("boom [literal]")],
+            metadata: IrMetadata::default(),
+        };
+
+        let code = super::lower_to_typst_code(&doc);
+
+        assert!(code.contains("#block[Error: error Cannot call function error"));
+        assert!(code.contains("boom \\[literal\\]"), "{code}");
     }
 
     #[test]

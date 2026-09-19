@@ -227,6 +227,7 @@ fn collect_component_sources(
         IrComponent::Landscape(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::ExplicitError(_) => {}
     }
     Ok(())
 }
@@ -619,6 +620,7 @@ pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
+    ExplicitError(IrExplicitErrorComponent),
 }
 
 impl IrComponent {
@@ -628,8 +630,19 @@ impl IrComponent {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
+            Self::ExplicitError(component) => component.span,
         }
     }
+}
+
+/// A backend-neutral explicit document error produced by Quarkdown `.error`.
+///
+/// This stores only the converted message and source provenance. Rendering
+/// style and native stderr/exit behavior remain host/backend concerns.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrExplicitErrorComponent {
+    pub message: String,
+    pub span: SourceSpan,
 }
 
 /// The backend-neutral semantic state produced by `.landscape`.
@@ -1097,6 +1110,7 @@ enum WireComponent {
     Stacked(WireStackedComponent),
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
+    ExplicitError(IrExplicitErrorComponent),
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1587,6 +1601,7 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
 
@@ -2036,6 +2051,7 @@ fn component_from_wire(
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
+        WireComponent::ExplicitError(component) => IrComponent::ExplicitError(component),
     })
 }
 
@@ -2538,10 +2554,10 @@ mod tests {
         IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
-        IrDocumentState, IrDocumentTheme, IrDocumentType, IrInline, IrLandscapeComponent,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange, IrRawBody, IrSize,
-        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget, SourceTable,
-        TargetSpecificContent,
+        IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrInline,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange,
+        IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
+        SourceTable, TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -3163,6 +3179,21 @@ mod tests {
                 span: SourceSpan::new(SourceId(7), 12, 19),
             }
         );
+    }
+
+    #[test]
+    fn explicit_error_component_serde_roundtrip_preserves_message_and_span() {
+        let value = IrValue::Component(IrComponent::ExplicitError(IrExplicitErrorComponent {
+            message: "boom".to_string(),
+            span: SourceSpan::new(SourceId(197), 4, 17),
+        }));
+
+        let encoded = serde_json::to_string(&value).expect("explicit error serializes");
+        assert!(!encoded.contains("typst"));
+        let decoded =
+            serde_json::from_str::<IrValue>(&encoded).expect("explicit error deserializes");
+
+        assert_eq!(decoded, value);
     }
 
     #[test]
