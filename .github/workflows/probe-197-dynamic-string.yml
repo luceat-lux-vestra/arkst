@@ -1,0 +1,104 @@
+name: Quarkdown logger dynamic-string clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe-${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          url="https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe logger String conversion value categories
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-dynamic-string
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/pair-direct.qd" <<'QD'
+          .log {.pair {left} {right}}
+          QD
+
+          cat > "$root/pair-variable.qd" <<'QD'
+          .var {value} {.pair {left} {right}}
+          .log {.value}
+          QD
+
+          cat > "$root/range-direct.qd" <<'QD'
+          .log {.range {1} {3}}
+          QD
+
+          cat > "$root/range-variable.qd" <<'QD'
+          .var {value} {.range {1} {3}}
+          .log {.value}
+          QD
+
+          cat > "$root/none-direct.qd" <<'QD'
+          .log {.none}
+          QD
+
+          cat > "$root/nested-unit.qd" <<'QD'
+          .log {.log {INNER197}}
+          QD
+
+          cat > "$root/pair-error.qd" <<'QD'
+          before
+          .error {.pair {left} {right}}
+          after
+          QD
+
+          for fixture in pair-direct pair-variable range-direct range-variable none-direct nested-unit pair-error; do
+            out="$root/out-$fixture"
+            stdout="$root/$fixture.stdout"
+            stderr="$root/$fixture.stderr"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            python3 - "$fixture" "$rc" "$stdout" "$stderr" <<'PY'
+          from pathlib import Path
+          import sys
+          fixture, rc, stdout_path, stderr_path = sys.argv[1:]
+          stdout = Path(stdout_path).read_text(errors="replace")
+          stderr = Path(stderr_path).read_text(errors="replace")
+          print(f"QD197-DYN fixture={fixture} rc={rc}")
+          print(f"QD197-DYN-STDOUT fixture={fixture} value={stdout!r}")
+          print(f"QD197-DYN-STDERR fixture={fixture} value={stderr!r}")
+          PY
+          done
