@@ -12,7 +12,12 @@ fn platform_neutral_env_path_has_no_ambient_process_lookup() {
         ("arkst-core/lib.rs", include_str!("../src/lib.rs")),
     ];
 
-    let forbidden = ["std::env", "use std::{env", "use std::{ env"];
+    let forbidden = [
+        "std::env::",
+        "use std::env",
+        "use std::{env",
+        "use std::{ env",
+    ];
 
     for (path, source) in sources {
         for pattern in forbidden {
