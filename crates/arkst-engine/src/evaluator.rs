@@ -61,10 +61,9 @@ use arkst_ir::{
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageGeometry,
-    IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
-    IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
-    NativeTarget, TargetSpecificContent,
+    IrNode, IrPageGeometry, IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -423,9 +422,15 @@ enum CallOutcome {
 fn component_contains_explicit_error(component: &IrComponent) -> bool {
     match component {
         IrComponent::ExplicitError(_) => true,
-        IrComponent::Stacked(component) => component.children.iter().any(node_contains_explicit_error),
-        IrComponent::Container(component) => component.children.iter().any(node_contains_explicit_error),
-        IrComponent::Landscape(component) => component.children.iter().any(node_contains_explicit_error),
+        IrComponent::Stacked(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+        IrComponent::Container(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
+        IrComponent::Landscape(component) => {
+            component.children.iter().any(node_contains_explicit_error)
+        }
     }
 }
 
@@ -447,10 +452,12 @@ fn value_contains_explicit_error(value: &IrValue) -> bool {
         IrValue::Content(nodes) => nodes.iter().any(node_contains_explicit_error),
         IrValue::Collection(values) => values.iter().any(value_contains_explicit_error),
         IrValue::Pair(pair) => {
-            value_contains_explicit_error(&pair.first) || value_contains_explicit_error(&pair.second)
+            value_contains_explicit_error(&pair.first)
+                || value_contains_explicit_error(&pair.second)
         }
         IrValue::Dictionary(dictionary) => dictionary.entries.iter().any(|pair| {
-            value_contains_explicit_error(&pair.first) || value_contains_explicit_error(&pair.second)
+            value_contains_explicit_error(&pair.first)
+                || value_contains_explicit_error(&pair.second)
         }),
         _ => false,
     }
