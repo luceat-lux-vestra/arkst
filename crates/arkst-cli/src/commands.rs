@@ -464,6 +464,43 @@ fn ensure_no_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyhow::Result<()
     Ok(())
 }
 
+const EXPLICIT_ERROR_HINT: &str = "The document explicitly requested an error through `.error`.";
+
+fn is_explicit_error_diagnostic(diagnostic: &arkst_core::Diagnostic) -> bool {
+    diagnostic.code == "E3011"
+        && diagnostic.severity == arkst_core::Severity::Error
+        && diagnostic
+            .hints
+            .iter()
+            .any(|hint| hint == EXPLICIT_ERROR_HINT)
+}
+
+fn emit_native_build_diagnostics(diagnostics: &[arkst_core::Diagnostic]) {
+    for diagnostic in diagnostics {
+        if is_explicit_error_diagnostic(diagnostic) {
+            eprintln!("{}", diagnostic.message);
+        } else {
+            eprintln!("{diagnostic:?}");
+        }
+    }
+}
+
+fn ensure_no_fatal_build_errors(
+    diagnostics: &[arkst_core::Diagnostic],
+) -> anyhow::Result<()> {
+    let error_count = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.severity == arkst_core::Severity::Error
+                && !is_explicit_error_diagnostic(diagnostic)
+        })
+        .count();
+    if error_count > 0 {
+        anyhow::bail!("found {} error(s)", error_count);
+    }
+    Ok(())
+}
+
 /// Execute the `build` command: compile input to output format(s).
 ///
 /// `typst_path` selects the Typst executable used for PDF output. It is only
@@ -537,12 +574,11 @@ pub fn build_with_backend_and_libraries(
         .finish()
         .context("cannot write Quarkdown logger output to stdout")?;
 
-    for diag in &result.diagnostics {
-        eprintln!("{:?}", diag);
-    }
+    emit_native_build_diagnostics(&result.diagnostics);
 
-    // Fail on error diagnostics before writing output
-    ensure_no_errors(&result.diagnostics)?;
+    // Quarkdown default/non-strict `.error` is a rendered document component,
+    // not a build-aborting diagnostic. Every other error remains fail-closed.
+    ensure_no_fatal_build_errors(&result.diagnostics)?;
 
     let (typst_code, _source_map) = arkst_typst::lowering::lower_to_typst(&result.ir);
 
@@ -1171,6 +1207,31 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn build_error_classifier_requires_the_explicit_error_hint_not_only_e3011() {
+        let explicit = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: "explicit".to_string(),
+            primary: None,
+            secondary: Vec::new(),
+            hints: vec![EXPLICIT_ERROR_HINT.to_string()],
+        };
+        assert!(is_explicit_error_diagnostic(&explicit));
+        assert!(ensure_no_fatal_build_errors(&[explicit]).is_ok());
+
+        let unrelated = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: "unrelated parser error".to_string(),
+            primary: None,
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        assert!(!is_explicit_error_diagnostic(&unrelated));
+        assert!(ensure_no_fatal_build_errors(&[unrelated]).is_err());
     }
 
     #[test]
