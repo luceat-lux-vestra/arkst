@@ -60,7 +60,7 @@ With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immedi
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
-This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. The normal CLI still does not reproduce Quarkdown's stdout behavior, and unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete and no longer blocks this logger slice; native CLI sink/output integration remains #197-owned, while public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
+This remains intentionally `PARTIAL`: the engine models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. Native `arkst build` now supplies an explicit host-owned sink that writes `Log` events to stdout in evaluation order while leaving `Debug` silent; the core/evaluator still perform no ambient process I/O, and ordinary `compile(...)` remains no-sink/fail-closed. A prior log remains observable when a later `.error` fails the build, and the failed build publishes no output artifact. Arkst-specific `check`/`inspect` output policy is not promoted by this bounded CLI build slice. Unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete; public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
 
 ### `.debug`
 
@@ -100,5 +100,5 @@ This contract does not:
 - broaden the evidenced Unit contract into generalized JVM/Kotlin object emulation;
 - claim Quarkdown error-card rendering or strict-mode CLI parity;
 - claim logger String formatting for structured categories beyond the independently evidenced Unit/None/closed-Range/plain-text-Pair subset;
-- close #197 while native CLI/output/strict behavior and unreviewed logger String categories remain;
+- close #197 while `.error` rendering/stderr/strict behavior and unreviewed logger String categories remain;
 - claim M3 (#263) completion.

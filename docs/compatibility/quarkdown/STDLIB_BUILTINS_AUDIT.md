@@ -401,9 +401,12 @@ Clean-room PR #378 establishes an additional logger-only String subset,
 identical across exact v2.5.1/v2.6.0 artifacts: Unit -> `kotlin.Unit`, None ->
 `None`, closed Range -> `start..end`, and the evidenced plain-text Pair JVM
 representation. The generic scalar String adapter remains unchanged.
-Quarkdown's CLI stdout behavior, rendered error component, exact stderr text,
-strict exit code, unreviewed logger String categories, and public WASM/embedder
-exposure remain outside this bounded claim. The
+Native `arkst build` now supplies an explicit host-owned logger sink and
+writes `Log` events to stdout in evaluation order while keeping `Debug` silent;
+ordinary core compilation remains no-sink/fail-closed. Rendered error
+components, exact stderr text, strict exit behavior, unreviewed logger String
+categories, and public WASM/embedder exposure remain outside this bounded
+claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
@@ -430,9 +433,10 @@ without a sink; `.error` emits one structured `E3011` diagnostic and fails
 the call. Logger events are emitted synchronously in evaluation order with
 source provenance, malformed calls emit no events, and source-defined
 functions retain normal precedence over these native names. The three rows are
-`PARTIAL`, not `SUPPORTED_SEMANTICS`, because normal CLI stdout/error-card/
-strict-mode behavior, unreviewed logger String categories, and #191 public
-WASM exposure are not claimed. The bounded Unit value/result semantics are
+`PARTIAL`, not `SUPPORTED_SEMANTICS`, because `.error` error-card/stderr/
+strict-mode behavior, unreviewed logger String categories, Arkst-specific
+analysis-command logger output policy, and #191 public WASM exposure are not
+claimed. The bounded Unit value/result semantics are
 covered by #368/PR #371. #197 therefore remains open for the remaining logger
 residuals even though no #151 row is still `UNSUPPORTED`.
 
@@ -599,8 +603,10 @@ takeif, libexists, functionexists, libraries, libfunctions, log, debug, and
 error. The four library-inspection rows are bounded runtime-inspection
 implementations under #195 but cannot claim full stdlib visibility parity while
 Arkst intentionally filters out upstream names it cannot call. The three
-logger/diagnostic rows are bounded evaluator implementations under #197 but do
-not claim normal CLI stdout/error-card/strict-mode parity. No #151-owned row
+logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
+native `arkst build` `Log` stdout are implemented, but `.error` rendered/stderr/
+strict-mode behavior, Arkst-specific analysis-command logger output policy, and
+unreviewed logger String categories remain partial. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
 row is none because its value taxonomy belongs to #149. The 46
@@ -679,10 +685,10 @@ semantic implementation. Library inspection now has a bounded #195 evaluator
 implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
-evidenced Unit value-context results, while residual PARTIAL status still
-includes richer upstream dynamic-value String formatting in addition to normal
-CLI/output and public embedder exposure. #197 remains open for those owned
-residuals rather than being treated
+evidenced Unit value-context results, while residual PARTIAL status now covers unreviewed logger String categories,
+`.error` output/strict behavior, Arkst-specific analysis-command output policy,
+and public embedder exposure. #197 remains open for those owned residuals
+rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
 

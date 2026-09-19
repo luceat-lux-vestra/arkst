@@ -148,6 +148,33 @@ pub mod evaluator {
             )
         }
 
+        pub(crate) fn evaluate_with_resources_and_log_sink<
+            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
+        >(
+            &self,
+            resources: &R,
+            source_id: SourceId,
+            source_mode: SourceMode,
+            document: &IrDocument,
+            metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
+            log_sink: &dyn arkst_engine::LogSink,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            let source_mode = match source_mode {
+                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+            };
+            self.inner
+                .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
+                    resources,
+                    resources,
+                    log_sink,
+                    source_id,
+                    source_mode,
+                    document,
+                    metadata_defaults,
+                )
+        }
+
         pub(crate) fn evaluate_with_resources_and_environment<
             R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
         >(
@@ -227,7 +254,9 @@ pub use arkst_diagnostics as diagnostics;
 pub use arkst_diagnostics::{Diagnostic, Severity};
 pub use source::*;
 // Compatibility facade: implementation ownership lives in arkst-project.
-pub use arkst_engine::{Capabilities, Capability, EnvironmentInputs, EvaluationLimits};
+pub use arkst_engine::{
+    Capabilities, Capability, EnvironmentInputs, EvaluationLimits, LogEvent, LogLevel, LogSink,
+};
 pub use arkst_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
 
 /// The Arkst core result type.
@@ -270,7 +299,25 @@ pub fn compile(project: &arkst_project::VirtualProject, options: &CompileOptions
         project,
         options,
         Capabilities::compatibility_default(),
-        None,
+        EvaluationHost::Default,
+    )
+}
+
+/// Compile an Arkst project with an explicit logger sink.
+///
+/// The platform-neutral compiler never writes to a process stream by itself.
+/// Native hosts that intentionally expose Quarkdown-compatible logger output
+/// must provide a sink through this entry point.
+pub fn compile_with_log_sink(
+    project: &arkst_project::VirtualProject,
+    options: &CompileOptions,
+    log_sink: &dyn LogSink,
+) -> CompileResult {
+    compile_with_inputs(
+        project,
+        options,
+        Capabilities::compatibility_default(),
+        EvaluationHost::LogSink(log_sink),
     )
 }
 
@@ -286,7 +333,7 @@ pub fn compile_with_environment(
         project,
         options,
         Capabilities::compatibility_default(),
-        Some(environment),
+        EvaluationHost::Environment(environment),
     )
 }
 
@@ -296,7 +343,7 @@ pub fn compile_with_capabilities(
     options: &CompileOptions,
     capabilities: Capabilities,
 ) -> CompileResult {
-    compile_with_inputs(project, options, capabilities, None)
+    compile_with_inputs(project, options, capabilities, EvaluationHost::Default)
 }
 
 /// Compile an Arkst project with both explicit evaluator capabilities and an
@@ -307,14 +354,25 @@ pub fn compile_with_capabilities_and_environment(
     capabilities: Capabilities,
     environment: &EnvironmentInputs,
 ) -> CompileResult {
-    compile_with_inputs(project, options, capabilities, Some(environment))
+    compile_with_inputs(
+        project,
+        options,
+        capabilities,
+        EvaluationHost::Environment(environment),
+    )
+}
+
+enum EvaluationHost<'a> {
+    Default,
+    Environment(&'a EnvironmentInputs),
+    LogSink(&'a dyn LogSink),
 }
 
 fn compile_with_inputs(
     project: &arkst_project::VirtualProject,
     options: &CompileOptions,
     capabilities: Capabilities,
-    environment: Option<&EnvironmentInputs>,
+    host: EvaluationHost<'_>,
 ) -> CompileResult {
     let entry = project.entry();
 
@@ -357,21 +415,30 @@ fn compile_with_inputs(
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
     let evaluator =
         evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits);
-    let (ir, evaluation_diagnostics) = match environment {
-        Some(environment) => evaluator.evaluate_with_resources_and_environment(
+    let (ir, evaluation_diagnostics) = match host {
+        EvaluationHost::Default => evaluator.evaluate_with_resources(
             &resource_provider,
             source_id,
             source_mode,
             &ir,
             &metadata_defaults,
-            environment,
         ),
-        None => evaluator.evaluate_with_resources(
+        EvaluationHost::Environment(environment) => evaluator
+            .evaluate_with_resources_and_environment(
+                &resource_provider,
+                source_id,
+                source_mode,
+                &ir,
+                &metadata_defaults,
+                environment,
+            ),
+        EvaluationHost::LogSink(log_sink) => evaluator.evaluate_with_resources_and_log_sink(
             &resource_provider,
             source_id,
             source_mode,
             &ir,
             &metadata_defaults,
+            log_sink,
         ),
     };
     let mut diagnostics: Vec<Diagnostic> = parsed
@@ -414,9 +481,22 @@ pub struct CompileResult {
 mod tests {
     use crate::ir::{IrInline, IrNode};
     use crate::{
-        CompileOptions, EvaluationLimits, Severity, SourceMode, VirtualPathBuf,
-        VirtualProjectBuilder,
+        CompileOptions, EvaluationLimits, LogEvent, LogLevel, LogSink, Severity, SourceMode,
+        VirtualPathBuf, VirtualProjectBuilder,
     };
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    struct CollectingLogSink {
+        events: RefCell<Vec<LogEvent>>,
+    }
+
+    impl LogSink for CollectingLogSink {
+        fn emit(&self, event: &LogEvent) {
+            self.events.borrow_mut().push(event.clone());
+        }
+    }
+
     #[test]
     fn it_compiles_empty_document() {
         let project = VirtualProjectBuilder::new()
@@ -434,6 +514,33 @@ mod tests {
             },
         );
         assert!(result.ir.nodes.is_empty());
+    }
+
+    #[test]
+    fn compile_log_sink_is_explicit_and_does_not_widen_default_compile() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .expect("valid path")
+            .add_source("main.qd", ".log {visible}\n.debug {hidden}\n")
+            .expect("valid path")
+            .build()
+            .unwrap();
+
+        let default_result = super::compile(&project, &CompileOptions::default());
+        assert_eq!(default_result.diagnostics.len(), 1, "{default_result:?}");
+        assert_eq!(default_result.diagnostics[0].code, "E3010");
+
+        let sink = CollectingLogSink::default();
+        let result = super::compile_with_log_sink(&project, &CompileOptions::default(), &sink);
+        assert!(result.diagnostics.is_empty(), "{result:?}");
+        assert!(result.ir.nodes.is_empty(), "{:?}", result.ir.nodes);
+
+        let events = sink.events.borrow();
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events[0].level, LogLevel::Log);
+        assert_eq!(events[0].message, "visible");
+        assert_eq!(events[1].level, LogLevel::Debug);
+        assert_eq!(events[1].message, "hidden");
     }
 
     #[test]
