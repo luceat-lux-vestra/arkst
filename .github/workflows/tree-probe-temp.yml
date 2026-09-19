@@ -1,0 +1,24 @@
+name: TEMP Tree Probe
+
+on:
+  push:
+    branches: [compat/197-native-cli-log-stdout]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 4
+          persist-credentials: false
+      - name: Print target tree
+        run: |
+          printf 'TARGET_COMMIT=%s\n' "d691cb41576748e4679e40a9caf0506095c66e7b"
+          printf 'TARGET_TREE=%s\n' "$(git rev-parse 'd691cb41576748e4679e40a9caf0506095c66e7b^{tree}')"
