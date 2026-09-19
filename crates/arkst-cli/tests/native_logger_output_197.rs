@@ -53,11 +53,12 @@ fn build_keeps_prior_log_and_renders_non_strict_error_component() {
     assert_eq!(stdout, "before-error\n");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let resolved_output = dir.path().canonicalize().unwrap().join("main.typ");
     assert_eq!(
         stderr,
         "Cannot call function error(String message) with arguments (boom): boom\nWrote generated Typst to "
             .to_string()
-            + &dir.path().join("main.typ").display().to_string()
+            + &resolved_output.display().to_string()
             + "\n"
     );
 
