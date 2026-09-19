@@ -1184,7 +1184,9 @@ mod tests {
 
         let error = sink.finish().expect_err("write failure must surface");
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
-        assert!(error.to_string().contains("synthetic logger output failure"));
+        assert!(error
+            .to_string()
+            .contains("synthetic logger output failure"));
     }
 
     /// Test-only variant of [`super::build`] that keeps the pre-`--typst-path`
