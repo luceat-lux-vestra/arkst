@@ -98,7 +98,14 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
     let source = ".log {.pair {left} {right}}\n.var {stored} {.pair {left} {right}}\n.debug {.stored}\n.log {.range {1} {3}}\n.log {.none}\n.error {.stored}";
     let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
 
-    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected explicit error component, got {:?}", result.nodes);
+    };
+    assert_eq!(error.message, pair);
+    assert_eq!(error.span.source_id, source_id);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(diagnostics[0].code, "E3011");
     assert_eq!(
@@ -186,9 +193,71 @@ fn explicit_error_is_source_backed_and_document_evaluation_continues() {
         diagnostics[0].primary.map(|span| span.source_id),
         Some(source_id)
     );
-    assert!(diagnostics[0].message.contains("boom"));
+    assert_eq!(
+        diagnostics[0].message,
+        "Cannot call function error(String message) with arguments (boom): boom"
+    );
     assert!(sink.events.borrow().is_empty());
     assert_eq!(paragraph_texts(&result), vec!["before", "after"]);
+    assert!(matches!(
+        result.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::Component {
+                component: arkst_ir::IrComponent::ExplicitError(_)
+            },
+            IrNode::Paragraph { .. }
+        ]
+    ));
+}
+
+#[test]
+fn error_component_stops_a_following_chain_without_secondary_diagnostics() {
+    let source_id = SourceId(1990);
+    let source = "before\n\n.error {chain-error}::isnone\n\nafter";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert_eq!(paragraph_texts(&result), vec!["before", "after"]);
+    assert!(matches!(
+        result.nodes.as_slice(),
+        [
+            IrNode::Paragraph { .. },
+            IrNode::Component {
+                component: arkst_ir::IrComponent::ExplicitError(_)
+            },
+            IrNode::Paragraph { .. }
+        ]
+    ));
+}
+
+#[test]
+fn explicit_error_in_value_context_fails_without_fabricating_a_component_value() {
+    let source_id = SourceId(1991);
+    let (result, diagnostics) = evaluate_plain(".uppercase {.error {nested-error}}", source_id);
+
+    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert!(diagnostics[0].message.contains("nested-error"));
+}
+
+#[test]
+fn explicit_error_preserves_failure_style_state_rollback_inside_user_function() {
+    let source_id = SourceId(1992);
+    let source = ".var {state} {before}\n.function {boom}\n    .state {after}\n    .error {rollback}\n.boom\n.state";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert_eq!(paragraph_texts(&result), vec!["before"]);
+    assert!(matches!(
+        result.nodes.first(),
+        Some(IrNode::Component {
+            component: arkst_ir::IrComponent::ExplicitError(_)
+        })
+    ));
 }
 
 #[test]
