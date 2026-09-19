@@ -35,6 +35,16 @@ accepts Pair/None/Unit while remaining CLI-silent; and `.error` accepts the
 same Pair conversion. #378 is closed unmerged and no upstream implementation
 source, tests, or fixtures were inspected or copied for this correction.
 
+Disposable clean-room PR #382 then re-pinned the remaining `.error` output
+contract against the exact same v2.5.1/v2.6.0 official artifacts. Workflow run
+35432948304 passed for v2.5.1 job 105870633950 and v2.6.0 job 105870633937.
+Both versions agree that default/non-strict `.error` exits 0, writes the stable
+one-line failed-call presentation to stderr, renders an error component at the
+call site, and continues following content; the same holds through a
+source-defined function. Both strict probes exit 66 and publish no artifact.
+Strict stack implementation frames differ between versions and are explicitly
+not a compatibility contract. #382 is closed unmerged.
+
 Observed behavior from probe runs 35284604253 / 35284697810 / 35302505118, with final return-value confirmation in run 35324039621 (job 105532850554):
 
 - `.log {text}` writes the converted message to stdout, contributes no direct document output, and compilation succeeds in both default and `--strict` modes.
@@ -60,7 +70,7 @@ With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immedi
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
-This remains intentionally `PARTIAL`: the engine models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. Native `arkst build` now supplies an explicit host-owned sink that writes `Log` events to stdout in evaluation order while leaving `Debug` silent; the core/evaluator still perform no ambient process I/O, and ordinary `compile(...)` remains no-sink/fail-closed. A prior log remains observable when a later `.error` fails the build, and the failed build publishes no output artifact. Arkst-specific `check`/`inspect` output policy is not promoted by this bounded CLI build slice. Unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete; public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
+This remains intentionally `PARTIAL`: the engine models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. Native `arkst build` supplies an explicit host-owned sink that writes `Log` events to stdout in evaluation order while leaving `Debug` silent; the core/evaluator still perform no ambient process I/O, and ordinary `compile(...)` remains no-sink/fail-closed for `.log`. Default native build now treats only the structured explicit-`.error` diagnostic as recoverable, emits the clean-room-evidenced one-line stderr presentation, lowers a backend-neutral explicit-error component, and continues artifact production. Ordinary errors remain fatal. Arkst-specific `check`/`inspect` output policy is not promoted by this bounded CLI build slice. Unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete; public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
 
 ### `.debug`
 
@@ -72,11 +82,11 @@ The optional explicit sink is an Arkst embedder boundary; it does not claim that
 
 ### `.error`
 
-Arkst does not route `.error` through `LogSink`. After normal binding and String conversion it creates one source-backed `E3011` compiler diagnostic and the call fails semantically. Evaluation of later top-level content continues, matching the observed non-strict continuation behavior. This is explicitly covered both with and without an injected logger sink, proving that `.error` does not accidentally acquire logger-capability semantics.
+Arkst does not route `.error` through `LogSink`. After normal binding and String conversion it creates one source-backed `E3011` compiler diagnostic and a backend-neutral `IrComponent::ExplicitError` carrying only the converted message and provenance. Output contexts materialize that component while later top-level content and source-defined-function content continue. The invocation still uses failure-style transaction rollback, and an explicit-error component is not exposed as an ordinary scalar/chain value.
 
-The diagnostic remains structured compiler state rather than an implicit stderr write.
+The evaluator performs no stderr write. Native `arkst build` recognizes an explicit `.error` only when the structured E3011 diagnostic also carries the dedicated explicit-error hint; unrelated E3011 diagnostics remain fatal. Default build writes the clean-room-evidenced line `Cannot call function error(String message) with arguments (<message>): <message>` to stderr and continues artifact production. Typst lowering emits a visible semantic error block without claiming Quarkdown's HTML/CSS styling or source-snippet markup.
 
-This is `PARTIAL` because Arkst does not yet reproduce Quarkdown's rendered HTML error component, exact stderr text, or CLI `--strict` exit-code behavior. Those output/CLI effects must not be fabricated inside the platform-neutral evaluator.
+This remains `PARTIAL`: Arkst has no `--strict` CLI contract yet, so exit 66, strict abort/no-artifact handling, and strict stderr presentation remain open. Conditional-body error recovery and exact Quarkdown HTML error-card styling are also not generalized beyond independently established Arkst boundaries.
 
 ## Ordering, failure, and provenance
 
@@ -98,7 +108,7 @@ This contract does not:
 - reopen or duplicate completed #190 host/process capability work;
 - complete #191 public WASM/embedder bindings;
 - broaden the evidenced Unit contract into generalized JVM/Kotlin object emulation;
-- claim Quarkdown error-card rendering or strict-mode CLI parity;
+- claim exact Quarkdown HTML/CSS error-card styling or strict-mode CLI parity;
 - claim logger String formatting for structured categories beyond the independently evidenced Unit/None/closed-Range/plain-text-Pair subset;
-- close #197 while `.error` rendering/stderr/strict behavior and unreviewed logger String categories remain;
+- close #197 while strict-mode behavior, exact HTML styling/unevidenced output contexts, and unreviewed logger String categories remain;
 - claim M3 (#263) completion.
