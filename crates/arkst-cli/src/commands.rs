@@ -468,7 +468,7 @@ const EXPLICIT_ERROR_HINT: &str = "The document explicitly requested an error th
 
 fn is_explicit_error_diagnostic(diagnostic: &arkst_core::Diagnostic) -> bool {
     diagnostic.code == "E3011"
-        && diagnostic.severity == arkst_core::Severity::Error
+        && matches!(&diagnostic.severity, arkst_core::Severity::Error)
         && diagnostic
             .hints
             .iter()
@@ -489,7 +489,7 @@ fn ensure_no_fatal_build_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyho
     let error_count = diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.severity == arkst_core::Severity::Error
+            matches!(&diagnostic.severity, arkst_core::Severity::Error)
                 && !is_explicit_error_diagnostic(diagnostic)
         })
         .count();
