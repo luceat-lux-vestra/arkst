@@ -408,9 +408,13 @@ PR #382 additionally fixes the stable default/non-strict `.error` contract
 across exact v2.5.1/v2.6.0 artifacts: one-line stderr, rendered call-site
 continuation, selected conditional/function body replacement with caller continuation, and rc=0. Arkst models that
 bounded contract with a backend-neutral explicit-error component and
-native-build continuation. Strict-mode behavior, exact Quarkdown HTML/CSS
-styling and unevidenced output contexts, unreviewed logger String categories,
-and public WASM/embedder exposure remain outside this bounded claim. The
+native-build continuation. Clean-room PR #386 further pins strict native-build
+finalization: evaluator/caller/logger continuation remains observable at the
+evidenced boundaries, the first paired explicit error determines bounded strict
+stderr, exit 66 occurs before artifact publication, and unselected conditionals
+remain lazy. Exact Quarkdown HTML/CSS styling and unevidenced output contexts,
+exact JVM strict stack traces, unreviewed logger String categories, and public
+WASM/embedder exposure remain outside this bounded claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
@@ -431,7 +435,10 @@ representation without widening unrelated generic String consumers.
 `.error` is a failed call that renders an error component while caller/top-level
 content continues in non-strict mode. Clean-room PR #385 additionally pins that
 selected conditional/function body content around the error is replaced by the
-error component; strict mode aborts the compile.
+error component. Clean-room PR #386 pins strict mode as host/build finalization
+rather than a global evaluator abort: caller/top-level effects continue at the
+evidenced boundaries, then the first paired explicit error yields exit 66 and
+no artifact.
 
 Arkst keeps host effects outside the evaluator. `.log` requires an explicit
 `LogSink`; `.debug` validates/converts its argument and is a silent no-op
@@ -440,15 +447,17 @@ backend-neutral explicit-error component. The invocation retains failure-style
 rollback/value-boundary stopping, while block output can materialize the
 component and continue later content. Native `arkst build` alone recognizes
 the dedicated explicit-error diagnostic as recoverable in default mode and
-emits the evidenced stderr line; unrelated errors remain fatal. Logger events
-are emitted synchronously in evaluation order with source provenance,
-malformed calls emit no events, and source-defined functions retain normal
-precedence over these native names. The three rows are
-`PARTIAL`, not `SUPPORTED_SEMANTICS`, because strict-mode behavior, exact
-Quarkdown HTML/CSS error-card styling and unevidenced output contexts,
-unreviewed logger String categories, Arkst-specific analysis-command logger
-output policy, and #191 public WASM exposure are not
-claimed. The bounded Unit value/result semantics are
+emits the evidenced stderr line; strict native build reuses the same proven
+diagnostic/component pairing, preserves evaluation/logger continuation, then
+reports the first paired explicit error with bounded strict stderr and exits 66
+before artifact writes. Unrelated errors remain fatal. Logger events are emitted
+synchronously in evaluation order with source provenance, malformed calls emit
+no events, and source-defined functions retain normal precedence over these
+native names. The three rows are `PARTIAL`, not `SUPPORTED_SEMANTICS`, because
+exact Quarkdown HTML/CSS error-card styling and unevidenced output contexts,
+exact JVM strict stack traces, unreviewed logger String categories,
+Arkst-specific analysis-command logger output policy, and #191 public WASM
+exposure are not claimed. The bounded Unit value/result semantics are
 covered by #368/PR #371. #197 therefore remains open for the remaining logger
 residuals even though no #151 row is still `UNSUPPORTED`.
 
@@ -617,9 +626,11 @@ implementations under #195 but cannot claim full stdlib visibility parity while
 Arkst intentionally filters out upstream names it cannot call. The three
 logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
 native `arkst build` `Log` stdout plus the clean-room-evidenced default/non-strict
-`.error` stderr/rendered continuation contract are implemented, but strict-mode
-behavior, exact HTML/CSS styling/unevidenced output contexts, Arkst-specific
-analysis-command logger output policy, and unreviewed logger String categories remain partial. No #151-owned row
+and bounded native strict `.error` contracts are implemented, including strict
+first-error stderr, exit 66/no-artifact finalization, caller/top-level continuation,
+and unselected-conditional laziness; exact HTML/CSS styling/unevidenced output
+contexts, exact JVM strict stack traces, Arkst-specific analysis-command logger
+output policy, and unreviewed logger String categories remain partial. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
 row is none because its value taxonomy belongs to #149. The 46
@@ -699,8 +710,8 @@ implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
 evidenced Unit value-context results, while residual PARTIAL status now covers unreviewed logger String categories,
-`.error` strict-mode plus exact-styling/unevidenced-output behavior, Arkst-specific
-analysis-command output policy, and public embedder exposure. #197 remains open for those owned residuals
+`.error` exact-styling/unevidenced-output behavior, exact JVM strict stack traces,
+Arkst-specific analysis-command output policy, and public embedder exposure. #197 remains open for those owned residuals
 rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
