@@ -2112,6 +2112,7 @@ dependencies = [
 name = "arkst-engine"
 version = "0.0.1"
 dependencies = [
+ "csv",
  "insta",
  "libm",
  "arkst-compat",

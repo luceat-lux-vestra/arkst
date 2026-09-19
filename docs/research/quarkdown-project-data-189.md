@@ -1,9 +1,9 @@
 # Quarkdown v2.5.1 project data/file identity evidence (#189)
 
-## Implemented bounded slices: `.filename` and `.listfiles`
+## Implemented bounded slices: `.filename`, `.listfiles`, and raw `.csv` resource parsing
 
 This record pins the bounded #189 implementation slices against Quarkdown v2.5.1 at
-`107ec3a9482f10d6f90d7580f8409b46a719d18e`. The remaining #189 families `.csv` and `.bibliography` are intentionally not claimed here.
+`107ec3a9482f10d6f90d7580f8409b46a719d18e`. `.filename` and `.listfiles` evidence remains below; the bounded raw `.csv` resource/parser contract is recorded separately in [`quarkdown-csv-resource-189.md`](quarkdown-csv-resource-189.md). Public `.csv` callable/table production remains #183-owned, and `.bibliography` remains an unimplemented #189 family.
 
 Pinned `quarkdown-stdlib/.../Data.kt` uses the shared `file(context, path,
 requireExistence = true)` helper. Observable ordering is resolve -> read

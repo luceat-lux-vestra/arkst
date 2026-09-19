@@ -68,7 +68,7 @@ The owned evaluator/data result is deliberately narrow:
   ingestion is explicitly bounded and evidenced under completed #298/#302;
   public WASM host resource/library binding and the full nested graph contract
   remain open under #191 and #199/#181.
-- `.csv` and `.bibliography` remain `UNSUPPORTED`; `.env`, `.filename`, and `.listfiles` are bounded `PARTIAL` rows. `.env` now has the deterministic #190 semantic/native boundary, while public WASM exposure remains #191-owned. The manifest states each residual contract and assigns its bounded follow-up; absence is not inferred merely from a missing high-level test.
+- `.csv`, `.env`, `.filename`, and `.listfiles` are bounded `PARTIAL` rows; `.bibliography` remains `UNSUPPORTED`. The `.csv` row now represents only the #189 source-relative raw CSV resource/parser boundary: `ResourceProvider::read_text` plus deterministic bounded tabular strings. Public `.csv` binding, Markdown-cell transformation, caption/ref handling, table-node production, and output remain #183-owned. `.env` retains the completed deterministic #190 semantic/native boundary, while public WASM exposure remains #191-owned. The manifest states each residual contract and assigns its bounded follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
   semantic boundary is represented, while specific consumers and output layers
@@ -276,8 +276,9 @@ and exact case-sensitive in-memory loadable-library dispatch before file fallbac
 Library hits ignore the requested sandbox, evaluate in the caller context, and keep the
 includer's resource base. That historical #62 evidence does not by itself
 establish `.listfiles`, `.filename`, `.csv`, `.bibliography`, or `.subdocument`
-graph behavior; `.filename` and the bounded `.listfiles` NONE/ASCII-NAME slices
-are separately evidenced under #189, including #307 for name sorting. Native
+graph behavior; `.filename`, the bounded `.listfiles` NONE/ASCII-NAME slices,
+and the bounded raw `.csv` resource/parser slice are separately evidenced under
+#189, including #307 for name sorting and the clean-room #376 CSV evidence. Native
 host library-directory discovery/ingestion is separately evidenced as completed
 under #298/#302. Current `.includeall` and `.pathtoroot` evidence is bounded to
 deterministic logical-project semantics and does not claim the remaining

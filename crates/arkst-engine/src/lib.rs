@@ -7,6 +7,7 @@
 
 pub mod ast_to_ir;
 pub mod builtins;
+pub mod csv_resource;
 pub(crate) mod doclang_v260;
 pub mod evaluator;
 pub(crate) mod invocation_binder;
