@@ -73,6 +73,17 @@ jobs:
           1,2
           CSV
 
+          cat > "$root/trim-duplicate.csv" <<'CSV'
+           a ,a
+          1,2
+          CSV
+
+          cat > "$root/one-blank.csv" <<'CSV'
+          a
+
+          1
+          CSV
+
           : > "$root/empty.csv"
 
           cat > "$root/header-only.csv" <<'CSV'
@@ -98,7 +109,7 @@ jobs:
           **bold**,_italic_
           CSV
 
-          for fixture in basic short long duplicate empty header-only blank-line crlf multiline; do
+          for fixture in basic short long duplicate trim-duplicate one-blank empty header-only blank-line crlf multiline; do
             printf '.csv {%s.csv}\n' "$fixture" > "$root/$fixture.qd"
           done
           printf '.csv {markdown.csv} mode:{markdown}\n' > "$root/markdown.qd"
@@ -109,7 +120,7 @@ jobs:
           set -euo pipefail
           root="/tmp/qd189-${{ matrix.version }}"
 
-          for fixture in basic short long duplicate empty header-only blank-line crlf multiline markdown; do
+          for fixture in basic short long duplicate trim-duplicate one-blank empty header-only blank-line crlf multiline markdown; do
             for mode in default strict; do
               out="$root/out-$fixture-$mode"
               stdout="$root/$fixture-$mode.stdout"
