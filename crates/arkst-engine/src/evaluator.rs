@@ -6001,7 +6001,7 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let message = match builtins::scalar_string_conversion(&argument) {
+        let message = match builtins::logger_string_conversion(&argument) {
             Ok(message) => message,
             Err(error) => {
                 let call = format!("`.{name}`");
