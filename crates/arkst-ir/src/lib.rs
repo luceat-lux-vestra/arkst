@@ -227,6 +227,7 @@ fn collect_component_sources(
         IrComponent::Landscape(component) => {
             collect_document_sources(&component.children, sources)?;
         }
+        IrComponent::ExplicitError(_) => {}
     }
     Ok(())
 }
@@ -619,6 +620,7 @@ pub enum IrComponent {
     Stacked(IrStackedComponent),
     Container(IrContainerComponent),
     Landscape(IrLandscapeComponent),
+    ExplicitError(IrExplicitErrorComponent),
 }
 
 impl IrComponent {
@@ -628,8 +630,19 @@ impl IrComponent {
             Self::Stacked(component) => component.span,
             Self::Container(component) => component.span,
             Self::Landscape(component) => component.span,
+            Self::ExplicitError(component) => component.span,
         }
     }
+}
+
+/// A backend-neutral explicit document error produced by Quarkdown `.error`.
+///
+/// This stores only the converted message and source provenance. Rendering
+/// style and native stderr/exit behavior remain host/backend concerns.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrExplicitErrorComponent {
+    pub message: String,
+    pub span: SourceSpan,
 }
 
 /// The backend-neutral semantic state produced by `.landscape`.
@@ -1097,6 +1110,7 @@ enum WireComponent {
     Stacked(WireStackedComponent),
     Container(WireContainerComponent),
     Landscape(WireLandscapeComponent),
+    ExplicitError(IrExplicitErrorComponent),
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1587,6 +1601,7 @@ fn component_to_wire(
             children: wire_nodes(&component.children, sources)?,
             span: component.span,
         }),
+        IrComponent::ExplicitError(component) => WireComponent::ExplicitError(component.clone()),
     })
 }
 
@@ -2036,6 +2051,7 @@ fn component_from_wire(
             children: nodes_from_wire(component.children, sources)?,
             span: component.span,
         }),
+        WireComponent::ExplicitError(component) => IrComponent::ExplicitError(component),
     })
 }
 
