@@ -9,6 +9,7 @@
 mod commands;
 
 use clap::{Parser, Subcommand};
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -37,6 +38,9 @@ enum Commands {
         /// Output file path (defaults to .typ for typst and .pdf for pdf)
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Treat evidenced explicit `.error` output as a strict build failure (exit 66, no artifact)
+        #[arg(long)]
+        strict: bool,
         /// Native PDF backend: subprocess (default) or in-process (explicit native-only opt-in; requires Cargo feature `typst-inprocess`; not browser/WASM rendering)
         #[arg(long, value_enum, default_value = "subprocess")]
         backend: commands::BackendSelection,
@@ -75,16 +79,21 @@ fn main() -> anyhow::Result<()> {
             libs,
             format,
             output,
+            strict,
             backend,
             typst_path,
-        } => commands::build_with_backend_and_libraries(
-            &input,
-            &format,
-            output.as_deref(),
-            &typst_path,
-            backend,
-            libs.as_deref(),
-        ),
+        } => {
+            let outcome = commands::build_with_backend_libraries_and_strict(
+                &input,
+                &format,
+                output.as_deref(),
+                &typst_path,
+                backend,
+                libs.as_deref(),
+                strict,
+            )?;
+            finish_native_build_outcome(outcome)
+        }
         Commands::Check { input, libs } => commands::check_with_libraries(&input, libs.as_deref()),
         Commands::Inspect { input, libs, emit } => {
             commands::inspect_with_libraries(&input, &emit, libs.as_deref())
@@ -92,9 +101,43 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+fn finish_native_build_outcome(outcome: commands::NativeBuildOutcome) -> anyhow::Result<()> {
+    match outcome {
+        commands::NativeBuildOutcome::Success => Ok(()),
+        commands::NativeBuildOutcome::StrictExplicitError { message } => {
+            let mut stderr = std::io::stderr().lock();
+            writeln!(
+                stderr,
+                "An error occurred while in strict mode (error code {})",
+                commands::STRICT_ERROR_EXIT_CODE
+            )?;
+            writeln!(stderr, "Originated from function: error")?;
+            writeln!(stderr, "java.lang.Exception: {message}")?;
+            stderr.flush()?;
+            std::process::exit(commands::STRICT_ERROR_EXIT_CODE);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_defaults_off_and_accepts_explicit_flag() {
+        let cli = Cli::try_parse_from(["arkst", "build", "document.qd"]).expect("parse");
+        let Commands::Build { strict, .. } = cli.command else {
+            panic!("expected build command");
+        };
+        assert!(!strict);
+
+        let cli =
+            Cli::try_parse_from(["arkst", "build", "document.qd", "--strict"]).expect("parse");
+        let Commands::Build { strict, .. } = cli.command else {
+            panic!("expected build command");
+        };
+        assert!(strict);
+    }
 
     #[test]
     fn backend_defaults_to_subprocess() {
@@ -140,6 +183,8 @@ mod tests {
             .expect("build subcommand")
             .render_long_help()
             .to_string();
+        assert!(help.contains("--strict"));
+        assert!(help.contains("exit 66"));
         assert!(help.contains("--backend"));
         assert!(help.contains("subprocess"));
         assert!(help.contains("in-process"));
