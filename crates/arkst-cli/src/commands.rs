@@ -452,7 +452,9 @@ fn compile_project(project: &VirtualProject) -> anyhow::Result<arkst_core::Compi
 }
 
 /// Compiles a pre-loaded VirtualProject with the native build logger adapter.
-fn compile_project_for_build(project: &VirtualProject) -> anyhow::Result<arkst_core::CompileResult> {
+fn compile_project_for_build(
+    project: &VirtualProject,
+) -> anyhow::Result<arkst_core::CompileResult> {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
     compile_project_with_log_writer(project, &mut stdout)
@@ -1196,7 +1198,10 @@ mod tests {
             .expect_err("logger stdout failure must fail the host compile boundary");
 
         let message = error.to_string();
-        assert!(message.contains("cannot write logger output to stdout"), "{message}");
+        assert!(
+            message.contains("cannot write logger output to stdout"),
+            "{message}"
+        );
     }
 
     #[test]
