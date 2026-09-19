@@ -112,7 +112,9 @@ jobs:
           print(f"QD197-INNER-HTML fixture={fixture} text={text!r}")
 
           if fixture == "function-inner":
-              markers=["outer-before","fn-before","QD197_FN_INNER_ERROR","fn-after","outer-after"]
+              markers=["outer-before","QD197_FN_INNER_ERROR","outer-after"]
+              for absent in ("fn-before","fn-after"):
+                  assert absent not in text, (absent, text)
           elif fixture == "conditional-inner":
               markers=["outer-before","if-before","QD197_IF_INNER_ERROR","if-after","outer-after"]
           else:
