@@ -63,9 +63,13 @@ result, and caller/top-level content continues. Closed/unmerged clean-room PR #3
 native strict finalization: selected errors retain ordinary evaluator/log continuation semantics,
 then the first evidenced explicit error exits 66 with the bounded strict stderr prefix and no
 artifact, while unselected conditionals remain lazy. Arkst models that bounded contract with a
-backend-neutral error component plus default/strict native host policies. #197 stays open for
-Arkst-specific analysis-command output policy, exact HTML/CSS styling/unevidenced output contexts,
-and unreviewed logger String categories; public WASM/embedder exposure remains deferred under #191,
+backend-neutral error component plus default/strict native host policies. Arkst-specific
+`check`/`inspect` now have an explicit sinkless/fail-closed analysis policy: no `LogSink`,
+`.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves
+all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output while
+keeping successful warning-only inspection stderr-silent. #197 stays open for exact HTML/CSS
+styling/unevidenced output contexts and unreviewed logger String categories; public WASM/embedder
+exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 the #188 resolver prerequisite for `.subdocumentgraph` is complete; producer/content/output remains blocked on #199.
