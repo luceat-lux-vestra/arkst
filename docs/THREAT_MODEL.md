@@ -20,7 +20,7 @@ vulnerabilities (report to Typst GmbH).
 | T8 | Infinite recursion          | CPU / Stack          | Malicious doc     | Evaluator      | Scoped active evaluator-depth bound | Low           |
 | T9 | Large loop count            | CPU                  | Malicious doc     | Evaluator      | Per-operation materialized-element bound | Low           |
 | T10 | Hostile regex               | CPU                  | Malicious doc     | Evaluator      | No user-provided regex in core      | Low           |
-| T11 | Environment leakage         | Secrets              | Malicious doc     | Evaluator      | Environment access disabled by def  | Low           |
+| T11 | Environment leakage         | Secrets              | Malicious doc     | Evaluator      | Denied by default; only explicit immutable `EnvironmentInputs` are visible; no ambient `std::env` lookup | Low |
 | T12 | Arbitrary shell execution   | System               | Malicious doc     | Evaluator      | No shell execution                  | None (blocked) |
 | T13 | Network access              | Network              | Malicious doc     | Evaluator / native backend | Core evaluator has no network capability; InProcess World denies it; subprocess CLI resolver is not hard-isolated by syntax preflight | Medium for subprocess |
 | T14 | Typst package resolution    | Network / Filesystem | Malicious doc     | Typst backend  | InProcess World denies package roots; subprocess provides only best-effort static preflight and no hard guarantee | Medium for subprocess |
@@ -35,7 +35,7 @@ vulnerabilities (report to Typst GmbH).
 ```
 network:          denied in core and InProcess World; subprocess resolver capability is not hard-denied by static analysis
 shell:            denied
-environment:      denied
+environment:      denied by default; explicit immutable EnvironmentInputs only
 filesystem:       project-relative source/resource reads are explicit project-root scoped; temporary mirror; package resolver is a separate T14 capability
 symlink escape:   denied (final canonical target outside root is rejected)
 absolute include: denied by default

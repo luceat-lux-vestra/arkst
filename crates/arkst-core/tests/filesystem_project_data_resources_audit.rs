@@ -412,6 +412,10 @@ fn remote_and_deterministic_surfaces_cannot_disappear() {
     assert!(row(&rows, "contract:remote-resource-policy")[19]
         .to_ascii_lowercase()
         .contains("remote"));
-    assert!(row(&rows, "builtin:.env")[17] == "UNSUPPORTED");
+    let env = row(&rows, "builtin:.env");
+    assert_eq!(env[17], "PARTIAL");
+    assert!(env[18].contains("EnvironmentInputs"));
+    assert!(env[18].contains("E3004"));
+    assert!(env[19].contains("#191"));
     assert!(row(&rows, "contract:wasm-resource-boundary")[21].contains("#191"));
 }

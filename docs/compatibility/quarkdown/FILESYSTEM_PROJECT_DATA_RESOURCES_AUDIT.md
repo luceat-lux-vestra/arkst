@@ -68,8 +68,7 @@ The owned evaluator/data result is deliberately narrow:
   ingestion is explicitly bounded and evidenced under completed #298/#302;
   public WASM host resource/library binding and the full nested graph contract
   remain open under #191 and #199/#181.
-- `.csv`, `.bibliography`, and `.env` remain `UNSUPPORTED`; `.filename` and `.listfiles` are bounded `PARTIAL` file-identity/directory-listing slices. The manifest states each absent contract and assigns its bounded
-  follow-up; absence is not inferred merely from a missing high-level test.
+- `.csv` and `.bibliography` remain `UNSUPPORTED`; `.env`, `.filename`, and `.listfiles` are bounded `PARTIAL` rows. `.env` now has the deterministic #190 semantic/native boundary, while public WASM exposure remains #191-owned. The manifest states each residual contract and assigns its bounded follow-up; absence is not inferred merely from a missing high-level test.
 - The VirtualProject/ResourceProvider model, logical normalization, project
   boundary, and host-determinism isolation are `SUPPORTED_SEMANTICS`: the
   semantic boundary is represented, while specific consumers and output layers
@@ -227,9 +226,12 @@ and deliberately expose no host filename, native path, or timestamp state.
 - The native Typst adapter intentionally uses an isolated OS temporary mirror,
   but only after the evaluator boundary and with an explicit project root. This
   is backend execution state, not language resource identity.
-- `.env` is an upstream process-environment surface and is currently
-  unsupported in Arkst. It is assigned to #190 so future behavior must use
-  explicit capability/injection or deterministic denial.
+- `.env` is an upstream process-environment surface. Arkst now models the
+  #190 semantic boundary with caller-supplied immutable `EnvironmentInputs`:
+  presence returns the exact injected String, absence returns `None`, and
+  omitting the snapshot fails closed with source-backed `E3004`. Platform-neutral
+  production evaluation code never calls `std::env`; test-only oracle harnesses do not participate in language evaluation. Ordinary compile/CLI evaluation therefore
+  remains deterministically denied rather than inheriting host process state.
 - Remote image/media and font URLs are real upstream network surfaces. The
   current Arkst policy rejects URI references and does not fetch them. The
   resource boundary is recorded here and media/layout implementation remains
@@ -284,7 +286,7 @@ global-permission/WASM contracts.
 The current provider is WASM-safe in its core design because it owns no host
 filesystem access. That is distinct from a WASM binding, which is absent. The
 common resolver prerequisite completed under #188 and native host ingestion
-completed under #298/#302; the manifest routes residual implementation work to #189/#190/#191, while the global-read incompatibility is the accepted fail-closed policy divergence recorded under completed #296/#300
+completed under #298/#302; the manifest routes residual implementation work to #189/#191, while #190 is the completed bounded environment-input contract and the global-read incompatibility is the accepted fail-closed policy divergence recorded under completed #296/#300
 without adding direct `std::fs`, cwd lookup, temp-dependent evaluator behavior,
 or network access.
 
@@ -302,8 +304,10 @@ or network access.
   `.csv`, `.bibliography`), with the ASCII `.listfiles sortby:name` slice
   completed under #307 while Unicode comparator parity and the other declared
   residuals remain; coordinated with #181/#183 consumers;
-- [#190](https://github.com/luceat-lux-vestra/arkst/issues/190): explicit,
-  deterministic `.env` capability/injection or rejection;
+- [#190](https://github.com/luceat-lux-vestra/arkst/issues/190): **implemented
+  bounded environment-input boundary**: explicit immutable injection,
+  present/absent semantics, deterministic denial, no ambient `std::env` in production evaluation, and
+  public core/native composition APIs; public WASM exposure remains #191;
 - [#191](https://github.com/luceat-lux-vestra/arkst/issues/191): deferred
   WASM project/resource binding;
 - [#175](https://github.com/luceat-lux-vestra/arkst/issues/175),

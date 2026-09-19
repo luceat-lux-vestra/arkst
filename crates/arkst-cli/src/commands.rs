@@ -1104,6 +1104,25 @@ mod tests {
     }
 
     #[test]
+    fn native_cli_composition_does_not_inherit_process_environment_190() {
+        assert!(
+            std::env::var_os("PATH").is_some(),
+            "test host must expose PATH to prove it is not inherited"
+        );
+
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("main.qd");
+        fs::write(&input, ".env {PATH}\n").unwrap();
+
+        let loaded = load_single_file_project_with_libraries(&input, None).unwrap();
+        let result = compile_project(&loaded.project).unwrap();
+
+        assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+        assert_eq!(result.diagnostics[0].code, "E3004");
+        assert!(result.ir.nodes.is_empty(), "{:?}", result.ir.nodes);
+    }
+
+    #[test]
     fn native_project_ingestion_preserves_empty_directory_identity_189() {
         let dir = tempdir().unwrap();
         let project_root = dir.path().join("project");

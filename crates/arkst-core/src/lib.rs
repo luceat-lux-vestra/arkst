@@ -17,7 +17,7 @@ pub mod source_map;
 pub use arkst_engine::builtins;
 pub mod evaluator {
     use crate::engine_adapter::VirtualProjectResourceProvider;
-    use crate::{Capabilities, EvaluationLimits, SourceMode, VirtualProject};
+    use crate::{Capabilities, EnvironmentInputs, EvaluationLimits, SourceMode, VirtualProject};
     use arkst_diagnostics::Diagnostic;
     use arkst_engine::evaluator as engine_evaluator;
     use arkst_ir::IrDocument;
@@ -76,6 +76,15 @@ pub mod evaluator {
             self.inner.evaluate(document)
         }
 
+        /// Evaluates IR with an explicit deterministic environment snapshot.
+        pub fn evaluate_with_environment(
+            &self,
+            document: &IrDocument,
+            environment: &EnvironmentInputs,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            self.inner.evaluate_with_environment(document, environment)
+        }
+
         /// Evaluates an IR document using the legacy project-backed entry
         /// point. Project access remains adapted in core and is delegated to
         /// the physical engine implementation.
@@ -92,6 +101,26 @@ pub mod evaluator {
                 super::source_mode_for_entry(project.entry()),
                 document,
                 &arkst_engine::DocumentMetadataDefaults::default(),
+            )
+        }
+
+        /// Evaluates project-backed IR with an explicit deterministic
+        /// environment snapshot. The project adapter never reads process state.
+        pub fn evaluate_project_with_environment(
+            &self,
+            project: &VirtualProject,
+            source_id: SourceId,
+            document: &IrDocument,
+            environment: &EnvironmentInputs,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            let resource_provider = VirtualProjectResourceProvider::new(project);
+            self.evaluate_with_resources_and_environment(
+                &resource_provider,
+                source_id,
+                super::source_mode_for_entry(project.entry()),
+                document,
+                &arkst_engine::DocumentMetadataDefaults::default(),
+                environment,
             )
         }
 
@@ -117,6 +146,33 @@ pub mod evaluator {
                 document,
                 metadata_defaults,
             )
+        }
+
+        pub(crate) fn evaluate_with_resources_and_environment<
+            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
+        >(
+            &self,
+            resources: &R,
+            source_id: SourceId,
+            source_mode: SourceMode,
+            document: &IrDocument,
+            metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
+            environment: &EnvironmentInputs,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            let source_mode = match source_mode {
+                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+            };
+            self.inner
+                .evaluate_with_resources_and_libraries_and_environment_for_mode(
+                    resources,
+                    resources,
+                    environment,
+                    source_id,
+                    source_mode,
+                    document,
+                    metadata_defaults,
+                )
         }
     }
 }
@@ -171,7 +227,7 @@ pub use arkst_diagnostics as diagnostics;
 pub use arkst_diagnostics::{Diagnostic, Severity};
 pub use source::*;
 // Compatibility facade: implementation ownership lives in arkst-project.
-pub use arkst_engine::{Capabilities, Capability, EvaluationLimits};
+pub use arkst_engine::{Capabilities, Capability, EnvironmentInputs, EvaluationLimits};
 pub use arkst_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
 
 /// The Arkst core result type.
@@ -210,14 +266,55 @@ fn source_mode_for_entry(entry: &arkst_project::VirtualPathBuf) -> SourceMode {
 /// The entry point source and its `SourceId` come from the project's
 /// `SourceStore`; no global ID generator is involved.
 pub fn compile(project: &arkst_project::VirtualProject, options: &CompileOptions) -> CompileResult {
-    compile_with_capabilities(project, options, Capabilities::compatibility_default())
+    compile_with_inputs(
+        project,
+        options,
+        Capabilities::compatibility_default(),
+        None,
+    )
 }
 
-/// Compile a Arkst project with an explicit evaluator capability set.
+/// Compile an Arkst project with an explicit deterministic environment
+/// snapshot. Supplying this snapshot is the only way `.env` can observe
+/// environment values through the core compilation facade.
+pub fn compile_with_environment(
+    project: &arkst_project::VirtualProject,
+    options: &CompileOptions,
+    environment: &EnvironmentInputs,
+) -> CompileResult {
+    compile_with_inputs(
+        project,
+        options,
+        Capabilities::compatibility_default(),
+        Some(environment),
+    )
+}
+
+/// Compile an Arkst project with an explicit evaluator capability set.
 pub fn compile_with_capabilities(
     project: &arkst_project::VirtualProject,
     options: &CompileOptions,
     capabilities: Capabilities,
+) -> CompileResult {
+    compile_with_inputs(project, options, capabilities, None)
+}
+
+/// Compile an Arkst project with both explicit evaluator capabilities and an
+/// explicit deterministic environment snapshot.
+pub fn compile_with_capabilities_and_environment(
+    project: &arkst_project::VirtualProject,
+    options: &CompileOptions,
+    capabilities: Capabilities,
+    environment: &EnvironmentInputs,
+) -> CompileResult {
+    compile_with_inputs(project, options, capabilities, Some(environment))
+}
+
+fn compile_with_inputs(
+    project: &arkst_project::VirtualProject,
+    options: &CompileOptions,
+    capabilities: Capabilities,
+    environment: Option<&EnvironmentInputs>,
 ) -> CompileResult {
     let entry = project.entry();
 
@@ -258,15 +355,25 @@ pub fn compile_with_capabilities(
         source_mode,
     );
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
-    let (ir, evaluation_diagnostics) =
-        evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits)
-            .evaluate_with_resources(
-                &resource_provider,
-                source_id,
-                source_mode,
-                &ir,
-                &metadata_defaults,
-            );
+    let evaluator =
+        evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits);
+    let (ir, evaluation_diagnostics) = match environment {
+        Some(environment) => evaluator.evaluate_with_resources_and_environment(
+            &resource_provider,
+            source_id,
+            source_mode,
+            &ir,
+            &metadata_defaults,
+            environment,
+        ),
+        None => evaluator.evaluate_with_resources(
+            &resource_provider,
+            source_id,
+            source_mode,
+            &ir,
+            &metadata_defaults,
+        ),
+    };
     let mut diagnostics: Vec<Diagnostic> = parsed
         .diagnostics
         .into_iter()

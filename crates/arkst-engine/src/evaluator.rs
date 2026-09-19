@@ -50,9 +50,9 @@ use crate::value_conversion::{
 };
 use crate::{ast_to_ir, builtins};
 use crate::{
-    Capabilities, Capability, EvaluationLimits, IncludedSource, LoadableLibraryProvider,
-    LoadableLibrarySource, LogEvent, LogLevel, LogSink, ResourceAccessError, ResourceEntryKind,
-    ResourceProvider, ResourceRoot, ResourceText,
+    Capabilities, Capability, EnvironmentInputs, EvaluationLimits, IncludedSource,
+    LoadableLibraryProvider, LoadableLibrarySource, LogEvent, LogLevel, LogSink,
+    ResourceAccessError, ResourceEntryKind, ResourceProvider, ResourceRoot, ResourceText,
 };
 use arkst_diagnostics::{Diagnostic, Severity};
 use arkst_ir::{
@@ -832,6 +832,7 @@ struct EvaluationContext<'a> {
     resources: Option<&'a dyn ResourceProvider>,
     loadable_libraries: Option<&'a dyn LoadableLibraryProvider>,
     log_sink: Option<&'a dyn LogSink>,
+    environment: Option<&'a EnvironmentInputs>,
     metadata_defaults: crate::DocumentMetadataDefaults,
     current_source: Option<SourceId>,
     subdocument_root: Option<SourceId>,
@@ -1190,6 +1191,7 @@ impl<'a> EvaluationContext<'a> {
             resources: None,
             loadable_libraries: None,
             log_sink: None,
+            environment: None,
             metadata_defaults: crate::DocumentMetadataDefaults::default(),
             current_source: None,
             subdocument_root: None,
@@ -1235,6 +1237,7 @@ impl<'a> EvaluationContext<'a> {
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
             log_sink: self.log_sink,
+            environment: self.environment,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -1360,6 +1363,7 @@ impl<'a> EvaluationContext<'a> {
             resources: self.resources,
             loadable_libraries: self.loadable_libraries,
             log_sink: self.log_sink,
+            environment: self.environment,
             metadata_defaults: self.metadata_defaults.clone(),
             current_source: self.current_source,
             subdocument_root: self.subdocument_root,
@@ -2020,6 +2024,7 @@ impl<'a> EvaluationContext<'a> {
                 .filter(|context| context.loadable_libraries)
                 .and(caller_context.loadable_libraries),
             log_sink: caller_context.log_sink,
+            environment: caller_context.environment,
             metadata_defaults: if has_resource_context {
                 caller_context.metadata_defaults.clone()
             } else {
@@ -2544,6 +2549,20 @@ impl Evaluator {
         let mut context = EvaluationContext::with_limits(self.limits);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
+
+    /// Evaluates one document with an explicit deterministic environment
+    /// snapshot. Supplying the snapshot is the complete authorization/input
+    /// boundary for `.env`; no ambient process environment is consulted.
+    pub fn evaluate_with_environment(
+        &self,
+        document: &IrDocument,
+        environment: &EnvironmentInputs,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_limits(self.limits);
+        context.environment = Some(environment);
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
     /// Evaluates one document with an explicit platform-neutral logger sink.
     ///
     /// No ambient stdout/stderr or process logger is discovered. Supplying
@@ -2640,6 +2659,36 @@ impl Evaluator {
             metadata_defaults,
             self.limits,
         );
+        self.evaluate_with_context(document, &mut diagnostics, &mut context)
+    }
+
+    /// Resource/library evaluation with an explicit deterministic environment
+    /// snapshot. The snapshot is never serialized into IR or callable captures;
+    /// child evaluations reuse only this compilation's injected reference.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_resources_and_libraries_and_environment_for_mode<
+        R: ResourceProvider,
+        L: LoadableLibraryProvider,
+    >(
+        &self,
+        resources: &R,
+        loadable_libraries: &L,
+        environment: &EnvironmentInputs,
+        source_id: SourceId,
+        source_mode: Mode,
+        document: &IrDocument,
+        metadata_defaults: &crate::DocumentMetadataDefaults,
+    ) -> (IrDocument, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut context = EvaluationContext::with_resources_and_libraries(
+            resources,
+            loadable_libraries,
+            source_id,
+            source_mode,
+            metadata_defaults,
+            self.limits,
+        );
+        context.environment = Some(environment);
         self.evaluate_with_context(document, &mut diagnostics, &mut context)
     }
 
@@ -3577,6 +3626,20 @@ impl Evaluator {
         if is_logger(name) && context.get_function(name).is_none() {
             return self.evaluate_logger_builtin(
                 name,
+                ordered_args,
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                native_binding_plan.as_ref(),
+                first_origin,
+                implicit_argument.as_ref(),
+            );
+        }
+
+        if is_environment(name) && context.get_function(name).is_none() {
+            return self.evaluate_environment_builtin(
                 ordered_args,
                 positional_args,
                 named_args,
@@ -5811,6 +5874,82 @@ impl Evaluator {
             context.set_page_geometry(Some(IrPageGeometry { width, height }));
         }
         CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_environment_builtin(
+        &self,
+        ordered_args: Option<&[IrCallArgument]>,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+        implicit_argument: Option<&InvocationValue>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+
+        let candidates = match self.evaluate_invocation_candidates(
+            ordered_args,
+            positional_args,
+            named_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+            implicit_argument,
+        ) {
+            Ok(candidates) => candidates,
+            Err(outcome) => return outcome,
+        };
+        let bound = match binding_plan.bind(&candidates, None, *span) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3001"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameter_span = bound
+            .parameters
+            .first()
+            .and_then(|parameter| parameter.name_span);
+        let Some(BoundSlot::Explicit {
+            value: argument,
+            span: argument_span,
+        }) = bound.slots.into_iter().next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let name = match builtins::scalar_string_conversion(&argument) {
+            Ok(name) => name,
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(argument_span),
+                        Some("name"),
+                        parameter_span,
+                        *span,
+                    ),
+                    Some("`.env`"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let Some(environment) = context.environment else {
+            diagnostics.push(environment_access_denied(*span));
+            return CallOutcome::Failed;
+        };
+
+        match environment.get(&name) {
+            Some(value) => CallOutcome::Value(IrValue::String(value.to_string())),
+            None => CallOutcome::Value(IrValue::None),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -13130,6 +13269,7 @@ pub(crate) enum NativeDispatchOwner {
     CollectionTransform,
     LibraryInspection,
     Logger,
+    Environment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13202,6 +13342,7 @@ const COLLECTION_TRANSFORM_NATIVE_NAMES: &[&str] = &["map", "filter", "sorted"];
 const LIBRARY_INSPECTION_NATIVE_NAMES: &[&str] =
     &["libexists", "functionexists", "libraries", "libfunctions"];
 const LOGGER_NATIVE_NAMES: &[&str] = &["log", "debug", "error"];
+const ENVIRONMENT_NATIVE_NAMES: &[&str] = &["env"];
 const DEFERRED_NATIVE_NAMES: &[&str] = &["llmstxt"];
 
 static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
@@ -13313,6 +13454,10 @@ static BESPOKE_NATIVE_OWNERS: &[NativeOwnerInventory] = &[
         owner: NativeDispatchOwner::Logger,
         names: LOGGER_NATIVE_NAMES,
     },
+    NativeOwnerInventory {
+        owner: NativeDispatchOwner::Environment,
+        names: ENVIRONMENT_NATIVE_NAMES,
+    },
 ];
 
 #[cfg(test)]
@@ -13406,6 +13551,10 @@ fn is_library_inspection(name: &str) -> bool {
 
 fn is_logger(name: &str) -> bool {
     has_native_owner(name, NativeDispatchOwner::Logger)
+}
+
+fn is_environment(name: &str) -> bool {
+    has_native_owner(name, NativeDispatchOwner::Environment)
 }
 
 fn is_deferred(name: &str) -> bool {
@@ -14411,6 +14560,18 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
         return Some((
             vec![ParameterMetadata {
                 name: "message",
+                aliases: &[],
+                allows_named: true,
+                omission: invocation_binder::OmissionPolicy::Required,
+                name_span: None,
+            }],
+            BodyPolicy::Reject,
+        ));
+    }
+    if name == "env" {
+        return Some((
+            vec![ParameterMetadata {
+                name: "name",
                 aliases: &[],
                 allows_named: true,
                 omission: invocation_binder::OmissionPolicy::Required,
@@ -15470,6 +15631,20 @@ fn implicit_parameter_error(
         secondary: Vec::new(),
         hints: vec![
             "Provide the positional argument required by the implicit lambda parameter."
+                .to_string(),
+        ],
+    }
+}
+
+fn environment_access_denied(span: SourceSpan) -> Diagnostic {
+    Diagnostic {
+        code: "E3004".to_string(),
+        severity: Severity::Error,
+        message: "Process environment capability is required for `.env`".to_string(),
+        primary: Some(span),
+        secondary: Vec::new(),
+        hints: vec![
+            "Supply explicit EnvironmentInputs for this evaluation; Arkst never reads the ambient process environment."
                 .to_string(),
         ],
     }

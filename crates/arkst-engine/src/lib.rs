@@ -46,6 +46,47 @@ impl Default for EvaluationLimits {
     }
 }
 
+/// Explicit deterministic environment input for one evaluation.
+///
+/// Supplying this value is both the authorization boundary for Quarkdown
+/// `.env` and the complete set of environment values visible to the
+/// evaluator. The engine never falls back to `std::env`, process-global
+/// state, a working directory, or another ambient host source. An empty map is
+/// therefore an explicitly authorized environment in which every lookup is
+/// absent, while omitting `EnvironmentInputs` denies process-environment
+/// access entirely.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EnvironmentInputs {
+    values: std::collections::BTreeMap<String, String>,
+}
+
+impl EnvironmentInputs {
+    /// Creates an explicit environment snapshot from deterministic key/value
+    /// pairs. Later duplicate keys follow `BTreeMap`'s last-write behavior.
+    pub fn new(values: std::collections::BTreeMap<String, String>) -> Self {
+        Self { values }
+    }
+
+    /// Returns the exact injected value for `name`, if present.
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.values.get(name).map(String::as_str)
+    }
+
+    /// Returns whether this authorized environment snapshot contains no
+    /// variables.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
+impl FromIterator<(String, String)> for EnvironmentInputs {
+    fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
+        Self {
+            values: iter.into_iter().collect(),
+        }
+    }
+}
+
 /// The closed evaluator capability set used by the compatibility pipeline.
 ///
 /// This is deliberately narrow: granting native content authorizes creation
