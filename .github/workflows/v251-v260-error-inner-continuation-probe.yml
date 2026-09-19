@@ -1,0 +1,128 @@
+name: Quarkdown error inner-continuation probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+          archive="/tmp/quarkdown-$version.zip"
+          root="/tmp/quarkdown-$version"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe continuation depth around non-strict error
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error-inner-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/function-inner.qd" <<'QD'
+          .function {boom}
+              fn-before
+              .error {QD197_FN_INNER_ERROR}
+              fn-after
+          outer-before
+          .boom
+          outer-after
+          QD
+
+          cat > "$root/conditional-inner.qd" <<'QD'
+          outer-before
+          .if {true}
+              if-before
+              .error {QD197_IF_INNER_ERROR}
+              if-after
+          outer-after
+          QD
+
+          cat > "$root/repeated.qd" <<'QD'
+          before
+          .error {QD197_FIRST_ERROR}
+          middle
+          .error {QD197_SECOND_ERROR}
+          after
+          QD
+
+          for fixture in function-inner conditional-inner repeated; do
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-INNER version=%s fixture=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD197-INNER-STDERR version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+            test "$rc" -eq 0
+
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+            python3 - "$html" "$fixture" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.parts=[]; self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script","style"): self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script","style") and self.skip: self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip: self.parts.append(data)
+
+          html=Path(sys.argv[1]).read_text()
+          p=Text(); p.feed(html)
+          text=" ".join(" ".join(p.parts).split())
+          fixture=sys.argv[2]
+          print(f"QD197-INNER-HTML fixture={fixture} text={text!r}")
+
+          if fixture == "function-inner":
+              markers=["outer-before","fn-before","QD197_FN_INNER_ERROR","fn-after","outer-after"]
+          elif fixture == "conditional-inner":
+              markers=["outer-before","if-before","QD197_IF_INNER_ERROR","if-after","outer-after"]
+          else:
+              markers=["before","QD197_FIRST_ERROR","middle","QD197_SECOND_ERROR","after"]
+
+          positions=[]
+          for marker in markers:
+              idx=text.find(marker)
+              assert idx >= 0, (marker, text)
+              positions.append(idx)
+          assert positions == sorted(positions), (markers, positions, text)
+          PY
+          done
