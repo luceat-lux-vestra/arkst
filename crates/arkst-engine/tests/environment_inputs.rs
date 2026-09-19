@@ -50,7 +50,7 @@ fn paragraph_texts(document: &IrDocument) -> Vec<String> {
 #[test]
 fn injected_environment_returns_exact_string_and_absent_none() {
     let source_id = SourceId(1900);
-    let source = ".var {present} {.env {ARKST_PRESENT}}\nvalue:.present\nabsent:.string {.isnone {.env {ARKST_ABSENT}}}";
+    let source = ".var {present} {.env {ARKST_PRESENT}}\nvalue:.present\n\nabsent:.string {.isnone {.env {ARKST_ABSENT}}}";
     let inputs = environment(&[("ARKST_PRESENT", "qd190-present-value")]);
 
     let (result, diagnostics) = arkst_engine::evaluator::Evaluator::new()
