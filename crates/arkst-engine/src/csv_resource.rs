@@ -213,8 +213,9 @@ fn validate_bounded_csv_syntax(path: &str, text: &str) -> Result<(), CsvResource
             b'\r' => {
                 return Err(CsvResourceError::UnsupportedRecordTerminator {
                     path: path.to_string(),
-                    message: "bare carriage-return record separators are outside the evidenced subset"
-                        .to_string(),
+                    message:
+                        "bare carriage-return record separators are outside the evidenced subset"
+                            .to_string(),
                 });
             }
             _ => None,
