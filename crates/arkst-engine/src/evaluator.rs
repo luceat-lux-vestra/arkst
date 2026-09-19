@@ -59,8 +59,9 @@ use arkst_ir::{
     IrCallArgument, IrCallSegment, IrCallable, IrCallableCapture, IrCallableResourceContext,
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
-    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrInline, IrInlineBody,
-    IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg, IrNode, IrPageGeometry,
+    IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
+    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
+    IrNode, IrPageGeometry,
     IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration,
     IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue,
     NativeTarget, TargetSpecificContent,
@@ -417,6 +418,47 @@ enum CallOutcome {
     NoValue,
     Failed,
     Unresolved,
+}
+
+fn component_contains_explicit_error(component: &IrComponent) -> bool {
+    match component {
+        IrComponent::ExplicitError(_) => true,
+        IrComponent::Stacked(component) => component.children.iter().any(node_contains_explicit_error),
+        IrComponent::Container(component) => component.children.iter().any(node_contains_explicit_error),
+        IrComponent::Landscape(component) => component.children.iter().any(node_contains_explicit_error),
+    }
+}
+
+fn node_contains_explicit_error(node: &IrNode) -> bool {
+    match node {
+        IrNode::Component { component } => component_contains_explicit_error(component),
+        IrNode::Blockquote { content, .. } => content.iter().any(node_contains_explicit_error),
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
+            .iter()
+            .flat_map(|item| &item.nodes)
+            .any(node_contains_explicit_error),
+        _ => false,
+    }
+}
+
+fn value_contains_explicit_error(value: &IrValue) -> bool {
+    match value {
+        IrValue::Component(component) => component_contains_explicit_error(component),
+        IrValue::Content(nodes) => nodes.iter().any(node_contains_explicit_error),
+        IrValue::Collection(values) => values.iter().any(value_contains_explicit_error),
+        IrValue::Pair(pair) => {
+            value_contains_explicit_error(&pair.first) || value_contains_explicit_error(&pair.second)
+        }
+        IrValue::Dictionary(dictionary) => dictionary.entries.iter().any(|pair| {
+            value_contains_explicit_error(&pair.first) || value_contains_explicit_error(&pair.second)
+        }),
+        _ => false,
+    }
+}
+
+fn outcome_requires_rollback(outcome: &CallOutcome) -> bool {
+    matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved)
+        || matches!(outcome, CallOutcome::Value(value) if value_contains_explicit_error(value))
 }
 
 type LocalizationTable = BTreeMap<String, BTreeMap<String, String>>;
@@ -3515,7 +3557,7 @@ impl Evaluator {
             ordered_args,
             implicit_argument,
         );
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(context);
         } else {
             checkpoint.commit(context);
@@ -10330,14 +10372,16 @@ impl Evaluator {
             }
             let outcome =
                 self.evaluate_callable_body_value(&callable.body, diagnostics, &mut child);
-            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue) {
+            if matches!(outcome, CallOutcome::Value(_) | CallOutcome::NoValue)
+                && !outcome_requires_rollback(&outcome)
+            {
                 for (name, value) in child.assigned_values() {
                     caller_context.apply_callable_assignment(name, value);
                 }
             }
             outcome
         };
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(caller_context);
         } else {
             checkpoint.commit(caller_context);
@@ -11616,7 +11660,7 @@ impl Evaluator {
                 )
             }
         };
-        if matches!(outcome, CallOutcome::Failed | CallOutcome::Unresolved) {
+        if outcome_requires_rollback(&outcome) {
             checkpoint.restore(context);
         } else {
             checkpoint.commit(context);
