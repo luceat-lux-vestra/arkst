@@ -17,11 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - version: v2.5.1
-            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
-          - version: v2.6.0
-            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+        version: [v2.5.1, v2.6.0]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,7 +30,11 @@ jobs:
         run: |
           set -euo pipefail
           version='${{ matrix.version }}'
-          expected='${{ matrix.sha256 }}'
+          case "$version" in
+            v2.5.1) expected='5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9' ;;
+            v2.6.0) expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4' ;;
+            *) echo "unexpected version: $version" >&2; exit 1 ;;
+          esac
           url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
           archive="/tmp/quarkdown-$version.zip"
           root="/tmp/quarkdown-$version"
