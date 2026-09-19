@@ -50,10 +50,14 @@ jobs:
           mkdir -p "$root"
 
           cat > "$root/top-level.qd" <<'QD'
+          .function {secondMessage}
+              .log {QD197_STRICT_SECOND_ARG_SIDE_EFFECT}
+              QD197_STRICT_SECOND_ERROR
           .log {QD197_STRICT_TOP_PRE}
           .error {QD197_STRICT_FIRST_ERROR}
           .log {QD197_STRICT_TOP_POST}
-          .error {QD197_STRICT_SECOND_ERROR}
+          .error {.secondMessage}
+          .log {QD197_STRICT_AFTER_SECOND}
           QD
 
           cat > "$root/function.qd" <<'QD'
@@ -105,19 +109,43 @@ jobs:
             case "$fixture" in
               top-level)
                 test "$rc" -eq 66
-                grep -q 'QD197_STRICT_FIRST_ERROR' "$root/$fixture.stderr"
+                grep -Fxq 'QD197_STRICT_TOP_PRE' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_TOP_POST' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_SECOND_ARG_SIDE_EFFECT' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_AFTER_SECOND' "$root/$fixture.stdout"
+                grep -Fq 'An error occurred while in strict mode (error code 66)' "$root/$fixture.stderr"
+                grep -Fq 'Originated from function: error' "$root/$fixture.stderr"
+                grep -Fq 'QD197_STRICT_FIRST_ERROR' "$root/$fixture.stderr"
+                ! grep -Fq 'QD197_STRICT_SECOND_ERROR' "$root/$fixture.stderr"
                 ;;
               function)
                 test "$rc" -eq 66
-                grep -q 'QD197_STRICT_FN_ERROR' "$root/$fixture.stderr"
+                grep -Fxq 'QD197_STRICT_CALLER_PRE' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_FN_PRE' "$root/$fixture.stdout"
+                ! grep -Fxq 'QD197_STRICT_FN_POST' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_CALLER_POST' "$root/$fixture.stdout"
+                grep -Fq 'An error occurred while in strict mode (error code 66)' "$root/$fixture.stderr"
+                grep -Fq 'Originated from function: error' "$root/$fixture.stderr"
+                grep -Fq 'QD197_STRICT_FN_ERROR' "$root/$fixture.stderr"
                 ;;
               conditional-selected)
                 test "$rc" -eq 66
-                grep -q 'QD197_STRICT_IF_ERROR' "$root/$fixture.stderr"
+                grep -Fxq 'QD197_STRICT_IF_OUTER_PRE' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_IF_PRE' "$root/$fixture.stdout"
+                ! grep -Fxq 'QD197_STRICT_IF_POST' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_IF_OUTER_POST' "$root/$fixture.stdout"
+                grep -Fq 'An error occurred while in strict mode (error code 66)' "$root/$fixture.stderr"
+                grep -Fq 'Originated from function: error' "$root/$fixture.stderr"
+                grep -Fq 'QD197_STRICT_IF_ERROR' "$root/$fixture.stderr"
                 ;;
               conditional-unselected)
-                # Unknown ordering/laziness is intentionally observational in
-                # this first run. Do not promote it to a contract yet.
+                test "$rc" -eq 0
+                grep -Fxq 'QD197_STRICT_LAZY_PRE' "$root/$fixture.stdout"
+                grep -Fxq 'QD197_STRICT_LAZY_POST' "$root/$fixture.stdout"
+                ! grep -Fq 'QD197_STRICT_LAZY_MUST_NOT_RUN' "$root/$fixture.stdout"
+                ! grep -Fq 'QD197_STRICT_LAZY_MUST_NOT_RUN' "$root/$fixture.stderr"
+                test ! -s "$root/$fixture.stderr"
+                find "$out" -type f -name '*.html' -print -quit | grep -q .
                 ;;
             esac
 
