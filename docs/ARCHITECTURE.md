@@ -1177,9 +1177,14 @@ Typst executable; it is included in the default CLI build. `in-process` is a
 native-only trusted-host opt-in that requires both the
 `typst-inprocess` Cargo feature and explicit runtime selection. It is not a
 browser/WASM renderer. A feature-disabled explicit selection fails with
-rebuild guidance and does not fall back to subprocess. The illustrative
-`[typst] backend` configuration above is not a claim that `arkst.toml`
-backend parsing is already implemented.
+rebuild guidance and does not fall back to subprocess. The current native CLI
+also exposes `arkst build ... --strict` for the independently evidenced
+Quarkdown explicit-error policy. That flag is a host finalization boundary:
+ordinary evaluator/log semantics run first, then a paired explicit error can
+force exit 66 and suppress artifact/backend publication. It is not propagated
+as an evaluator-wide abort option. The illustrative `[typst] backend`
+configuration above is not a claim that `arkst.toml` backend parsing is
+already implemented.
 
 ```text
 arkst.toml + CLI flags
@@ -1194,13 +1199,15 @@ arkst-cli / host
           +---- backend selection ------> host composition
 ```
 
-Compiler/language options include the compatibility profile, strictness or
+Compiler/language options include the compatibility profile, language-level
 compatibility behavior, and semantic/evaluation resource limits. Host/output
 options include the output path or directory, requested output target,
-selected Typst compiler adapter, and native filesystem behavior. Output-path
-or subprocess configuration does not belong in `arkst-engine` or another
-platform-independent compiler crate. `VirtualProject` does not select a
-native backend executable.
+selected Typst compiler adapter, native filesystem behavior, and the current
+native-build `--strict` finalization policy. In particular, the implemented
+Quarkdown `--strict` behavior must not be reinterpreted as an evaluator-wide
+immediate-abort flag. Output-path or subprocess configuration does not belong
+in `arkst-engine` or another platform-independent compiler crate.
+`VirtualProject` does not select a native backend executable.
 
 ### R10 evaluator resource budgets
 
@@ -1273,11 +1280,13 @@ strict = false
 ```
 
 The example profile value is illustrative, not a promise that one specific
-Quarkdown version is permanently the default. The CLI/host parses the setting
-and passes normalized compatibility selection into compilation.
-`arkst-compat` owns compatibility-policy definitions, while
-`arkst-core` distributes the selected policy and options to the stages that
-need them. Individual frontend or backend crates do not parse `arkst.toml`.
+Quarkdown version is permanently the default. The `strict = false` key in this
+conceptual configuration is likewise not a claim that `arkst.toml` currently
+parses or owns the implemented native `build --strict` behavior. The current
+flag stays at the CLI host-finalization boundary described above. Future
+normalized compatibility selection that does enter compilation remains owned
+by `arkst-compat` and distributed by `arkst-core`; individual frontend or
+backend crates do not parse `arkst.toml`.
 
 ## Security Boundaries
 

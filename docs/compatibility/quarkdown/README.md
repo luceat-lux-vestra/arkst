@@ -59,10 +59,13 @@ no-sink/fail-closed for `.log`. Clean-room PR #382 additionally pins default/non
 stderr, rendered-component continuation, and source-defined-function behavior across exact
 v2.5.1/v2.6.0 artifacts; PR #385 tightens the inner semantics: selected conditional/function
 body content surrounding the error is suppressed, the error component becomes the body/callable
-result, and caller/top-level content continues. Arkst models that bounded contract with a
-backend-neutral error component and native-build continuation. #197 stays open for strict-mode behavior,
-Arkst-specific analysis-command output policy, exact HTML/CSS styling, and unreviewed logger
-String categories; public WASM/embedder exposure remains deferred under #191,
+result, and caller/top-level content continues. Closed/unmerged clean-room PR #386 further pins
+native strict finalization: selected errors retain ordinary evaluator/log continuation semantics,
+then the first evidenced explicit error exits 66 with the bounded strict stderr prefix and no
+artifact, while unselected conditionals remain lazy. Arkst models that bounded contract with a
+backend-neutral error component plus default/strict native host policies. #197 stays open for
+Arkst-specific analysis-command output policy, exact HTML/CSS styling/unevidenced output contexts,
+and unreviewed logger String categories; public WASM/embedder exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 the #188 resolver prerequisite for `.subdocumentgraph` is complete; producer/content/output remains blocked on #199.

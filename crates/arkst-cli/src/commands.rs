@@ -515,20 +515,26 @@ fn explicit_error_diagnostic_matches_component(
             )
 }
 
-fn ensure_no_fatal_build_errors(
+#[derive(Debug, Default)]
+struct BuildErrorClassification {
+    explicit_messages: Vec<String>,
+    fatal_errors: usize,
+}
+
+fn classify_build_errors(
     diagnostics: &[arkst_core::Diagnostic],
     document: &IrDocument,
-) -> anyhow::Result<()> {
+) -> BuildErrorClassification {
     let mut components = Vec::new();
     collect_explicit_error_components(&document.nodes, &mut components);
 
-    let mut fatal_errors = 0usize;
+    let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
         .iter()
         .filter(|diagnostic| matches!(&diagnostic.severity, arkst_core::Severity::Error))
     {
         if !is_explicit_error_diagnostic(diagnostic) {
-            fatal_errors += 1;
+            classification.fatal_errors += 1;
             continue;
         }
 
@@ -538,21 +544,57 @@ fn ensure_no_fatal_build_errors(
             // A recoverable explicit-error diagnostic must have a concrete
             // rendered semantic counterpart. Value-context or otherwise
             // unmaterialized explicit errors stay fail-closed.
-            fatal_errors += 1;
+            classification.fatal_errors += 1;
             continue;
         };
-        components.remove(index);
+        classification
+            .explicit_messages
+            .push(components.remove(index).message.clone());
     }
 
     // Likewise, never publish a document containing an explicit-error
     // component without its structured diagnostic provenance.
-    fatal_errors += components.len();
+    classification.fatal_errors += components.len();
+    classification
+}
 
-    if fatal_errors > 0 {
-        anyhow::bail!("found {} error(s)", fatal_errors);
+fn ensure_no_fatal_build_errors(
+    diagnostics: &[arkst_core::Diagnostic],
+    document: &IrDocument,
+) -> anyhow::Result<()> {
+    let classification = classify_build_errors(diagnostics, document);
+    if classification.fatal_errors > 0 {
+        anyhow::bail!("found {} error(s)", classification.fatal_errors);
     }
     Ok(())
 }
+
+#[derive(Debug)]
+pub(crate) struct StrictModeError {
+    message: String,
+}
+
+impl StrictModeError {
+    pub(crate) const EXIT_CODE: i32 = 66;
+
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl std::fmt::Display for StrictModeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "An error occurred while in strict mode (error code 66)\n\
+             Originated from function: error\n\
+             java.lang.Exception: {}",
+            self.message
+        )
+    }
+}
+
+impl std::error::Error for StrictModeError {}
 
 /// Execute the `build` command: compile input to output format(s).
 ///
@@ -584,7 +626,7 @@ pub fn build_with_backend(
     typst_path: &Path,
     backend: BackendSelection,
 ) -> anyhow::Result<()> {
-    build_with_backend_and_libraries(input, formats, output, typst_path, backend, None)
+    build_with_backend_and_libraries(input, formats, output, typst_path, backend, None, false)
 }
 
 /// Execute the `build` command with explicit native loadable-library ingestion.
@@ -595,6 +637,7 @@ pub fn build_with_backend_and_libraries(
     typst_path: &Path,
     backend: BackendSelection,
     libraries_dir: Option<&Path>,
+    strict: bool,
 ) -> anyhow::Result<()> {
     const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
 
@@ -627,10 +670,24 @@ pub fn build_with_backend_and_libraries(
         .finish()
         .context("cannot write Quarkdown logger output to stdout")?;
 
+    let classification = classify_build_errors(&result.diagnostics, &result.ir);
+    if strict && classification.fatal_errors == 0 {
+        if let Some(message) = classification.explicit_messages.first() {
+            // Clean-room v2.5.1/v2.6.0 evidence shows strict mode is a host
+            // finalization policy, not an evaluator-wide immediate abort:
+            // evaluation/log side effects complete according to the ordinary
+            // explicit-error semantics, then the first selected error forces
+            // exit 66 and suppresses artifact publication.
+            return Err(anyhow::Error::new(StrictModeError::new(message.clone())));
+        }
+    }
+
     emit_native_build_diagnostics(&result.diagnostics);
 
     // Quarkdown default/non-strict `.error` is a rendered document component,
     // not a build-aborting diagnostic. Every other error remains fail-closed.
+    // In strict mode, unpaired/unevidenced errors deliberately stay on this
+    // ordinary fatal path rather than being misclassified as exit 66.
     ensure_no_fatal_build_errors(&result.diagnostics, &result.ir)?;
 
     let (typst_code, _source_map) = arkst_typst::lowering::lower_to_typst(&result.ir);
@@ -1286,6 +1343,18 @@ mod tests {
         };
         assert!(is_explicit_error_diagnostic(&explicit));
         assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &document).is_ok());
+        let classification = classify_build_errors(std::slice::from_ref(&explicit), &document);
+        assert_eq!(classification.explicit_messages, vec!["explicit"]);
+        assert_eq!(classification.fatal_errors, 0);
+
+        let strict_error = StrictModeError::new(classification.explicit_messages[0].clone());
+        assert_eq!(StrictModeError::EXIT_CODE, 66);
+        assert_eq!(
+            strict_error.to_string(),
+            "An error occurred while in strict mode (error code 66)\n\
+             Originated from function: error\n\
+             java.lang.Exception: explicit"
+        );
 
         let empty_document = IrDocument {
             nodes: Vec::new(),
@@ -1305,6 +1374,10 @@ mod tests {
             hints: Vec::new(),
         };
         assert!(!is_explicit_error_diagnostic(&unrelated));
+        let classification =
+            classify_build_errors(std::slice::from_ref(&unrelated), &empty_document);
+        assert!(classification.explicit_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
         assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
     }
 
