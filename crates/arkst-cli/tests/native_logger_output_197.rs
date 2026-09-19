@@ -3,11 +3,14 @@ use std::process::{Command, Output};
 use tempfile::tempdir;
 
 fn run_build(input: &std::path::Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_arkst"))
-        .arg("build")
-        .arg(input)
-        .output()
-        .expect("arkst process must run")
+    run_build_args(input, &[])
+}
+
+fn run_build_args(input: &std::path::Path, args: &[&str]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_arkst"));
+    command.arg("build").arg(input);
+    command.args(args);
+    command.output().expect("arkst process must run")
 }
 
 #[test]
@@ -93,6 +96,140 @@ fn build_renders_error_component_returned_through_source_defined_function() {
     let error = typst.find("function-error").expect("error component");
     let after = typst.rfind("after").expect("after");
     assert!(before < error && error < after, "{typst}");
+}
+
+#[test]
+fn strict_build_reports_first_error_after_preserving_top_level_side_effects() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".function {secondMessage}\n    .log {second-arg-side-effect}\n    second-error\n.log {top-pre}\n.error {first-error}\n.log {top-post}\n.error {.secondMessage}\n.log {after-second}\n",
+    )
+    .unwrap();
+
+    let output = run_build_args(&input, &["--strict"]);
+
+    assert_eq!(output.status.code(), Some(66));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout must be UTF-8"),
+        "top-pre\ntop-post\nsecond-arg-side-effect\nafter-second\n"
+    );
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr must be UTF-8"),
+        "An error occurred while in strict mode (error code 66)\nOriginated from function: error\njava.lang.Exception: first-error\n"
+    );
+    assert!(!dir.path().join("main.typ").exists());
+}
+
+#[test]
+fn strict_build_suppresses_function_tail_but_continues_caller() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".function {boom}\n    .log {fn-pre}\n    .error {function-error}\n    .log {fn-post}\n.log {caller-pre}\n.boom\n.log {caller-post}\n",
+    )
+    .unwrap();
+
+    let output = run_build_args(&input, &["--strict"]);
+
+    assert_eq!(output.status.code(), Some(66));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout must be UTF-8"),
+        "caller-pre\nfn-pre\ncaller-post\n"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    assert!(stderr.contains("java.lang.Exception: function-error"), "{stderr}");
+    assert!(!dir.path().join("main.typ").exists());
+}
+
+#[test]
+fn strict_build_suppresses_selected_conditional_tail_but_continues_outer_scope() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".log {outer-pre}\n.if {true}\n    .log {if-pre}\n    .error {conditional-error}\n    .log {if-post}\n.log {outer-post}\n",
+    )
+    .unwrap();
+
+    let output = run_build_args(&input, &["--strict"]);
+
+    assert_eq!(output.status.code(), Some(66));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout must be UTF-8"),
+        "outer-pre\nif-pre\nouter-post\n"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    assert!(stderr.contains("java.lang.Exception: conditional-error"), "{stderr}");
+    assert!(!dir.path().join("main.typ").exists());
+}
+
+#[test]
+fn strict_build_keeps_unselected_conditional_lazy_and_publishes_normally() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".log {lazy-pre}\n.if {false}\n    .error {must-not-run}\n.log {lazy-post}\nvisible\n",
+    )
+    .unwrap();
+
+    let output = run_build_args(&input, &["--strict"]);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout must be UTF-8"),
+        "lazy-pre\nlazy-post\n"
+    );
+    let typst = fs::read_to_string(dir.path().join("main.typ")).unwrap();
+    assert!(typst.contains("visible"), "{typst}");
+    assert!(!typst.contains("must-not-run"), "{typst}");
+}
+
+#[test]
+fn strict_build_returns_before_pdf_backend_or_artifact_publication() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(&input, ".error {pdf-strict}\n").unwrap();
+
+    let output = run_build_args(
+        &input,
+        &[
+            "--strict",
+            "--format",
+            "pdf",
+            "--typst-path",
+            "definitely-missing-typst",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(66));
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
+    assert!(stderr.contains("java.lang.Exception: pdf-strict"), "{stderr}");
+    assert!(!stderr.contains("PDF compilation failed"), "{stderr}");
+    assert!(!dir.path().join("main.pdf").exists());
+}
+
+#[test]
+fn strict_build_does_not_promote_unmaterialized_explicit_error_to_exit_66() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(&input, ".uppercase {.error {nested-strict-error}}\n").unwrap();
+
+    let output = run_build_args(&input, &["--strict"]);
+
+    assert_ne!(output.status.code(), Some(66));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nested-strict-error"), "{stderr}");
+    assert!(stderr.contains("found 1 error(s)"), "{stderr}");
+    assert!(!dir.path().join("main.typ").exists());
 }
 
 #[test]
