@@ -62,7 +62,10 @@ fn build_keeps_prior_log_and_renders_non_strict_error_component() {
     );
 
     let typst = fs::read_to_string(dir.path().join("main.typ")).unwrap();
-    assert!(typst.contains("Error: error Cannot call function error"), "{typst}");
+    assert!(
+        typst.contains("Error: error Cannot call function error"),
+        "{typst}"
+    );
     assert!(typst.contains("boom"), "{typst}");
     assert!(typst.contains("after"), "{typst}");
 }
