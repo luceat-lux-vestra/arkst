@@ -1,0 +1,189 @@
+name: Quarkdown CSV black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: csv-contract-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Prepare CSV fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd189-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/basic.csv" <<'CSV'
+          Name , Value
+           Alice , 1
+          "Bob, Jr.","a ""quote"""
+          CSV
+
+          cat > "$root/short.csv" <<'CSV'
+          a,b,c
+          1,2
+          CSV
+
+          cat > "$root/long.csv" <<'CSV'
+          a,b
+          1,2,3
+          CSV
+
+          cat > "$root/duplicate.csv" <<'CSV'
+          a,a
+          1,2
+          CSV
+
+          : > "$root/empty.csv"
+
+          cat > "$root/header-only.csv" <<'CSV'
+          a,b
+          CSV
+
+          cat > "$root/blank-line.csv" <<'CSV'
+          a,b
+
+          1,2
+          CSV
+
+          printf 'a,b\r\n1,2\r\n' > "$root/crlf.csv"
+
+          cat > "$root/multiline.csv" <<'CSV'
+          a,b
+          "one
+          line",two
+          CSV
+
+          cat > "$root/markdown.csv" <<'CSV'
+          a,b
+          **bold**,_italic_
+          CSV
+
+          for fixture in basic short long duplicate empty header-only blank-line crlf multiline; do
+            printf '.csv {%s.csv}\n' "$fixture" > "$root/$fixture.qd"
+          done
+          printf '.csv {markdown.csv} mode:{markdown}\n' > "$root/markdown.qd"
+
+      - name: Probe CSV behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/qd189-${{ matrix.version }}"
+
+          for fixture in basic short long duplicate empty header-only blank-line crlf multiline markdown; do
+            for mode in default strict; do
+              out="$root/out-$fixture-$mode"
+              stdout="$root/$fixture-$mode.stdout"
+              stderr="$root/$fixture-$mode.stderr"
+              args=(compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe)
+              if [ "$mode" = strict ]; then
+                args+=(--strict)
+              fi
+
+              set +e
+              "$QD" "${args[@]}" >"$stdout" 2>"$stderr"
+              rc=$?
+              set -e
+
+              printf 'QD189-RUN version=%s fixture=%s mode=%s rc=%s\n'                 '${{ matrix.version }}' "$fixture" "$mode" "$rc"
+              printf 'QD189-STDERR version=%s fixture=%s mode=%s ['                 '${{ matrix.version }}' "$fixture" "$mode"
+              tr '\n' '|' <"$stderr"
+              printf ']\n'
+
+              html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+              if [ -n "$html" ]; then
+                python3 - "$html" '${{ matrix.version }}' "$fixture" "$mode" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import json
+          import sys
+
+          class Tables(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.tables = []
+                  self.table = None
+                  self.row = None
+                  self.cell = None
+                  self.cell_tag = None
+
+              def handle_starttag(self, tag, attrs):
+                  if tag == "table":
+                      self.table = []
+                  elif self.table is not None and tag == "tr":
+                      self.row = []
+                  elif self.row is not None and tag in ("th", "td"):
+                      self.cell = []
+                      self.cell_tag = tag
+
+              def handle_data(self, data):
+                  if self.cell is not None:
+                      self.cell.append(data)
+
+              def handle_endtag(self, tag):
+                  if self.cell is not None and tag == self.cell_tag:
+                      self.row.append(" ".join("".join(self.cell).split()))
+                      self.cell = None
+                      self.cell_tag = None
+                  elif self.row is not None and tag == "tr":
+                      self.table.append(self.row)
+                      self.row = None
+                  elif self.table is not None and tag == "table":
+                      self.tables.append(self.table)
+                      self.table = None
+
+          parser = Tables()
+          parser.feed(Path(sys.argv[1]).read_text())
+          print(
+              "QD189-TABLE version={} fixture={} mode={} tables={}".format(
+                  sys.argv[2],
+                  sys.argv[3],
+                  sys.argv[4],
+                  json.dumps(parser.tables, ensure_ascii=False),
+              )
+          )
+          PY
+              else
+                printf 'QD189-TABLE version=%s fixture=%s mode=%s NONE\n'                   '${{ matrix.version }}' "$fixture" "$mode"
+              fi
+            done
+          done
