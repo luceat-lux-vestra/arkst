@@ -116,7 +116,9 @@ jobs:
               for absent in ("fn-before","fn-after"):
                   assert absent not in text, (absent, text)
           elif fixture == "conditional-inner":
-              markers=["outer-before","if-before","QD197_IF_INNER_ERROR","if-after","outer-after"]
+              markers=["outer-before","QD197_IF_INNER_ERROR","outer-after"]
+              for absent in ("if-before","if-after"):
+                  assert absent not in text, (absent, text)
           else:
               markers=["before","QD197_FIRST_ERROR","middle","QD197_SECOND_ERROR","after"]
 
