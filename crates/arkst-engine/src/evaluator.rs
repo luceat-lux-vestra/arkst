@@ -6085,8 +6085,13 @@ impl Evaluator {
                 CallOutcome::Value(IrValue::Unit)
             }
             "error" => {
-                diagnostics.push(logger_requested_error(message, *span));
-                CallOutcome::Failed
+                diagnostics.push(logger_requested_error(message.clone(), *span));
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(
+                    IrExplicitErrorComponent {
+                        message,
+                        span: *span,
+                    },
+                )))
             }
             _ => unreachable!("logger name was prevalidated"),
         }
@@ -12072,6 +12077,9 @@ impl Evaluator {
             CallOutcome::Value(value) => value,
             outcome => return outcome,
         };
+        if value_contains_explicit_error(&value) {
+            return CallOutcome::Value(value);
+        }
 
         for (index, source_segment) in chain.iter().enumerate() {
             let mut positional_args = Vec::with_capacity(1 + source_segment.positional_args.len());
@@ -12143,6 +12151,9 @@ impl Evaluator {
             );
             match outcome {
                 CallOutcome::Value(next_value) => {
+                    if value_contains_explicit_error(&next_value) {
+                        return CallOutcome::Value(next_value);
+                    }
                     value = next_value;
                     value_origin = call_result_origin(&source_segment.name, context);
                 }
@@ -15711,7 +15722,9 @@ fn logger_requested_error(message: String, span: SourceSpan) -> Diagnostic {
     Diagnostic {
         code: "E3011".to_string(),
         severity: Severity::Error,
-        message: format!("`.error`: {message}"),
+        message: format!(
+            "Cannot call function error(String message) with arguments ({message}): {message}"
+        ),
         primary: Some(span),
         secondary: Vec::new(),
         hints: vec!["The document explicitly requested an error through `.error`.".to_string()],
