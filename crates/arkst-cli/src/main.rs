@@ -43,6 +43,9 @@ enum Commands {
         /// Path to the Typst executable used by the subprocess PDF backend (defaults to `typst` on PATH)
         #[arg(long, default_value = "typst")]
         typst_path: PathBuf,
+        /// Quarkdown-compatible strict mode: explicit `.error` exits 66 and publishes no artifact
+        #[arg(long)]
+        strict: bool,
     },
     /// Validate input without producing output
     Check {
@@ -69,7 +72,7 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Build {
             input,
             libs,
@@ -77,6 +80,7 @@ fn main() -> anyhow::Result<()> {
             output,
             backend,
             typst_path,
+            strict,
         } => commands::build_with_backend_and_libraries(
             &input,
             &format,
@@ -84,11 +88,23 @@ fn main() -> anyhow::Result<()> {
             &typst_path,
             backend,
             libs.as_deref(),
+            strict,
         ),
         Commands::Check { input, libs } => commands::check_with_libraries(&input, libs.as_deref()),
         Commands::Inspect { input, libs, emit } => {
             commands::inspect_with_libraries(&input, &emit, libs.as_deref())
         }
+    };
+
+    match result {
+        Err(error) if error.downcast_ref::<commands::StrictModeError>().is_some() => {
+            let strict_error = error
+                .downcast_ref::<commands::StrictModeError>()
+                .expect("strict error was just identified");
+            eprintln!("{strict_error}");
+            std::process::exit(commands::StrictModeError::EXIT_CODE);
+        }
+        result => result,
     }
 }
 
@@ -103,6 +119,32 @@ mod tests {
             panic!("expected build command");
         };
         assert_eq!(backend, commands::BackendSelection::Subprocess);
+    }
+
+    #[test]
+    fn build_strict_defaults_off_and_accepts_explicit_flag() {
+        let default = Cli::try_parse_from(["arkst", "build", "document.qd"]).expect("parse");
+        let Commands::Build { strict, .. } = default.command else {
+            panic!("expected build command");
+        };
+        assert!(!strict);
+
+        let enabled =
+            Cli::try_parse_from(["arkst", "build", "document.qd", "--strict"]).expect("parse");
+        let Commands::Build { strict, .. } = enabled.command else {
+            panic!("expected build command");
+        };
+        assert!(strict);
+    }
+
+    #[test]
+    fn strict_is_build_only() {
+        for command in ["check", "inspect"] {
+            let error = Cli::try_parse_from(["arkst", command, "document.qd", "--strict"])
+                .err()
+                .expect("--strict must be rejected outside build");
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        }
     }
 
     #[test]
