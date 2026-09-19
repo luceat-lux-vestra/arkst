@@ -559,17 +559,6 @@ fn classify_build_errors(
     classification
 }
 
-fn ensure_no_fatal_build_errors(
-    diagnostics: &[arkst_core::Diagnostic],
-    document: &IrDocument,
-) -> anyhow::Result<()> {
-    let classification = classify_build_errors(diagnostics, document);
-    if classification.fatal_errors > 0 {
-        anyhow::bail!("found {} error(s)", classification.fatal_errors);
-    }
-    Ok(())
-}
-
 pub(crate) const STRICT_ERROR_EXIT_CODE: i32 = 66;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1348,16 +1337,23 @@ mod tests {
             metadata: Default::default(),
         };
         assert!(is_explicit_error_diagnostic(&explicit));
-        assert!(ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &document).is_ok());
+        assert_eq!(
+            classify_build_errors(std::slice::from_ref(&explicit), &document),
+            BuildErrorClassification {
+                matched_explicit_messages: vec!["explicit".to_string()],
+                fatal_errors: 0,
+            }
+        );
 
         let empty_document = IrDocument {
             nodes: Vec::new(),
             metadata: Default::default(),
         };
-        assert!(
-            ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &empty_document).is_err()
+        assert_eq!(
+            classify_build_errors(std::slice::from_ref(&explicit), &empty_document).fatal_errors,
+            1
         );
-        assert!(ensure_no_fatal_build_errors(&[], &document).is_err());
+        assert_eq!(classify_build_errors(&[], &document).fatal_errors, 1);
 
         let unrelated = arkst_core::Diagnostic {
             code: "E3011".to_string(),
@@ -1368,7 +1364,10 @@ mod tests {
             hints: Vec::new(),
         };
         assert!(!is_explicit_error_diagnostic(&unrelated));
-        assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
+        assert_eq!(
+            classify_build_errors(&[unrelated], &empty_document).fatal_errors,
+            1
+        );
     }
 
     #[test]
