@@ -570,6 +570,8 @@ fn ensure_no_fatal_build_errors(
     Ok(())
 }
 
+pub(crate) const STRICT_ERROR_EXIT_CODE: i32 = 66;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NativeBuildOutcome {
     Success,
