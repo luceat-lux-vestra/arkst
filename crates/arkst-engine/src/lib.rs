@@ -240,8 +240,9 @@ pub struct LogEvent {
 /// that wants `.log` / `.debug` observability may inject this sink for the
 /// evaluation. `.log` requires an explicit sink, while `.debug` remains a
 /// silent no-op when no sink is present, matching the observed v2.6 CLI
-/// default. `.error` is represented only as a structured compiler diagnostic
-/// so failure semantics never depend on host logging.
+/// default. `.error` remains independent of this sink: the evaluator records a
+/// structured compiler diagnostic plus a backend-neutral explicit-error component,
+/// so its failure/rollback semantics never depend on host logging or ambient I/O.
 pub trait LogSink {
     fn emit(&self, event: &LogEvent);
 }
