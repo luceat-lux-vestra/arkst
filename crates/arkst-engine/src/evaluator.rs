@@ -18623,6 +18623,9 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             component.span = source_span;
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
+        IrComponent::ExplicitError(component) => {
+            component.span = source_span;
+        }
     }
 }
 
