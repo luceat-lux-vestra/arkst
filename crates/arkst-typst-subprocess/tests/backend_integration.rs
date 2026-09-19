@@ -110,6 +110,48 @@ fn integration_runtime_evaluation_remains_available_to_subprocess() {
 }
 
 #[test]
+fn integration_explicit_error_lowering_escapes_typst_text_and_compiles_pdf() {
+    let project = VirtualProjectBuilder::new()
+        .entry("explicit-error.qd")
+        .expect("valid entry path")
+        .add_source("explicit-error.qd", ".error {boom}\n")
+        .expect("valid source path")
+        .build()
+        .expect("valid project");
+    let mut result = compile(&project, &CompileOptions::default());
+
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "E3011");
+    let [IrNode::Component {
+        component: IrComponent::ExplicitError(error),
+    }] = result.ir.nodes.as_mut_slice()
+    else {
+        panic!("expected explicit error component");
+    };
+    error.message = "boom [literal] #hash \\ path\nnext".to_string();
+
+    let typst_code = lower_to_typst_code(&result.ir);
+    assert!(
+        typst_code.contains(r"boom \[literal\] \#hash \\ path"),
+        "{typst_code}"
+    );
+    assert!(typst_code.contains("next"), "{typst_code}");
+
+    with_typst("explicit-error", |backend| {
+        let output = backend
+            .compile(&TypstInput {
+                source: typst_code,
+                entry_path: "explicit-error.qd".to_string(),
+            })
+            .expect("explicit-error Typst must compile");
+        assert!(output
+            .pdf
+            .expect("PDF output must be present")
+            .starts_with(b"%PDF-"));
+    });
+}
+
+#[test]
 fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
     let source = ".row alignment:{spacebetween} cross:{stretch} gap:{10px}\n    A\n\n    B\n\n.column alignment:{spacearound} cross:{start} gap:{25%}\n    C\n\n    D\n\n.grid columns:{2} alignment:{spaceevenly} cross:{end} gap:{1cm} vgap:{2cm} hgap:{3cm}\n    E\n\n    F\n\n    G\n";
     let project = VirtualProjectBuilder::new()

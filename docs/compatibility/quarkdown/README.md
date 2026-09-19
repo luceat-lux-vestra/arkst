@@ -53,10 +53,15 @@ the previously omitted Unit value category in #149, including the evidenced
 `kotlin.Unit` projection and direct-call suppression. Clean-room PR #378
 additionally establishes the logger-only Unit/None/closed-Range/plain-text-Pair
 String subset identically on exact v2.5.1/v2.6.0 artifacts without widening
-generic String conversion. Native `arkst build` now writes `Log` events to stdout through an explicit
+generic String conversion. Native `arkst build` writes `Log` events to stdout through an explicit
 host-owned sink while `Debug` stays silent and ordinary core compilation remains
-no-sink/fail-closed. #197 stays open for `.error` rendering/stderr/strict
-behavior, Arkst-specific analysis-command output policy, and unreviewed logger
+no-sink/fail-closed for `.log`. Clean-room PR #382 additionally pins default/non-strict `.error`
+stderr, rendered-component continuation, and source-defined-function behavior across exact
+v2.5.1/v2.6.0 artifacts; PR #385 tightens the inner semantics: selected conditional/function
+body content surrounding the error is suppressed, the error component becomes the body/callable
+result, and caller/top-level content continues. Arkst models that bounded contract with a
+backend-neutral error component and native-build continuation. #197 stays open for strict-mode behavior,
+Arkst-specific analysis-command output policy, exact HTML/CSS styling, and unreviewed logger
 String categories; public WASM/embedder exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
