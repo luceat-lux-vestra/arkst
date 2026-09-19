@@ -77,13 +77,28 @@ jobs:
           .log {.log {INNER197}}
           QD
 
+          cat > "$root/pair-debug.qd" <<'QD'
+          .debug {.pair {left} {right}}
+          after-debug-pair
+          QD
+
+          cat > "$root/none-debug.qd" <<'QD'
+          .debug {.none}
+          after-debug-none
+          QD
+
+          cat > "$root/unit-debug.qd" <<'QD'
+          .debug {.log {INNER197_DEBUG}}
+          after-debug-unit
+          QD
+
           cat > "$root/pair-error.qd" <<'QD'
           before
           .error {.pair {left} {right}}
           after
           QD
 
-          for fixture in pair-direct pair-variable range-direct range-variable none-direct nested-unit pair-error; do
+          for fixture in pair-direct pair-variable range-direct range-variable none-direct nested-unit pair-debug none-debug unit-debug pair-error; do
             out="$root/out-$fixture"
             stdout="$root/$fixture.stdout"
             stderr="$root/$fixture.stderr"
