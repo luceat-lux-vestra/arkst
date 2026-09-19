@@ -1,0 +1,135 @@
+name: Quarkdown strict error ordering black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+          archive="/tmp/quarkdown-$version.zip"
+          root="/tmp/quarkdown-$version"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe strict abort and side-effect ordering
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error197-strict-order-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/top-level.qd" <<'QD'
+          .log {QD197_STRICT_TOP_PRE}
+          .error {QD197_STRICT_FIRST_ERROR}
+          .log {QD197_STRICT_TOP_POST}
+          .error {QD197_STRICT_SECOND_ERROR}
+          QD
+
+          cat > "$root/function.qd" <<'QD'
+          .function {boom}
+              .log {QD197_STRICT_FN_PRE}
+              .error {QD197_STRICT_FN_ERROR}
+              .log {QD197_STRICT_FN_POST}
+          .log {QD197_STRICT_CALLER_PRE}
+          .boom
+          .log {QD197_STRICT_CALLER_POST}
+          QD
+
+          cat > "$root/conditional-selected.qd" <<'QD'
+          .log {QD197_STRICT_IF_OUTER_PRE}
+          .if {true}
+              .log {QD197_STRICT_IF_PRE}
+              .error {QD197_STRICT_IF_ERROR}
+              .log {QD197_STRICT_IF_POST}
+          .log {QD197_STRICT_IF_OUTER_POST}
+          QD
+
+          cat > "$root/conditional-unselected.qd" <<'QD'
+          .log {QD197_STRICT_LAZY_PRE}
+          .if {false}
+              .error {QD197_STRICT_LAZY_MUST_NOT_RUN}
+          .log {QD197_STRICT_LAZY_POST}
+          QD
+
+          run_strict() {
+            fixture="$1"
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe --strict \
+              >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+
+            printf 'QD197-STRICT-ORDER version=%s fixture=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD197-STRICT-ORDER-STDOUT version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD197-STRICT-ORDER-STDERR version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+            printf 'QD197-STRICT-ORDER-ARTIFACTS version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            find "$out" -type f -printf '%f|' 2>/dev/null || true
+            printf ']\n'
+
+            case "$fixture" in
+              top-level)
+                test "$rc" -eq 66
+                grep -q 'QD197_STRICT_FIRST_ERROR' "$root/$fixture.stderr"
+                ;;
+              function)
+                test "$rc" -eq 66
+                grep -q 'QD197_STRICT_FN_ERROR' "$root/$fixture.stderr"
+                ;;
+              conditional-selected)
+                test "$rc" -eq 66
+                grep -q 'QD197_STRICT_IF_ERROR' "$root/$fixture.stderr"
+                ;;
+              conditional-unselected)
+                # Unknown ordering/laziness is intentionally observational in
+                # this first run. Do not promote it to a contract yet.
+                ;;
+            esac
+
+            if [ "$fixture" != conditional-unselected ]; then
+              if find "$out" -type f \( -name '*.html' -o -name '*.pdf' \) -print -quit 2>/dev/null | grep -q .; then
+                echo "strict mode unexpectedly published an artifact for $fixture" >&2
+                exit 1
+              fi
+            fi
+          }
+
+          run_strict top-level
+          run_strict function
+          run_strict conditional-selected
+          run_strict conditional-unselected
