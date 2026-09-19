@@ -92,7 +92,7 @@ The accepted subset covers:
 - commas;
 - RFC-style quoted fields;
 - doubled quote escapes;
-- LF, CR, and CRLF record terminators;
+- LF and CRLF record terminators;
 - multiline quoted fields;
 - equal record widths; and
 - raw duplicate-header rejection before trimming.
@@ -100,6 +100,7 @@ The accepted subset covers:
 The following remain deliberately outside the claimed subset:
 
 - non-standard quote placement and other unproven kotlin-csv leniencies;
+- bare CR-only record separators, which were not established by the clean-room probes;
 - generalized blank-record parity beyond the independently observed failure
   case; and
 - any table/content/output semantics.
