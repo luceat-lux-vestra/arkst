@@ -92,13 +92,18 @@ fn explicit_sink_receives_log_and_debug_events_in_evaluation_order() {
 }
 
 #[test]
-fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error() {
+fn logger_dynamic_string_boundary_matches_clean_room_structured_subset() {
     let source_id = SourceId(1989);
     let sink = CollectingSink::default();
-    let source = ".log {.pair {left} {right}}\n.var {stored} {.pair {left} {right}}\n.debug {.stored}\n.log {.range {1} {3}}\n.log {.none}\n.error {.stored}";
+    let source = ".log {.pair {left} {right}}\n.var {stored} {.pair {.pair {left} {right}} {.none}}\n.debug {.stored}\n.log {.range {1} {3}}\n.log {.range to:{3}}\n.log {.range from:{2}}\n.log {.range}\n.log {.none}\n.var {table}\n    .dictionary\n        - first: one\n        - second: 2\n.log {.table}\n.error {.stored}";
     let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
     let pair =
         "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
+    let nested_pair = format!(
+        "[DynamicValue(unwrappedValue={pair}, evaluationContext=null), DynamicValue(unwrappedValue=None, evaluationContext=null)]"
+    );
+    let dictionary =
+        "{first=DynamicValue(unwrappedValue=one, evaluationContext=null), second=DynamicValue(unwrappedValue=2, evaluationContext=null)}";
 
     let [IrNode::Component {
         component: arkst_ir::IrComponent::ExplicitError(error),
@@ -106,7 +111,7 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
     else {
         panic!("expected explicit error component, got {:?}", result.nodes);
     };
-    assert_eq!(error.message, pair);
+    assert_eq!(error.message, nested_pair);
     assert_eq!(error.span.source_id, source_id);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(diagnostics[0].code, "E3011");
@@ -115,7 +120,10 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
         Some(source_id)
     );
 
-    assert!(diagnostics[0].message.contains(pair), "{diagnostics:?}");
+    assert!(
+        diagnostics[0].message.contains(&nested_pair),
+        "{diagnostics:?}"
+    );
 
     let events = sink.events.borrow();
     assert_eq!(
@@ -125,9 +133,13 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
             .collect::<Vec<_>>(),
         vec![
             (LogLevel::Log, pair),
-            (LogLevel::Debug, pair),
+            (LogLevel::Debug, nested_pair.as_str()),
             (LogLevel::Log, "1..3"),
+            (LogLevel::Log, "..3"),
+            (LogLevel::Log, "2.."),
+            (LogLevel::Log, ".."),
             (LogLevel::Log, "None"),
+            (LogLevel::Log, dictionary),
         ]
     );
 }
@@ -144,8 +156,15 @@ fn debug_without_sink_is_silent_and_validates_bounded_logger_conversion() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(result.nodes.is_empty(), "{:?}", result.nodes);
 
-    let (_, diagnostics) = evaluate_plain(
+    let (result, diagnostics) = evaluate_plain(
         ".var {table}\n    .dictionary\n        - a: 1\n.debug {.table}",
+        source_id,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
+
+    let (_, diagnostics) = evaluate_plain(
+        ".var {values}\n    - alpha\n    - beta\n.debug {.values}",
         source_id,
     );
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
@@ -163,6 +182,11 @@ fn log_without_sink_fails_after_supported_message_conversion() {
         ".log {hello}",
         ".log {.pair {left} {right}}",
         ".log {.range {1} {3}}",
+        ".log {.range to:{3}}",
+        ".log {.range from:{2}}",
+        ".log {.range}",
+        ".log {.pair {.pair {left} {right}} {.none}}",
+        ".var {table}\n    .dictionary\n        - a: 1\n.log {.table}",
         ".log {.none}",
     ] {
         let (_, diagnostics) = evaluate_plain(source, source_id);
@@ -465,7 +489,7 @@ fn malformed_or_unsupported_log_arguments_never_emit_events() {
     assert_eq!(duplicate.len(), 1, "{duplicate:?}");
     assert!(sink.events.borrow().is_empty());
 
-    let source = ".var {table}\n    .dictionary\n        - a: 1\n.log {.table}";
+    let source = ".var {values}\n    - alpha\n    - beta\n.log {.values}";
     let (_, unsupported) = evaluate_with_sink(source, source_id, &sink);
     assert_eq!(unsupported.len(), 1, "{unsupported:?}");
     assert_eq!(
@@ -677,6 +701,47 @@ fn unit_logger_conversion_is_target_specific_and_does_not_widen_generic_string_c
     assert_eq!(events[0].message, "unit");
     assert_eq!(events[1].level, LogLevel::Log);
     assert_eq!(events[1].message, "kotlin.Unit");
+}
+
+#[test]
+fn structured_logger_conversion_does_not_widen_generic_string_consumers() {
+    let source_id = SourceId(1990);
+    let sink = CollectingSink::default();
+    let source = ".var {table}\n    .dictionary\n        - first: one\n        - second: 2\n.uppercase {.table}\n.log {.table}";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(paragraph_texts(&result).is_empty());
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
+    );
+    assert!(diagnostics[0].message.contains("adapt"), "{diagnostics:?}");
+
+    let events = sink.events.borrow();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Log);
+    assert_eq!(
+        events[0].message,
+        "{first=DynamicValue(unwrappedValue=one, evaluationContext=null), second=DynamicValue(unwrappedValue=2, evaluationContext=null)}"
+    );
+}
+
+#[test]
+fn dictionary_logger_projection_rejects_unevidenced_rich_or_nested_entries() {
+    let source_id = SourceId(1991);
+    for source in [
+        ".var {table}\n    .dictionary\n        - first: **one**\n.log {.table}",
+        ".var {table}\n    .dictionary\n        - first: .whitespace\n.log {.table}",
+        ".var {table}\n    .dictionary\n        - nested:\n            - child: value\n.log {.table}",
+    ] {
+        let sink = CollectingSink::default();
+        let (_, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3001", "{source}: {diagnostics:?}");
+        assert!(sink.events.borrow().is_empty(), "{source}");
+    }
 }
 
 #[test]

@@ -51,9 +51,13 @@ contract and residual gaps recorded in
 `UNSUPPORTED`; the #195/#197 rows remain `PARTIAL`. #368/PR #371 correct
 the previously omitted Unit value category in #149, including the evidenced
 `kotlin.Unit` projection and direct-call suppression. Clean-room PR #378
-additionally establishes the logger-only Unit/None/closed-Range/plain-text-Pair
-String subset identically on exact v2.5.1/v2.6.0 artifacts without widening
-generic String conversion. Native `arkst build` writes `Log` events to stdout through an explicit
+establishes the initial logger-only Unit/None/closed-Range/plain-text-Pair
+String subset, and closed/unmerged clean-room PR #390 extends the stable
+cross-version evidence to all Range endpoint shapes, the evidenced nested-Pair/None and Pair/Range compositions,
+and the evidenced flat ordered Dictionary scalar-entry projection without widening generic String conversion.
+Markdown-list Collection conversion was observed by #390 but remains
+fail-closed because Arkst's typed Collection no longer retains enough list-origin
+information to keep that production adapter evidence-bounded. Native `arkst build` writes `Log` events to stdout through an explicit
 host-owned sink while `Debug` stays silent and ordinary core compilation remains
 no-sink/fail-closed for `.log`. Clean-room PR #382 additionally pins default/non-strict `.error`
 stderr, rendered-component continuation, and source-defined-function behavior across exact
@@ -68,7 +72,7 @@ backend-neutral error component plus default/strict native host policies. Arkst-
 `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves
 all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output while
 keeping successful warning-only inspection stderr-silent. #197 stays open for exact HTML/CSS
-styling/unevidenced output contexts and unreviewed logger String categories; public WASM/embedder
+styling/unevidenced output contexts and remaining logger String categories such as Collection; public WASM/embedder
 exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and

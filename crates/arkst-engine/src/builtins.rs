@@ -1517,43 +1517,113 @@ pub(crate) fn scalar_string_conversion(
 /// conversion boundary without widening ordinary String consumers.
 ///
 /// Clean-room v2.5.1/v2.6.0 evidence shows logger messages accept the normal
-/// scalar/plain-content boundary plus Unit, None, closed Range, and a bounded
-/// scalar-text Pair representation. Unsupported structured values remain
-/// fail-closed until independently evidenced.
+/// scalar/plain-content boundary plus Unit, None, all four Range endpoint
+/// shapes, the observed nested-Pair/None and Pair/Range compositions, and the
+/// observed flat ordered Dictionary shape with string keys and scalar entry
+/// text/number values. Collection conversion remains fail-closed because the
+/// current IR does not retain enough list-origin information to distinguish the newly
+/// observed Markdown-list case from unevidenced Collection producers.
 pub(crate) fn logger_string_conversion(
     value: &InvocationValue,
 ) -> Result<String, value_conversion::ConversionError> {
     match scalar_string_conversion(value) {
         Ok(value) => Ok(value),
-        Err(error) => match &value.value {
-            IrValue::Unit => Ok("kotlin.Unit".to_string()),
-            IrValue::None => Ok("None".to_string()),
-            IrValue::Range(range) => match (range.start, range.end) {
-                (Some(start), Some(end)) => Ok(format!("{start}..{end}")),
-                _ => Err(error),
-            },
-            IrValue::Pair(pair) => {
-                let Some(first) = logger_pair_text_value(&pair.first) else {
-                    return Err(error);
-                };
-                let Some(second) = logger_pair_text_value(&pair.second) else {
-                    return Err(error);
-                };
-                Ok(format!(
-                    "[DynamicValue(unwrappedValue={first}, evaluationContext=null), \
-                     DynamicValue(unwrappedValue={second}, evaluationContext=null)]"
-                ))
-            }
-            _ => Err(error),
-        },
+        Err(error) => logger_structured_string_value(&value.value).ok_or(error),
     }
 }
 
-fn logger_pair_text_value(value: &IrValue) -> Option<&str> {
+fn logger_structured_string_value(value: &IrValue) -> Option<String> {
     match value {
-        IrValue::String(value) | IrValue::Identifier(value) => Some(value.as_str()),
+        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),
+        IrValue::Number(value) => Some(value.to_string()),
+        IrValue::Boolean(value) => Some(value.to_string()),
+        IrValue::Unit => Some("kotlin.Unit".to_string()),
+        IrValue::None => Some("None".to_string()),
+        IrValue::Range(range) => Some(format!(
+            "{}..{}",
+            range
+                .start
+                .map_or_else(String::new, |value| value.to_string()),
+            range
+                .end
+                .map_or_else(String::new, |value| value.to_string())
+        )),
+        IrValue::Pair(pair) => {
+            let first = logger_pair_member_string(&pair.first)?;
+            let second = logger_pair_member_string(&pair.second)?;
+            Some(format!(
+                "[DynamicValue(unwrappedValue={first}, evaluationContext=null), \
+                 DynamicValue(unwrappedValue={second}, evaluationContext=null)]"
+            ))
+        }
+        IrValue::Dictionary(dictionary) => {
+            let mut rendered = String::from("{");
+            for (index, pair) in dictionary.entries.iter().enumerate() {
+                let key = match pair.first.as_ref() {
+                    IrValue::String(value) => value,
+                    _ => return None,
+                };
+                let value = logger_dictionary_entry_string(&pair.second)?;
+                if index > 0 {
+                    rendered.push_str(", ");
+                }
+                rendered.push_str(key);
+                rendered.push_str("=DynamicValue(unwrappedValue=");
+                rendered.push_str(&value);
+                rendered.push_str(", evaluationContext=null)");
+            }
+            rendered.push('}');
+            Some(rendered)
+        }
+        IrValue::Collection(_)
+        | IrValue::Content(_)
+        | IrValue::Component(_)
+        | IrValue::Callable(_)
+        | IrValue::InlineBody(_)
+        | IrValue::Size(_)
+        | IrValue::Color(_)
+        | IrValue::Enum(_) => None,
+    }
+}
+
+fn logger_pair_member_string(value: &IrValue) -> Option<String> {
+    match value {
+        // #378/#390 independently evidence plain-text Pair members, nested
+        // Pair + None, and Pair + Range composition. Do not infer arbitrary
+        // recursive DynamicValue formatting from those observations.
+        IrValue::String(_) | IrValue::Identifier(_) | IrValue::None | IrValue::Range(_) => {
+            logger_structured_string_value(value)
+        }
+        IrValue::Pair(_) => logger_structured_string_value(value),
         _ => None,
     }
+}
+
+fn logger_dictionary_entry_string(value: &IrValue) -> Option<String> {
+    match value {
+        // #390 independently evidenced only the flat Markdown dictionary
+        // shape with ordinary scalar entry text/number values. Arkst keeps
+        // those entry values as one Paragraph-backed Content value, so
+        // project only that exact internal representation here. Rich content,
+        // nested structures, and typed values from other producers stay
+        // fail-closed until separately evidenced.
+        IrValue::Content(nodes) => logger_dictionary_plain_entry_text(nodes),
+        _ => None,
+    }
+}
+
+fn logger_dictionary_plain_entry_text(nodes: &[IrNode]) -> Option<String> {
+    let [IrNode::Paragraph { content, .. }] = nodes else {
+        return None;
+    };
+    let mut rendered = String::new();
+    for inline in content {
+        match inline {
+            IrInline::Text { content, .. } => rendered.push_str(content),
+            _ => return None,
+        }
+    }
+    Some(rendered)
 }
 
 fn scalar_string_argument_result(
