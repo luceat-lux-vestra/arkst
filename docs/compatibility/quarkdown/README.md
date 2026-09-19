@@ -53,9 +53,10 @@ the previously omitted Unit value category in #149, including the evidenced
 `kotlin.Unit` projection and direct-call suppression. Clean-room PR #378
 additionally establishes the logger-only Unit/None/closed-Range/plain-text-Pair
 String subset identically on exact v2.5.1/v2.6.0 artifacts without widening
-generic String conversion. #197 stays open for native CLI/output/strict
-behavior and unreviewed logger String categories; public WASM/embedder exposure
-remains deferred under #191, while #190 is complete. For #154, `.match` is #198-owned,
+generic String conversion. Native CLI build `.log` stdout integration is now
+wired through the explicit sink boundary. #197 stays open for rendered-error/
+stderr/strict behavior and unreviewed logger String categories; public WASM/
+embedder exposure remains deferred under #191, and #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
 the #188 resolver prerequisite for `.subdocumentgraph` is complete; producer/content/output remains blocked on #199.
 `.css` and `.cssproperties` remain unsupported with an explicit defer until a

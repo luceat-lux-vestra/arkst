@@ -17,7 +17,9 @@ pub mod source_map;
 pub use arkst_engine::builtins;
 pub mod evaluator {
     use crate::engine_adapter::VirtualProjectResourceProvider;
-    use crate::{Capabilities, EnvironmentInputs, EvaluationLimits, SourceMode, VirtualProject};
+    use crate::{
+        Capabilities, EnvironmentInputs, EvaluationLimits, LogSink, SourceMode, VirtualProject,
+    };
     use arkst_diagnostics::Diagnostic;
     use arkst_engine::evaluator as engine_evaluator;
     use arkst_ir::IrDocument;
@@ -174,6 +176,33 @@ pub mod evaluator {
                     metadata_defaults,
                 )
         }
+
+        pub(crate) fn evaluate_with_resources_and_log_sink<
+            R: arkst_engine::ResourceProvider + arkst_engine::LoadableLibraryProvider,
+        >(
+            &self,
+            resources: &R,
+            source_id: SourceId,
+            source_mode: SourceMode,
+            document: &IrDocument,
+            metadata_defaults: &arkst_engine::DocumentMetadataDefaults,
+            log_sink: &dyn LogSink,
+        ) -> (IrDocument, Vec<Diagnostic>) {
+            let source_mode = match source_mode {
+                SourceMode::Markdown => arkst_markdown::Mode::Markdown,
+                SourceMode::Quarkdown => arkst_markdown::Mode::Quarkdown,
+            };
+            self.inner
+                .evaluate_with_resources_and_libraries_and_log_sink_for_mode(
+                    resources,
+                    resources,
+                    log_sink,
+                    source_id,
+                    source_mode,
+                    document,
+                    metadata_defaults,
+                )
+        }
     }
 }
 
@@ -227,7 +256,9 @@ pub use arkst_diagnostics as diagnostics;
 pub use arkst_diagnostics::{Diagnostic, Severity};
 pub use source::*;
 // Compatibility facade: implementation ownership lives in arkst-project.
-pub use arkst_engine::{Capabilities, Capability, EnvironmentInputs, EvaluationLimits};
+pub use arkst_engine::{
+    Capabilities, Capability, EnvironmentInputs, EvaluationLimits, LogEvent, LogLevel, LogSink,
+};
 pub use arkst_project::{BuildError, ProjectMetadata, VirtualProject, VirtualProjectBuilder};
 
 /// The Arkst core result type.
@@ -260,6 +291,12 @@ fn source_mode_for_entry(entry: &arkst_project::VirtualPathBuf) -> SourceMode {
     }
 }
 
+enum CompileEvaluationInput<'a> {
+    Default,
+    Environment(&'a EnvironmentInputs),
+    LogSink(&'a dyn LogSink),
+}
+
 /// Compile a Arkst project through the full pipeline.
 ///
 /// Returns a `CompileResult` with the generated IR and diagnostics.
@@ -270,7 +307,7 @@ pub fn compile(project: &arkst_project::VirtualProject, options: &CompileOptions
         project,
         options,
         Capabilities::compatibility_default(),
-        None,
+        CompileEvaluationInput::Default,
     )
 }
 
@@ -286,7 +323,7 @@ pub fn compile_with_environment(
         project,
         options,
         Capabilities::compatibility_default(),
-        Some(environment),
+        CompileEvaluationInput::Environment(environment),
     )
 }
 
@@ -296,7 +333,7 @@ pub fn compile_with_capabilities(
     options: &CompileOptions,
     capabilities: Capabilities,
 ) -> CompileResult {
-    compile_with_inputs(project, options, capabilities, None)
+    compile_with_inputs(project, options, capabilities, CompileEvaluationInput::Default)
 }
 
 /// Compile an Arkst project with both explicit evaluator capabilities and an
@@ -307,14 +344,36 @@ pub fn compile_with_capabilities_and_environment(
     capabilities: Capabilities,
     environment: &EnvironmentInputs,
 ) -> CompileResult {
-    compile_with_inputs(project, options, capabilities, Some(environment))
+    compile_with_inputs(
+        project,
+        options,
+        capabilities,
+        CompileEvaluationInput::Environment(environment),
+    )
+}
+
+/// Compile an Arkst project with an explicit platform-neutral logger sink.
+///
+/// The sink is the only logger authority supplied to evaluator semantics.
+/// Core itself does not discover or write process stdout/stderr.
+pub fn compile_with_log_sink(
+    project: &arkst_project::VirtualProject,
+    options: &CompileOptions,
+    log_sink: &dyn LogSink,
+) -> CompileResult {
+    compile_with_inputs(
+        project,
+        options,
+        Capabilities::compatibility_default(),
+        CompileEvaluationInput::LogSink(log_sink),
+    )
 }
 
 fn compile_with_inputs(
     project: &arkst_project::VirtualProject,
     options: &CompileOptions,
     capabilities: Capabilities,
-    environment: Option<&EnvironmentInputs>,
+    evaluation_input: CompileEvaluationInput<'_>,
 ) -> CompileResult {
     let entry = project.entry();
 
@@ -357,21 +416,31 @@ fn compile_with_inputs(
     let resource_provider = engine_adapter::VirtualProjectResourceProvider::new(project);
     let evaluator =
         evaluator::Evaluator::with_capabilities_and_limits(capabilities, options.evaluation_limits);
-    let (ir, evaluation_diagnostics) = match environment {
-        Some(environment) => evaluator.evaluate_with_resources_and_environment(
+    let (ir, evaluation_diagnostics) = match evaluation_input {
+        CompileEvaluationInput::Default => evaluator.evaluate_with_resources(
             &resource_provider,
             source_id,
             source_mode,
             &ir,
             &metadata_defaults,
-            environment,
         ),
-        None => evaluator.evaluate_with_resources(
+        CompileEvaluationInput::Environment(environment) => {
+            evaluator.evaluate_with_resources_and_environment(
+                &resource_provider,
+                source_id,
+                source_mode,
+                &ir,
+                &metadata_defaults,
+                environment,
+            )
+        }
+        CompileEvaluationInput::LogSink(log_sink) => evaluator.evaluate_with_resources_and_log_sink(
             &resource_provider,
             source_id,
             source_mode,
             &ir,
             &metadata_defaults,
+            log_sink,
         ),
     };
     let mut diagnostics: Vec<Diagnostic> = parsed

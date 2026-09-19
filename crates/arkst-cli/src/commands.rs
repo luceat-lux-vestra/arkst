@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::ValueEnum;
+use std::cell::RefCell;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -389,10 +390,72 @@ fn collect_loadable_libraries(directory: &Path) -> anyhow::Result<Vec<(String, S
     Ok(libraries)
 }
 
-/// Compiles a pre-loaded VirtualProject.
+struct NativeCliLogSink<'a> {
+    writer: RefCell<&'a mut dyn Write>,
+    write_error: RefCell<Option<std::io::Error>>,
+}
+
+impl<'a> NativeCliLogSink<'a> {
+    fn new(writer: &'a mut dyn Write) -> Self {
+        Self {
+            writer: RefCell::new(writer),
+            write_error: RefCell::new(None),
+        }
+    }
+
+    fn finish(&self) -> anyhow::Result<()> {
+        if let Some(error) = self.write_error.borrow_mut().take() {
+            return Err(error).context("cannot write logger output to stdout");
+        }
+        self.writer
+            .borrow_mut()
+            .flush()
+            .context("cannot flush logger output to stdout")
+    }
+}
+
+impl arkst_core::LogSink for NativeCliLogSink<'_> {
+    fn emit(&self, event: &arkst_core::LogEvent) {
+        if event.level != arkst_core::LogLevel::Log || self.write_error.borrow().is_some() {
+            return;
+        }
+
+        let result = {
+            let mut writer = self.writer.borrow_mut();
+            writeln!(&mut **writer, "{}", event.message)
+        };
+        if let Err(error) = result {
+            *self.write_error.borrow_mut() = Some(error);
+        }
+    }
+}
+
+fn compile_project_with_log_writer(
+    project: &VirtualProject,
+    writer: &mut dyn Write,
+) -> anyhow::Result<arkst_core::CompileResult> {
+    let options = arkst_core::CompileOptions::default();
+    let sink = NativeCliLogSink::new(writer);
+    let result = arkst_core::compile_with_log_sink(project, &options, &sink);
+    sink.finish()?;
+    Ok(result)
+}
+
+/// Compiles a pre-loaded VirtualProject without native logger authority.
+///
+/// Validation/inspection commands retain the existing fail-closed behavior;
+/// the observed Quarkdown stdout contract is wired only into the normal build
+/// path, whose output lifecycle is the bounded compatibility target here.
 fn compile_project(project: &VirtualProject) -> anyhow::Result<arkst_core::CompileResult> {
     let options = arkst_core::CompileOptions::default();
     Ok(arkst_core::compile(project, &options))
+}
+
+/// Compiles a pre-loaded VirtualProject with the native build logger adapter.
+fn compile_project_for_build(project: &VirtualProject) -> anyhow::Result<arkst_core::CompileResult> {
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    compile_project_with_log_writer(project, &mut stdout)
 }
 /// Returns an error if any diagnostic has Severity::Error.
 fn ensure_no_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyhow::Result<()> {
@@ -473,7 +536,7 @@ pub fn build_with_backend_and_libraries(
     let input_path = Path::new(input);
     let loaded = load_single_file_project_with_libraries(input_path, libraries_dir)?;
 
-    let result = compile_project(&loaded.project)?;
+    let result = compile_project_for_build(&loaded.project)?;
 
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
@@ -1101,6 +1164,39 @@ mod tests {
     /// [`super::build`] directly so they can pass a fake executable path.
     fn build(input: &str, formats: &[String], output: Option<&Path>) -> anyhow::Result<()> {
         super::build(input, formats, output, Path::new("typst"))
+    }
+
+    struct FailingLogWriter;
+
+    impl std::io::Write for FailingLogWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "synthetic logger stdout failure",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn native_build_logger_write_failure_is_returned_before_output_publication() {
+        let project = VirtualProjectBuilder::new()
+            .entry("main.qd")
+            .unwrap()
+            .add_source("main.qd", ".log {before-output}\nvisible\n")
+            .unwrap()
+            .build()
+            .unwrap();
+        let mut writer = FailingLogWriter;
+
+        let error = compile_project_with_log_writer(&project, &mut writer)
+            .expect_err("logger stdout failure must fail the host compile boundary");
+
+        let message = error.to_string();
+        assert!(message.contains("cannot write logger output to stdout"), "{message}");
     }
 
     #[test]

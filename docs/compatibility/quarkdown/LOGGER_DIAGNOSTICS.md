@@ -60,7 +60,7 @@ With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immedi
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
-This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. The normal CLI still does not reproduce Quarkdown's stdout behavior, and unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete and no longer blocks this logger slice; native CLI sink/output integration remains #197-owned, while public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
+This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. The native CLI build path now injects an explicit stdout adapter through the core logger-sink compile boundary: `Log` events are written to stdout in evaluation order while `Debug` events remain silent, matching the independently observed distributed CLI compile behavior without adding ambient process I/O to core or engine. Arkst-specific `check`/`inspect` commands retain their prior sinkless behavior because the clean-room evidence does not define those separate command surfaces. Unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete and no longer blocks this logger slice; public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
 
 ### `.debug`
 
@@ -89,7 +89,7 @@ This is `PARTIAL` because Arkst does not yet reproduce Quarkdown's rendered HTML
 
 ## Host and platform boundary
 
-`LogSink`, `LogEvent`, and `LogLevel` are platform-neutral engine types. They contain only semantic data and source provenance. The evaluator exposes both resource-free injection and a combined resource/loadable-library/logger entry point so logger authority composes with ordinary project evaluation without serializing host objects into IR.
+`LogSink`, `LogEvent`, and `LogLevel` are platform-neutral engine types. They contain only semantic data and source provenance. The evaluator exposes both resource-free injection and a combined resource/loadable-library/logger entry point so logger authority composes with ordinary project evaluation without serializing host objects into IR. `arkst-core` now exposes the same explicit sink boundary through `compile_with_log_sink(...)`; the native CLI build adapter binds that boundary to stdout, filters `Debug`, flushes before returning the compile result, and propagates stdout write/flush failures as CLI host errors.
 
 This contract does not:
 
@@ -100,5 +100,5 @@ This contract does not:
 - broaden the evidenced Unit contract into generalized JVM/Kotlin object emulation;
 - claim Quarkdown error-card rendering or strict-mode CLI parity;
 - claim logger String formatting for structured categories beyond the independently evidenced Unit/None/closed-Range/plain-text-Pair subset;
-- close #197 while native CLI/output/strict behavior and unreviewed logger String categories remain;
+- close #197 while rendered-error/stderr/strict behavior and unreviewed logger String categories remain;
 - claim M3 (#263) completion.

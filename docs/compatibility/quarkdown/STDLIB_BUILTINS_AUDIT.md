@@ -401,9 +401,10 @@ Clean-room PR #378 establishes an additional logger-only String subset,
 identical across exact v2.5.1/v2.6.0 artifacts: Unit -> `kotlin.Unit`, None ->
 `None`, closed Range -> `start..end`, and the evidenced plain-text Pair JVM
 representation. The generic scalar String adapter remains unchanged.
-Quarkdown's CLI stdout behavior, rendered error component, exact stderr text,
-strict exit code, unreviewed logger String categories, and public WASM/embedder
-exposure remain outside this bounded claim. The
+Native CLI build `.log` stdout behavior is now implemented through the explicit
+sink boundary. Rendered error components, exact `.error` stderr presentation,
+strict exit behavior, unreviewed logger String categories, and public
+WASM/embedder exposure remain outside this bounded claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
@@ -430,7 +431,9 @@ without a sink; `.error` emits one structured `E3011` diagnostic and fails
 the call. Logger events are emitted synchronously in evaluation order with
 source provenance, malformed calls emit no events, and source-defined
 functions retain normal precedence over these native names. The three rows are
-`PARTIAL`, not `SUPPORTED_SEMANTICS`, because normal CLI stdout/error-card/
+`PARTIAL`, not `SUPPORTED_SEMANTICS`: native CLI build `.log` stdout
+integration is now implemented through the explicit sink boundary, but
+error-card/stderr/
 strict-mode behavior, unreviewed logger String categories, and #191 public
 WASM exposure are not claimed. The bounded Unit value/result semantics are
 covered by #368/PR #371. #197 therefore remains open for the remaining logger
