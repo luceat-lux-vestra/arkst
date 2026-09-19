@@ -1,0 +1,147 @@
+name: Quarkdown error output black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+          archive="/tmp/quarkdown-$version.zip"
+          root="/tmp/quarkdown-$version"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe non-strict rendered error continuation
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error197-${{ matrix.version }}"
+          mkdir -p "$root"
+          cat > "$root/standalone.qd" <<'QD'
+          alpha
+          .error {QD197_STABLE_ERROR}
+          omega
+          QD
+          cat > "$root/function.qd" <<'QD'
+          .function {boom}
+              .error {QD197_FN_STABLE_ERROR}
+          before
+          .boom
+          after
+          QD
+
+          for fixture in standalone function; do
+            out="$root/out-$fixture"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+            printf 'QD197-STABLE version=%s fixture=%s mode=default rc=%s\n' '${{ matrix.version }}' "$fixture" "$rc"
+            printf 'QD197-STABLE-STDOUT version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD197-STABLE-STDERR version=%s fixture=%s [' '${{ matrix.version }}' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+
+            test "$rc" -eq 0
+            html="$(find "$out" -type f -name '*.html' -print -quit)"
+            test -n "$html"
+
+            python3 - "$html" "$fixture" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import sys
+
+          class Text(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.parts=[]
+                  self.skip=0
+              def handle_starttag(self, tag, attrs):
+                  if tag in ("script", "style"):
+                      self.skip += 1
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.parts.append(data)
+
+          html=Path(sys.argv[1]).read_text()
+          p=Text()
+          p.feed(html)
+          text=" ".join(" ".join(p.parts).split())
+          fixture=sys.argv[2]
+          marker="QD197_STABLE_ERROR" if fixture == "standalone" else "QD197_FN_STABLE_ERROR"
+          before="alpha" if fixture == "standalone" else "before"
+          after="omega" if fixture == "standalone" else "after"
+          assert "Error:" in text, text
+          assert marker in text, text
+          assert before in text and after in text, text
+          assert text.index(before) < text.index(marker) < text.rindex(after), text
+          print(f"QD197-STABLE-HTML fixture={fixture} text={text!r}")
+          PY
+          done
+
+      - name: Probe strict abort and no artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error197-strict-${{ matrix.version }}"
+          mkdir -p "$root"
+          cat > "$root/strict.qd" <<'QD'
+          before-strict
+          .error {QD197_STRICT_ERROR}
+          after-strict
+          QD
+          out="$root/out"
+          set +e
+          "$QD" compile "$root/strict.qd" --clean --out "$out" --out-name probe --strict >"$root/stdout" 2>"$root/stderr"
+          rc=$?
+          set -e
+          printf 'QD197-STABLE version=%s fixture=strict mode=strict rc=%s\n' '${{ matrix.version }}' "$rc"
+          printf 'QD197-STABLE-STRICT-STDOUT version=%s [' '${{ matrix.version }}'
+          tr '\n' '|' <"$root/stdout"
+          printf ']\n'
+          printf 'QD197-STABLE-STRICT-STDERR version=%s [' '${{ matrix.version }}'
+          tr '\n' '|' <"$root/stderr"
+          printf ']\n'
+
+          test "$rc" -eq 66
+          grep -q 'QD197_STRICT_ERROR' "$root/stderr"
+          if find "$out" -type f \( -name '*.html' -o -name '*.pdf' \) -print -quit 2>/dev/null | grep -q .; then
+            echo 'strict mode unexpectedly published an artifact' >&2
+            exit 1
+          fi
