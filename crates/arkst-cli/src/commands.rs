@@ -515,20 +515,26 @@ fn explicit_error_diagnostic_matches_component(
             )
 }
 
-fn ensure_no_fatal_build_errors(
+#[derive(Debug, Default, PartialEq, Eq)]
+struct BuildErrorClassification {
+    matched_explicit_messages: Vec<String>,
+    fatal_errors: usize,
+}
+
+fn classify_build_errors(
     diagnostics: &[arkst_core::Diagnostic],
     document: &IrDocument,
-) -> anyhow::Result<()> {
+) -> BuildErrorClassification {
     let mut components = Vec::new();
     collect_explicit_error_components(&document.nodes, &mut components);
 
-    let mut fatal_errors = 0usize;
+    let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
         .iter()
         .filter(|diagnostic| matches!(&diagnostic.severity, arkst_core::Severity::Error))
     {
         if !is_explicit_error_diagnostic(diagnostic) {
-            fatal_errors += 1;
+            classification.fatal_errors += 1;
             continue;
         }
 
@@ -538,20 +544,36 @@ fn ensure_no_fatal_build_errors(
             // A recoverable explicit-error diagnostic must have a concrete
             // rendered semantic counterpart. Value-context or otherwise
             // unmaterialized explicit errors stay fail-closed.
-            fatal_errors += 1;
+            classification.fatal_errors += 1;
             continue;
         };
-        components.remove(index);
+        let component = components.remove(index);
+        classification
+            .matched_explicit_messages
+            .push(component.message.clone());
     }
 
     // Likewise, never publish a document containing an explicit-error
     // component without its structured diagnostic provenance.
-    fatal_errors += components.len();
+    classification.fatal_errors += components.len();
+    classification
+}
 
-    if fatal_errors > 0 {
-        anyhow::bail!("found {} error(s)", fatal_errors);
+fn ensure_no_fatal_build_errors(
+    diagnostics: &[arkst_core::Diagnostic],
+    document: &IrDocument,
+) -> anyhow::Result<()> {
+    let classification = classify_build_errors(diagnostics, document);
+    if classification.fatal_errors > 0 {
+        anyhow::bail!("found {} error(s)", classification.fatal_errors);
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NativeBuildOutcome {
+    Success,
+    StrictExplicitError { message: String },
 }
 
 /// Execute the `build` command: compile input to output format(s).
@@ -596,6 +618,31 @@ pub fn build_with_backend_and_libraries(
     backend: BackendSelection,
     libraries_dir: Option<&Path>,
 ) -> anyhow::Result<()> {
+    match build_with_backend_libraries_and_strict(
+        input,
+        formats,
+        output,
+        typst_path,
+        backend,
+        libraries_dir,
+        false,
+    )? {
+        NativeBuildOutcome::Success => Ok(()),
+        NativeBuildOutcome::StrictExplicitError { .. } => {
+            unreachable!("non-strict build cannot produce a strict outcome")
+        }
+    }
+}
+
+pub(crate) fn build_with_backend_libraries_and_strict(
+    input: &str,
+    formats: &[String],
+    output: Option<&Path>,
+    typst_path: &Path,
+    backend: BackendSelection,
+    libraries_dir: Option<&Path>,
+    strict: bool,
+) -> anyhow::Result<NativeBuildOutcome> {
     const SUPPORTED_FORMATS: &[&str] = &["typst", "pdf"];
 
     let unsupported: Vec<&String> = formats
@@ -627,11 +674,25 @@ pub fn build_with_backend_and_libraries(
         .finish()
         .context("cannot write Quarkdown logger output to stdout")?;
 
-    emit_native_build_diagnostics(&result.diagnostics);
+    let classification = classify_build_errors(&result.diagnostics, &result.ir);
+    if classification.fatal_errors > 0 {
+        emit_native_build_diagnostics(&result.diagnostics);
+        anyhow::bail!("found {} error(s)", classification.fatal_errors);
+    }
 
-    // Quarkdown default/non-strict `.error` is a rendered document component,
-    // not a build-aborting diagnostic. Every other error remains fail-closed.
-    ensure_no_fatal_build_errors(&result.diagnostics, &result.ir)?;
+    if strict {
+        if let Some(message) = classification.matched_explicit_messages.first() {
+            // Clean-room v2.5.1/v2.6.0 evidence shows strict mode finalizes
+            // after normal evaluator/caller continuation and logger side
+            // effects, but before any output artifact is published. Only a
+            // proven direct diagnostic/component pair is eligible here.
+            return Ok(NativeBuildOutcome::StrictExplicitError {
+                message: message.clone(),
+            });
+        }
+    } else {
+        emit_native_build_diagnostics(&result.diagnostics);
+    }
 
     let (typst_code, _source_map) = arkst_typst::lowering::lower_to_typst(&result.ir);
 
@@ -709,7 +770,7 @@ pub fn build_with_backend_and_libraries(
         }
     }
 
-    Ok(())
+    Ok(NativeBuildOutcome::Success)
 }
 
 /// Returns the default output path for Typst output.
