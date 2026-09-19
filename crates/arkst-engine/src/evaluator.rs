@@ -461,6 +461,13 @@ fn outcome_requires_rollback(outcome: &CallOutcome) -> bool {
         || matches!(outcome, CallOutcome::Value(value) if value_contains_explicit_error(value))
 }
 
+fn value_context_outcome(outcome: CallOutcome) -> CallOutcome {
+    match outcome {
+        CallOutcome::Value(value) if value_contains_explicit_error(&value) => CallOutcome::Failed,
+        outcome => outcome,
+    }
+}
+
 type LocalizationTable = BTreeMap<String, BTreeMap<String, String>>;
 type LocalizationTables = BTreeMap<String, LocalizationTable>;
 type LocalizationTableUndo = BTreeMap<String, Option<LocalizationTable>>;
@@ -12773,7 +12780,7 @@ impl Evaluator {
                     ..
                 }] = nodes.as_slice()
                 {
-                    return self.evaluate_call_value_with_ordered(
+                    return value_context_outcome(self.evaluate_call_value_with_ordered(
                         name,
                         ordered_args.as_deref(),
                         positional_args,
@@ -12784,7 +12791,7 @@ impl Evaluator {
                         span,
                         diagnostics,
                         context,
-                    );
+                    ));
                 }
                 if let [IrNode::ChainedFunctionCall {
                     head,
@@ -12794,14 +12801,14 @@ impl Evaluator {
                     ..
                 }] = nodes.as_slice()
                 {
-                    return self.evaluate_chain_value(
+                    return value_context_outcome(self.evaluate_chain_value(
                         head,
                         chain,
                         body.as_deref().map(CallBody::Block),
                         raw_body.as_ref(),
                         diagnostics,
                         context,
-                    );
+                    ));
                 }
                 let before = diagnostics.len();
                 let contains_declaration = nodes
@@ -12827,7 +12834,7 @@ impl Evaluator {
                     CallOutcome::Value(IrValue::Callable(callable))
                 }
             }
-            scalar => CallOutcome::Value(scalar.clone()),
+            scalar => value_context_outcome(CallOutcome::Value(scalar.clone())),
         }
     }
 
