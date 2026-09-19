@@ -3182,6 +3182,21 @@ mod tests {
     }
 
     #[test]
+    fn explicit_error_component_serde_roundtrip_preserves_message_and_span() {
+        let value = IrValue::Component(IrComponent::ExplicitError(IrExplicitErrorComponent {
+            message: "boom".to_string(),
+            span: SourceSpan::new(SourceId(197), 4, 17),
+        }));
+
+        let encoded = serde_json::to_string(&value).expect("explicit error serializes");
+        assert!(!encoded.contains("typst"));
+        let decoded =
+            serde_json::from_str::<IrValue>(&encoded).expect("explicit error deserializes");
+
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
     fn container_component_serde_roundtrip() {
         let value = container_value();
         let first = serde_json::to_string(&value).expect("container serializes");
