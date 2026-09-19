@@ -1,5 +1,7 @@
 use anyhow::Context;
+use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
+use std::cell::RefCell;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -389,10 +391,66 @@ fn collect_loadable_libraries(directory: &Path) -> anyhow::Result<Vec<(String, S
     Ok(libraries)
 }
 
-/// Compiles a pre-loaded VirtualProject.
+/// Compiles a pre-loaded VirtualProject without host logger output.
+///
+/// Arkst-specific analysis commands keep this deterministic no-sink boundary.
+/// The compatibility-facing native build path uses the explicit sink helper
+/// below instead.
 fn compile_project(project: &VirtualProject) -> anyhow::Result<arkst_core::CompileResult> {
     let options = arkst_core::CompileOptions::default();
     Ok(arkst_core::compile(project, &options))
+}
+
+fn compile_project_with_log_sink(
+    project: &VirtualProject,
+    log_sink: &dyn LogSink,
+) -> anyhow::Result<arkst_core::CompileResult> {
+    let options = arkst_core::CompileOptions::default();
+    Ok(arkst_core::compile_with_log_sink(
+        project, &options, log_sink,
+    ))
+}
+
+/// Native stdout adapter for Quarkdown `.log`.
+///
+/// `.debug` stays silent in the distributed CLI, matching independently
+/// observed target behavior. I/O failures are retained and reported after
+/// evaluation instead of panicking from the logger callback.
+struct WriterLogSink<W: Write> {
+    writer: RefCell<W>,
+    error: RefCell<Option<std::io::Error>>,
+}
+
+impl<W: Write> WriterLogSink<W> {
+    fn new(writer: W) -> Self {
+        Self {
+            writer: RefCell::new(writer),
+            error: RefCell::new(None),
+        }
+    }
+
+    fn finish(&self) -> std::io::Result<()> {
+        if let Some(error) = self.error.borrow_mut().take() {
+            return Err(error);
+        }
+        self.writer.borrow_mut().flush()
+    }
+}
+
+impl<W: Write> LogSink for WriterLogSink<W> {
+    fn emit(&self, event: &LogEvent) {
+        if event.level != LogLevel::Log || self.error.borrow().is_some() {
+            return;
+        }
+
+        let result = {
+            let mut writer = self.writer.borrow_mut();
+            writeln!(writer, "{}", event.message)
+        };
+        if let Err(error) = result {
+            *self.error.borrow_mut() = Some(error);
+        }
+    }
 }
 /// Returns an error if any diagnostic has Severity::Error.
 fn ensure_no_errors(diagnostics: &[arkst_core::Diagnostic]) -> anyhow::Result<()> {
@@ -473,7 +531,11 @@ pub fn build_with_backend_and_libraries(
     let input_path = Path::new(input);
     let loaded = load_single_file_project_with_libraries(input_path, libraries_dir)?;
 
-    let result = compile_project(&loaded.project)?;
+    let log_sink = WriterLogSink::new(std::io::stdout());
+    let result = compile_project_with_log_sink(&loaded.project, &log_sink)?;
+    log_sink
+        .finish()
+        .context("cannot write Quarkdown logger output to stdout")?;
 
     for diag in &result.diagnostics {
         eprintln!("{:?}", diag);
@@ -1095,6 +1157,37 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
     use tempfile::tempdir;
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "synthetic logger output failure",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn native_logger_sink_reports_stdout_failures_without_panicking() {
+        let sink = WriterLogSink::new(FailingWriter);
+        sink.emit(&LogEvent {
+            level: LogLevel::Log,
+            message: "will-fail".to_string(),
+            span: arkst_core::SourceSpan::new(arkst_core::SourceId(1), 0, 1),
+        });
+
+        let error = sink.finish().expect_err("write failure must surface");
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(error
+            .to_string()
+            .contains("synthetic logger output failure"));
+    }
 
     /// Test-only variant of [`super::build`] that keeps the pre-`--typst-path`
     /// three-argument shape for the many typst-output tests. PDF tests use
