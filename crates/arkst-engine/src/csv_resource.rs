@@ -44,6 +44,9 @@ pub enum CsvResourceError {
     #[error("CSV resource contains unsupported quoting syntax: {path}: {message}")]
     UnsupportedQuoting { path: String, message: String },
 
+    #[error("CSV resource contains an unsupported record terminator: {path}: {message}")]
+    UnsupportedRecordTerminator { path: String, message: String },
+
     #[error("CSV resource contains a duplicate header {header:?}: {path}")]
     DuplicateHeader { path: String, header: String },
 
@@ -86,7 +89,7 @@ pub fn load_csv_resource<R: ResourceProvider + ?Sized>(
 ///
 /// The accepted syntax is the independently evidenced standard subset:
 /// comma-separated records, RFC-style quoted fields, doubled quote escapes,
-/// CR/LF/CRLF record terminators, equal record widths, and unique raw headers.
+/// LF/CRLF record terminators, equal record widths, and unique raw headers.
 ///
 /// Physical blank records and non-standard quote placement fail closed instead
 /// of inheriting the more permissive behavior of a particular CSV library.
@@ -206,7 +209,14 @@ fn validate_bounded_csv_syntax(path: &str, text: &str) -> Result<(), CsvResource
 
         let terminator_len = match byte {
             b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(2),
-            b'\r' | b'\n' => Some(1),
+            b'\n' => Some(1),
+            b'\r' => {
+                return Err(CsvResourceError::UnsupportedRecordTerminator {
+                    path: path.to_string(),
+                    message: "bare carriage-return record separators are outside the evidenced subset"
+                        .to_string(),
+                });
+            }
             _ => None,
         };
         if let Some(len) = terminator_len {
@@ -375,6 +385,14 @@ mod tests {
         assert!(matches!(
             parse_csv_resource_text("quote.csv", "a,b\n\"unterminated,right\n", LIMIT),
             Err(CsvResourceError::UnsupportedQuoting { .. })
+        ));
+    }
+
+    #[test]
+    fn bare_carriage_return_record_terminators_fail_closed() {
+        assert!(matches!(
+            parse_csv_resource_text("bare-cr.csv", "a,b\r1,2\r", LIMIT),
+            Err(CsvResourceError::UnsupportedRecordTerminator { .. })
         ));
     }
 
