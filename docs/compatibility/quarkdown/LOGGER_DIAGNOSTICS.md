@@ -23,6 +23,18 @@ versions, including the callable-body distinction between one unconsumed Unit,
 repeated Unit statements (captureable empty content), and mixed Unit/content bodies. No Quarkdown implementation source, tests, or fixtures were inspected
 or copied for these probes.
 
+Disposable clean-room PR #378 then probed the logger `message: String`
+conversion boundary against the same exact v2.5.1/v2.6.0 artifacts. Final
+probe HEAD `82885148091846b7f7bb4e33611d6738a5953727` (workflow run
+35426565850; jobs 105853447856 / 105853447726) observed identical behavior:
+plain-text Pairs stringify as
+`[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]`,
+closed `1..3` Ranges stringify as `1..3`, `None` as `None`, and Unit as
+`kotlin.Unit`. Direct and variable-held Pair/Range values agree; `.debug`
+accepts Pair/None/Unit while remaining CLI-silent; and `.error` accepts the
+same Pair conversion. #378 is closed unmerged and no upstream implementation
+source, tests, or fixtures were inspected or copied for this correction.
+
 Observed behavior from probe runs 35284604253 / 35284697810 / 35302505118, with final return-value confirmation in run 35324039621 (job 105532850554):
 
 - `.log {text}` writes the converted message to stdout, contributes no direct document output, and compilation succeeds in both default and `--strict` modes.
@@ -48,7 +60,7 @@ With a sink, Arkst emits one source-backed `LogEvent { level: Log, ... }` immedi
 
 Without a sink, Arkst deterministically rejects the otherwise valid call with `E3010`. Argument binding and conversion happen before this capability rejection, so malformed calls retain their ordinary binding/conversion diagnostics.
 
-This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary, but the normal CLI still does not reproduce Quarkdown's stdout behavior and richer upstream DynamicValue-to-String formatting remains outside the bounded scalar adapter. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. Host/CLI exposure remains coordinated with #190 and public WASM/embedder exposure with #191. #368 records the value-model correction to #149.
+This remains intentionally `PARTIAL`: the engine now models the independently evidenced Unit value boundary and a logger-specific bounded DynamicValue-to-String adapter for Unit, None, closed Range, and plain-text Pair values. The generic scalar String adapter remains unchanged, so unrelated String consumers do not inherit these logger-only conversions. The normal CLI still does not reproduce Quarkdown's stdout behavior, and unreviewed structured DynamicValue categories remain fail-closed. Unit stays distinct from both `None` and evaluator `NoValue`; only the separately evidenced equality operation treats Unit and None as equivalent. #190 is complete and no longer blocks this logger slice; native CLI sink/output integration remains #197-owned, while public WASM/embedder exposure remains #191-owned. #368 records the value-model correction to #149.
 
 ### `.debug`
 
@@ -83,10 +95,10 @@ This contract does not:
 
 - authorize ambient stdout/stderr or a process logging framework;
 - add environment, filesystem, network, or plugin discovery;
-- complete #190 host/process capability work;
+- reopen or duplicate completed #190 host/process capability work;
 - complete #191 public WASM/embedder bindings;
 - broaden the evidenced Unit contract into generalized JVM/Kotlin object emulation;
 - claim Quarkdown error-card rendering or strict-mode CLI parity;
-- claim rich DynamicValue-to-String formatting beyond the bounded scalar adapter;
-- close #197 while its dynamic-string, output/strict, and public-binding gaps remain;
+- claim logger String formatting for structured categories beyond the independently evidenced Unit/None/closed-Range/plain-text-Pair subset;
+- close #197 while native CLI/output/strict behavior and unreviewed logger String categories remain;
 - claim M3 (#263) completion.

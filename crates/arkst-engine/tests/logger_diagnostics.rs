@@ -92,13 +92,55 @@ fn explicit_sink_receives_log_and_debug_events_in_evaluation_order() {
 }
 
 #[test]
-fn debug_without_sink_is_a_silent_noop_but_still_validates_message_conversion() {
+fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error() {
+    let source_id = SourceId(1989);
+    let sink = CollectingSink::default();
+    let source = ".log {.pair {left} {right}}\n.var {stored} {.pair {left} {right}}\n.debug {.stored}\n.log {.range {1} {3}}\n.log {.none}\n.error {.stored}";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
+    );
+
+    let pair =
+        "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
+    assert!(diagnostics[0].message.contains(pair), "{diagnostics:?}");
+
+    let events = sink.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.level, event.message.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (LogLevel::Log, pair),
+            (LogLevel::Debug, pair),
+            (LogLevel::Log, "1..3"),
+            (LogLevel::Log, "None"),
+        ]
+    );
+}
+
+#[test]
+fn debug_without_sink_is_silent_and_validates_bounded_logger_conversion() {
     let source_id = SourceId(1971);
     let (result, diagnostics) = evaluate_plain(".debug {hidden}", source_id);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(result.nodes.is_empty(), "{:?}", result.nodes);
 
-    let (_, diagnostics) = evaluate_plain(".debug {.pair {a} {b}}", source_id);
+    let source = ".debug {.pair {a} {b}}\n.debug {.none}\n.var {u} {.debug {unit}}\n.debug {.u}";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
+
+    let (_, diagnostics) = evaluate_plain(
+        ".var {table}\n    .dictionary\n        - a: 1\n.debug {.table}",
+        source_id,
+    );
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(
         diagnostics[0].primary.map(|span| span.source_id),
@@ -108,15 +150,22 @@ fn debug_without_sink_is_a_silent_noop_but_still_validates_message_conversion() 
 }
 
 #[test]
-fn log_without_sink_fails_deterministically_after_normal_argument_binding() {
+fn log_without_sink_fails_after_supported_message_conversion() {
     let source_id = SourceId(1972);
-    let (_, diagnostics) = evaluate_plain(".log {hello}", source_id);
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].code, "E3010");
-    assert_eq!(
-        diagnostics[0].primary.map(|span| span.source_id),
-        Some(source_id)
-    );
+    for source in [
+        ".log {hello}",
+        ".log {.pair {left} {right}}",
+        ".log {.range {1} {3}}",
+        ".log {.none}",
+    ] {
+        let (_, diagnostics) = evaluate_plain(source, source_id);
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3010", "{source}: {diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].primary.map(|span| span.source_id),
+            Some(source_id)
+        );
+    }
 
     let (_, malformed) = evaluate_plain(".log", source_id);
     assert_eq!(malformed.len(), 1, "{malformed:?}");
@@ -204,7 +253,7 @@ fn logger_names_are_visible_to_library_inspection_as_real_dispatch_owners() {
 }
 
 #[test]
-fn malformed_or_non_stringable_log_arguments_never_emit_events() {
+fn malformed_or_unsupported_log_arguments_never_emit_events() {
     let source_id = SourceId(1976);
     let sink = CollectingSink::default();
 
@@ -212,13 +261,14 @@ fn malformed_or_non_stringable_log_arguments_never_emit_events() {
     assert_eq!(duplicate.len(), 1, "{duplicate:?}");
     assert!(sink.events.borrow().is_empty());
 
-    let (_, structured) = evaluate_with_sink(".log {.pair {a} {b}}", source_id, &sink);
-    assert_eq!(structured.len(), 1, "{structured:?}");
+    let source = ".var {table}\n    .dictionary\n        - a: 1\n.log {.table}";
+    let (_, unsupported) = evaluate_with_sink(source, source_id, &sink);
+    assert_eq!(unsupported.len(), 1, "{unsupported:?}");
     assert_eq!(
-        structured[0].primary.map(|span| span.source_id),
+        unsupported[0].primary.map(|span| span.source_id),
         Some(source_id)
     );
-    assert!(structured[0].message.contains(".log"));
+    assert!(unsupported[0].message.contains(".log"));
     assert!(sink.events.borrow().is_empty());
 }
 
@@ -403,35 +453,26 @@ fn unit_optionality_equality_and_string_conversion_match_clean_room_contract() {
 }
 
 #[test]
-fn unit_string_projection_does_not_widen_generic_string_consumers() {
+fn unit_logger_conversion_is_target_specific_and_does_not_widen_generic_string_consumers() {
     let source_id = SourceId(1987);
     let sink = CollectingSink::default();
     let source = ".var {u} {.debug {unit}}\n.uppercase {.u}\n.log {.u}";
     let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
 
     assert!(paragraph_texts(&result).is_empty());
-    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-    assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.primary.map(|span| span.source_id) == Some(source_id)),
-        "{diagnostics:?}"
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].primary.map(|span| span.source_id),
+        Some(source_id)
     );
-    assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.message.contains("adapt")
-                || diagnostic.message.contains(".log")),
-        "{diagnostics:?}"
-    );
+    assert!(diagnostics[0].message.contains("adapt"), "{diagnostics:?}");
+
     let events = sink.events.borrow();
-    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events.len(), 2, "{events:?}");
     assert_eq!(events[0].level, LogLevel::Debug);
     assert_eq!(events[0].message, "unit");
-    assert!(
-        events.iter().all(|event| event.level != LogLevel::Log),
-        "Unit must not be coerced through logger message conversion"
-    );
+    assert_eq!(events[1].level, LogLevel::Log);
+    assert_eq!(events[1].message, "kotlin.Unit");
 }
 
 #[test]

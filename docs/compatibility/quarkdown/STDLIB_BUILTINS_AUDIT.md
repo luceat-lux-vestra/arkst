@@ -397,9 +397,13 @@ one is supplied, and `.error` produces a structured source-backed evaluator
 diagnostic rather than host logging. #368/PR #371 adds the independently
 evidenced Unit value boundary for successful `.log`/`.debug` calls, including
 direct-call output suppression and the exact `kotlin.Unit` String projection.
+Clean-room PR #378 establishes an additional logger-only String subset,
+identical across exact v2.5.1/v2.6.0 artifacts: Unit -> `kotlin.Unit`, None ->
+`None`, closed Range -> `start..end`, and the evidenced plain-text Pair JVM
+representation. The generic scalar String adapter remains unchanged.
 Quarkdown's CLI stdout behavior, rendered error component, exact stderr text,
-strict exit code, richer DynamicValue-to-String formatting, and public
-WASM/embedder exposure remain outside this bounded claim. The
+strict exit code, unreviewed logger String categories, and public WASM/embedder
+exposure remain outside this bounded claim. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
@@ -414,8 +418,9 @@ The clean-room v2.6 contract is recorded in
 probes establish that `.log` writes converted messages to stdout with no
 standalone document output, `.debug` is silent in the distributed CLI, and
 capturing either result in value context yields `kotlin.Unit` rather than
-Quarkdown `none`. The probes also show richer upstream dynamic String
-formatting (for example Pair values) than Arkst's current scalar boundary.
+Quarkdown `none`. Clean-room PR #378 additionally fixes the bounded logger-only dynamic String
+subset for Unit, None, closed Range, and the evidenced plain-text Pair
+representation without widening unrelated generic String consumers.
 `.error` is a failed call that renders an error component while later content
 continues in non-strict mode; strict mode aborts the compile.
 
@@ -426,7 +431,7 @@ the call. Logger events are emitted synchronously in evaluation order with
 source provenance, malformed calls emit no events, and source-defined
 functions retain normal precedence over these native names. The three rows are
 `PARTIAL`, not `SUPPORTED_SEMANTICS`, because normal CLI stdout/error-card/
-strict-mode behavior, richer dynamic-value String formatting, and #191 public
+strict-mode behavior, unreviewed logger String categories, and #191 public
 WASM exposure are not claimed. The bounded Unit value/result semantics are
 covered by #368/PR #371. #197 therefore remains open for the remaining logger
 residuals even though no #151 row is still `UNSUPPORTED`.

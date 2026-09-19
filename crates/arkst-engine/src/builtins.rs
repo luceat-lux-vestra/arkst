@@ -1513,6 +1513,49 @@ pub(crate) fn scalar_string_conversion(
     }
 }
 
+/// Applies the independently evidenced Quarkdown logger `message: String`
+/// conversion boundary without widening ordinary String consumers.
+///
+/// Clean-room v2.5.1/v2.6.0 evidence shows logger messages accept the normal
+/// scalar/plain-content boundary plus Unit, None, closed Range, and a bounded
+/// scalar-text Pair representation. Unsupported structured values remain
+/// fail-closed until independently evidenced.
+pub(crate) fn logger_string_conversion(
+    value: &InvocationValue,
+) -> Result<String, value_conversion::ConversionError> {
+    match scalar_string_conversion(value) {
+        Ok(value) => Ok(value),
+        Err(error) => match &value.value {
+            IrValue::Unit => Ok("kotlin.Unit".to_string()),
+            IrValue::None => Ok("None".to_string()),
+            IrValue::Range(range) => match (range.start, range.end) {
+                (Some(start), Some(end)) => Ok(format!("{start}..{end}")),
+                _ => Err(error),
+            },
+            IrValue::Pair(pair) => {
+                let Some(first) = logger_pair_text_value(&pair.first) else {
+                    return Err(error);
+                };
+                let Some(second) = logger_pair_text_value(&pair.second) else {
+                    return Err(error);
+                };
+                Ok(format!(
+                    "[DynamicValue(unwrappedValue={first}, evaluationContext=null), \
+                     DynamicValue(unwrappedValue={second}, evaluationContext=null)]"
+                ))
+            }
+            _ => Err(error),
+        },
+    }
+}
+
+fn logger_pair_text_value(value: &IrValue) -> Option<&str> {
+    match value {
+        IrValue::String(value) | IrValue::Identifier(value) => Some(value.as_str()),
+        _ => None,
+    }
+}
+
 fn scalar_string_argument_result(
     value: &InvocationValue,
     parameter: &str,
