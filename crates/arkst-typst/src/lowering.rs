@@ -6,9 +6,8 @@
 use arkst_ir::{
     IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment,
     IrDocument, IrDocumentAlignment, IrDocumentType, IrExplicitErrorComponent, IrInline,
-    IrLandscapeComponent,
-    IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout,
-    IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
+    IrLandscapeComponent, IrMainAxisAlignment, IrNode, IrSize, IrSizeUnit, IrStackedComponent,
+    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrTaskStatus, IrValue,
 };
 use arkst_source::{SourceId, SourceMapEntry, SourceSpan};
 
@@ -1359,10 +1358,9 @@ fn escape_typst_comment(s: &str) -> String {
 mod tests {
     use arkst_ir::{
         IrCallSegment, IrComponent, IrContainerAlignment, IrContainerComponent,
-        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline,
-        IrLandscapeComponent, IrListItem,
-        IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize, IrSizeUnit,
-        IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
+        IrCrossAxisAlignment, IrDocument, IrExplicitErrorComponent, IrInline, IrLandscapeComponent,
+        IrListItem, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrRange, IrSize,
+        IrSizeUnit, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow,
         IrTaskStatus, IrValue,
     };
     use arkst_source::{SourceId, SourceSpan};
