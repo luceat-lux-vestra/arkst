@@ -97,6 +97,8 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
     let sink = CollectingSink::default();
     let source = ".log {.pair {left} {right}}\n.var {stored} {.pair {left} {right}}\n.debug {.stored}\n.log {.range {1} {3}}\n.log {.none}\n.error {.stored}";
     let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+    let pair =
+        "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
 
     let [IrNode::Component {
         component: arkst_ir::IrComponent::ExplicitError(error),
@@ -113,8 +115,6 @@ fn logger_dynamic_string_boundary_matches_clean_room_pair_range_none_and_error()
         Some(source_id)
     );
 
-    let pair =
-        "[DynamicValue(unwrappedValue=left, evaluationContext=null), DynamicValue(unwrappedValue=right, evaluationContext=null)]";
     assert!(diagnostics[0].message.contains(pair), "{diagnostics:?}");
 
     let events = sink.events.borrow();
