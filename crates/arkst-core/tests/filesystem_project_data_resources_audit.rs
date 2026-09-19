@@ -342,6 +342,16 @@ fn resource_architecture_and_historical_reconciliation_are_explicit() {
     assert!(listfiles[19].contains("last-modified"));
     assert!(listfiles[21].contains("#189"));
     assert!(listfiles[21].contains("#191"));
+    let csv = row(&rows, "builtin:.csv");
+    assert_eq!(csv[17], "PARTIAL");
+    assert!(csv[13].contains("csv_resource"));
+    assert!(csv[13].contains("no evaluator dispatch"));
+    assert!(csv[18].contains("CsvResourceData"));
+    assert!(csv[18].contains("field-count limit"));
+    assert!(csv[19].contains("#183"));
+    assert!(csv[19].contains("table-node materialization"));
+    assert_eq!(csv[21], "#189;#183;POLICY_DIVERGENCE:global-read;#191");
+
     let filename = row(&rows, "builtin:.filename");
     assert_eq!(filename[17], "PARTIAL");
     assert!(filename[16].contains("quarkdown-project-data-189.md"));

@@ -116,6 +116,15 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     }
     let filename = resource_row("builtin:.filename");
     assert!(!filename[22].contains(".listfiles/.csv/.bibliography remain"));
+    let csv = resource_row("builtin:.csv");
+    assert_eq!(csv[17], "PARTIAL");
+    assert!(csv[16].contains("csv_resource.rs"));
+    assert!(csv[16].contains("#376"));
+    assert!(csv[18].contains("raw `CsvResourceData`"));
+    assert!(csv[19].contains("function binding"));
+    assert!(csv[19].contains("#183"));
+    assert_eq!(csv[21], "#189;#183;POLICY_DIVERGENCE:global-read;#191");
+
     let listfiles = resource_row("builtin:.listfiles");
     assert!(listfiles[16].contains("quarkdown_listfiles_name_sort_189.rs"));
     assert!(listfiles[18].contains("fullpath:false"));
@@ -138,10 +147,10 @@ fn reconciliation_keeps_resource_statuses_and_ownership_single_sourced() {
     assert!(!COMPAT_README
         .contains("`.listfiles`, `.filename`) and `.llmstxt` are tracked as deferred"));
     assert!(
-        GAP_INVENTORY.contains("bounded project data/file identity (`.filename`, `.listfiles`)")
+        GAP_INVENTORY.contains("bounded project data/file identity/resource parsing (`.filename`, `.listfiles`, raw `.csv` parser)")
     );
     assert!(GAP_INVENTORY.contains(
-        "`.includeall`, `.filename`, and `.listfiles` have bounded `PARTIAL` implementations"
+        "`.includeall`, `.filename`, and `.listfiles` have bounded `PARTIAL` implementations, and `.csv` now has a bounded source-relative raw resource/parser slice"
     ));
     assert!(!GAP_INVENTORY.contains("`.csv`, `.listfiles`, and `.filename`"));
     assert!(!GAP_INVENTORY

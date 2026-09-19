@@ -8,7 +8,7 @@ const MANIFEST: &str = include_str!(
 const TARGET_SHA: &str = "107ec3a9482f10d6f90d7580f8409b46a719d18e";
 const EVIDENCE_MERGE_SHA: &str = "e7da0718439ecf396fbfeceb133da872a940341a";
 const POLICY_MARKER: &str = "POLICY_DIVERGENCE:global-read";
-const EXPECTED_MARKER_SURFACES: [(&str, &str); 12] = [
+const EXPECTED_MARKER_SURFACES: [(&str, &str); 13] = [
     ("builtin:.read", "PARTIAL"),
     ("builtin:.json", "PARTIAL"),
     ("builtin:.include", "PARTIAL"),
@@ -16,6 +16,7 @@ const EXPECTED_MARKER_SURFACES: [(&str, &str); 12] = [
     ("builtin:.pathtoroot", "PARTIAL"),
     ("builtin:.listfiles", "PARTIAL"),
     ("builtin:.filename", "PARTIAL"),
+    ("builtin:.csv", "PARTIAL"),
     ("builtin:.subdocument", "PARTIAL"),
     ("contract:markdown-subdocument-resolution", "PARTIAL"),
     ("contract:logical-path-normalization", "SUPPORTED_SEMANTICS"),
