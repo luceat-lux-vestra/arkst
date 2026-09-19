@@ -1,0 +1,139 @@
+name: Quarkdown logger structured dynamic-string clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe-${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          url="https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe remaining structured logger String conversion categories
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/logger197-structured-string
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/collection-direct.qd" <<'QD'
+          .var {values}
+              - alpha
+              - beta
+          .log {.values}
+          QD
+
+          cat > "$root/collection-debug.qd" <<'QD'
+          .var {values}
+              - alpha
+              - beta
+          .debug {.values}
+          after-debug
+          QD
+
+          cat > "$root/collection-error.qd" <<'QD'
+          .var {values}
+              - alpha
+              - beta
+          before
+          .error {.values}
+          after
+          QD
+
+          cat > "$root/dictionary-direct.qd" <<'QD'
+          .var {table}
+              .dictionary
+                  - first: one
+                  - second: 2
+          .log {.table}
+          QD
+
+          cat > "$root/dictionary-variable.qd" <<'QD'
+          .var {table}
+              .dictionary
+                  - first: one
+                  - second: 2
+          .var {stored} {.table}
+          .log {.stored}
+          QD
+
+          cat > "$root/nested-pair.qd" <<'QD'
+          .log {.pair {.pair {left} {right}} {.none}}
+          QD
+
+          cat > "$root/pair-with-range.qd" <<'QD'
+          .log {.pair {.range {1} {3}} {.range to:{2}}}
+          QD
+
+          cat > "$root/open-range-left.qd" <<'QD'
+          .log {.range to:{3}}
+          QD
+
+          cat > "$root/open-range-right.qd" <<'QD'
+          .log {.range from:{2}}
+          QD
+
+          cat > "$root/open-range-empty.qd" <<'QD'
+          .log {.range}
+          QD
+
+          cat > "$root/scalar-controls.qd" <<'QD'
+          .log {42}
+          .log {true}
+          .log {plain}
+          QD
+
+          for fixture in collection-direct collection-debug collection-error dictionary-direct dictionary-variable nested-pair pair-with-range open-range-left open-range-right open-range-empty scalar-controls; do
+            out="$root/out-$fixture"
+            stdout="$root/$fixture.stdout"
+            stderr="$root/$fixture.stderr"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            python3 - "$fixture" "$rc" "$stdout" "$stderr" <<'PY'
+          from pathlib import Path
+          import sys
+          fixture, rc, stdout_path, stderr_path = sys.argv[1:]
+          stdout = Path(stdout_path).read_text(errors="replace")
+          stderr = Path(stderr_path).read_text(errors="replace")
+          print(f"QD197-STRUCT fixture={fixture} rc={rc}")
+          print(f"QD197-STRUCT-STDOUT fixture={fixture} value={stdout!r}")
+          print(f"QD197-STRUCT-STDERR fixture={fixture} value={stderr!r}")
+          PY
+          done
