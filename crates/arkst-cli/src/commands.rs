@@ -1246,15 +1246,28 @@ pub fn check(input: &str) -> anyhow::Result<()> {
 }
 
 /// Execute `check` with explicit native loadable-library ingestion.
+fn is_analysis_error(diagnostic: &arkst_core::Diagnostic) -> bool {
+    matches!(&diagnostic.severity, arkst_core::Severity::Error)
+}
+
+fn emit_analysis_errors(diagnostics: &[arkst_core::Diagnostic]) {
+    for diagnostic in diagnostics
+        .iter()
+        .filter(|diagnostic| is_analysis_error(diagnostic))
+    {
+        eprintln!("{diagnostic:?}");
+    }
+}
+
 pub fn check_with_libraries(input: &str, libraries_dir: Option<&Path>) -> anyhow::Result<()> {
     let input = Path::new(input);
     let loaded = load_single_file_project_with_libraries(input, libraries_dir)?;
     let result = compile_project(&loaded.project)?;
 
-    for diag in &result.diagnostics {
-        eprintln!("{:?}", diag);
+    // Preserve the pre-existing check contract: surface all diagnostics.
+    for diagnostic in &result.diagnostics {
+        eprintln!("{diagnostic:?}");
     }
-
     ensure_no_errors(&result.diagnostics)?;
 
     Ok(())
@@ -1276,7 +1289,10 @@ pub fn inspect_with_libraries(
     let loaded = load_single_file_project_with_libraries(input, libraries_dir)?;
     let result = compile_project(&loaded.project)?;
 
-    // Fail on error diagnostics
+    // Analysis commands deliberately stay sinkless/fail-closed for logger
+    // side effects. Inspect surfaces fatal diagnostics before refusing output
+    // while preserving its existing warning-silent success behavior.
+    emit_analysis_errors(&result.diagnostics);
     ensure_no_errors(&result.diagnostics)?;
 
     match emit {
@@ -1379,6 +1395,29 @@ mod tests {
         assert!(classification.explicit_messages.is_empty());
         assert_eq!(classification.fatal_errors, 1);
         assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
+    }
+
+    #[test]
+    fn inspect_analysis_diagnostic_filter_preserves_warning_silence() {
+        let warning = arkst_core::Diagnostic {
+            code: "W1970".to_string(),
+            severity: arkst_core::Severity::Warning,
+            message: "warning".to_string(),
+            primary: None,
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+        let error = arkst_core::Diagnostic {
+            code: "E1970".to_string(),
+            severity: arkst_core::Severity::Error,
+            message: "error".to_string(),
+            primary: None,
+            secondary: Vec::new(),
+            hints: Vec::new(),
+        };
+
+        assert!(!is_analysis_error(&warning));
+        assert!(is_analysis_error(&error));
     }
 
     #[test]

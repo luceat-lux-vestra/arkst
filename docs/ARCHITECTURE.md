@@ -1182,9 +1182,15 @@ also exposes `arkst build ... --strict` for the independently evidenced
 Quarkdown explicit-error policy. That flag is a host finalization boundary:
 ordinary evaluator/log semantics run first, then a paired explicit error can
 force exit 66 and suppress artifact/backend publication. It is not propagated
-as an evaluator-wide abort option. The illustrative `[typst] backend`
-configuration above is not a claim that `arkst.toml` backend parsing is
-already implemented.
+as an evaluator-wide abort option. The Arkst-specific analysis commands
+`check` and `inspect` deliberately use ordinary sinkless compilation instead:
+they do not inject a `LogSink`, so `.log` remains the deterministic E3010
+capability failure, `.debug` remains silent, and `.error` remains an ordinary
+fatal diagnostic rather than inheriting build recovery or strict exit 66.
+`check` preserves its existing behavior of emitting all compiler diagnostics
+to stderr. `inspect` emits fatal error diagnostics before refusing requested
+analysis output, while successful warning-only inspection remains stderr-silent. The illustrative `[typst] backend` configuration
+above is not a claim that `arkst.toml` backend parsing is already implemented.
 
 ```text
 arkst.toml + CLI flags
@@ -1202,10 +1208,12 @@ arkst-cli / host
 Compiler/language options include the compatibility profile, language-level
 compatibility behavior, and semantic/evaluation resource limits. Host/output
 options include the output path or directory, requested output target,
-selected Typst compiler adapter, native filesystem behavior, and the current
-native-build `--strict` finalization policy. In particular, the implemented
-Quarkdown `--strict` behavior must not be reinterpreted as an evaluator-wide
-immediate-abort flag. Output-path or subprocess configuration does not belong
+selected Typst compiler adapter, native filesystem behavior, the current
+native-build `--strict` finalization policy, and Arkst's analysis-command
+logger/diagnostic policy. In particular, the implemented Quarkdown `--strict`
+behavior must not be reinterpreted as an evaluator-wide immediate-abort flag,
+and `check`/`inspect` must not acquire build's host logger or recoverable
+explicit-error policy implicitly. Output-path or subprocess configuration does not belong
 in `arkst-engine` or another platform-independent compiler crate.
 `VirtualProject` does not select a native backend executable.
 
