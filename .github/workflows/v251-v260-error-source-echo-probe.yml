@@ -1,0 +1,217 @@
+name: Quarkdown explicit-error source-echo black-box probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: error-source-echo-probe-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: probe (${{ matrix.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v2.5.1, v2.6.0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          case "$version" in
+            v2.5.1) expected='5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9' ;;
+            v2.6.0) expected='5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4' ;;
+            *) echo "unexpected version: $version" >&2; exit 1 ;;
+          esac
+          url="https://github.com/iamgio/quarkdown/releases/download/$version/quarkdown-linux-x64.zip"
+          archive="/tmp/quarkdown-$version.zip"
+          dist="/tmp/quarkdown-$version"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$dist"
+          unzip -q "$archive" -d "$dist"
+          qd="$(find "$dist" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe source-echo normalization
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error-source-echo-${{ matrix.version }}"
+          mkdir -p "$root"
+
+          cat > "$root/literal.qd" <<'QD'
+          before-literal
+          .error {QD197_ECHO_LITERAL}
+          after-literal
+          QD
+
+          cat > "$root/dynamic.qd" <<'QD'
+          .var {msg} {QD197_ECHO_DYNAMIC}
+          before-dynamic
+          .error {.msg}
+          after-dynamic
+          QD
+
+          cat > "$root/function.qd" <<'QD'
+          .function {boom}
+              .error {QD197_ECHO_FUNCTION}
+          before-function
+          .boom
+          after-function
+          QD
+
+          cat > "$root/named.qd" <<'QD'
+          before-named
+          .error message:{QD197_ECHO_NAMED}
+          after-named
+          QD
+
+          cat > "$root/spacing.qd" <<'QD'
+          before-spacing
+          .error    {QD197_ECHO_SPACING}
+          after-spacing
+          QD
+
+          : > "$root/observations.ndjson"
+
+          inspect_html() {
+            html="$1"
+            fixture="$2"
+            marker="$3"
+            expected_source="$4"
+            python3 - "$html" "$fixture" "$marker" "$expected_source" <<'PY' >> "$root/observations.ndjson"
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import json
+          import sys
+
+          path = Path(sys.argv[1])
+          fixture, marker, expected_source = sys.argv[2:]
+          raw = path.read_text(errors="replace")
+
+          class Probe(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.stack = []
+                  self.text = []
+                  self.marker_paths = []
+                  self.skip = 0
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  label = tag
+                  if attrs.get("id"):
+                      label += f"#{attrs['id']}"
+                  if attrs.get("class"):
+                      label += "." + ".".join(attrs["class"].split())
+                  self.stack.append(label)
+                  if tag in ("script", "style"):
+                      self.skip += 1
+
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+                  if self.stack:
+                      self.stack.pop()
+
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.text.append(data)
+                  if marker in data:
+                      self.marker_paths.append(list(self.stack))
+
+          parser = Probe()
+          parser.feed(raw)
+          text = " ".join(" ".join(parser.text).split())
+
+          dot = raw.find(".error")
+          raw_neighborhood = ""
+          if dot >= 0:
+              raw_neighborhood = raw[max(0, dot - 240):dot + 480]
+
+          marker_index = raw.find(marker)
+          marker_neighborhood = ""
+          if marker_index >= 0:
+              marker_neighborhood = raw[max(0, marker_index - 240):marker_index + len(marker) + 480]
+
+          print(json.dumps({
+              "fixture": fixture,
+              "marker": marker,
+              "expected_source": expected_source,
+              "expected_source_present": expected_source in raw,
+              "marker_count": raw.count(marker),
+              "dot_error_count": raw.count(".error"),
+              "marker_paths": parser.marker_paths,
+              "text": text,
+              "raw_neighborhood": raw_neighborhood,
+              "marker_neighborhood": marker_neighborhood,
+          }, ensure_ascii=False))
+          PY
+          }
+
+          run_fixture() {
+            fixture="$1"
+            marker="$2"
+            expected_source="$3"
+            required="$4"
+            out="$root/out-$fixture"
+
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --out "$out" --out-name probe               >"$root/$fixture.stdout" 2>"$root/$fixture.stderr"
+            rc=$?
+            set -e
+
+            printf 'QD197-ECHO version=%s fixture=%s rc=%s expected_source=%q\n'               '${{ matrix.version }}' "$fixture" "$rc" "$expected_source"
+            printf 'QD197-ECHO-STDOUT fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stdout"
+            printf ']\n'
+            printf 'QD197-ECHO-STDERR fixture=%s [' "$fixture"
+            tr '\n' '|' <"$root/$fixture.stderr"
+            printf ']\n'
+
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              inspect_html "$html" "$fixture" "$marker" "$expected_source"
+            else
+              printf '{"fixture":"%s","marker":"%s","expected_source":"%s","rc":%s,"html":false}\n'                 "$fixture" "$marker" "$expected_source" "$rc" >> "$root/observations.ndjson"
+            fi
+
+            if [ "$required" = yes ]; then
+              test "$rc" -eq 0
+              test -n "$html"
+              grep -Fq "$marker" "$root/$fixture.stderr"
+              grep -Fq "$marker" "$html"
+            fi
+          }
+
+          run_fixture literal QD197_ECHO_LITERAL '.error {QD197_ECHO_LITERAL}' yes
+          run_fixture dynamic QD197_ECHO_DYNAMIC '.error {.msg}' yes
+          run_fixture function QD197_ECHO_FUNCTION '.error {QD197_ECHO_FUNCTION}' yes
+          run_fixture named QD197_ECHO_NAMED '.error message:{QD197_ECHO_NAMED}' no
+          run_fixture spacing QD197_ECHO_SPACING '.error    {QD197_ECHO_SPACING}' no
+
+          echo '--- QD197 source-echo observations ---'
+          cat "$root/observations.ndjson"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qd197-error-source-echo-${{ matrix.version }}-${{ github.run_id }}
+          path: /tmp/error-source-echo-${{ matrix.version }}
+          if-no-files-found: error
