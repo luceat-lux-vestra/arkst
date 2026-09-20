@@ -419,6 +419,15 @@ enum CallOutcome {
     Unresolved,
 }
 
+fn explicit_error_source_echo(context: &EvaluationContext<'_>, span: SourceSpan) -> Option<String> {
+    let source = context.resources?.source_text(span.source_id)?;
+    let source_echo = source.get(span.start..span.end)?;
+    if !source_echo.trim_start().starts_with(".error") {
+        return None;
+    }
+    Some(source_echo.to_string())
+}
+
 fn component_contains_explicit_error(component: &IrComponent) -> bool {
     match component {
         IrComponent::ExplicitError(_) => true,
@@ -6268,6 +6277,7 @@ impl Evaluator {
                 CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(
                     IrExplicitErrorComponent {
                         message,
+                        source_echo: explicit_error_source_echo(context, *span),
                         span: *span,
                     },
                 )))
@@ -18925,6 +18935,11 @@ fn rebase_dynamic_component(component: &mut IrComponent, source_span: SourceSpan
             rebase_dynamic_nodes(&mut component.children, source_span);
         }
         IrComponent::ExplicitError(component) => {
+            // Source echo is captured from the original .error call before a
+            // callable result is rebound to its caller span. Clean-room
+            // evidence requires the original function-body call spelling, not
+            // the caller invocation spelling, so rebasing must never rewrite
+            // source_echo.
             component.span = source_span;
         }
     }

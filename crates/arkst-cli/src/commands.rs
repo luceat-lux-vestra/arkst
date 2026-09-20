@@ -580,6 +580,13 @@ fn collect_explicit_error_components<'a>(
     collection
 }
 
+fn explicit_error_source_echo_is_evidenced(component: &IrExplicitErrorComponent) -> bool {
+    component
+        .source_echo
+        .as_deref()
+        .is_some_and(|source| source.trim_start().starts_with(".error"))
+}
+
 fn explicit_error_diagnostic_matches_component(
     diagnostic: &arkst_core::Diagnostic,
     component: &IrExplicitErrorComponent,
@@ -603,6 +610,18 @@ fn classify_build_errors(
     document: &IrDocument,
 ) -> BuildErrorClassification {
     let mut components = collect_explicit_error_components(&document.nodes);
+    let mut evidenced = Vec::with_capacity(components.recoverable.len());
+    for component in std::mem::take(&mut components.recoverable) {
+        if explicit_error_source_echo_is_evidenced(component) {
+            evidenced.push(component);
+        } else {
+            // Default/native recovery claims a rendered source echo. A
+            // component without independently sourced .error spelling is not
+            // eligible even when its diagnostic span/message pair matches.
+            components.unevidenced.push(component);
+        }
+    }
+    components.recoverable = evidenced;
 
     let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
@@ -1437,6 +1456,7 @@ mod tests {
             nodes: vec![IrNode::Component {
                 component: IrComponent::ExplicitError(IrExplicitErrorComponent {
                     message: "explicit".to_string(),
+                    source_echo: Some(".error {explicit}".to_string()),
                     span,
                 }),
             }],
@@ -1465,6 +1485,20 @@ mod tests {
             ensure_no_fatal_build_errors(std::slice::from_ref(&explicit), &empty_document).is_err()
         );
         assert!(ensure_no_fatal_build_errors(&[], &document).is_err());
+
+        let missing_echo = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::ExplicitError(IrExplicitErrorComponent {
+                    message: "explicit".to_string(),
+                    source_echo: None,
+                    span,
+                }),
+            }],
+            metadata: Default::default(),
+        };
+        let classification = classify_build_errors(std::slice::from_ref(&explicit), &missing_echo);
+        assert!(classification.explicit_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
 
         let unrelated = arkst_core::Diagnostic {
             code: "E3011".to_string(),
@@ -1498,6 +1532,7 @@ mod tests {
         let explicit_node = || IrNode::Component {
             component: IrComponent::ExplicitError(IrExplicitErrorComponent {
                 message: "explicit".to_string(),
+                source_echo: Some(".error {explicit}".to_string()),
                 span,
             }),
         };

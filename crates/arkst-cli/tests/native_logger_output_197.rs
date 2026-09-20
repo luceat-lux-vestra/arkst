@@ -73,6 +73,10 @@ fn build_keeps_prior_log_and_renders_non_strict_error_component() {
         "{typst}"
     );
     assert!(typst.contains("boom"), "{typst}");
+    assert!(
+        typst.contains("#raw(\".error {boom}\", block: true)"),
+        "{typst}"
+    );
     assert!(typst.contains("after"), "{typst}");
 }
 
@@ -98,6 +102,38 @@ fn build_renders_error_component_returned_through_source_defined_function() {
     let error = typst.find("function-error").expect("error component");
     let after = typst.rfind("after").expect("after");
     assert!(before < error && error < after, "{typst}");
+    assert!(
+        typst.contains("#raw(\".error {function-error}\", block: true)"),
+        "{typst}"
+    );
+    assert!(!typst.contains("#raw(\".boom\", block: true)"), "{typst}");
+}
+
+#[test]
+fn build_preserves_evidenced_dynamic_named_and_spacing_error_source_echo() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".var {msg} {dynamic-error}\n.error {.msg}\n.error message:{named-error}\n.error    {spacing-error}\n",
+    )
+    .unwrap();
+
+    let output = run_build(&input);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let typst = fs::read_to_string(dir.path().join("main.typ")).unwrap();
+    for expected in [
+        "#raw(\".error {.msg}\", block: true)",
+        "#raw(\".error message:{named-error}\", block: true)",
+        "#raw(\".error    {spacing-error}\", block: true)",
+    ] {
+        assert!(typst.contains(expected), "missing {expected:?}: {typst}");
+    }
 }
 
 #[test]
@@ -391,6 +427,11 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
         let error = typst.find(message).expect("error");
         let local_after_index = typst.rfind(local_after).expect("local-after");
         let outer_after = typst.rfind("outer-after").expect("outer-after");
+        let expected_source_echo = format!("#raw(\".error {{{message}}}\", block: true)");
+        assert!(
+            typst.contains(&expected_source_echo),
+            "{name}: missing {expected_source_echo:?}: {typst}"
+        );
         assert!(
             outer_before < local_before_index
                 && local_before_index < error

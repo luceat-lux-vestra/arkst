@@ -637,11 +637,15 @@ impl IrComponent {
 
 /// A backend-neutral explicit document error produced by Quarkdown `.error`.
 ///
-/// This stores only the converted message and source provenance. Rendering
-/// style and native stderr/exit behavior remain host/backend concerns.
+/// This stores the converted message plus the independently evidenced exact
+/// source-call spelling when it can be recovered from immutable source
+/// provenance. Rendering style and native stderr/exit behavior remain
+/// host/backend concerns.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IrExplicitErrorComponent {
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_echo: Option<String>,
     pub span: SourceSpan,
 }
 
@@ -3182,9 +3186,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_error_component_serde_roundtrip_preserves_message_and_span() {
+    fn explicit_error_component_serde_roundtrip_preserves_message_source_echo_and_span() {
         let value = IrValue::Component(IrComponent::ExplicitError(IrExplicitErrorComponent {
             message: "boom".to_string(),
+            source_echo: Some(".error    {boom}".to_string()),
             span: SourceSpan::new(SourceId(197), 4, 17),
         }));
 
