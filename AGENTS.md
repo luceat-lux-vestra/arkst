@@ -158,6 +158,57 @@ Do not rewrite historical ADR decisions, considered options, consequences, or
 rationale to make them agree with newer architecture. Use explicit
 supersession/addendum relationships and preserve the original record.
 
+## Failure classification before remediation
+
+A failing compiler test, compatibility/oracle observation, evidence gate,
+hardening check, or CI signal is an **observation**, not a remediation
+instruction. Before a non-trivial remediation, classify the observed failure
+as exactly one of:
+
+- `implementation defect` — Arkst compiler/tooling implementation violates an
+  accepted architecture, language, or observable compatibility contract;
+- `test defect` — an Arkst test, independent fixture, harness, oracle, golden,
+  snapshot, or assertion is wrong for the intended contract;
+- `evidence defect` — upstream observation, compatibility provenance,
+  attribution, capture, freshness, parsing, or proof construction is wrong or
+  insufficient;
+- `workflow-policy drift` — CI, compatibility workflow, repository
+  hardening/review policy, live settings, or their assumptions have diverged;
+- `environment failure` — compiler/toolchain, runner, platform, backend
+  executable, service/network, or other execution environment caused the
+  failure;
+- `UNKNOWN` — available evidence does not justify any of the five classes.
+
+`UNKNOWN`, `UNVERIFIED`, and `INSUFFICIENT EVIDENCE` remain fail-closed.
+Classification is itself a proof obligation. Preserve at least:
+
+```text
+Observed:
+Classification:
+Basis:
+Root cause:
+Remediation:
+Proof:
+```
+
+The `Basis` must justify the selected owner and identify plausible
+alternatives that were rejected or remain unresolved. An upstream Quarkdown
+behavior observation is not automatically an Arkst defect: first establish
+whether the accepted upstream contract changed, the oracle/fixture is wrong,
+the evidence is insufficient, Arkst violates the accepted contract, or the
+toolchain/environment produced the symptom.
+
+A deterministic/reproducible failure does not become an
+`environment failure` merely because a rerun later passes. Never weaken a
+valid compatibility test, oracle, evidence/provenance requirement, required
+check, or hardening/review policy merely to obtain green.
+
+If remediation changes Arkst implementation, a test/oracle, compatibility
+evidence/provenance, workflow/policy, compiler/toolchain premise, or another
+premise of an exact-final-HEAD proof, invalidate the affected evidence. Rerun
+the relevant targeted validation and configured required CI on the new exact
+final HEAD before merge.
+
 ## Required checks
 
 ### Local validation
