@@ -248,5 +248,62 @@ rationale = "fixture"
         self.assertEqual(paths, [])
 
 
+    def test_audited_failure_triage_pull_request_target_can_be_required(self):
+        target_workflow = """
+name: Failure triage
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+permissions:
+  contents: read
+jobs:
+  failure-triage:
+    name: failure-triage
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+"""
+        target_policy = POLICY + """
+[[producer]]
+workflow = ".github/workflows/failure-triage.yml"
+job = "failure-triage"
+trigger = "pull_request_target"
+classification = "required"
+contexts = ["failure-triage"]
+always_present = true
+rationale = "trusted-base metadata-only fixture"
+"""
+        tmp, root, _ = self.make_repo(policy=target_policy)
+        self.addCleanup(tmp.cleanup)
+        (root / ".github" / "workflows" / "failure-triage.yml").write_text(
+            textwrap.dedent(target_workflow).lstrip(), encoding="utf-8"
+        )
+        policy = mod.load_policy(root / ".github" / "gate-policy.toml")
+        mod.verify_repository(root, policy, ruleset(["fmt", "failure-triage"]))
+
+    def test_other_pull_request_target_required_producer_fails_closed(self):
+        bad_policy = POLICY + """
+[[producer]]
+workflow = ".github/workflows/other.yml"
+job = "other"
+trigger = "pull_request_target"
+classification = "required"
+contexts = ["other"]
+always_present = true
+rationale = "must not be allowed"
+"""
+        tmp, root, _ = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        (root / ".github" / "gate-policy.toml").write_text(
+            textwrap.dedent(bad_policy).lstrip(), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            mod.PolicyError,
+            "pull_request_target is allowed only for the audited failure-triage producer",
+        ):
+            mod.load_policy(root / ".github" / "gate-policy.toml")
+
+
 if __name__ == "__main__":
     unittest.main()
