@@ -90,9 +90,10 @@ jobs:
           outer-before
           .center
               center-before
-
-              > deep-before .error {QD197_RES_DEEP_ERROR} deep-after
-
+              .row
+                  deep-before
+                  .error {QD197_RES_DEEP_ERROR}
+                  deep-after
               center-after
           outer-after
           QD
@@ -131,9 +132,10 @@ jobs:
           outer-before
           .center
               center-before
-
-              > deep-before .log {QD197_RES_DEEP_LOG} deep-after
-
+              .row
+                  deep-before
+                  .log {QD197_RES_DEEP_LOG}
+                  deep-after
               center-after
           outer-after
           QD
