@@ -2826,6 +2826,151 @@ impl Evaluator {
         out
     }
 
+    /// Evaluates the independently evidenced inline explicit-error boundary
+    /// inside Markdown structural containers.
+    ///
+    /// Quarkdown v2.5.1/v2.6.0 preserve list/blockquote sibling text around a
+    /// direct native `.error` while materializing the error itself as block
+    /// output. Ordinary inline component materialization remains fail-closed;
+    /// this adapter is called only from the evidenced structural node owners.
+    fn evaluate_evidenced_structural_paragraph(
+        &self,
+        content: &[IrInline],
+        paragraph_span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrNode> {
+        let mut nodes = Vec::new();
+        let mut pending = Vec::new();
+
+        for inline in content {
+            let IrInline::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                ordered_args,
+                body,
+                span,
+                ..
+            } = inline
+            else {
+                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            };
+
+            let call_body = body.as_deref().map(CallBody::Inline);
+            let native_error_owns_call = name == "error"
+                && context.get_function(name).is_none()
+                && !is_variable_reference_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                )
+                && !is_variable_reassignment_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                );
+
+            if !native_error_owns_call {
+                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            }
+
+            let before = diagnostics.len();
+            let outcome = self.evaluate_call_value_with_ordered(
+                name,
+                ordered_args.as_deref(),
+                positional_args,
+                named_args,
+                call_body,
+                None,
+                None,
+                span,
+                diagnostics,
+                context,
+            );
+
+            match outcome {
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(error)))
+                    if diagnostics.len() > before
+                        && diagnostics[before..]
+                            .iter()
+                            .all(is_explicit_error_diagnostic) =>
+                {
+                    if !pending.is_empty() {
+                        nodes.push(IrNode::Paragraph {
+                            content: std::mem::take(&mut pending),
+                            span: *paragraph_span,
+                        });
+                    }
+                    nodes.push(IrNode::Component {
+                        component: IrComponent::ExplicitError(error),
+                    });
+                }
+                CallOutcome::Value(value) => {
+                    pending.extend(self.materialize_inline_value(Some(value), span, diagnostics));
+                }
+                CallOutcome::NoValue | CallOutcome::Failed => {}
+                CallOutcome::Unresolved => {
+                    pending.extend(
+                        self.preserve_inline_call(
+                            name,
+                            ordered_args.as_deref(),
+                            positional_args,
+                            named_args,
+                            body.as_deref(),
+                            span,
+                            diagnostics,
+                            context,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+
+        if !pending.is_empty() {
+            nodes.push(IrNode::Paragraph {
+                content: pending,
+                span: *paragraph_span,
+            });
+        }
+
+        nodes
+    }
+
+    /// Evaluates children of the clean-room-evidenced Markdown structural
+    /// output contexts. Only direct paragraph-level native `.error` calls
+    /// receive the block-materialization adapter above; all other nodes retain
+    /// their ordinary evaluator path.
+    fn evaluate_evidenced_structural_nodes(
+        &self,
+        nodes: &[IrNode],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrNode> {
+        let mut out = Vec::new();
+        for node in nodes {
+            match node {
+                IrNode::Paragraph { content, span } => {
+                    out.extend(self.evaluate_evidenced_structural_paragraph(
+                        content,
+                        span,
+                        diagnostics,
+                        context,
+                    ))
+                }
+                other => out.extend(self.evaluate_node(other, diagnostics, context)),
+            }
+        }
+        out
+    }
+
     /// Evaluates a single block node.
     fn evaluate_node(
         &self,
@@ -2909,14 +3054,18 @@ impl Evaluator {
                 span: *span,
             }],
             IrNode::Blockquote { content, span } => vec![IrNode::Blockquote {
-                content: self.evaluate_nodes(content, diagnostics, context),
+                content: self.evaluate_evidenced_structural_nodes(content, diagnostics, context),
                 span: *span,
             }],
             IrNode::UnorderedList { items, span } => {
                 let items = items
                     .iter()
                     .map(|item| arkst_ir::IrListItem {
-                        nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
+                        nodes: self.evaluate_evidenced_structural_nodes(
+                            &item.nodes,
+                            diagnostics,
+                            context,
+                        ),
                         task: item.task,
                         span: item.span,
                     })
@@ -4779,7 +4928,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5078,7 +5227,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5218,7 +5367,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -12253,6 +12402,72 @@ impl Evaluator {
                 CallOutcome::Failed
             }
         }
+    }
+
+    /// Evaluates the block body of the clean-room-evidenced Container family.
+    ///
+    /// Unlike source-defined functions and selected conditionals, Quarkdown
+    /// preserves content before and after a direct native `.error` inside
+    /// `.container`, `.center`, and `.align`. Other diagnostics and
+    /// indirect/unevidenced explicit-error producers remain fail-closed.
+    fn evaluate_evidenced_container_body(
+        &self,
+        nodes: &[IrNode],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> CallOutcome {
+        let mut output = Vec::new();
+
+        for node in nodes {
+            let direct_native_error = match node {
+                IrNode::FunctionCall {
+                    name,
+                    positional_args,
+                    named_args,
+                    body,
+                    ..
+                } if name == "error" && context.get_function(name).is_none() => {
+                    !is_variable_reference_call(
+                        name,
+                        positional_args,
+                        named_args,
+                        body.as_deref().map(CallBody::Block),
+                        context,
+                    ) && !is_variable_reassignment_call(
+                        name,
+                        positional_args,
+                        named_args,
+                        body.as_deref().map(CallBody::Block),
+                        context,
+                    )
+                }
+                _ => false,
+            };
+
+            let before = diagnostics.len();
+            let evaluated = self.evaluate_node(node, diagnostics, context);
+
+            if diagnostics.len() != before {
+                let new_diagnostics = &diagnostics[before..];
+                if direct_native_error
+                    && new_diagnostics.iter().all(is_explicit_error_diagnostic)
+                    && matches!(
+                        evaluated.as_slice(),
+                        [IrNode::Component {
+                            component: IrComponent::ExplicitError(_)
+                        }]
+                    )
+                {
+                    output.extend(evaluated);
+                    continue;
+                }
+                return CallOutcome::Failed;
+            }
+
+            output.extend(evaluated);
+        }
+
+        CallOutcome::Value(IrValue::Content(output))
     }
 
     /// Evaluates a call body only after its callee has selected that strategy.
