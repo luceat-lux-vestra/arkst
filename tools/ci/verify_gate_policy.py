@@ -264,6 +264,19 @@ def load_policy(path: Path) -> dict:
             raise PolicyError(
                 f"{path}: required producer {key[0]}#{key[1]} must set always_present = true"
             )
+        declared_trigger = producer.get("trigger", "pull_request")
+        if declared_trigger not in PR_EVENTS:
+            raise PolicyError(
+                f"{path}: {key[0]}#{key[1]} has unsupported required trigger {declared_trigger!r}"
+            )
+        if (
+            declared_trigger == "pull_request_target"
+            and key != (".github/workflows/failure-triage.yml", "failure-triage")
+        ):
+            raise PolicyError(
+                f"{path}: pull_request_target is allowed only for the audited "
+                "failure-triage producer"
+            )
     return policy
 
 
@@ -329,18 +342,20 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
             )
         if producer["classification"] == "required":
             required_contexts.update(contexts)
-            trigger = workflow.triggers.get("pull_request")
+            expected_trigger = producer.get("trigger", "pull_request")
+            trigger = workflow.triggers.get(expected_trigger)
             if trigger is None:
                 raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} must use pull_request"
+                    f"required producer {key[0]}#{key[1]} must use {expected_trigger}"
                 )
             if trigger.path_filtered:
                 raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} has top-level paths/paths-ignore filtering"
+                    f"required producer {key[0]}#{key[1]} has top-level "
+                    f"{expected_trigger} paths/paths-ignore filtering"
                 )
-            if trigger.types_restricted:
+            if trigger.types_restricted and expected_trigger != "pull_request_target":
                 raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} restricts pull_request types"
+                    f"required producer {key[0]}#{key[1]} restricts {expected_trigger} types"
                 )
             if job.has_if:
                 raise PolicyError(
