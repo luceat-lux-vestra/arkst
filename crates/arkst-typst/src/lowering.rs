@@ -397,6 +397,11 @@ impl LoweringContext {
         self.push_str(&escape_typst_text(&component.message));
         self.push_str("): ");
         self.push_str(&escape_typst_text(&component.message));
+        if let Some(source_echo) = &component.source_echo {
+            self.push_str("\n#raw(\"");
+            self.push_str(&escape_typst_string(source_echo));
+            self.push_str("\", block: true)");
+        }
         self.push_str("]\n");
         if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
@@ -1430,6 +1435,7 @@ mod tests {
         IrNode::Component {
             component: IrComponent::ExplicitError(IrExplicitErrorComponent {
                 message: message.to_string(),
+                source_echo: None,
                 span: empty_span(),
             }),
         }
@@ -1464,6 +1470,26 @@ mod tests {
 
         assert!(code.contains("#block[Error: error Cannot call function error"));
         assert!(code.contains("boom \\[literal\\]"), "{code}");
+    }
+
+    #[test]
+    fn lower_explicit_error_preserves_exact_source_echo_as_raw_block() {
+        let mut node = explicit_error_node("dynamic-message");
+        let IrNode::Component {
+            component: IrComponent::ExplicitError(error),
+        } = &mut node
+        else {
+            unreachable!("explicit_error_node must construct an explicit error");
+        };
+        error.source_echo = Some(".error    {.msg}".to_string());
+
+        let doc = IrDocument {
+            nodes: vec![node],
+            metadata: IrMetadata::default(),
+        };
+        let code = super::lower_to_typst_code(&doc);
+
+        assert!(code.contains("#raw(\".error    {.msg}\", block: true)"), "{code}");
     }
 
     #[test]

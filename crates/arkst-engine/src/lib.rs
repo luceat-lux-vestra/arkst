@@ -293,6 +293,15 @@ pub trait ResourceProvider {
     /// messages for a source identity.
     fn source_path(&self, source_id: arkst_source::SourceId) -> Option<String>;
 
+    /// Returns the exact immutable source text for one known source identity.
+    ///
+    /// This is a provenance operation, not a resource-discovery capability.
+    /// Providers that cannot expose source text may return `None`; callers
+    /// must then fail closed rather than reconstruct source spelling.
+    fn source_text(&self, _source_id: arkst_source::SourceId) -> Option<&str> {
+        None
+    }
+
     /// Returns the platform-neutral relative path from `source_id`'s parent
     /// directory to the requested logical root.
     fn relative_path_to_root(
