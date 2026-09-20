@@ -498,7 +498,6 @@ fn malformed_or_unsupported_log_arguments_never_emit_events() {
     );
     assert!(unsupported[0].message.contains(".log"));
     assert!(sink.events.borrow().is_empty());
-
 }
 
 #[test]
