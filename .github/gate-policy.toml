@@ -163,6 +163,7 @@ rationale = "PR metadata automation is non-authoritative and must never satisfy 
 [[producer]]
 workflow = ".github/workflows/failure-triage.yml"
 job = "failure-triage"
+trigger = "pull_request_target"
 classification = "required"
 contexts = ["failure-triage"]
 always_present = true
