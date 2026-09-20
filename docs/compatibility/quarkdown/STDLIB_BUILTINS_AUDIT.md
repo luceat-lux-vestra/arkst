@@ -397,10 +397,14 @@ one is supplied, and `.error` produces a structured source-backed evaluator
 diagnostic rather than host logging. #368/PR #371 adds the independently
 evidenced Unit value boundary for successful `.log`/`.debug` calls, including
 direct-call output suppression and the exact `kotlin.Unit` String projection.
-Clean-room PR #378 establishes an additional logger-only String subset,
-identical across exact v2.5.1/v2.6.0 artifacts: Unit -> `kotlin.Unit`, None ->
-`None`, closed Range -> `start..end`, and the evidenced plain-text Pair JVM
-representation. The generic scalar String adapter remains unchanged.
+Clean-room PR #378 establishes the initial logger-only String subset. Closed,
+unmerged clean-room PR #390 extends identical v2.5.1/v2.6.0 evidence to all
+Range endpoint shapes, initial nested Pair compositions, and the flat ordered
+Dictionary scalar-entry JVM-style projection. Closed/unmerged clean-room #395
+then confirms recursive Pair projection across left/right/balanced nesting
+through depth 4 with Range/None members. Its observed Markdown-list Collection conversion remains
+intentionally fail-closed because current typed Collections do not retain enough
+list-origin information for a bounded production adapter. The generic scalar String adapter remains unchanged.
 Native `arkst build` supplies an explicit host-owned logger sink and writes
 `Log` events to stdout in evaluation order while keeping `Debug` silent;
 ordinary core compilation remains no-sink/fail-closed for `.log`. Clean-room
@@ -421,9 +425,10 @@ The clean-room v2.6 contract is recorded in
 probes establish that `.log` writes converted messages to stdout with no
 standalone document output, `.debug` is silent in the distributed CLI, and
 capturing either result in value context yields `kotlin.Unit` rather than
-Quarkdown `none`. Clean-room PR #378 additionally fixes the bounded logger-only dynamic String
-subset for Unit, None, closed Range, and the evidenced plain-text Pair
-representation without widening unrelated generic String consumers.
+Quarkdown `none`. Clean-room PR #378 fixes the initial logger-only dynamic String subset; closed
+unmerged #390 extends the bounded production claim to all Range endpoint shapes,
+initial nested Pair compositions, and the flat ordered Dictionary scalar-entry projection; closed/unmerged #395 confirms recursive Pair composition through depth 4 across left/right/balanced shapes with Range/None members, without widening unrelated generic String consumers. Collection remains outside this bounded
+claim.
 `.error` is a failed call that renders an error component while caller/top-level
 content continues in non-strict mode. Clean-room PR #385 additionally pins that
 selected conditional/function body content around the error is replaced by the
@@ -442,7 +447,7 @@ malformed calls emit no events, and source-defined functions retain normal
 precedence over these native names. The three rows are
 `PARTIAL`, not `SUPPORTED_SEMANTICS`, because exact
 Quarkdown HTML/CSS error-card styling and unevidenced output contexts,
-unreviewed logger String categories and #191 public WASM exposure are not
+remaining logger String categories such as Collection and #191 public WASM exposure are not
 claimed. Arkst-specific `check`/`inspect` are explicitly bounded as
 sinkless/fail-closed analysis commands rather than Quarkdown runtime-output
 parity surfaces. The bounded Unit value/result semantics are
@@ -615,7 +620,7 @@ Arkst intentionally filters out upstream names it cannot call. The three
 logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
 native `arkst build` `Log` stdout plus the clean-room-evidenced default/non-strict
 `.error` stderr/rendered continuation contract and bounded strict host-finalization contract are implemented, but exact HTML/CSS styling/unevidenced output contexts and unreviewed logger
-String categories remain partial. Arkst-specific `check`/`inspect` policy is
+String categories such as Collection remain partial. Arkst-specific `check`/`inspect` policy is
 bounded separately as sinkless/fail-closed analysis behavior. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
@@ -695,7 +700,7 @@ semantic implementation. Library inspection now has a bounded #195 evaluator
 implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
-evidenced Unit value-context results, while residual PARTIAL status now covers unreviewed logger String categories,
+evidenced Unit value-context results, while residual PARTIAL status now covers remaining logger String categories such as Collection,
 exact-styling/unevidenced-output behavior and public embedder exposure; native strict `.error` host finalization is bounded by closed/unmerged #386 evidence, and Arkst-specific `check`/`inspect` are bounded as sinkless/fail-closed analysis commands. #197 remains open for the remaining owned residuals
 rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
