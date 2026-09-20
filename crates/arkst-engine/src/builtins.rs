@@ -1588,13 +1588,27 @@ fn logger_structured_string_value(value: &IrValue) -> Option<String> {
 
 fn logger_pair_member_string(value: &IrValue) -> Option<String> {
     match value {
-        // #378/#390 independently evidence plain-text Pair members, nested
-        // Pair + None, and Pair + Range composition. Do not infer arbitrary
-        // recursive DynamicValue formatting from those observations.
+        // #378/#390 independently evidence plain-text Pair members, Pair
+        // members containing None/Range, and exactly one nested plain-text
+        // Pair level. Do not recurse through arbitrary Pair depth.
         IrValue::String(_) | IrValue::Identifier(_) | IrValue::None | IrValue::Range(_) => {
             logger_structured_string_value(value)
         }
-        IrValue::Pair(_) => logger_structured_string_value(value),
+        IrValue::Pair(pair) => {
+            let first = logger_nested_pair_plain_text_member(pair.first.as_ref())?;
+            let second = logger_nested_pair_plain_text_member(pair.second.as_ref())?;
+            Some(format!(
+                "[DynamicValue(unwrappedValue={first}, evaluationContext=null), \
+                 DynamicValue(unwrappedValue={second}, evaluationContext=null)]"
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn logger_nested_pair_plain_text_member(value: &IrValue) -> Option<String> {
+    match value {
+        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),
         _ => None,
     }
 }

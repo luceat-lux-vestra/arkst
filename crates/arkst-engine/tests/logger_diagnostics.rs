@@ -498,6 +498,12 @@ fn malformed_or_unsupported_log_arguments_never_emit_events() {
     );
     assert!(unsupported[0].message.contains(".log"));
     assert!(sink.events.borrow().is_empty());
+
+    let source = ".log {.pair {.pair {.pair {left} {right}} {middle}} {.none}}";
+    let (_, overdeep_pair) = evaluate_with_sink(source, source_id, &sink);
+    assert_eq!(overdeep_pair.len(), 1, "{overdeep_pair:?}");
+    assert_eq!(overdeep_pair[0].code, "E3001", "{overdeep_pair:?}");
+    assert!(sink.events.borrow().is_empty());
 }
 
 #[test]
