@@ -77,6 +77,24 @@ jobs:
           outer-after
           QD
 
+          cat > "$root/column-error.qd" <<'QD'
+          outer-before
+          .column
+              column-before
+              .error {QD197_RES_COLUMN_ERROR}
+              column-after
+          outer-after
+          QD
+
+          cat > "$root/grid-error.qd" <<'QD'
+          outer-before
+          .grid columns:{2}
+              grid-before
+              .error {QD197_RES_GRID_ERROR}
+              grid-after
+          outer-after
+          QD
+
           cat > "$root/landscape-error.qd" <<'QD'
           outer-before
           .landscape
@@ -116,6 +134,24 @@ jobs:
               row-before
               .log {QD197_RES_ROW_LOG}
               row-after
+          outer-after
+          QD
+
+          cat > "$root/column-log-control.qd" <<'QD'
+          outer-before
+          .column
+              column-before
+              .log {QD197_RES_COLUMN_LOG}
+              column-after
+          outer-after
+          QD
+
+          cat > "$root/grid-log-control.qd" <<'QD'
+          outer-before
+          .grid columns:{2}
+              grid-before
+              .log {QD197_RES_GRID_LOG}
+              grid-after
           outer-after
           QD
 
@@ -285,6 +321,8 @@ jobs:
 
           run_control ordered-log-control QD197_RES_ORDERED_LOG
           run_control row-log-control QD197_RES_ROW_LOG
+          run_control column-log-control QD197_RES_COLUMN_LOG
+          run_control grid-log-control QD197_RES_GRID_LOG
           run_control landscape-log-control QD197_RES_LANDSCAPE_LOG
           run_control deeper-log-control QD197_RES_DEEP_LOG
           run_control top-inline-log-control QD197_RES_TOP_INLINE_LOG
@@ -293,6 +331,8 @@ jobs:
             run_error direct-error QD197_RES_DIRECT_ERROR "$mode"
             run_error ordered-error QD197_RES_ORDERED_ERROR "$mode"
             run_error row-error QD197_RES_ROW_ERROR "$mode"
+            run_error column-error QD197_RES_COLUMN_ERROR "$mode"
+            run_error grid-error QD197_RES_GRID_ERROR "$mode"
             run_error landscape-error QD197_RES_LANDSCAPE_ERROR "$mode"
             run_error deeper-error QD197_RES_DEEP_ERROR "$mode"
             run_error top-inline-error QD197_RES_TOP_INLINE_ERROR "$mode"
