@@ -364,9 +364,31 @@ fn explicit_error_inside_unordered_list_preserves_evidenced_sibling_content() {
 }
 
 #[test]
-fn top_level_inline_explicit_error_remains_fail_closed() {
+fn top_level_inline_explicit_error_preserves_evidenced_sibling_content() {
     let source_id = SourceId(1993);
     let source = "before .error {top-inline-error} after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [before, error, after] = result.nodes.as_slice() else {
+        panic!("expected paragraph/error/paragraph, got {:?}", result.nodes);
+    };
+    assert_eq!(paragraph_text(before), "before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "top-inline-error");
+    assert_eq!(paragraph_text(after), "after");
+}
+
+#[test]
+fn inline_explicit_error_stays_fail_closed_in_selected_conditional_body() {
+    let source_id = SourceId(1999);
+    let source = "outer-before\n.if {true}\n    inner-before .error {conditional-inline-error} inner-after\nouter-after";
     let (result, diagnostics) = evaluate_plain(source, source_id);
 
     assert!(
@@ -376,10 +398,11 @@ fn top_level_inline_explicit_error_remains_fail_closed() {
         "{diagnostics:?}"
     );
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code != "E3011"),
-        "inline component materialization must remain rejected: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E3001"
+                && diagnostic.message == "Semantic component is block-only"
+        }),
+        "unevidenced inline error must keep ordinary inline materialization rejection: {diagnostics:?}"
     );
     assert!(
         result.nodes.iter().all(|node| !matches!(
@@ -388,9 +411,184 @@ fn top_level_inline_explicit_error_remains_fail_closed() {
                 component: arkst_ir::IrComponent::ExplicitError(_)
             }
         )),
-        "{:?}",
+        "unevidenced conditional-inline error must not escape as recoverable output: {:?}",
         result.nodes
     );
+}
+
+#[test]
+fn inline_explicit_error_stays_fail_closed_in_user_function_body() {
+    let source_id = SourceId(2000);
+    let source = ".function {boom}\n    fn-before .error {function-inline-error} fn-after\nouter-before\n.boom\nouter-after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3011"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E3001"
+                && diagnostic.message == "Semantic component is block-only"
+        }),
+        "unevidenced inline error must keep ordinary inline materialization rejection: {diagnostics:?}"
+    );
+    assert!(
+        result.nodes.iter().all(|node| !matches!(
+            node,
+            IrNode::Component {
+                component: arkst_ir::IrComponent::ExplicitError(_)
+            }
+        )),
+        "unevidenced function-inline error must not escape as recoverable output: {:?}",
+        result.nodes
+    );
+}
+
+#[test]
+fn explicit_error_inside_ordered_list_preserves_evidenced_sibling_content() {
+    let source_id = SourceId(1995);
+    let source = "1. ordered-before .error {ordered-error} ordered-after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [IrNode::OrderedList { items, .. }] = result.nodes.as_slice() else {
+        panic!("expected one ordered list, got {:?}", result.nodes);
+    };
+    let [before, error, after] = items[0].nodes.as_slice() else {
+        panic!(
+            "expected paragraph/error/paragraph, got {:?}",
+            items[0].nodes
+        );
+    };
+    assert_eq!(paragraph_text(before), "ordered-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "ordered-error");
+    assert_eq!(paragraph_text(after), "ordered-after");
+}
+
+#[test]
+fn explicit_error_inside_stacked_and_landscape_preserves_evidenced_siblings() {
+    let stacked_cases = [
+        (
+            ".row\n    row-before\n    .error {row-error}\n    row-after",
+            "row-before",
+            "row-error",
+            "row-after",
+        ),
+        (
+            ".column\n    column-before\n    .error {column-error}\n    column-after",
+            "column-before",
+            "column-error",
+            "column-after",
+        ),
+        (
+            ".grid columns:{2}\n    grid-before\n    .error {grid-error}\n    grid-after",
+            "grid-before",
+            "grid-error",
+            "grid-after",
+        ),
+    ];
+
+    for (source, before_text, error_text, after_text) in stacked_cases {
+        let (result, diagnostics) = evaluate_plain(source, SourceId(1996));
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        let [IrNode::Component {
+            component: arkst_ir::IrComponent::Stacked(stacked),
+        }] = result.nodes.as_slice()
+        else {
+            panic!(
+                "expected one stacked component for {source}, got {:?}",
+                result.nodes
+            );
+        };
+        let [before, error, after] = stacked.children.as_slice() else {
+            panic!(
+                "expected paragraph/error/paragraph for {source}, got {:?}",
+                stacked.children
+            );
+        };
+        assert_eq!(paragraph_text(before), before_text);
+        let IrNode::Component {
+            component: arkst_ir::IrComponent::ExplicitError(error),
+        } = error
+        else {
+            panic!("expected explicit error component, got {error:?}");
+        };
+        assert_eq!(error.message, error_text);
+        assert_eq!(paragraph_text(after), after_text);
+    }
+
+    let source =
+        ".landscape\n    landscape-before\n    .error {landscape-error}\n    landscape-after";
+    let (result, diagnostics) = evaluate_plain(source, SourceId(1997));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::Landscape(landscape),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected one landscape component, got {:?}", result.nodes);
+    };
+    let [before, error, after] = landscape.children.as_slice() else {
+        panic!(
+            "expected paragraph/error/paragraph, got {:?}",
+            landscape.children
+        );
+    };
+    assert_eq!(paragraph_text(before), "landscape-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "landscape-error");
+    assert_eq!(paragraph_text(after), "landscape-after");
+}
+
+#[test]
+fn explicit_error_inside_evidenced_center_row_composition_preserves_siblings() {
+    let source = ".center\n    center-before\n    .row\n        deep-before\n        .error {deep-error}\n        deep-after\n    center-after";
+    let (result, diagnostics) = evaluate_plain(source, SourceId(1998));
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::Container(container),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected one container, got {:?}", result.nodes);
+    };
+    let [center_before, stacked, center_after] = container.children.as_slice() else {
+        panic!("unexpected center children: {:?}", container.children);
+    };
+    assert_eq!(paragraph_text(center_before), "center-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::Stacked(stacked),
+    } = stacked
+    else {
+        panic!("expected nested stacked component, got {stacked:?}");
+    };
+    let [deep_before, error, deep_after] = stacked.children.as_slice() else {
+        panic!("unexpected stacked children: {:?}", stacked.children);
+    };
+    assert_eq!(paragraph_text(deep_before), "deep-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "deep-error");
+    assert_eq!(paragraph_text(deep_after), "deep-after");
+    assert_eq!(paragraph_text(center_after), "center-after");
 }
 
 #[test]

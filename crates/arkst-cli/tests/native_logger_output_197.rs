@@ -268,7 +268,7 @@ fn strict_build_promotes_evidenced_structural_nested_errors_to_exit_66() {
             "container-error",
         ),
         (
-            "list",
+            "unordered-list",
             "outer-before\n\n- list-before .error {list-error} list-after\n\nouter-after\n",
             "list-error",
         ),
@@ -276,6 +276,41 @@ fn strict_build_promotes_evidenced_structural_nested_errors_to_exit_66() {
             "blockquote",
             "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n",
             "quote-error",
+        ),
+        (
+            "ordered-list",
+            "outer-before\n\n1. ordered-before .error {ordered-error} ordered-after\n\nouter-after\n",
+            "ordered-error",
+        ),
+        (
+            "row",
+            "outer-before\n.row\n    row-before\n    .error {row-error}\n    row-after\nouter-after\n",
+            "row-error",
+        ),
+        (
+            "column",
+            "outer-before\n.column\n    column-before\n    .error {column-error}\n    column-after\nouter-after\n",
+            "column-error",
+        ),
+        (
+            "grid",
+            "outer-before\n.grid columns:{2}\n    grid-before\n    .error {grid-error}\n    grid-after\nouter-after\n",
+            "grid-error",
+        ),
+        (
+            "landscape",
+            "outer-before\n.landscape\n    landscape-before\n    .error {landscape-error}\n    landscape-after\nouter-after\n",
+            "landscape-error",
+        ),
+        (
+            "deeper-center-row",
+            "outer-before\n.center\n    center-before\n    .row\n        deep-before\n        .error {deep-error}\n        deep-after\n    center-after\nouter-after\n",
+            "deep-error",
+        ),
+        (
+            "top-inline",
+            "outer-before\ninline-before .error {top-inline-error} inline-after\nouter-after\n",
+            "top-inline-error",
         ),
     ];
 
@@ -387,7 +422,7 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
             "container-after",
         ),
         (
-            "list",
+            "unordered-list",
             "outer-before\n\n- list-before .error {list-error} list-after\n\nouter-after\n",
             "list-error",
             "list-before",
@@ -399,6 +434,55 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
             "quote-error",
             "quote-before",
             "quote-after",
+        ),
+        (
+            "ordered-list",
+            "outer-before\n\n1. ordered-before .error {ordered-error} ordered-after\n\nouter-after\n",
+            "ordered-error",
+            "ordered-before",
+            "ordered-after",
+        ),
+        (
+            "row",
+            "outer-before\n.row\n    row-before\n    .error {row-error}\n    row-after\nouter-after\n",
+            "row-error",
+            "row-before",
+            "row-after",
+        ),
+        (
+            "column",
+            "outer-before\n.column\n    column-before\n    .error {column-error}\n    column-after\nouter-after\n",
+            "column-error",
+            "column-before",
+            "column-after",
+        ),
+        (
+            "grid",
+            "outer-before\n.grid columns:{2}\n    grid-before\n    .error {grid-error}\n    grid-after\nouter-after\n",
+            "grid-error",
+            "grid-before",
+            "grid-after",
+        ),
+        (
+            "landscape",
+            "outer-before\n.landscape\n    landscape-before\n    .error {landscape-error}\n    landscape-after\nouter-after\n",
+            "landscape-error",
+            "landscape-before",
+            "landscape-after",
+        ),
+        (
+            "deeper-center-row",
+            "outer-before\n.center\n    center-before\n    .row\n        deep-before\n        .error {deep-error}\n        deep-after\n    center-after\nouter-after\n",
+            "deep-error",
+            "deep-before",
+            "deep-after",
+        ),
+        (
+            "top-inline",
+            "outer-before\ninline-before .error {top-inline-error} inline-after\nouter-after\n",
+            "top-inline-error",
+            "inline-before",
+            "inline-after",
         ),
     ];
 
@@ -443,18 +527,22 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
 }
 
 #[test]
-fn unevidenced_stacked_landscape_and_ordered_list_outputs_remain_build_fatal() {
+fn unevidenced_structural_compositions_remain_build_fatal() {
     let cases = [
-        ("row", ".row\n    .error {row-error}\n", "row-error"),
         (
-            "landscape",
-            ".landscape\n    .error {landscape-error}\n",
-            "landscape-error",
+            "too-deep",
+            ".center\n    .row\n        .landscape\n            .error {too-deep-error}\n",
+            "too-deep-error",
         ),
         (
-            "ordered-list",
-            "1. before .error {ordered-error} after\n",
-            "ordered-error",
+            "align-row",
+            ".align {center}\n    .row\n        .error {align-row-error}\n",
+            "align-row-error",
+        ),
+        (
+            "container-row",
+            ".container\n    .row\n        .error {container-row-error}\n",
+            "container-row-error",
         ),
     ];
 
@@ -469,6 +557,7 @@ fn unevidenced_stacked_landscape_and_ordered_list_outputs_remain_build_fatal() {
         assert_ne!(output.status.code(), Some(66), "{name}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(message), "{name}: {stderr}");
+        assert!(stderr.contains("found 1 error(s)"), "{name}: {stderr}");
         assert!(
             !dir.path().join(format!("{name}.typ")).exists(),
             "{name}: unevidenced output must not publish an artifact"

@@ -2808,7 +2808,10 @@ impl Evaluator {
         context: &mut EvaluationContext<'_>,
     ) -> (IrDocument, Vec<Diagnostic>) {
         context.initialize_document_state(&document.metadata.document_state);
-        let nodes = self.evaluate_nodes(&document.nodes, diagnostics, context);
+        // Top-level paragraphs are an independently evidenced output owner for inline `.error`.
+        // Keep this opt-in at the document boundary rather than widening generic paragraph
+        // evaluation used by callable, conditional, include, and value/content paths.
+        let nodes = self.evaluate_evidenced_structural_nodes(&document.nodes, diagnostics, context);
         (
             IrDocument {
                 nodes,
@@ -2836,12 +2839,13 @@ impl Evaluator {
     }
 
     /// Evaluates the independently evidenced inline explicit-error boundary
-    /// inside Markdown structural containers.
+    /// for explicitly selected output owners.
     ///
-    /// Quarkdown v2.5.1/v2.6.0 preserve list/blockquote sibling text around a
-    /// direct native `.error` while materializing the error itself as block
-    /// output. Ordinary inline component materialization remains fail-closed;
-    /// this adapter is called only from the evidenced structural node owners.
+    /// Quarkdown v2.5.1/v2.6.0 preserve sibling text around a direct native
+    /// inline `.error` in the probed top-level/list/blockquote owners while
+    /// materializing the error itself as block output. Ordinary inline
+    /// component materialization remains fail-closed elsewhere; callers must
+    /// opt into this adapter only at an evidenced output boundary.
     fn evaluate_evidenced_structural_paragraph(
         &self,
         content: &[IrInline],
@@ -3085,7 +3089,11 @@ impl Evaluator {
                 let items = items
                     .iter()
                     .map(|item| arkst_ir::IrListItem {
-                        nodes: self.evaluate_nodes(&item.nodes, diagnostics, context),
+                        nodes: self.evaluate_evidenced_structural_nodes(
+                            &item.nodes,
+                            diagnostics,
+                            context,
+                        ),
                         task: item.task,
                         span: item.span,
                     })
@@ -4937,7 +4945,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, true) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -4999,7 +5007,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5236,7 +5244,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5376,7 +5384,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_container_body(nodes, diagnostics, context) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5662,7 +5670,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_call_body(CallBody::Block(nodes), span, diagnostics, context) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -12420,11 +12428,12 @@ impl Evaluator {
     /// preserves content before and after a direct native `.error` inside
     /// `.container`, `.center`, and `.align`. Other diagnostics and
     /// indirect/unevidenced explicit-error producers remain fail-closed.
-    fn evaluate_evidenced_container_body(
+    fn evaluate_evidenced_output_body(
         &self,
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        allow_nested_row: bool,
     ) -> CallOutcome {
         let mut output = Vec::new();
 
@@ -12453,18 +12462,37 @@ impl Evaluator {
                 }
                 _ => false,
             };
+            let evidenced_nested_row = allow_nested_row
+                && matches!(
+                    node,
+                    IrNode::FunctionCall { name, .. }
+                        if name == "row" && context.get_function(name).is_none()
+                );
 
             let before = diagnostics.len();
             let evaluated = self.evaluate_node(node, diagnostics, context);
 
             if diagnostics.len() != before {
                 let new_diagnostics = &diagnostics[before..];
+                let only_explicit = new_diagnostics.iter().all(is_explicit_error_diagnostic);
                 if direct_native_error
-                    && new_diagnostics.iter().all(is_explicit_error_diagnostic)
+                    && only_explicit
                     && matches!(
                         evaluated.as_slice(),
                         [IrNode::Component {
                             component: IrComponent::ExplicitError(_)
+                        }]
+                    )
+                {
+                    output.extend(evaluated);
+                    continue;
+                }
+                if evidenced_nested_row
+                    && only_explicit
+                    && matches!(
+                        evaluated.as_slice(),
+                        [IrNode::Component {
+                            component: IrComponent::Stacked(_)
                         }]
                     )
                 {

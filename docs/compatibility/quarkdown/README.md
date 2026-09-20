@@ -70,7 +70,7 @@ backend-neutral error component plus default/strict native host policies. Arkst-
 `check`/`inspect` now have an explicit sinkless/fail-closed analysis policy: no `LogSink`,
 `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves
 all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output while
-keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 additionally establish one enclosing Container-family / unordered-list / blockquote `.error` context for default recovery and strict exit 66/no-artifact. #197 stays open for source-echo/still-unevidenced output contexts and remaining logger String categories such as Collection; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
+keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 establish one enclosing Container-family / unordered-list / blockquote `.error` context; merged #398 adds independently sourced source-echo output, and closed/unmerged #401 establishes top-level inline, ordered-list, Stacked row/column/grid, Landscape, and one `.center` → `.row` deeper composition for default recovery and strict exit 66/no-artifact. #197 stays open for still-unevidenced output contexts and remaining logger String categories such as Collection; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
 exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
