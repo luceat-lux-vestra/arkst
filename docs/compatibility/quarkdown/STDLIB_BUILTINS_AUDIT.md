@@ -399,8 +399,10 @@ evidenced Unit value boundary for successful `.log`/`.debug` calls, including
 direct-call output suppression and the exact `kotlin.Unit` String projection.
 Clean-room PR #378 establishes the initial logger-only String subset. Closed,
 unmerged clean-room PR #390 extends identical v2.5.1/v2.6.0 evidence to all
-Range endpoint shapes, the evidenced nested-Pair/None and Pair/Range compositions, and the
-flat ordered Dictionary scalar-entry JVM-style projection. Its observed Markdown-list Collection conversion remains
+Range endpoint shapes, initial nested Pair compositions, and the flat ordered
+Dictionary scalar-entry JVM-style projection. Closed/unmerged clean-room #395
+then confirms recursive Pair projection across left/right/balanced nesting
+through depth 4 with Range/None members. Its observed Markdown-list Collection conversion remains
 intentionally fail-closed because current typed Collections do not retain enough
 list-origin information for a bounded production adapter. The generic scalar String adapter remains unchanged.
 Native `arkst build` supplies an explicit host-owned logger sink and writes
@@ -425,8 +427,7 @@ standalone document output, `.debug` is silent in the distributed CLI, and
 capturing either result in value context yields `kotlin.Unit` rather than
 Quarkdown `none`. Clean-room PR #378 fixes the initial logger-only dynamic String subset; closed
 unmerged #390 extends the bounded production claim to all Range endpoint shapes,
-the evidenced nested-Pair/None and Pair/Range compositions, and the flat ordered Dictionary scalar-entry projection without widening
-unrelated generic String consumers. Collection remains outside this bounded
+initial nested Pair compositions, and the flat ordered Dictionary scalar-entry projection; closed/unmerged #395 confirms recursive Pair composition through depth 4 across left/right/balanced shapes with Range/None members, without widening unrelated generic String consumers. Collection remains outside this bounded
 claim.
 `.error` is a failed call that renders an error component while caller/top-level
 content continues in non-strict mode. Clean-room PR #385 additionally pins that

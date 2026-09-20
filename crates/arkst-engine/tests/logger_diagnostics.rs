@@ -499,11 +499,6 @@ fn malformed_or_unsupported_log_arguments_never_emit_events() {
     assert!(unsupported[0].message.contains(".log"));
     assert!(sink.events.borrow().is_empty());
 
-    let source = ".log {.pair {.pair {.pair {left} {right}} {middle}} {.none}}";
-    let (_, overdeep_pair) = evaluate_with_sink(source, source_id, &sink);
-    assert_eq!(overdeep_pair.len(), 1, "{overdeep_pair:?}");
-    assert_eq!(overdeep_pair[0].code, "E3001", "{overdeep_pair:?}");
-    assert!(sink.events.borrow().is_empty());
 }
 
 #[test]
@@ -707,6 +702,62 @@ fn unit_logger_conversion_is_target_specific_and_does_not_widen_generic_string_c
     assert_eq!(events[0].message, "unit");
     assert_eq!(events[1].level, LogLevel::Log);
     assert_eq!(events[1].message, "kotlin.Unit");
+}
+
+#[test]
+fn recursive_pair_logger_projection_matches_clean_room_evidence() {
+    let source_id = SourceId(1992);
+    let sink = CollectingSink::default();
+    let source = concat!(
+        ".log {.pair {.pair {.pair {.pair {a} {b}} {c}} {d}} {e}}\n",
+        ".log {.pair {a} {.pair {b} {.pair {c} {.pair {d} {e}}}}}\n",
+        ".debug {.pair {.pair {a} {b}} {.pair {c} {d}}}\n",
+        ".error {.pair {.pair {.range {1} {3}} {.none}} {.pair {tail} {.range to:{2}}}}",
+    );
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    let pair = |left: &str, right: &str| {
+        format!(
+            "[DynamicValue(unwrappedValue={left}, evaluationContext=null), DynamicValue(unwrappedValue={right}, evaluationContext=null)]"
+        )
+    };
+    let ab = pair("a", "b");
+    let abc = pair(&ab, "c");
+    let abcd = pair(&abc, "d");
+    let abcde = pair(&abcd, "e");
+
+    let de = pair("d", "e");
+    let cde = pair("c", &de);
+    let bcde = pair("b", &cde);
+    let right_deep = pair("a", &bcde);
+
+    let balanced = pair(&ab, &pair("c", "d"));
+    let mixed = pair(&pair("1..3", "None"), &pair("tail", "..2"));
+
+    let events = sink.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.level, event.message.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (LogLevel::Log, abcde.as_str()),
+            (LogLevel::Log, right_deep.as_str()),
+            (LogLevel::Debug, balanced.as_str()),
+        ]
+    );
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert!(diagnostics[0].message.contains(&mixed), "{diagnostics:?}");
+
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected explicit error component, got {:?}", result.nodes);
+    };
+    assert_eq!(error.message, mixed);
 }
 
 #[test]

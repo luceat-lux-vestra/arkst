@@ -53,8 +53,7 @@ the previously omitted Unit value category in #149, including the evidenced
 `kotlin.Unit` projection and direct-call suppression. Clean-room PR #378
 establishes the initial logger-only Unit/None/closed-Range/plain-text-Pair
 String subset, and closed/unmerged clean-room PR #390 extends the stable
-cross-version evidence to all Range endpoint shapes, the evidenced nested-Pair/None and Pair/Range compositions,
-and the evidenced flat ordered Dictionary scalar-entry projection without widening generic String conversion.
+cross-version evidence to all Range endpoint shapes and the initial nested Pair compositions; closed/unmerged #395 then confirms the same Pair JVM-style projection recursively across left/right/balanced nesting through depth 4, including Range/None members. The evidenced flat ordered Dictionary scalar-entry projection remains separately bounded, and generic String conversion is not widened.
 Markdown-list Collection conversion was observed by #390 but remains
 fail-closed because Arkst's typed Collection no longer retains enough list-origin
 information to keep that production adapter evidence-bounded. Native `arkst build` writes `Log` events to stdout through an explicit

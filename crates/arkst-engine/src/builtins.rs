@@ -1518,9 +1518,11 @@ pub(crate) fn scalar_string_conversion(
 ///
 /// Clean-room v2.5.1/v2.6.0 evidence shows logger messages accept the normal
 /// scalar/plain-content boundary plus Unit, None, all four Range endpoint
-/// shapes, the observed nested-Pair/None and Pair/Range compositions, and the
-/// observed flat ordered Dictionary shape with string keys and scalar entry
-/// text/number values. Collection conversion remains fail-closed because the
+/// shapes, the recursively compositional Pair projection independently
+/// observed by clean-room #395 across left/right/balanced nesting through
+/// depth 4 (including Range/None members), and the observed flat ordered
+/// Dictionary shape with string keys and scalar entry text/number values.
+/// Collection conversion remains fail-closed because the
 /// current IR does not retain enough list-origin information to distinguish the newly
 /// observed Markdown-list case from unevidenced Collection producers.
 pub(crate) fn logger_string_conversion(
@@ -1588,27 +1590,16 @@ fn logger_structured_string_value(value: &IrValue) -> Option<String> {
 
 fn logger_pair_member_string(value: &IrValue) -> Option<String> {
     match value {
-        // #378/#390 independently evidence plain-text Pair members, Pair
-        // members containing None/Range, and exactly one nested plain-text
-        // Pair level. Do not recurse through arbitrary Pair depth.
-        IrValue::String(_) | IrValue::Identifier(_) | IrValue::None | IrValue::Range(_) => {
-            logger_structured_string_value(value)
-        }
-        IrValue::Pair(pair) => {
-            let first = logger_nested_pair_plain_text_member(pair.first.as_ref())?;
-            let second = logger_nested_pair_plain_text_member(pair.second.as_ref())?;
-            Some(format!(
-                "[DynamicValue(unwrappedValue={first}, evaluationContext=null), \
-                 DynamicValue(unwrappedValue={second}, evaluationContext=null)]"
-            ))
-        }
-        _ => None,
-    }
-}
-
-fn logger_nested_pair_plain_text_member(value: &IrValue) -> Option<String> {
-    match value {
-        IrValue::String(value) | IrValue::Identifier(value) => Some(value.clone()),
+        // #378/#390 establish the supported Pair leaves. Clean-room #395
+        // independently confirms that Pair projection composes recursively
+        // across left/right/balanced shapes through depth 4. Source-authored
+        // recursion remains bounded by the evaluator's existing depth budget;
+        // unrelated structured categories remain fail-closed.
+        IrValue::String(_)
+        | IrValue::Identifier(_)
+        | IrValue::None
+        | IrValue::Range(_)
+        | IrValue::Pair(_) => logger_structured_string_value(value),
         _ => None,
     }
 }
