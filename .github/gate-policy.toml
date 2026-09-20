@@ -160,3 +160,11 @@ classification = "advisory"
 contexts = ["label"]
 always_present = false
 rationale = "PR metadata automation is non-authoritative and must never satisfy a merge requirement."
+[[producer]]
+workflow = ".github/workflows/failure-triage.yml"
+job = "failure-triage"
+classification = "advisory"
+contexts = ["failure-triage"]
+always_present = true
+rationale = "Bootstrap failure-classification metadata validator. Keep advisory until real fail-to-body-edit-recovery proof and live required-context promotion are completed."
+
