@@ -57,6 +57,21 @@ fn paragraph_texts(document: &IrDocument) -> Vec<String> {
         .collect()
 }
 
+fn paragraph_text(node: &IrNode) -> String {
+    let IrNode::Paragraph { content, .. } = node else {
+        panic!("expected paragraph, got {node:?}");
+    };
+    content
+        .iter()
+        .filter_map(|inline| match inline {
+            IrInline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 #[derive(Default)]
 struct CollectingSink {
     events: RefCell<Vec<LogEvent>>,
@@ -233,6 +248,149 @@ fn explicit_error_is_source_backed_and_document_evaluation_continues() {
             IrNode::Paragraph { .. }
         ]
     ));
+}
+
+#[test]
+fn explicit_error_inside_container_family_preserves_evidenced_sibling_content() {
+    let cases = [
+        (
+            ".center\n    center-before\n    .error {center-error}\n    center-after",
+            "center-before",
+            "center-error",
+            "center-after",
+        ),
+        (
+            ".align {center}\n    align-before\n    .error {align-error}\n    align-after",
+            "align-before",
+            "align-error",
+            "align-after",
+        ),
+        (
+            ".container\n    container-before\n    .error {container-error}\n    container-after",
+            "container-before",
+            "container-error",
+            "container-after",
+        ),
+    ];
+
+    for (source, before_text, error_text, after_text) in cases {
+        let source_id = SourceId(1994);
+        let (result, diagnostics) = evaluate_plain(source, source_id);
+
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3011", "{source}: {diagnostics:?}");
+
+        let [IrNode::Component {
+            component: arkst_ir::IrComponent::Container(container),
+        }] = result.nodes.as_slice()
+        else {
+            panic!(
+                "expected one container for {source}, got {:?}",
+                result.nodes
+            );
+        };
+        let [before, error, after] = container.children.as_slice() else {
+            panic!(
+                "expected paragraph/error/paragraph for {source}, got {:?}",
+                container.children
+            );
+        };
+        assert_eq!(paragraph_text(before), before_text, "{source}");
+        let IrNode::Component {
+            component: arkst_ir::IrComponent::ExplicitError(error),
+        } = error
+        else {
+            panic!("expected explicit error component for {source}, got {error:?}");
+        };
+        assert_eq!(error.message, error_text, "{source}");
+        assert_eq!(paragraph_text(after), after_text, "{source}");
+    }
+}
+
+#[test]
+fn explicit_error_inside_blockquote_preserves_evidenced_sibling_content() {
+    let source_id = SourceId(1991);
+    let source = "> quote-before .error {quote-error} quote-after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+
+    let [IrNode::Blockquote { content, .. }] = result.nodes.as_slice() else {
+        panic!("expected one blockquote, got {:?}", result.nodes);
+    };
+    let [before, error, after] = content.as_slice() else {
+        panic!("expected paragraph/error/paragraph, got {content:?}");
+    };
+    assert_eq!(paragraph_text(before), "quote-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "quote-error");
+    assert_eq!(paragraph_text(after), "quote-after");
+}
+
+#[test]
+fn explicit_error_inside_unordered_list_preserves_evidenced_sibling_content() {
+    let source_id = SourceId(1992);
+    let source = "- list-before .error {list-error} list-after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+
+    let [IrNode::UnorderedList { items, .. }] = result.nodes.as_slice() else {
+        panic!("expected one unordered list, got {:?}", result.nodes);
+    };
+    assert_eq!(items.len(), 1, "{items:?}");
+    let [before, error, after] = items[0].nodes.as_slice() else {
+        panic!(
+            "expected paragraph/error/paragraph, got {:?}",
+            items[0].nodes
+        );
+    };
+    assert_eq!(paragraph_text(before), "list-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error component, got {error:?}");
+    };
+    assert_eq!(error.message, "list-error");
+    assert_eq!(paragraph_text(after), "list-after");
+}
+
+#[test]
+fn top_level_inline_explicit_error_remains_fail_closed() {
+    let source_id = SourceId(1993);
+    let source = "before .error {top-inline-error} after";
+    let (result, diagnostics) = evaluate_plain(source, source_id);
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3011"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code != "E3011"),
+        "inline component materialization must remain rejected: {diagnostics:?}"
+    );
+    assert!(
+        result.nodes.iter().all(|node| !matches!(
+            node,
+            IrNode::Component {
+                component: arkst_ir::IrComponent::ExplicitError(_)
+            }
+        )),
+        "{:?}",
+        result.nodes
+    );
 }
 
 #[test]

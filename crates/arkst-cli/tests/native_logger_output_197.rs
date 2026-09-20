@@ -214,19 +214,57 @@ fn strict_build_does_not_promote_unevidenced_value_context_error_to_exit_66() {
 }
 
 #[test]
-fn strict_build_keeps_unevidenced_nested_output_on_ordinary_fatal_path() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("main.qd");
-    fs::write(&input, ".center\n    .error {strict-nested-output}\n").unwrap();
+fn strict_build_promotes_evidenced_structural_nested_errors_to_exit_66() {
+    let cases = [
+        (
+            "center",
+            "outer-before\n.center\n    center-before\n    .error {center-error}\n    center-after\nouter-after\n",
+            "center-error",
+        ),
+        (
+            "align",
+            "outer-before\n.align {center}\n    align-before\n    .error {align-error}\n    align-after\nouter-after\n",
+            "align-error",
+        ),
+        (
+            "container",
+            "outer-before\n.container\n    container-before\n    .error {container-error}\n    container-after\nouter-after\n",
+            "container-error",
+        ),
+        (
+            "list",
+            "outer-before\n\n- list-before .error {list-error} list-after\n\nouter-after\n",
+            "list-error",
+        ),
+        (
+            "blockquote",
+            "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n",
+            "quote-error",
+        ),
+    ];
 
-    let output = run_build_with_args(&input, &["--strict"]);
+    for (name, source, message) in cases {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join(format!("{name}.qd"));
+        fs::write(&input, source).unwrap();
 
-    assert!(!output.status.success());
-    assert_ne!(output.status.code(), Some(66));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("strict-nested-output"), "{stderr}");
-    assert!(stderr.contains("found 1 error(s)"), "{stderr}");
-    assert!(!dir.path().join("main.typ").exists());
+        let output = run_build_with_args(&input, &["--strict"]);
+
+        assert_eq!(output.status.code(), Some(66), "{name}: {output:?}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!(
+                "An error occurred while in strict mode (error code 66)\n\
+                 Originated from function: error\n\
+                 java.lang.Exception: {message}\n"
+            ),
+            "{name}"
+        );
+        assert!(
+            !dir.path().join(format!("{name}.typ")).exists(),
+            "{name}: strict mode must publish no artifact"
+        );
+    }
 }
 
 #[test]
@@ -289,21 +327,112 @@ fn unmaterialized_explicit_error_stays_build_fatal() {
 }
 
 #[test]
-fn explicit_error_inside_unevidenced_wrapper_stays_build_fatal() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("main.qd");
-    fs::write(&input, ".center\n    .error {nested-output}\n").unwrap();
+fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_siblings() {
+    let cases = [
+        (
+            "center",
+            "outer-before\n.center\n    center-before\n    .error {center-error}\n    center-after\nouter-after\n",
+            "center-error",
+            "center-before",
+            "center-after",
+        ),
+        (
+            "align",
+            "outer-before\n.align {center}\n    align-before\n    .error {align-error}\n    align-after\nouter-after\n",
+            "align-error",
+            "align-before",
+            "align-after",
+        ),
+        (
+            "container",
+            "outer-before\n.container\n    container-before\n    .error {container-error}\n    container-after\nouter-after\n",
+            "container-error",
+            "container-before",
+            "container-after",
+        ),
+        (
+            "list",
+            "outer-before\n\n- list-before .error {list-error} list-after\n\nouter-after\n",
+            "list-error",
+            "list-before",
+            "list-after",
+        ),
+        (
+            "blockquote",
+            "outer-before\n\n> quote-before .error {quote-error} quote-after\n\nouter-after\n",
+            "quote-error",
+            "quote-before",
+            "quote-after",
+        ),
+    ];
 
-    let output = run_build(&input);
+    for (name, source, message, local_before, local_after) in cases {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join(format!("{name}.qd"));
+        fs::write(&input, source).unwrap();
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("nested-output"), "{stderr}");
-    assert!(stderr.contains("found 1 error(s)"), "{stderr}");
-    assert!(
-        !dir.path().join("main.typ").exists(),
-        "unevidenced nested error output must not publish an artifact"
-    );
+        let output = run_build(&input);
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "Cannot call function error(String message) with arguments ({message}): {message}"
+            )),
+            "{name}: {stderr}"
+        );
+
+        let typst = fs::read_to_string(dir.path().join(format!("{name}.typ"))).unwrap();
+        let outer_before = typst.find("outer-before").expect("outer-before");
+        let local_before_index = typst.find(local_before).expect("local-before");
+        let error = typst.find(message).expect("error");
+        let local_after_index = typst.rfind(local_after).expect("local-after");
+        let outer_after = typst.rfind("outer-after").expect("outer-after");
+        assert!(
+            outer_before < local_before_index
+                && local_before_index < error
+                && error < local_after_index
+                && local_after_index < outer_after,
+            "{name}: {typst}"
+        );
+    }
+}
+
+#[test]
+fn unevidenced_stacked_landscape_and_ordered_list_outputs_remain_build_fatal() {
+    let cases = [
+        ("row", ".row\n    .error {row-error}\n", "row-error"),
+        (
+            "landscape",
+            ".landscape\n    .error {landscape-error}\n",
+            "landscape-error",
+        ),
+        (
+            "ordered-list",
+            "1. before .error {ordered-error} after\n",
+            "ordered-error",
+        ),
+    ];
+
+    for (name, source, message) in cases {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join(format!("{name}.qd"));
+        fs::write(&input, source).unwrap();
+
+        let output = run_build(&input);
+
+        assert!(!output.status.success(), "{name}: {output:?}");
+        assert_ne!(output.status.code(), Some(66), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{name}: {stderr}");
+        assert!(
+            !dir.path().join(format!("{name}.typ")).exists(),
+            "{name}: unevidenced output must not publish an artifact"
+        );
+    }
 }
 
 #[test]

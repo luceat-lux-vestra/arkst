@@ -486,21 +486,98 @@ fn emit_native_build_diagnostics(diagnostics: &[arkst_core::Diagnostic]) {
     }
 }
 
-fn collect_explicit_error_components<'a>(
+#[derive(Debug, Default)]
+struct ExplicitErrorComponentCollection<'a> {
+    recoverable: Vec<&'a IrExplicitErrorComponent>,
+    unevidenced: Vec<&'a IrExplicitErrorComponent>,
+}
+
+fn collect_unevidenced_explicit_errors_from_node<'a>(
+    node: &'a IrNode,
+    components: &mut Vec<&'a IrExplicitErrorComponent>,
+) {
+    match node {
+        IrNode::Component {
+            component: IrComponent::ExplicitError(error),
+        } => components.push(error),
+        IrNode::Component {
+            component: IrComponent::Container(component),
+        } => collect_unevidenced_explicit_errors(&component.children, components),
+        IrNode::Component {
+            component: IrComponent::Stacked(component),
+        } => collect_unevidenced_explicit_errors(&component.children, components),
+        IrNode::Component {
+            component: IrComponent::Landscape(component),
+        } => collect_unevidenced_explicit_errors(&component.children, components),
+        IrNode::Blockquote { content, .. } => {
+            collect_unevidenced_explicit_errors(content, components);
+        }
+        IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+            for item in items {
+                collect_unevidenced_explicit_errors(&item.nodes, components);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_unevidenced_explicit_errors<'a>(
     nodes: &'a [IrNode],
     components: &mut Vec<&'a IrExplicitErrorComponent>,
 ) {
     for node in nodes {
-        if let IrNode::Component {
-            component: IrComponent::ExplicitError(error),
-        } = node
-        {
-            // Only the independently evidenced direct document-level error
-            // component is recoverable. Nested wrapper/list/blockquote output
-            // stays fail-closed until that output context is probed separately.
-            components.push(error);
+        collect_unevidenced_explicit_errors_from_node(node, components);
+    }
+}
+
+fn collect_evidenced_nested_explicit_errors<'a>(
+    nodes: &'a [IrNode],
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) {
+    for node in nodes {
+        match node {
+            IrNode::Component {
+                component: IrComponent::ExplicitError(error),
+            } => collection.recoverable.push(error),
+            other => {
+                // The clean-room probes cover one enclosing Container,
+                // unordered-list item, or blockquote around the explicit
+                // error. Deeper/nested structural compositions remain
+                // unevidenced and therefore stay fail-closed.
+                collect_unevidenced_explicit_errors_from_node(other, &mut collection.unevidenced);
+            }
         }
     }
+}
+
+fn collect_explicit_error_components<'a>(
+    nodes: &'a [IrNode],
+) -> ExplicitErrorComponentCollection<'a> {
+    let mut collection = ExplicitErrorComponentCollection::default();
+
+    for node in nodes {
+        match node {
+            IrNode::Component {
+                component: IrComponent::ExplicitError(error),
+            } => collection.recoverable.push(error),
+            IrNode::Component {
+                component: IrComponent::Container(component),
+            } => collect_evidenced_nested_explicit_errors(&component.children, &mut collection),
+            IrNode::Blockquote { content, .. } => {
+                collect_evidenced_nested_explicit_errors(content, &mut collection);
+            }
+            IrNode::UnorderedList { items, .. } => {
+                for item in items {
+                    collect_evidenced_nested_explicit_errors(&item.nodes, &mut collection);
+                }
+            }
+            other => {
+                collect_unevidenced_explicit_errors_from_node(other, &mut collection.unevidenced);
+            }
+        }
+    }
+
+    collection
 }
 
 fn explicit_error_diagnostic_matches_component(
@@ -525,8 +602,7 @@ fn classify_build_errors(
     diagnostics: &[arkst_core::Diagnostic],
     document: &IrDocument,
 ) -> BuildErrorClassification {
-    let mut components = Vec::new();
-    collect_explicit_error_components(&document.nodes, &mut components);
+    let mut components = collect_explicit_error_components(&document.nodes);
 
     let mut classification = BuildErrorClassification::default();
     for diagnostic in diagnostics
@@ -538,23 +614,32 @@ fn classify_build_errors(
             continue;
         }
 
-        let Some(index) = components.iter().position(|component| {
+        if let Some(index) = components.recoverable.iter().position(|component| {
             explicit_error_diagnostic_matches_component(diagnostic, component)
-        }) else {
-            // A recoverable explicit-error diagnostic must have a concrete
-            // rendered semantic counterpart. Value-context or otherwise
-            // unmaterialized explicit errors stay fail-closed.
-            classification.fatal_errors += 1;
+        }) {
+            classification
+                .explicit_messages
+                .push(components.recoverable.remove(index).message.clone());
             continue;
-        };
-        classification
-            .explicit_messages
-            .push(components.remove(index).message.clone());
+        }
+
+        if let Some(index) = components.unevidenced.iter().position(|component| {
+            explicit_error_diagnostic_matches_component(diagnostic, component)
+        }) {
+            components.unevidenced.remove(index);
+        }
+
+        // An explicit-error diagnostic without an evidenced rendered semantic
+        // counterpart remains fatal. Matching an unevidenced component above
+        // consumes only the orphan accounting; it never makes the diagnostic
+        // recoverable.
+        classification.fatal_errors += 1;
     }
 
     // Likewise, never publish a document containing an explicit-error
     // component without its structured diagnostic provenance.
-    classification.fatal_errors += components.len();
+    classification.fatal_errors += components.recoverable.len();
+    classification.fatal_errors += components.unevidenced.len();
     classification
 }
 
@@ -1395,6 +1480,104 @@ mod tests {
         assert!(classification.explicit_messages.is_empty());
         assert_eq!(classification.fatal_errors, 1);
         assert!(ensure_no_fatal_build_errors(&[unrelated], &empty_document).is_err());
+    }
+
+    #[test]
+    fn build_error_classifier_bounds_nested_recovery_to_evidenced_contexts() {
+        let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(197), 0, 13);
+        let diagnostic = arkst_core::Diagnostic {
+            code: "E3011".to_string(),
+            severity: arkst_core::Severity::Error,
+            message:
+                "Cannot call function error(String message) with arguments (explicit): explicit"
+                    .to_string(),
+            primary: Some(span),
+            secondary: Vec::new(),
+            hints: vec![EXPLICIT_ERROR_HINT.to_string()],
+        };
+        let explicit_node = || IrNode::Component {
+            component: IrComponent::ExplicitError(IrExplicitErrorComponent {
+                message: "explicit".to_string(),
+                span,
+            }),
+        };
+
+        let container = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(arkst_core::ir::IrContainerComponent {
+                    width: None,
+                    height: None,
+                    full_width: false,
+                    alignment: None,
+                    children: vec![explicit_node()],
+                    span,
+                }),
+            }],
+            metadata: Default::default(),
+        };
+        let blockquote = IrDocument {
+            nodes: vec![IrNode::Blockquote {
+                content: vec![explicit_node()],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+        let unordered = IrDocument {
+            nodes: vec![IrNode::UnorderedList {
+                items: vec![arkst_core::ir::IrListItem {
+                    nodes: vec![explicit_node()],
+                    task: None,
+                    span,
+                }],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+
+        for document in [&container, &blockquote, &unordered] {
+            let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
+            assert_eq!(classification.explicit_messages, vec!["explicit"]);
+            assert_eq!(classification.fatal_errors, 0);
+        }
+
+        let nested_composition = IrDocument {
+            nodes: vec![IrNode::Component {
+                component: IrComponent::Container(arkst_core::ir::IrContainerComponent {
+                    width: None,
+                    height: None,
+                    full_width: false,
+                    alignment: None,
+                    children: vec![IrNode::Blockquote {
+                        content: vec![explicit_node()],
+                        span,
+                    }],
+                    span,
+                }),
+            }],
+            metadata: Default::default(),
+        };
+        let ordered = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![arkst_core::ir::IrListItem {
+                    nodes: vec![explicit_node()],
+                    task: None,
+                    span,
+                }],
+                start: 1,
+                span,
+            }],
+            metadata: Default::default(),
+        };
+
+        for document in [&nested_composition, &ordered] {
+            let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
+            assert!(classification.explicit_messages.is_empty());
+            assert_eq!(classification.fatal_errors, 1);
+
+            let orphan = classify_build_errors(&[], document);
+            assert!(orphan.explicit_messages.is_empty());
+            assert_eq!(orphan.fatal_errors, 1);
+        }
     }
 
     #[test]
