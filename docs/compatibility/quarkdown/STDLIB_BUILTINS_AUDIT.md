@@ -410,7 +410,7 @@ Native `arkst build` supplies an explicit host-owned logger sink and writes
 ordinary core compilation remains no-sink/fail-closed for `.log`. Clean-room
 PR #382 additionally fixes the stable default/non-strict `.error` contract
 across exact v2.5.1/v2.6.0 artifacts: one-line stderr, rendered call-site
-continuation, selected conditional/function body replacement with caller continuation, and rc=0. Closed/unmerged PR #386 fixes the strict native host-finalization boundary across the same exact releases: evaluation/log side effects retain ordinary continuation semantics, function/selected-conditional local bodies stop at the error while caller/outer content continues, unselected conditionals stay lazy, the first selected error determines the bounded three-line stderr prefix, exit is 66, and no artifact is published. Arkst models these bounded contracts with a backend-neutral explicit-error component plus default/strict native host policies. Arkst-specific `check`/`inspect` use a separate explicit sinkless/fail-closed analysis policy: no `LogSink`, `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output and keeps successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 additionally pin one enclosing Container-family / unordered-list / blockquote error-output context, including default sibling continuation and strict exit 66/no-artifact. Arkst implements that bounded structural recovery/strict policy. Source-echo rendering and still-unevidenced output contexts, remaining logger String categories such as Collection, and public WASM/embedder exposure remain outside this bounded claim; exact Quarkdown HTML/CSS styling is not a Typst/PDF closure requirement. The
+continuation, selected conditional/function body replacement with caller continuation, and rc=0. Closed/unmerged PR #386 fixes the strict native host-finalization boundary across the same exact releases: evaluation/log side effects retain ordinary continuation semantics, function/selected-conditional local bodies stop at the error while caller/outer content continues, unselected conditionals stay lazy, the first selected error determines the bounded three-line stderr prefix, exit is 66, and no artifact is published. Arkst models these bounded contracts with a backend-neutral explicit-error component plus default/strict native host policies. Arkst-specific `check`/`inspect` use a separate explicit sinkless/fail-closed analysis policy: no `LogSink`, `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output and keeps successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 pin one enclosing Container-family / unordered-list / blockquote error-output context. Merged #398 supplies bounded independently sourced `.error` source echo, while closed/unmerged #401 extends exact cross-version evidence to top-level inline, ordered-list, Stacked row/column/grid, Landscape, and one `.center` → `.row` composition; Arkst implements those bounded recovery/strict contexts. Still-unevidenced output contexts, remaining logger String categories such as Collection, and public WASM/embedder exposure remain outside this bounded claim; exact Quarkdown HTML/CSS styling is not a Typst/PDF closure requirement. The
 [#196](https://github.com/luceat-lux-vestra/arkst/issues/196) localization
 names remain a bounded `SUPPORTED_SEMANTICS` evaluator slice. The common
 resolver prerequisite completed under #188 and native host ingestion completed
@@ -446,12 +446,12 @@ are emitted synchronously in evaluation order with source provenance,
 malformed calls emit no events, and source-defined functions retain normal
 precedence over these native names. The three rows are
 `PARTIAL`, not `SUPPORTED_SEMANTICS`, because exact
-Quarkdown source-echo rendering and still-unevidenced output contexts,
+Quarkdown still-unevidenced output contexts,
 remaining logger String categories such as Collection and #191 public WASM exposure are not
 claimed. Arkst-specific `check`/`inspect` are explicitly bounded as
 sinkless/fail-closed analysis commands rather than Quarkdown runtime-output
 parity surfaces. The bounded Unit value/result semantics are
-covered by #368/PR #371. #197 therefore remains open for the remaining logger
+covered by #368/PR #371. #197 therefore remains open after merged #398 source echo and the #401-evidenced residual-context slice for the remaining logger
 residuals even though no #151 row is still `UNSUPPORTED`.
 
 ### Bounded #196 localization contract
@@ -619,7 +619,7 @@ implementations under #195 but cannot claim full stdlib visibility parity while
 Arkst intentionally filters out upstream names it cannot call. The three
 logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
 native `arkst build` `Log` stdout plus the clean-room-evidenced default/non-strict
-`.error` stderr/rendered continuation contract and bounded strict host-finalization contract are implemented, and #392/#393 cover one enclosing Container-family / unordered-list / blockquote context, but source-echo/still-unevidenced output contexts and remaining logger
+`.error` stderr/rendered continuation contract and bounded strict host-finalization contract are implemented, and #392/#393 cover one enclosing Container-family / unordered-list / blockquote context, merged #398 covers bounded source echo, and #401 covers top-level inline, ordered-list, Stacked row/column/grid, Landscape, and one `.center` → `.row` composition, but still-unevidenced output contexts and remaining logger
 String categories such as Collection remain partial; exact HTML/CSS styling is not a Typst/PDF closure requirement. Arkst-specific `check`/`inspect` policy is
 bounded separately as sinkless/fail-closed analysis behavior. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
@@ -701,7 +701,7 @@ implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
 evidenced Unit value-context results, while residual PARTIAL status now covers remaining logger String categories such as Collection,
-source-echo/still-unevidenced-output behavior and public embedder exposure; native strict `.error` host finalization is bounded by closed/unmerged #386 evidence, and Arkst-specific `check`/`inspect` are bounded as sinkless/fail-closed analysis commands. #197 remains open for the remaining owned residuals
+still-unevidenced-output behavior and public embedder exposure after merged #398 source echo and the #401-evidenced production slice; native strict `.error` host finalization is bounded by closed/unmerged #386 evidence, and Arkst-specific `check`/`inspect` are bounded as sinkless/fail-closed analysis commands. #197 remains open for the remaining owned residuals
 rather than being treated
 as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.

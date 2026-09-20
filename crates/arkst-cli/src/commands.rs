@@ -533,17 +533,23 @@ fn collect_unevidenced_explicit_errors<'a>(
 fn collect_evidenced_nested_explicit_errors<'a>(
     nodes: &'a [IrNode],
     collection: &mut ExplicitErrorComponentCollection<'a>,
+    allow_nested_stacked: bool,
 ) {
     for node in nodes {
         match node {
             IrNode::Component {
                 component: IrComponent::ExplicitError(error),
             } => collection.recoverable.push(error),
+            IrNode::Component {
+                component: IrComponent::Stacked(component),
+            } if allow_nested_stacked => {
+                // #401 pins one additional evidenced composition:
+                // Container-family -> Stacked -> direct explicit error.
+                // Do not recurse again; deeper structural compositions remain
+                // fail-closed.
+                collect_evidenced_nested_explicit_errors(&component.children, collection, false);
+            }
             other => {
-                // The clean-room probes cover one enclosing Container,
-                // unordered-list item, or blockquote around the explicit
-                // error. Deeper/nested structural compositions remain
-                // unevidenced and therefore stay fail-closed.
                 collect_unevidenced_explicit_errors_from_node(other, &mut collection.unevidenced);
             }
         }
@@ -562,13 +568,29 @@ fn collect_explicit_error_components<'a>(
             } => collection.recoverable.push(error),
             IrNode::Component {
                 component: IrComponent::Container(component),
-            } => collect_evidenced_nested_explicit_errors(&component.children, &mut collection),
-            IrNode::Blockquote { content, .. } => {
-                collect_evidenced_nested_explicit_errors(content, &mut collection);
+            } => {
+                collect_evidenced_nested_explicit_errors(&component.children, &mut collection, true)
             }
-            IrNode::UnorderedList { items, .. } => {
+            IrNode::Component {
+                component: IrComponent::Stacked(component),
+            } => collect_evidenced_nested_explicit_errors(
+                &component.children,
+                &mut collection,
+                false,
+            ),
+            IrNode::Component {
+                component: IrComponent::Landscape(component),
+            } => collect_evidenced_nested_explicit_errors(
+                &component.children,
+                &mut collection,
+                false,
+            ),
+            IrNode::Blockquote { content, .. } => {
+                collect_evidenced_nested_explicit_errors(content, &mut collection, false);
+            }
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
                 for item in items {
-                    collect_evidenced_nested_explicit_errors(&item.nodes, &mut collection);
+                    collect_evidenced_nested_explicit_errors(&item.nodes, &mut collection, false);
                 }
             }
             other => {
@@ -1568,8 +1590,20 @@ mod tests {
             }],
             metadata: Default::default(),
         };
+        let ordered = IrDocument {
+            nodes: vec![IrNode::OrderedList {
+                items: vec![arkst_core::ir::IrListItem {
+                    nodes: vec![explicit_node()],
+                    task: None,
+                    span,
+                }],
+                start: 1,
+                span,
+            }],
+            metadata: Default::default(),
+        };
 
-        for document in [&container, &blockquote, &unordered] {
+        for document in [&container, &blockquote, &unordered, &ordered] {
             let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
             assert_eq!(classification.explicit_messages, vec!["explicit"]);
             assert_eq!(classification.fatal_errors, 0);
@@ -1591,28 +1625,14 @@ mod tests {
             }],
             metadata: Default::default(),
         };
-        let ordered = IrDocument {
-            nodes: vec![IrNode::OrderedList {
-                items: vec![arkst_core::ir::IrListItem {
-                    nodes: vec![explicit_node()],
-                    task: None,
-                    span,
-                }],
-                start: 1,
-                span,
-            }],
-            metadata: Default::default(),
-        };
+        let document = &nested_composition;
+        let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
+        assert!(classification.explicit_messages.is_empty());
+        assert_eq!(classification.fatal_errors, 1);
 
-        for document in [&nested_composition, &ordered] {
-            let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
-            assert!(classification.explicit_messages.is_empty());
-            assert_eq!(classification.fatal_errors, 1);
-
-            let orphan = classify_build_errors(&[], document);
-            assert!(orphan.explicit_messages.is_empty());
-            assert_eq!(orphan.fatal_errors, 1);
-        }
+        let orphan = classify_build_errors(&[], document);
+        assert!(orphan.explicit_messages.is_empty());
+        assert_eq!(orphan.fatal_errors, 1);
     }
 
     #[test]
