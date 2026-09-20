@@ -50,7 +50,9 @@ impl ResourceProvider for VirtualProjectResourceProvider<'_> {
     fn source_text(&self, source_id: SourceId) -> Option<&str> {
         self.project.sources().get_by_id(source_id).or_else(|| {
             let name = self.project.loadable_library_name_by_source_id(source_id)?;
-            self.project.loadable_library(name).map(|library| library.source())
+            self.project
+                .loadable_library(name)
+                .map(|library| library.source())
         })
     }
 

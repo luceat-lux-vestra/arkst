@@ -1496,8 +1496,7 @@ mod tests {
             }],
             metadata: Default::default(),
         };
-        let classification =
-            classify_build_errors(std::slice::from_ref(&explicit), &missing_echo);
+        let classification = classify_build_errors(std::slice::from_ref(&explicit), &missing_echo);
         assert!(classification.explicit_messages.is_empty());
         assert_eq!(classification.fatal_errors, 1);
 

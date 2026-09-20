@@ -73,7 +73,10 @@ fn build_keeps_prior_log_and_renders_non_strict_error_component() {
         "{typst}"
     );
     assert!(typst.contains("boom"), "{typst}");
-    assert!(typst.contains("#raw(\".error {boom}\", block: true)"), "{typst}");
+    assert!(
+        typst.contains("#raw(\".error {boom}\", block: true)"),
+        "{typst}"
+    );
     assert!(typst.contains("after"), "{typst}");
 }
 

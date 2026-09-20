@@ -3186,9 +3186,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_error_component_serde_roundtrip_preserves_message_and_span() {
+    fn explicit_error_component_serde_roundtrip_preserves_message_source_echo_and_span() {
         let value = IrValue::Component(IrComponent::ExplicitError(IrExplicitErrorComponent {
             message: "boom".to_string(),
+            source_echo: Some(".error    {boom}".to_string()),
             span: SourceSpan::new(SourceId(197), 4, 17),
         }));
 

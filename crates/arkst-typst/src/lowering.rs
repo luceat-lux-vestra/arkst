@@ -1489,7 +1489,10 @@ mod tests {
         };
         let code = super::lower_to_typst_code(&doc);
 
-        assert!(code.contains("#raw(\".error    {.msg}\", block: true)"), "{code}");
+        assert!(
+            code.contains("#raw(\".error    {.msg}\", block: true)"),
+            "{code}"
+        );
     }
 
     #[test]

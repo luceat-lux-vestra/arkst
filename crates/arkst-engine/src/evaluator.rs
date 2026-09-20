@@ -419,10 +419,7 @@ enum CallOutcome {
     Unresolved,
 }
 
-fn explicit_error_source_echo(
-    context: &EvaluationContext<'_>,
-    span: SourceSpan,
-) -> Option<String> {
+fn explicit_error_source_echo(context: &EvaluationContext<'_>, span: SourceSpan) -> Option<String> {
     let source = context.resources?.source_text(span.source_id)?;
     let source_echo = source.get(span.start..span.end)?;
     if !source_echo.trim_start().starts_with(".error") {
