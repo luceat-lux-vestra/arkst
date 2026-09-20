@@ -1,0 +1,109 @@
+name: Quarkdown recursive nested-Pair logger clean-room probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe-${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          root="/tmp/quarkdown-${version}"
+          url="https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          qd="$(find "$root" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Observe recursive Pair logger conversion
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/logger197-recursive-pair-${{ matrix.version }}"
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/left-depth-2.qd" <<'QD'
+          .log {.pair {.pair {a} {b}} {c}}
+          QD
+
+          cat > "$root/left-depth-3.qd" <<'QD'
+          .log {.pair {.pair {.pair {a} {b}} {c}} {d}}
+          QD
+
+          cat > "$root/left-depth-4.qd" <<'QD'
+          .log {.pair {.pair {.pair {.pair {a} {b}} {c}} {d}} {e}}
+          QD
+
+          cat > "$root/right-depth-4.qd" <<'QD'
+          .log {.pair {a} {.pair {b} {.pair {c} {.pair {d} {e}}}}}
+          QD
+
+          cat > "$root/balanced.qd" <<'QD'
+          .log {.pair {.pair {a} {b}} {.pair {c} {d}}}
+          QD
+
+          cat > "$root/mixed-structured.qd" <<'QD'
+          .log {.pair {.pair {.range {1} {3}} {.none}} {.pair {tail} {.range to:{2}}}}
+          QD
+
+          cat > "$root/debug-depth-4.qd" <<'QD'
+          .debug {.pair {.pair {.pair {.pair {a} {b}} {c}} {d}} {e}}
+          after-debug
+          QD
+
+          cat > "$root/error-depth-4.qd" <<'QD'
+          before-error
+          .error {.pair {.pair {.pair {.pair {a} {b}} {c}} {d}} {e}}
+          after-error
+          QD
+
+          for fixture in left-depth-2 left-depth-3 left-depth-4 right-depth-4 balanced mixed-structured debug-depth-4 error-depth-4; do
+            out="$root/out-$fixture"
+            stdout="$root/$fixture.stdout"
+            stderr="$root/$fixture.stderr"
+            set +e
+            "$QD" compile "$root/$fixture.qd" --clean --pretty --out "$out" --out-name probe >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            python3 - "$fixture" "$rc" "$stdout" "$stderr" <<'PY'
+          from pathlib import Path
+          import sys
+
+          fixture, rc, stdout_path, stderr_path = sys.argv[1:]
+          stdout = Path(stdout_path).read_text(errors="replace")
+          stderr = Path(stderr_path).read_text(errors="replace")
+          print(f"QD197-PAIR-RECURSIVE fixture={fixture} rc={rc}")
+          print(f"QD197-PAIR-RECURSIVE-STDOUT fixture={fixture} value={stdout!r}")
+          print(f"QD197-PAIR-RECURSIVE-STDERR fixture={fixture} value={stderr!r}")
+          PY
+          done
