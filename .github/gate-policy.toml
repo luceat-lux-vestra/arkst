@@ -106,10 +106,10 @@ rationale = "Required minimum-supported-Rust-version contract."
 [[producer]]
 workflow = ".github/workflows/dependency-review.yml"
 job = "dependency-review"
-classification = "advisory"
+classification = "required"
 contexts = ["dependency-review"]
 always_present = true
-rationale = "Diff-scoped dependency review is intentionally advisory: the required license job already validates the resulting Rust dependency graph unconditionally with cargo-deny. Keep this distinct evidence without adding a redundant blocking context."
+rationale = "Required diff-scoped admission for newly introduced vulnerable dependencies, including GitHub Actions dependencies represented by GitHub's dependency graph. The separate required license job remains authoritative for the resulting Rust full graph via cargo-deny."
 
 [[producer]]
 workflow = ".github/workflows/codeql.yml"
