@@ -320,7 +320,7 @@ class StaticAuthorityTests(unittest.TestCase):
                     dry_run:
                       default: true
                     backfill:
-                      default: true
+                      default: false
                 permissions:
                   contents: read
                   issues: write
@@ -367,7 +367,7 @@ class StaticAuthorityTests(unittest.TestCase):
                     dry_run:
                       default: true
                     backfill:
-                      default: true
+                      default: false
                 permissions:
                   contents: read
                 jobs:
