@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -273,8 +274,37 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
         for label in ("type:task", "area:ci", "priority:normal"):
             if label not in labeler:
                 findings.append(Finding("label-automation", f"managed label definition missing: {label}"))
-        if "workflow_dispatch:" not in labeler:
-            findings.append(Finding("label-automation", "issue label reconciliation dispatch is missing"))
+        required_dispatch_fragments = (
+            "workflow_dispatch:",
+            "dry_run:",
+            "backfill:",
+            "DRY_RUN:",
+            "BACKFILL:",
+            "if (!dryRun)",
+            "Mutating backfill must run from",
+        )
+        for fragment in required_dispatch_fragments:
+            if fragment not in labeler:
+                findings.append(
+                    Finding("label-automation", f"issue reconciliation safety contract missing: {fragment}")
+                )
+        if not re.search(
+            r"(?ms)^permissions:\n  contents: read\s*$",
+            labeler,
+        ):
+            findings.append(
+                Finding(
+                    "label-automation",
+                    "issue labeler workflow must keep top-level permissions read-only",
+                )
+            )
+        if "    permissions:\n      contents: read\n      issues: write\n" not in labeler:
+            findings.append(
+                Finding(
+                    "label-automation",
+                    "issue labeler must isolate issues:write to the classify job",
+                )
+            )
     except OSError as exc:
         findings.append(Finding("label-automation", f"cannot read issue labeler: {exc}"))
     return findings
