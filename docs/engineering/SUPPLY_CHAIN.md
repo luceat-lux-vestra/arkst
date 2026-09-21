@@ -32,7 +32,9 @@ Historical Markdown substrate PoCs deliberately remain research evidence. In par
 
 ## Diff-scoped dependency review
 
-`.github/workflows/dependency-review.yml` reviews dependency changes introduced by a pull request. It provides useful diff-specific license and vulnerability evidence, but it is advisory because the production Rust dependency graph is already checked unconditionally by the required `license` job. Its purpose is change attribution, not replacement of the production full-graph gate.
+`.github/workflows/dependency-review.yml` is a required pull-request admission gate. It rejects newly introduced known vulnerabilities at the configured severity threshold and applies the repository's dependency-license policy to the diff.
+
+This is not redundant with the required `license` job. GitHub's dependency graph also recognizes GitHub Actions workflow dependencies, while cargo-deny is authoritative for the resulting Rust graph. Dependency Review therefore owns change attribution and admission across GitHub's supported dependency graph; cargo-deny independently owns unconditional Rust full-graph advisories, licenses, bans, and sources.
 
 ## Post-merge and scheduled detection
 
