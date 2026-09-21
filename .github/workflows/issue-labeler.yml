@@ -7,10 +7,20 @@ on:
       - edited
       - reopened
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report proposed backlog changes without mutating labels
+        required: true
+        default: true
+        type: boolean
+      backfill:
+        description: Reconcile all open issues
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: issue-labeler-${{ github.event.issue.number || github.run_id }}
@@ -21,11 +31,26 @@ jobs:
     name: classify
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Classify issues
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          BACKFILL: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill || false }}
         with:
           script: |
+            const dryRun = process.env.DRY_RUN === 'true';
+            const backfill = process.env.BACKFILL === 'true';
+            const defaultBranchRef = `refs/heads/${context.payload.repository.default_branch}`;
+
+            if (context.eventName === 'workflow_dispatch' && !dryRun && context.ref !== defaultBranchRef) {
+              core.setFailed(`Mutating backfill must run from ${defaultBranchRef}; got ${context.ref}`);
+              return;
+            }
+
             const defs = [
               ['type:bug', 'B60205', 'A defect in existing functionality'],
               ['type:feature', '1D76DB', 'A new user-facing capability'],
@@ -47,15 +72,20 @@ jobs:
               ['area:docs', 'EDEDED', 'Documentation'],
               ['priority:normal', 'FBCA04', 'Default triage priority'],
             ];
-            for (const [name, color, description] of defs) {
-              try {
-                const { data } = await github.rest.issues.getLabel({ ...context.repo, name });
-                if ((data.description || '') !== description) {
-                  await github.rest.issues.updateLabel({ ...context.repo, name, description });
+            if (!dryRun) {
+              for (const [name, color, description] of defs) {
+                try {
+                  const { data } = await github.rest.issues.getLabel({ ...context.repo, name });
+                  if (
+                    (data.description || '') !== description ||
+                    (data.color || '').toLowerCase() !== color.toLowerCase()
+                  ) {
+                    await github.rest.issues.updateLabel({ ...context.repo, name, color, description });
+                  }
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  await github.rest.issues.createLabel({ ...context.repo, name, color, description });
                 }
-              } catch (error) {
-                if (error.status !== 404) throw error;
-                await github.rest.issues.createLabel({ ...context.repo, name, color, description });
               }
             }
 
@@ -95,7 +125,7 @@ jobs:
               // Issue Form/upstream/manual type choices and default truly unlabeled issues.
               if (explicitType) {
                 for (const name of existingTypes) {
-                  if (name !== explicitType) {
+                  if (name !== explicitType && !dryRun) {
                     await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue.number, name });
                   }
                 }
@@ -107,12 +137,20 @@ jobs:
               // Issue area inference is additive; unlike PR changed paths, heuristics are
               // not authoritative enough to delete manually curated ownership labels.
               if (!names.some(x => x.startsWith('priority:'))) add.push('priority:normal');
-              if (add.length) await github.rest.issues.addLabels({ ...context.repo, issue_number: issue.number, labels: [...new Set(add)] });
+              const uniqueAdd = [...new Set(add)];
+              core.info(
+                `#${issue.number} dry_run=${dryRun} add=${uniqueAdd.join(',') || '-'}`
+              );
+              if (!dryRun && uniqueAdd.length) {
+                await github.rest.issues.addLabels({ ...context.repo, issue_number: issue.number, labels: uniqueAdd });
+              }
             }
 
-            if (context.eventName === 'workflow_dispatch') {
+            if (context.eventName === 'workflow_dispatch' && backfill) {
               const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
               for (const issue of issues) await classify(issue);
-            } else {
+            } else if (context.eventName === 'issues') {
               await classify(context.payload.issue);
+            } else {
+              core.notice('No backlog reconciliation target selected.');
             }
