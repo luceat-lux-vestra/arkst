@@ -18,14 +18,17 @@ The accepted required set remains:
 - `wasm`
 - `compatibility`
 - `msrv`
+- `dependency-review`
 
 The live ruleset must remain strict and contain exactly this set. Required contexts must be produced on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers.
 
-## Non-required PR controls
+## Dependency admission and full-graph authority
 
-`dependency-review` remains advisory rather than required. It is diff-scoped evidence about newly introduced dependency changes. The required `license` job independently runs full-graph `cargo deny check --all-features` on every PR and remains authoritative for the resulting Rust dependency graph. Keeping both controls distinct avoids making a second blocking context mandatory without weakening either check.
+`dependency-review` is required and always present. It owns pull-request-diff admission for newly introduced vulnerable dependencies, including GitHub Actions dependencies represented by GitHub's dependency graph.
 
-The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, and PR metadata automation are classified explicitly in the canonical policy. Their presence in the inventory prevents silent job/context drift without promoting conditional or advisory jobs into required checks.
+The required `license` job remains independent authority for the resulting Rust dependency graph and runs full-graph `cargo deny check --all-features` on every PR. Neither gate substitutes for the other: Dependency Review provides change attribution and non-Cargo dependency coverage; cargo-deny provides unconditional Rust graph advisories, licenses, bans, and source policy.
+
+The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, and PR metadata automation remain explicitly non-required. Their presence in the inventory prevents silent job/context drift without promoting conditional jobs into merge authority.
 
 Arkst previously carried a custom advisory AI review workflow backed by GitHub Models. GitHub retired GitHub Models on July 30, 2026, so that dead integration and its review prompt were removed rather than preserved as a nonfunctional governance control. AI review is not part of merge authority; any future replacement requires a separate explicit trust-boundary review before being added to this inventory.
 
