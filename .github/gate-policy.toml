@@ -163,8 +163,9 @@ rationale = "PR metadata automation is non-authoritative and must never satisfy 
 [[producer]]
 workflow = ".github/workflows/failure-triage.yml"
 job = "failure-triage"
-classification = "advisory"
+trigger = "pull_request_target"
+classification = "required"
 contexts = ["failure-triage"]
 always_present = true
-rationale = "Bootstrap failure-classification metadata validator. Keep advisory until real fail-to-body-edit-recovery proof and live required-context promotion are completed."
+rationale = "Trusted-base classification-before-remediation metadata gate. Proof PR #412: run 35522163591 failed invalid metadata and run 35522396415 passed after body-only correction; live Protect main promotion/readback is required before merge."
 
