@@ -294,6 +294,10 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
             findings.append(
                 Finding("label-automation", "issue reconciliation dry_run must default to true")
             )
+        if not re.search(r"(?ms)^      backfill:\n.*?^        default: false\s*$", labeler):
+            findings.append(
+                Finding("label-automation", "issue reconciliation backfill must default to false")
+            )
         expected_mutations = {
             "github.rest.issues.updateLabel": 1,
             "github.rest.issues.createLabel": 1,
@@ -310,7 +314,7 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
                     )
                 )
         if not re.search(
-            r"(?ms)^permissions:\n  contents: read\s*$",
+            r"(?m)^permissions:\n  contents: read\n(?:\n)*(?=\S)",
             labeler,
         ):
             findings.append(
