@@ -21,15 +21,14 @@ UNTRUSTED_EXPRESSIONS = (
     "github.event.inputs.",
     "inputs.",
 )
-ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {
-    ".github/workflows/issue-labeler.yml": {"issues"},
-    ".github/workflows/pr-labeler.yml": {"issues", "pull-requests"},
-    ".github/workflows/upstream-quarkdown.yml": {"issues"},
-}
+ALLOWED_WORKFLOW_WRITE_PERMISSIONS = {}
 ALLOWED_JOB_WRITE_PERMISSIONS = {
     (".github/workflows/codeql.yml", "analyze"): {"security-events"},
     (".github/workflows/hardening-drift-audit.yml", "report"): {"issues"},
     (".github/workflows/security.yml", "report-failure"): {"issues"},
+    (".github/workflows/issue-labeler.yml", "classify"): {"issues"},
+    (".github/workflows/pr-labeler.yml", "label"): {"issues", "pull-requests"},
+    (".github/workflows/upstream-quarkdown.yml", "watch"): {"issues"},
 }
 
 

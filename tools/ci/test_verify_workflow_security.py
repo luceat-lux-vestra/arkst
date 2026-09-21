@@ -146,6 +146,33 @@ class WorkflowSecurityTests(unittest.TestCase):
         )
         self.reject(bad, "unapproved workflow-level write permission", name="security.yml")
 
+
+    def test_pr_labeler_may_not_regain_workflow_level_writes(self) -> None:
+        valid = (ROOT / ".github/workflows/pr-labeler.yml").read_text(encoding="utf-8")
+        bad = valid.replace(
+            "permissions:\n  contents: read\n",
+            "permissions:\n  contents: read\n  issues: write\n",
+            1,
+        )
+        self.reject(
+            bad,
+            "unapproved workflow-level write permission",
+            name="pr-labeler.yml",
+        )
+
+    def test_upstream_watcher_may_not_regain_workflow_level_writes(self) -> None:
+        valid = (ROOT / ".github/workflows/upstream-quarkdown.yml").read_text(encoding="utf-8")
+        bad = valid.replace(
+            "permissions:\n  contents: read\n",
+            "permissions:\n  contents: read\n  issues: write\n",
+            1,
+        )
+        self.reject(
+            bad,
+            "unapproved workflow-level write permission",
+            name="upstream-quarkdown.yml",
+        )
+
     def test_missing_timeout_is_rejected(self) -> None:
         self.reject(BASE.replace("    timeout-minutes: 5\n", ""), "timeout-minutes")
 
