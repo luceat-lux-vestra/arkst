@@ -16,7 +16,7 @@ on:
       backfill:
         description: Reconcile all open issues
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      # Required only to create/update canonical labels and reconcile issue labels.
       issues: write
     steps:
       - name: Classify issues
