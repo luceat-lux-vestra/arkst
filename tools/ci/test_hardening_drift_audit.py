@@ -268,6 +268,161 @@ class StaticAuthorityTests(unittest.TestCase):
         self.assertTrue(any(item.control == "security-reporting" for item in findings))
 
 
+    def test_issue_labeler_requires_dry_run_first_contract(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                workflow_dispatch:
+                  inputs:
+                    backfill:
+                      default: true
+                permissions:
+                  contents: read
+                jobs:
+                  classify:
+                    permissions:
+                      contents: read
+                      issues: write
+                type:task
+                area:ci
+                priority:normal
+                DRY_RUN:
+                BACKFILL:
+                if (!dryRun)
+                name !== explicitType && !dryRun
+                if (!dryRun && uniqueAdd.length)
+                Mutating backfill must run from
+                github.rest.issues.updateLabel
+                github.rest.issues.createLabel
+                github.rest.issues.removeLabel
+                github.rest.issues.addLabels
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any("dry_run" in item.details for item in findings if item.control == "label-automation")
+        )
+
+    def test_issue_labeler_rejects_missing_default_branch_mutation_guard(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        source = (HERE.parents[1] / ".github" / "workflows" / "issue-labeler.yml").read_text(
+            encoding="utf-8"
+        )
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            source.replace("Mutating backfill must run from", "bulk mutation allowed"),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any(
+                "Mutating backfill must run from" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
+    def test_issue_labeler_rejects_workflow_level_write(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                workflow_dispatch:
+                  inputs:
+                    dry_run:
+                      default: true
+                    backfill:
+                      default: false
+                permissions:
+                  contents: read
+                  issues: write
+                jobs:
+                  classify:
+                    permissions:
+                      contents: read
+                      issues: write
+                type:task
+                area:ci
+                priority:normal
+                DRY_RUN:
+                BACKFILL:
+                if (!dryRun)
+                name !== explicitType && !dryRun
+                if (!dryRun && uniqueAdd.length)
+                Mutating backfill must run from
+                github.rest.issues.updateLabel
+                github.rest.issues.createLabel
+                github.rest.issues.removeLabel
+                github.rest.issues.addLabels
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any(
+                "top-level permissions read-only" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
+    def test_issue_labeler_rejects_new_untracked_mutation_surface(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                workflow_dispatch:
+                  inputs:
+                    dry_run:
+                      default: true
+                    backfill:
+                      default: false
+                permissions:
+                  contents: read
+                jobs:
+                  classify:
+                    permissions:
+                      contents: read
+                      issues: write
+                type:task
+                area:ci
+                priority:normal
+                DRY_RUN:
+                BACKFILL:
+                if (!dryRun)
+                name !== explicitType && !dryRun
+                if (!dryRun && uniqueAdd.length)
+                Mutating backfill must run from
+                github.rest.issues.updateLabel
+                github.rest.issues.updateLabel
+                github.rest.issues.createLabel
+                github.rest.issues.removeLabel
+                github.rest.issues.addLabels
+                """
+            ),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any(
+                "mutation surface drifted" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
+
 class WorkflowBoundaryTests(unittest.TestCase):
     def test_production_dispatch_is_live_only_and_commit_pinned(self):
         workflow = (

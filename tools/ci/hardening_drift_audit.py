@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -273,8 +274,62 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
         for label in ("type:task", "area:ci", "priority:normal"):
             if label not in labeler:
                 findings.append(Finding("label-automation", f"managed label definition missing: {label}"))
-        if "workflow_dispatch:" not in labeler:
-            findings.append(Finding("label-automation", "issue label reconciliation dispatch is missing"))
+        required_dispatch_fragments = (
+            "workflow_dispatch:",
+            "dry_run:",
+            "backfill:",
+            "DRY_RUN:",
+            "BACKFILL:",
+            "if (!dryRun)",
+            "name !== explicitType && !dryRun",
+            "if (!dryRun && uniqueAdd.length)",
+            "Mutating backfill must run from",
+        )
+        for fragment in required_dispatch_fragments:
+            if fragment not in labeler:
+                findings.append(
+                    Finding("label-automation", f"issue reconciliation safety contract missing: {fragment}")
+                )
+        if not re.search(r"(?ms)^      dry_run:\n.*?^        default: true\s*$", labeler):
+            findings.append(
+                Finding("label-automation", "issue reconciliation dry_run must default to true")
+            )
+        if not re.search(r"(?ms)^      backfill:\n.*?^        default: false\s*$", labeler):
+            findings.append(
+                Finding("label-automation", "issue reconciliation backfill must default to false")
+            )
+        expected_mutations = {
+            "github.rest.issues.updateLabel": 1,
+            "github.rest.issues.createLabel": 1,
+            "github.rest.issues.removeLabel": 1,
+            "github.rest.issues.addLabels": 1,
+        }
+        for call, expected_count in expected_mutations.items():
+            observed = labeler.count(call)
+            if observed != expected_count:
+                findings.append(
+                    Finding(
+                        "label-automation",
+                        f"issue labeler mutation surface drifted for {call}: expected {expected_count}, got {observed}",
+                    )
+                )
+        if not re.search(
+            r"(?m)^permissions:\n  contents: read\n(?:\n)*(?=\S)",
+            labeler,
+        ):
+            findings.append(
+                Finding(
+                    "label-automation",
+                    "issue labeler workflow must keep top-level permissions read-only",
+                )
+            )
+        if "    permissions:\n      contents: read\n      issues: write\n" not in labeler:
+            findings.append(
+                Finding(
+                    "label-automation",
+                    "issue labeler must isolate issues:write to the classify job",
+                )
+            )
     except OSError as exc:
         findings.append(Finding("label-automation", f"cannot read issue labeler: {exc}"))
     return findings
