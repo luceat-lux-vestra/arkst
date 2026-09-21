@@ -308,6 +308,26 @@ class StaticAuthorityTests(unittest.TestCase):
             any("dry_run" in item.details for item in findings if item.control == "label-automation")
         )
 
+    def test_issue_labeler_rejects_missing_default_branch_mutation_guard(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        source = (HERE.parents[1] / ".github" / "workflows" / "issue-labeler.yml").read_text(
+            encoding="utf-8"
+        )
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            source.replace("Mutating backfill must run from", "bulk mutation allowed"),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any(
+                "Mutating backfill must run from" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
     def test_issue_labeler_rejects_workflow_level_write(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
