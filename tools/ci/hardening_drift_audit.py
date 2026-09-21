@@ -281,12 +281,33 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
             "DRY_RUN:",
             "BACKFILL:",
             "if (!dryRun)",
+            "name !== explicitType && !dryRun",
+            "if (!dryRun && uniqueAdd.length)",
             "Mutating backfill must run from",
         )
         for fragment in required_dispatch_fragments:
             if fragment not in labeler:
                 findings.append(
                     Finding("label-automation", f"issue reconciliation safety contract missing: {fragment}")
+                )
+        if not re.search(r"(?ms)^      dry_run:\n.*?^        default: true\s*$", labeler):
+            findings.append(
+                Finding("label-automation", "issue reconciliation dry_run must default to true")
+            )
+        expected_mutations = {
+            "github.rest.issues.updateLabel": 1,
+            "github.rest.issues.createLabel": 1,
+            "github.rest.issues.removeLabel": 1,
+            "github.rest.issues.addLabels": 1,
+        }
+        for call, expected_count in expected_mutations.items():
+            observed = labeler.count(call)
+            if observed != expected_count:
+                findings.append(
+                    Finding(
+                        "label-automation",
+                        f"issue labeler mutation surface drifted for {call}: expected {expected_count}, got {observed}",
+                    )
                 )
         if not re.search(
             r"(?ms)^permissions:\n  contents: read\s*$",
