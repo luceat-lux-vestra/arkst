@@ -324,12 +324,12 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
                 )
             )
         classify_match = re.search(
-            r"(?ms)^  classify:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\\Z)",
+            r"(?ms)^  classify:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
             labeler,
         )
         classify_block = classify_match.group("body") if classify_match else ""
         permissions_match = re.search(
-            r"(?ms)^    permissions:\n(?P<body>(?:      [^\\n]*(?:\n|\\Z))*)",
+            r"(?ms)^    permissions:\n(?P<body>(?:      [^\n]*(?:\n|\Z))*)",
             classify_block,
         )
         classify_permissions: dict[str, str] = {}
