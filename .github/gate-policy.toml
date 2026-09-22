@@ -106,10 +106,10 @@ rationale = "Required minimum-supported-Rust-version contract."
 [[producer]]
 workflow = ".github/workflows/dependency-review.yml"
 job = "dependency-review"
-classification = "advisory"
+classification = "required"
 contexts = ["dependency-review"]
 always_present = true
-rationale = "Diff-scoped dependency review is intentionally advisory: the required license job already validates the resulting Rust dependency graph unconditionally with cargo-deny. Keep this distinct evidence without adding a redundant blocking context."
+rationale = "Required diff-scoped dependency admission for newly introduced vulnerable dependencies and GitHub Actions references. It complements, rather than replaces, the required full-graph Rust cargo-deny license gate."
 
 [[producer]]
 workflow = ".github/workflows/codeql.yml"
@@ -168,4 +168,3 @@ classification = "required"
 contexts = ["failure-triage"]
 always_present = true
 rationale = "Trusted-base classification-before-remediation metadata gate. Proof PR #412: run 35522163591 failed invalid metadata and run 35522396415 passed after body-only correction; live Protect main promotion/readback is required before merge."
-
