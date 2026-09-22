@@ -323,11 +323,28 @@ def check_governance_docs_and_ownership(root: Path = ROOT) -> list[Finding]:
                     "issue labeler workflow must keep top-level permissions read-only",
                 )
             )
-        if "    permissions:\n      contents: read\n      issues: write\n" not in labeler:
+        classify_match = re.search(
+            r"(?ms)^  classify:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+            labeler,
+        )
+        classify_block = classify_match.group("body") if classify_match else ""
+        permissions_match = re.search(
+            r"(?ms)^    permissions:\n(?P<body>(?:      [^\n]*(?:\n|\Z))*)",
+            classify_block,
+        )
+        classify_permissions: dict[str, str] = {}
+        if permissions_match:
+            for line in permissions_match.group("body").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or ":" not in stripped:
+                    continue
+                key, value = stripped.split(":", 1)
+                classify_permissions[key.strip()] = value.strip()
+        if classify_permissions != {"contents": "read", "issues": "write"}:
             findings.append(
                 Finding(
                     "label-automation",
-                    "issue labeler must isolate issues:write to the classify job",
+                    "issue labeler must isolate exactly contents:read and issues:write to the classify job",
                 )
             )
     except OSError as exc:

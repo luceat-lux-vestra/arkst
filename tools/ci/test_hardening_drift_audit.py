@@ -328,6 +328,47 @@ class StaticAuthorityTests(unittest.TestCase):
             )
         )
 
+    def test_issue_labeler_allows_comments_inside_classify_permissions(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        source = (HERE.parents[1] / ".github" / "workflows" / "issue-labeler.yml").read_text(
+            encoding="utf-8"
+        )
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(source, encoding="utf-8")
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertFalse(
+            any(
+                "isolate exactly contents:read and issues:write" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
+    def test_issue_labeler_rejects_extra_classify_permission(self):
+        temp, root = self.make_root()
+        self.addCleanup(temp.cleanup)
+        source = (HERE.parents[1] / ".github" / "workflows" / "issue-labeler.yml").read_text(
+            encoding="utf-8"
+        )
+        path = root / ".github" / "workflows" / "issue-labeler.yml"
+        path.write_text(
+            source.replace(
+                "      issues: write\n",
+                "      issues: write\n      pull-requests: write\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        findings = AUDIT.check_governance_docs_and_ownership(root)
+        self.assertTrue(
+            any(
+                "isolate exactly contents:read and issues:write" in item.details
+                for item in findings
+                if item.control == "label-automation"
+            )
+        )
+
     def test_issue_labeler_rejects_workflow_level_write(self):
         temp, root = self.make_root()
         self.addCleanup(temp.cleanup)
