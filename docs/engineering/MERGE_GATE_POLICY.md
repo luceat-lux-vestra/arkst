@@ -18,12 +18,15 @@ The accepted required set remains:
 - `wasm`
 - `compatibility`
 - `msrv`
+- `dependency-review`
 
 The live ruleset must remain strict and contain exactly this set. Required contexts must be produced on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers.
 
-## Non-required PR controls
+## Complementary required supply-chain controls
 
-`dependency-review` remains advisory rather than required. It is diff-scoped evidence about newly introduced dependency changes. The required `license` job independently runs full-graph `cargo deny check --all-features` on every PR and remains authoritative for the resulting Rust dependency graph. Keeping both controls distinct avoids making a second blocking context mandatory without weakening either check.
+`dependency-review` is required because it provides diff-scoped admission for newly introduced dependency changes, including GitHub Actions references represented by GitHub's dependency graph. The required `license` job remains independently authoritative for the resulting Rust dependency graph through unconditional full-graph `cargo deny check --all-features`. Neither gate substitutes for the other.
+
+## Non-required PR controls
 
 The path-scoped spelling and security-audit jobs, the reference-JVM deep oracle, and PR metadata automation are classified explicitly in the canonical policy. Their presence in the inventory prevents silent job/context drift without promoting conditional or advisory jobs into required checks.
 
