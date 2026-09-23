@@ -54,9 +54,11 @@ the previously omitted Unit value category in #149, including the evidenced
 establishes the initial logger-only Unit/None/closed-Range/plain-text-Pair
 String subset, and closed/unmerged clean-room PR #390 extends the stable
 cross-version evidence to all Range endpoint shapes and the initial nested Pair compositions; closed/unmerged #395 then confirms the same Pair JVM-style projection recursively across left/right/balanced nesting through depth 4, including Range/None members. The evidenced flat ordered Dictionary scalar-entry projection remains separately bounded, and generic String conversion is not widened.
-Markdown-list Collection conversion was observed by #390 but remains
-fail-closed because Arkst's typed Collection no longer retains enough list-origin
-information to keep that production adapter evidence-bounded. Native `arkst build` writes `Log` events to stdout through an explicit
+Markdown-list Collection conversion was observed by #390 and refined by closed/unmerged
+#403: a direct unordered Markdown-list variable uses Markdown list text, while
+operation-generated Collections use different JVM object projections and may carry
+unstable runtime context identities. Arkst implements only the exact evaluator-retained
+direct-list origin; generic `IrValue::Collection` stringification remains fail-closed. Native `arkst build` writes `Log` events to stdout through an explicit
 host-owned sink while `Debug` stays silent and ordinary core compilation remains
 no-sink/fail-closed for `.log`. Clean-room PR #382 additionally pins default/non-strict `.error`
 stderr, rendered-component continuation, and source-defined-function behavior across exact
@@ -70,7 +72,7 @@ backend-neutral error component plus default/strict native host policies. Arkst-
 `check`/`inspect` now have an explicit sinkless/fail-closed analysis policy: no `LogSink`,
 `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves
 all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output while
-keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 establish one enclosing Container-family / unordered-list / blockquote `.error` context; merged #398 adds independently sourced source-echo output, and closed/unmerged #401 establishes top-level inline, ordered-list, Stacked row/column/grid, Landscape, and one `.center` → `.row` deeper composition for default recovery and strict exit 66/no-artifact. #197 stays open for still-unevidenced output contexts and remaining logger String categories such as Collection; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
+keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 establish one enclosing Container-family / unordered-list / blockquote `.error` context; merged #398 adds independently sourced source-echo output, and closed/unmerged #401 establishes top-level inline, ordered-list, Stacked row/column/grid, Landscape, and one `.center` → `.row` deeper composition for default recovery and strict exit 66/no-artifact. #197 stays open for still-unevidenced output contexts; operation-generated Collection projections remain deliberately fail-closed as a non-portable JVM boundary rather than a production completion target; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
 exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
