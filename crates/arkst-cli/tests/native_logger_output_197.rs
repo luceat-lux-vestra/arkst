@@ -42,6 +42,72 @@ fn build_emits_log_to_stdout_in_order_and_keeps_debug_silent() {
 }
 
 #[test]
+fn build_emits_evidenced_direct_markdown_list_logger_message() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("main.qd");
+    fs::write(
+        &input,
+        ".var {values}\n    - alpha\n    - beta\n.log {.values}\nvisible\n",
+    )
+    .unwrap();
+
+    let output = run_build(&input);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout must be UTF-8"),
+        "- alpha\n- beta\n"
+    );
+    let typst = fs::read_to_string(dir.path().join("main.typ")).unwrap();
+    assert!(typst.contains("visible"), "{typst}");
+}
+
+#[test]
+fn build_recovers_direct_markdown_list_error_and_strict_finalizes() {
+    let source = ".var {values}\n    - alpha\n    - beta\n.error {.values}\nvisible\n";
+
+    let default_dir = tempdir().unwrap();
+    let default_input = default_dir.path().join("default.qd");
+    fs::write(&default_input, source).unwrap();
+    let default = run_build(&default_input);
+    assert!(
+        default.status.success(),
+        "{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    let default_stderr = String::from_utf8(default.stderr).expect("stderr must be UTF-8");
+    assert!(
+        default_stderr.contains(
+            "Cannot call function error(String message) with arguments (- alpha\n- beta): - alpha\n- beta"
+        ),
+        "{default_stderr}"
+    );
+    let typst = fs::read_to_string(default_dir.path().join("default.typ")).unwrap();
+    assert!(
+        typst.contains("#raw(\".error {.values}\", block: true)"),
+        "{typst}"
+    );
+    assert!(typst.contains("alpha") && typst.contains("beta"), "{typst}");
+    assert!(typst.contains("visible"), "{typst}");
+
+    let strict_dir = tempdir().unwrap();
+    let strict_input = strict_dir.path().join("strict.qd");
+    fs::write(&strict_input, source).unwrap();
+    let strict = run_build_with_args(&strict_input, &["--strict"]);
+    assert_eq!(strict.status.code(), Some(66));
+    assert_eq!(
+        String::from_utf8(strict.stderr).expect("stderr must be UTF-8"),
+        "An error occurred while in strict mode (error code 66)\n\
+         Originated from function: error\n\
+         java.lang.Exception: - alpha\n- beta\n"
+    );
+    assert!(!strict_dir.path().join("strict.typ").exists());
+}
+
+#[test]
 fn build_keeps_prior_log_and_renders_non_strict_error_component() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("main.qd");

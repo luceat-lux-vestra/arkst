@@ -83,6 +83,13 @@ use std::rc::{Rc, Weak};
 enum VariableValue {
     Scalar(IrValue),
     Content(Vec<IrNode>),
+    /// A direct source-authored unordered Markdown list retained as content.
+    ///
+    /// This evaluator-local marker exists only to preserve the independently
+    /// evidenced logger String boundary from clean-room #403. It is not part
+    /// of durable IR, and collection-producing operations deliberately do not
+    /// inherit it.
+    DirectMarkdownList(Vec<IrNode>),
 }
 
 impl VariableValue {
@@ -99,8 +106,26 @@ impl VariableValue {
     fn to_value(&self) -> IrValue {
         match self {
             VariableValue::Scalar(value) => value.clone(),
-            VariableValue::Content(nodes) => IrValue::Content(nodes.clone()),
+            VariableValue::Content(nodes) | VariableValue::DirectMarkdownList(nodes) => {
+                IrValue::Content(nodes.clone())
+            }
         }
+    }
+
+    fn is_direct_markdown_list(&self) -> bool {
+        matches!(self, Self::DirectMarkdownList(_))
+    }
+
+    fn mark_direct_markdown_list(&mut self) -> bool {
+        let Self::Content(nodes) = self else {
+            return false;
+        };
+        let [IrNode::UnorderedList { .. }] = nodes.as_slice() else {
+            return false;
+        };
+        let nodes = std::mem::take(nodes);
+        *self = Self::DirectMarkdownList(nodes);
+        true
     }
 }
 
@@ -1876,6 +1901,28 @@ impl<'a> EvaluationContext<'a> {
 
     fn assigned_values(&self) -> BTreeMap<String, IrValue> {
         self.assigned_variables.clone()
+    }
+
+    /// Marks the actual variable owner as the exact direct Markdown-list
+    /// provenance evidenced for logger String conversion.
+    ///
+    /// The ordinary assignment above has already recorded the pre-write value
+    /// in the current savepoint, so this metadata refinement participates in
+    /// the same rollback entry rather than creating a second transaction path.
+    fn mark_direct_markdown_list_owner(&mut self, name: &str) -> bool {
+        if let Some(parent) = self.parent.as_mut() {
+            if parent.mark_direct_markdown_list_owner(name) {
+                return true;
+            }
+        }
+        if self.variable_owners.contains(name) {
+            self.record_variable_before(name);
+            return self
+                .variables
+                .get_mut(name)
+                .is_some_and(VariableValue::mark_direct_markdown_list);
+        }
+        false
     }
 
     /// Publishes a successful nested callable assignment into an actual
@@ -6239,7 +6286,11 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let message = match builtins::logger_string_conversion(&argument) {
+        let direct_markdown_list = implicit_argument.is_none()
+            && named_args.is_empty()
+            && positional_args.len() == 1
+            && direct_markdown_list_variable_reference(&positional_args[0], context);
+        let message = match builtins::logger_string_conversion(&argument, direct_markdown_list) {
             Ok(message) => message,
             Err(error) => {
                 let call = format!("`.{name}`");
@@ -18329,6 +18380,43 @@ fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigi
     }
 }
 
+/// Returns whether this exact raw argument is a direct variable reference whose
+/// stored value came from one source-authored unordered Markdown list block.
+///
+/// The gate intentionally does not follow aliases, chains, callable results,
+/// conditionals, or collection transforms. Those shapes were not promoted by
+/// clean-room #403 and remain fail-closed.
+fn direct_markdown_list_variable_reference(
+    value: &IrValue,
+    context: &EvaluationContext<'_>,
+) -> bool {
+    let IrValue::Content(nodes) = value else {
+        return false;
+    };
+    let [IrNode::FunctionCall {
+        name,
+        positional_args,
+        named_args,
+        body,
+        ..
+    }] = nodes.as_slice()
+    else {
+        return false;
+    };
+    if !is_variable_reference_call(
+        name,
+        positional_args,
+        named_args,
+        body.as_deref().map(CallBody::Block),
+        context,
+    ) {
+        return false;
+    }
+    context
+        .get(name)
+        .is_some_and(VariableValue::is_direct_markdown_list)
+}
+
 /// Decides whether a conditional's content is taken.
 fn take_branch(name: &str, condition: bool) -> bool {
     if name == "if" {
@@ -18613,7 +18701,20 @@ impl Evaluator {
                 };
             match outcome {
                 CallOutcome::Value(value) => {
-                    context.assign_value(var_name, value);
+                    let direct_markdown_list = matches!(
+                        body,
+                        CallBody::Block(nodes)
+                            if matches!(nodes, [IrNode::UnorderedList { .. }])
+                    ) && matches!(
+                        &value,
+                        IrValue::Content(nodes)
+                            if matches!(nodes.as_slice(), [IrNode::UnorderedList { .. }])
+                    );
+                    context.assign_value(var_name.clone(), value);
+                    if direct_markdown_list {
+                        let marked = context.mark_direct_markdown_list_owner(&var_name);
+                        debug_assert!(marked, "new .var owner must retain direct-list provenance");
+                    }
                     return CallOutcome::NoValue;
                 }
                 CallOutcome::Failed => return CallOutcome::Failed,

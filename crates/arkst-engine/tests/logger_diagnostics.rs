@@ -160,6 +160,81 @@ fn logger_dynamic_string_boundary_matches_clean_room_structured_subset() {
 }
 
 #[test]
+fn direct_markdown_list_logger_conversion_is_bounded_to_evidenced_source_origin() {
+    let source_id = SourceId(1998);
+    let sink = CollectingSink::default();
+    let source = ".var {values}\n    - alpha\n    - beta\n.log {.values}\n.debug {.values}\n.error {.values}";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+    let expected = "- alpha\n- beta";
+
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected explicit error component, got {:?}", result.nodes);
+    };
+    assert_eq!(error.message, expected);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    assert!(diagnostics[0].message.contains(expected), "{diagnostics:?}");
+
+    let events = sink.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.level, event.message.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(LogLevel::Log, expected), (LogLevel::Debug, expected)]
+    );
+}
+
+#[test]
+fn operation_generated_collections_remain_fail_closed_at_logger_string_boundary() {
+    let source_id = SourceId(1999);
+    let cases = [
+        ".var {values}\n    - alpha\n    - beta\n.debug {.values::reversed}",
+        ".var {values}\n    - alpha\n    - beta\n    - alpha\n.debug {.values::distinct}",
+        ".var {values}\n    - beta\n    - alpha\n.debug {.values::sorted}",
+        ".debug {.range {1} {3}::reversed}",
+        ".debug {.pair {left} {right}::reversed}",
+        ".var {generated}\n    .foreach {1..2}\n        .1\n.debug {.generated}",
+        ".var {values}\n    - alpha\n    - beta\n    - alpha\n.debug {.values::groupvalues}",
+    ];
+
+    for source in cases {
+        let (result, diagnostics) = evaluate_plain(source, source_id);
+        assert!(result.nodes.is_empty(), "{source}: {:?}", result.nodes);
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3001", "{source}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].message.contains(".debug"),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn direct_markdown_list_provenance_does_not_escape_evidenced_variable_boundary() {
+    let source_id = SourceId(2000);
+    let cases = [
+        ".var {values}\n    - alpha\n    - beta\n.var {alias} {.values}\n.debug {.alias}",
+        ".function {make}\n    - alpha\n    - beta\n.var {generated} {.make}\n.debug {.generated}",
+        ".var {values}\n    - alpha\n    - beta\n.var {values} {.range {1} {3}::reversed}\n.debug {.values}",
+    ];
+
+    for source in cases {
+        let (result, diagnostics) = evaluate_plain(source, source_id);
+        assert!(result.nodes.is_empty(), "{source}: {:?}", result.nodes);
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3001", "{source}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].message.contains(".debug"),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn debug_without_sink_is_silent_and_validates_bounded_logger_conversion() {
     let source_id = SourceId(1971);
     let (result, diagnostics) = evaluate_plain(".debug {hidden}", source_id);
@@ -178,16 +253,12 @@ fn debug_without_sink_is_silent_and_validates_bounded_logger_conversion() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(result.nodes.is_empty(), "{:?}", result.nodes);
 
-    let (_, diagnostics) = evaluate_plain(
+    let (result, diagnostics) = evaluate_plain(
         ".var {values}\n    - alpha\n    - beta\n.debug {.values}",
         source_id,
     );
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(
-        diagnostics[0].primary.map(|span| span.source_id),
-        Some(source_id)
-    );
-    assert!(diagnostics[0].message.contains(".debug"));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(result.nodes.is_empty(), "{:?}", result.nodes);
 }
 
 #[test]
@@ -845,7 +916,7 @@ fn malformed_or_unsupported_log_arguments_never_emit_events() {
     assert_eq!(duplicate.len(), 1, "{duplicate:?}");
     assert!(sink.events.borrow().is_empty());
 
-    let source = ".var {values}\n    - alpha\n    - beta\n.log {.values}";
+    let source = ".var {values}\n    - alpha\n    - beta\n.log {.values::reversed}";
     let (_, unsupported) = evaluate_with_sink(source, source_id, &sink);
     assert_eq!(unsupported.len(), 1, "{unsupported:?}");
     assert_eq!(
