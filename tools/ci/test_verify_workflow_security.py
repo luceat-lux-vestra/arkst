@@ -131,6 +131,21 @@ class WorkflowSecurityTests(unittest.TestCase):
     def test_security_reporter_job_may_write_issues(self) -> None:
         self.verify(SECURITY_REPORTER, name="security.yml")
 
+    def test_failure_classifier_may_write_only_pull_requests(self) -> None:
+        valid = (ROOT / ".github/workflows/failure-classification.yml").read_text(encoding="utf-8")
+        self.verify(valid, name="failure-classification.yml")
+
+        broadened = valid.replace(
+            "      pull-requests: write\n",
+            "      pull-requests: write\n      issues: write\n",
+            1,
+        )
+        self.reject(
+            broadened,
+            "unapproved job classify write permission: issues",
+            name="failure-classification.yml",
+        )
+
     def test_security_audit_job_may_not_write_issues(self) -> None:
         bad = SECURITY_REPORTER.replace(
             "  audit:\n    runs-on: ubuntu-latest\n",
