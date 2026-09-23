@@ -248,11 +248,11 @@ rationale = "fixture"
         self.assertEqual(paths, [])
 
 
-    def test_audited_failure_triage_pull_request_target_can_be_required(self):
-        target_workflow = """
+    def test_failure_declaration_pull_request_can_be_required(self):
+        declaration_workflow = """
 name: Failure triage
 on:
-  pull_request_target:
+  pull_request:
     branches: [main]
     types: [opened, reopened, synchronize, edited]
 permissions:
@@ -264,25 +264,36 @@ jobs:
     steps:
       - run: true
 """
-        target_policy = POLICY + """
+        declaration_policy = POLICY + """
 [[producer]]
-workflow = ".github/workflows/failure-triage.yml"
+workflow = ".github/workflows/failure-declaration.yml"
 job = "failure-triage"
-trigger = "pull_request_target"
+trigger = "pull_request"
 classification = "required"
 contexts = ["failure-triage"]
 always_present = true
-rationale = "trusted-base metadata-only fixture"
+rationale = "unprivileged exact-PR declaration fixture"
 """
-        tmp, root, _ = self.make_repo(policy=target_policy)
+        tmp, root, _ = self.make_repo(policy=declaration_policy)
         self.addCleanup(tmp.cleanup)
-        (root / ".github" / "workflows" / "failure-triage.yml").write_text(
-            textwrap.dedent(target_workflow).lstrip(), encoding="utf-8"
-        )
+        path = root / ".github" / "workflows" / "failure-declaration.yml"
+        path.write_text(textwrap.dedent(declaration_workflow).lstrip(), encoding="utf-8")
         policy = mod.load_policy(root / ".github" / "gate-policy.toml")
         mod.verify_repository(root, policy, ruleset(["fmt", "failure-triage"]))
 
-    def test_other_pull_request_target_required_producer_fails_closed(self):
+        path.write_text(
+            textwrap.dedent(declaration_workflow)
+            .replace("opened, reopened, synchronize, edited", "opened, reopened, edited")
+            .lstrip(),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            mod.PolicyError,
+            "failure declaration must run on exactly opened/reopened/synchronize/edited",
+        ):
+            mod.verify_repository(root, policy, ruleset(["fmt", "failure-triage"]))
+
+    def test_pull_request_target_required_producer_fails_closed(self):
         bad_policy = POLICY + """
 [[producer]]
 workflow = ".github/workflows/other.yml"
@@ -300,7 +311,7 @@ rationale = "must not be allowed"
         )
         with self.assertRaisesRegex(
             mod.PolicyError,
-            "pull_request_target is allowed only for the audited failure-triage producer",
+            "required producers must use unprivileged pull_request",
         ):
             mod.load_policy(root / ".github" / "gate-policy.toml")
 

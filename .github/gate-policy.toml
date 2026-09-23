@@ -161,10 +161,10 @@ contexts = ["label"]
 always_present = false
 rationale = "PR metadata automation is non-authoritative and must never satisfy a merge requirement."
 [[producer]]
-workflow = ".github/workflows/failure-triage.yml"
+workflow = ".github/workflows/failure-declaration.yml"
 job = "failure-triage"
-trigger = "pull_request_target"
+trigger = "pull_request"
 classification = "required"
 contexts = ["failure-triage"]
 always_present = true
-rationale = "Trusted-base classification-before-remediation metadata gate. Proof PR #412: run 35522163591 failed invalid metadata and run 35522396415 passed after body-only correction; live Protect main promotion/readback is required before merge."
+rationale = "Unprivileged exact-PR classification-before-remediation declaration gate using the immutable central validator. Proof PR #412: run 35522163591 failed invalid metadata and run 35522396415 passed after body-only correction; live Protect main promotion/readback is required before merge."
