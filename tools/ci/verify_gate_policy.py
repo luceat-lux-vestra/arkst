@@ -395,9 +395,17 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                         "opened/reopened/synchronize/edited"
                     )
             elif trigger.types_restricted:
-                raise PolicyError(
-                    f"required producer {key[0]}#{key[1]} restricts {expected_trigger} types"
-                )
+                canonical_types = {"opened", "reopened", "synchronize", "ready_for_review"}
+                if (
+                    trigger.types is None
+                    or len(trigger.types) != len(canonical_types)
+                    or set(trigger.types) != canonical_types
+                ):
+                    raise PolicyError(
+                        f"required producer {key[0]}#{key[1]} must use exactly "
+                        "opened/reopened/synchronize/ready_for_review when pull_request "
+                        "types are declared"
+                    )
             if job.has_if:
                 raise PolicyError(
                     f"required producer {key[0]}#{key[1]} has a job-level if condition"

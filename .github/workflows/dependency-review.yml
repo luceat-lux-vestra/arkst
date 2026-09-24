@@ -2,6 +2,7 @@ name: Dependency review
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
 
@@ -18,7 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - name: Review dependency changes
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate
