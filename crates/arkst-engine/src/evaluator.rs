@@ -2928,6 +2928,7 @@ impl Evaluator {
         content: &[IrInline],
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        image_alt_evidenced: bool,
     ) -> Vec<IrInline> {
         let mut out = Vec::new();
 
@@ -2942,7 +2943,12 @@ impl Evaluator {
                 ..
             } = inline
             else {
-                out.extend(self.evaluate_inline(inline, diagnostics, context));
+                out.extend(self.evaluate_evidenced_inline_owner(
+                    inline,
+                    diagnostics,
+                    context,
+                    image_alt_evidenced,
+                ));
                 continue;
             };
 
@@ -3115,23 +3121,39 @@ impl Evaluator {
         out
     }
 
-    fn evaluate_evidenced_root_inline_owner(
+    fn evaluate_evidenced_inline_owner(
         &self,
         inline: &IrInline,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        image_alt_evidenced: bool,
     ) -> Vec<IrInline> {
         match inline {
             IrInline::Emphasis { content, span } => vec![IrInline::Emphasis {
-                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                content: self.evaluate_evidenced_inline_sequence(
+                    content,
+                    diagnostics,
+                    context,
+                    false,
+                ),
                 span: *span,
             }],
             IrInline::Strong { content, span } => vec![IrInline::Strong {
-                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                content: self.evaluate_evidenced_inline_sequence(
+                    content,
+                    diagnostics,
+                    context,
+                    false,
+                ),
                 span: *span,
             }],
             IrInline::Strikethrough { content, span } => vec![IrInline::Strikethrough {
-                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                content: self.evaluate_evidenced_inline_sequence(
+                    content,
+                    diagnostics,
+                    context,
+                    false,
+                ),
                 span: *span,
             }],
             IrInline::Link {
@@ -3186,7 +3208,12 @@ impl Evaluator {
                     }
                 }
                 vec![IrInline::Link {
-                    content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                    content: self.evaluate_evidenced_inline_sequence(
+                        content,
+                        diagnostics,
+                        context,
+                        false,
+                    ),
                     destination: destination.clone(),
                     title: title.clone(),
                     span: *span,
@@ -3197,7 +3224,7 @@ impl Evaluator {
                 destination,
                 title,
                 span,
-            } => vec![IrInline::Image {
+            } if image_alt_evidenced => vec![IrInline::Image {
                 content: self.evaluate_evidenced_image_alt(content, diagnostics, context),
                 destination: destination.clone(),
                 title: title.clone(),
@@ -3213,7 +3240,7 @@ impl Evaluator {
         paragraph_span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-        root_inline_owners: bool,
+        image_alt_evidenced: bool,
     ) -> Vec<IrNode> {
         let mut nodes = Vec::new();
         let mut pending = Vec::new();
@@ -3229,15 +3256,12 @@ impl Evaluator {
                 ..
             } = inline
             else {
-                if root_inline_owners {
-                    pending.extend(self.evaluate_evidenced_root_inline_owner(
-                        inline,
-                        diagnostics,
-                        context,
-                    ));
-                } else {
-                    pending.extend(self.evaluate_inline(inline, diagnostics, context));
-                }
+                pending.extend(self.evaluate_evidenced_inline_owner(
+                    inline,
+                    diagnostics,
+                    context,
+                    image_alt_evidenced,
+                ));
                 continue;
             };
 
@@ -3260,15 +3284,7 @@ impl Evaluator {
                 );
 
             if !native_error_owns_call {
-                if root_inline_owners {
-                    pending.extend(self.evaluate_evidenced_root_inline_owner(
-                        inline,
-                        diagnostics,
-                        context,
-                    ));
-                } else {
-                    pending.extend(self.evaluate_inline(inline, diagnostics, context));
-                }
+                pending.extend(self.evaluate_inline(inline, diagnostics, context));
                 continue;
             }
 
@@ -3344,7 +3360,7 @@ impl Evaluator {
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-        root_inline_owners: bool,
+        image_alt_evidenced: bool,
     ) -> Vec<IrNode> {
         let mut out = Vec::new();
         for node in nodes {
@@ -3355,19 +3371,24 @@ impl Evaluator {
                         span,
                         diagnostics,
                         context,
-                        root_inline_owners,
+                        image_alt_evidenced,
                     ))
                 }
                 IrNode::Heading {
                     level,
                     content,
                     span,
-                } if root_inline_owners => out.push(IrNode::Heading {
+                } => out.push(IrNode::Heading {
                     level: *level,
-                    content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                    content: self.evaluate_evidenced_inline_sequence(
+                        content,
+                        diagnostics,
+                        context,
+                        false,
+                    ),
                     span: *span,
                 }),
-                IrNode::Table { header, rows, span } if root_inline_owners => {
+                IrNode::Table { header, rows, span } => {
                     let mut evaluate_row = |row: &arkst_ir::IrTableRow| arkst_ir::IrTableRow {
                         cells: row
                             .cells
@@ -3377,6 +3398,7 @@ impl Evaluator {
                                     &cell.content,
                                     diagnostics,
                                     context,
+                                    false,
                                 ),
                                 alignment: cell.alignment,
                                 span: cell.span,

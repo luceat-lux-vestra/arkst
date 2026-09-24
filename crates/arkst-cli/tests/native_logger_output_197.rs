@@ -804,18 +804,77 @@ fn build_recovers_evidenced_root_inline_owner_errors_and_strict_suppresses_artif
 }
 
 #[test]
-fn nested_unprobed_inline_owner_composition_remains_on_ordinary_fatal_path() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("nested-inline-owner.qd");
-    fs::write(&input, "- *before .error {nested-inline-error} after*\n").unwrap();
+fn build_preserves_evidenced_nested_inline_owner_compositions() {
+    let cases = [
+        (
+            "list-emphasis",
+            "- item-before *em-before .error {list-emphasis-error} em-after* item-after\n",
+            "list-emphasis-error",
+        ),
+        (
+            "ordered-link",
+            "1. item-before [link-before .error {ordered-link-error} link-after](https://example.com) item-after\n",
+            "ordered-link-error",
+        ),
+        (
+            "blockquote-strong",
+            "> quote-before **strong-before .error {blockquote-strong-error} strong-after** quote-after\n",
+            "blockquote-strong-error",
+        ),
+        (
+            "emphasis-link",
+            "outer-before *em-before [link-before .error {emphasis-link-error} link-after](https://example.com) em-after* outer-after\n",
+            "emphasis-link-error",
+        ),
+        (
+            "link-strong",
+            "outer-before [link-before **strong-before .error {link-strong-error} strong-after** link-after](https://example.com) outer-after\n",
+            "link-strong-error",
+        ),
+        (
+            "table-strong",
+            "| value |\n| --- |\n| cell-before **strong-before .error {table-strong-error} strong-after** cell-after |\n",
+            "table-strong-error",
+        ),
+    ];
 
-    let output = run_build(&input);
-    assert!(!output.status.success(), "{output:?}");
-    assert_ne!(output.status.code(), Some(66));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("nested-inline-error"), "{stderr}");
-    assert!(
-        !dir.path().join("nested-inline-owner.typ").exists(),
-        "unevidenced nested inline-owner composition must publish no artifact"
-    );
+    for (name, source, message) in cases {
+        let default_dir = tempdir().unwrap();
+        let default_input = default_dir.path().join(format!("{name}.qd"));
+        fs::write(&default_input, source).unwrap();
+        let default = run_build(&default_input);
+        assert!(
+            default.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&default.stderr)
+        );
+        let stderr = String::from_utf8(default.stderr).expect("stderr must be UTF-8");
+        assert!(
+            stderr.contains(&format!(
+                "Cannot call function error(String message) with arguments ({message}): {message}"
+            )),
+            "{name}: {stderr}"
+        );
+        let typst = fs::read_to_string(default_dir.path().join(format!("{name}.typ"))).unwrap();
+        assert!(typst.contains(message), "{name}: {typst}");
+        assert!(
+            typst.contains(&format!("#raw(\".error {{{message}}}\")")),
+            "{name}: {typst}"
+        );
+
+        let strict_dir = tempdir().unwrap();
+        let strict_input = strict_dir.path().join(format!("{name}.qd"));
+        fs::write(&strict_input, source).unwrap();
+        let strict = run_build_with_args(&strict_input, &["--strict"]);
+        assert_eq!(
+            strict.status.code(),
+            Some(66),
+            "{name}: {}",
+            String::from_utf8_lossy(&strict.stderr)
+        );
+        assert!(
+            !strict_dir.path().join(format!("{name}.typ")).exists(),
+            "{name}: strict mode must publish no artifact"
+        );
+    }
 }

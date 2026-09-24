@@ -1432,3 +1432,56 @@ fn evidenced_root_image_alt_executes_log_but_consumes_direct_explicit_error_sile
     assert!(!text.contains("img-log"), "{text:?}");
     assert!(!text.contains("img-error"), "{text:?}");
 }
+
+
+#[test]
+fn evidenced_nested_inline_owner_compositions_materialize_explicit_error() {
+    let cases = [
+        (
+            "- item-before *em-before .error {list-emphasis-error} em-after* item-after",
+            "list-emphasis-error",
+        ),
+        (
+            "1. item-before [link-before .error {ordered-link-error} link-after](https://example.com) item-after",
+            "ordered-link-error",
+        ),
+        (
+            "> quote-before **strong-before .error {blockquote-strong-error} strong-after** quote-after",
+            "blockquote-strong-error",
+        ),
+        (
+            "outer-before *em-before [link-before .error {emphasis-link-error} link-after](https://example.com) em-after* outer-after",
+            "emphasis-link-error",
+        ),
+        (
+            "outer-before [link-before **strong-before .error {link-strong-error} strong-after** link-after](https://example.com) outer-after",
+            "link-strong-error",
+        ),
+        (
+            "| value |\n| --- |\n| cell-before **strong-before .error {table-strong-error} strong-after** cell-after |",
+            "table-strong-error",
+        ),
+    ];
+
+    for (index, (source, message)) in cases.into_iter().enumerate() {
+        let (result, diagnostics) = evaluate_plain(source, SourceId(2120 + index as u32));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "E3011")
+                .count(),
+            1,
+            "{source}: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "E3011"),
+            "{source}: {diagnostics:?}"
+        );
+
+        let debug = format!("{:?}", result.nodes);
+        assert!(debug.contains("ExplicitError"), "{source}: {debug}");
+        assert!(debug.contains(message), "{source}: {debug}");
+    }
+}
