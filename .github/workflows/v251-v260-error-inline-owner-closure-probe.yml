@@ -1,0 +1,267 @@
+name: Quarkdown explicit-error inline-owner closure probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: error-inline-owner-probe-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: probe (${{ matrix.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          expected='${{ matrix.sha256 }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          dist="/tmp/quarkdown-${version}"
+          url="https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -o "$archive" "$url"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -
+          mkdir -p "$dist"
+          unzip -q "$archive" -d "$dist"
+          qd="$(find "$dist" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+
+      - name: Probe remaining public inline owners
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error-inline-owner-${{ matrix.version }}"
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/direct-error.qd" <<'QD'
+          direct-before
+          .error {QD197_OWNER_DIRECT_ERROR}
+          direct-after
+          QD
+
+          cat > "$root/direct-log.qd" <<'QD'
+          direct-before
+          .log {QD197_OWNER_DIRECT_LOG}
+          direct-after
+          QD
+
+          cat > "$root/heading-error.qd" <<'QD'
+          # heading-before .error {QD197_OWNER_HEADING_ERROR} heading-after
+          QD
+          cat > "$root/heading-log.qd" <<'QD'
+          # heading-before .log {QD197_OWNER_HEADING_LOG} heading-after
+          QD
+
+          cat > "$root/table-error.qd" <<'QD'
+          | value |
+          | --- |
+          | cell-before .error {QD197_OWNER_TABLE_ERROR} cell-after |
+          QD
+          cat > "$root/table-log.qd" <<'QD'
+          | value |
+          | --- |
+          | cell-before .log {QD197_OWNER_TABLE_LOG} cell-after |
+          QD
+
+          cat > "$root/emphasis-error.qd" <<'QD'
+          outer-before *em-before .error {QD197_OWNER_EMPHASIS_ERROR} em-after* outer-after
+          QD
+          cat > "$root/emphasis-log.qd" <<'QD'
+          outer-before *em-before .log {QD197_OWNER_EMPHASIS_LOG} em-after* outer-after
+          QD
+
+          cat > "$root/strong-error.qd" <<'QD'
+          outer-before **strong-before .error {QD197_OWNER_STRONG_ERROR} strong-after** outer-after
+          QD
+          cat > "$root/strong-log.qd" <<'QD'
+          outer-before **strong-before .log {QD197_OWNER_STRONG_LOG} strong-after** outer-after
+          QD
+
+          cat > "$root/strike-error.qd" <<'QD'
+          outer-before ~~strike-before .error {QD197_OWNER_STRIKE_ERROR} strike-after~~ outer-after
+          QD
+          cat > "$root/strike-log.qd" <<'QD'
+          outer-before ~~strike-before .log {QD197_OWNER_STRIKE_LOG} strike-after~~ outer-after
+          QD
+
+          cat > "$root/link-error.qd" <<'QD'
+          outer-before [link-before .error {QD197_OWNER_LINK_ERROR} link-after](https://example.com) outer-after
+          QD
+          cat > "$root/link-log.qd" <<'QD'
+          outer-before [link-before .log {QD197_OWNER_LINK_LOG} link-after](https://example.com) outer-after
+          QD
+
+          cat > "$root/image-error.qd" <<'QD'
+          outer-before ![img-before .error {QD197_OWNER_IMAGE_ERROR} img-after](https://example.com/image.png) outer-after
+          QD
+          cat > "$root/image-log.qd" <<'QD'
+          outer-before ![img-before .log {QD197_OWNER_IMAGE_LOG} img-after](https://example.com/image.png) outer-after
+          QD
+
+          inspect_html() {
+            html="$1"
+            fixture="$2"
+            mode="$3"
+            marker="$4"
+            python3 - "$html" "$fixture" "$mode" "$marker" <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import json
+          import sys
+
+          path = Path(sys.argv[1])
+          fixture, mode, marker = sys.argv[2:]
+          raw = path.read_text(errors="replace")
+
+          class Probe(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.stack = []
+                  self.text = []
+                  self.marker_paths = []
+                  self.skip = 0
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  label = tag
+                  if attrs.get("id"):
+                      label += f"#{attrs['id']}"
+                  if attrs.get("class"):
+                      label += "." + ".".join(attrs["class"].split())
+                  self.stack.append(label)
+                  if tag in ("script", "style"):
+                      self.skip += 1
+
+              def handle_endtag(self, tag):
+                  if tag in ("script", "style") and self.skip:
+                      self.skip -= 1
+                  if self.stack:
+                      self.stack.pop()
+
+              def handle_data(self, data):
+                  if not self.skip:
+                      self.text.append(data)
+                  if marker in data:
+                      self.marker_paths.append(list(self.stack))
+
+          parser = Probe()
+          parser.feed(raw)
+          text = " ".join(" ".join(parser.text).split())
+          index = raw.find(marker)
+          neighborhood = ""
+          if index >= 0:
+              neighborhood = raw[max(0, index - 500):index + len(marker) + 700]
+              neighborhood = neighborhood.replace("\r", "\\r").replace("\n", "\\n")
+
+          print(
+              "QD197-OWNER-HTML "
+              f"fixture={fixture} mode={mode} marker={marker} "
+              f"marker_count={raw.count(marker)} dot_error_count={raw.count('.error')} "
+              f"marker_paths={json.dumps(parser.marker_paths)}"
+          )
+          print(f"QD197-OWNER-TEXT fixture={fixture} mode={mode} text={text!r}")
+          print(f"QD197-OWNER-RAW fixture={fixture} mode={mode} neighborhood={neighborhood!r}")
+          PY
+          }
+
+          run_case() {
+            fixture="$1"
+            marker="$2"
+            mode="$3"
+            out="$root/out-$fixture-$mode"
+            args=(compile "$root/$fixture.qd" --clean --out "$out" --out-name probe)
+            if [ "$mode" = strict ]; then
+              args+=(--strict)
+            fi
+
+            set +e
+            "$QD" "${args[@]}" >"$root/$fixture-$mode.stdout" 2>"$root/$fixture-$mode.stderr"
+            rc=$?
+            set -e
+
+            printf 'QD197-OWNER version=%s fixture=%s mode=%s rc=%s\n' '${{ matrix.version }}' "$fixture" "$mode" "$rc"
+            printf 'QD197-OWNER-STDOUT fixture=%s mode=%s [' "$fixture" "$mode"
+            tr '\n' '|' <"$root/$fixture-$mode.stdout"
+            printf ']\n'
+            printf 'QD197-OWNER-STDERR fixture=%s mode=%s [' "$fixture" "$mode"
+            tr '\n' '|' <"$root/$fixture-$mode.stderr"
+            printf ']\n'
+            printf 'QD197-OWNER-ARTIFACTS fixture=%s mode=%s [' "$fixture" "$mode"
+            find "$out" -type f -printf '%f|' 2>/dev/null || true
+            printf ']\n'
+
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            if [ -n "$html" ]; then
+              inspect_html "$html" "$fixture" "$mode" "$marker"
+            else
+              printf 'QD197-OWNER-HTML fixture=%s mode=%s none\n' "$fixture" "$mode"
+            fi
+
+            if [ "$fixture" = direct-error ] && [ "$mode" = default ]; then
+              test "$rc" -eq 0
+              test -n "$html"
+              grep -Fq "$marker" "$root/$fixture-$mode.stderr"
+            fi
+            if [ "$fixture" = direct-error ] && [ "$mode" = strict ]; then
+              test "$rc" -eq 66
+              grep -Fq 'An error occurred while in strict mode (error code 66)' "$root/$fixture-$mode.stderr"
+              if find "$out" -type f \( -name '*.html' -o -name '*.pdf' \) -print -quit 2>/dev/null | grep -q .; then
+                echo 'direct strict control unexpectedly published an artifact' >&2
+                exit 1
+              fi
+            fi
+            if [ "$fixture" = direct-log ] && [ "$mode" = default ]; then
+              test "$rc" -eq 0
+              grep -Fxq "$marker" "$root/$fixture-$mode.stdout"
+            fi
+          }
+
+          run_case direct-log QD197_OWNER_DIRECT_LOG default
+          for mode in default strict; do
+            run_case direct-error QD197_OWNER_DIRECT_ERROR "$mode"
+            run_case heading-error QD197_OWNER_HEADING_ERROR "$mode"
+            run_case table-error QD197_OWNER_TABLE_ERROR "$mode"
+            run_case emphasis-error QD197_OWNER_EMPHASIS_ERROR "$mode"
+            run_case strong-error QD197_OWNER_STRONG_ERROR "$mode"
+            run_case strike-error QD197_OWNER_STRIKE_ERROR "$mode"
+            run_case link-error QD197_OWNER_LINK_ERROR "$mode"
+            run_case image-error QD197_OWNER_IMAGE_ERROR "$mode"
+          done
+
+          run_case heading-log QD197_OWNER_HEADING_LOG default
+          run_case table-log QD197_OWNER_TABLE_LOG default
+          run_case emphasis-log QD197_OWNER_EMPHASIS_LOG default
+          run_case strong-log QD197_OWNER_STRONG_LOG default
+          run_case strike-log QD197_OWNER_STRIKE_LOG default
+          run_case link-log QD197_OWNER_LINK_LOG default
+          run_case image-log QD197_OWNER_IMAGE_LOG default
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qd197-inline-owner-${{ matrix.version }}-${{ github.run_id }}
+          path: /tmp/error-inline-owner-${{ matrix.version }}
+          if-no-files-found: error
