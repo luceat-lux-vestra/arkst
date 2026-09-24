@@ -43,12 +43,12 @@ manifests linked below remain the row-level evidence authorities.
 The bounded library-inspection family is implemented by
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195); its clean-room
 v2.6 contract and non-goals are recorded in
-[`LIBRARY_INSPECTION.md`](LIBRARY_INSPECTION.md). A bounded
-logger/diagnostic evaluator/sink slice is implemented under
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197), with its v2.6
-contract and residual gaps recorded in
+[`LIBRARY_INSPECTION.md`](LIBRARY_INSPECTION.md). The bounded logger/diagnostic implementation was completed under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197); its v2.6
+contract and cross-owner row-level limitations are recorded in
 [`LOGGER_DIAGNOSTICS.md`](LOGGER_DIAGNOSTICS.md). No #151-owned row remains
-`UNSUPPORTED`; the #195/#197 rows remain `PARTIAL`. #368/PR #371 correct
+`UNSUPPORTED`; the #195 rows and the logger/diagnostic rows remain `PARTIAL`
+for their documented external boundaries. #368/PR #371 correct
 the previously omitted Unit value category in #149, including the evidenced
 `kotlin.Unit` projection and direct-call suppression. Clean-room PR #378
 establishes the initial logger-only Unit/None/closed-Range/plain-text-Pair
@@ -75,7 +75,7 @@ backend-neutral error component plus default/strict native host policies. Arkst-
 `check`/`inspect` now have an explicit sinkless/fail-closed analysis policy: no `LogSink`,
 `.log` is E3010, `.debug` is silent, and `.error` is fatal E3011. `check` preserves
 all-diagnostics stderr output; `inspect` surfaces fatal diagnostics before refusing output while
-keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 establish the initial nested structural `.error` contexts; merged #398 adds independently sourced source-echo output; #401 extends evidence to top-level inline, ordered-list, Stacked row/column/grid, Landscape, and a representative `.center` → `.row` composition; #431/#433 establish direct heading/table-cell plus compositional emphasis/strong/strikethrough/link owners. Exact v2.5.1/v2.6.0 source review shows recursive nestable-owner traversal without a depth counter, so Arkst keeps the already-supported rendered-owner tree recursively composable rather than treating deeper permutations as new #197 gaps. Distinct semantic boundaries remain fail-closed; image-alt is #182-dependent. Operation-generated Collection projections remain deliberately fail-closed as a non-portable JVM boundary rather than a production completion target; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
+keeping successful warning-only inspection stderr-silent. Closed/unmerged #392/#393 establish the initial nested structural `.error` contexts; merged #398 adds independently sourced source-echo output; #401 extends evidence to top-level inline, ordered-list, Stacked row/column/grid, Landscape, and a representative `.center` → `.row` composition; #431/#433 establish direct heading/table-cell plus compositional emphasis/strong/strikethrough/link owners. Exact v2.5.1/v2.6.0 source review shows recursive nestable-owner traversal without a depth counter, so Arkst keeps the already-supported rendered-owner tree recursively composable rather than treating deeper permutations as new #197 gaps. Closure review of the upstream error-owner paths found no additional #197-owned public mismatch: image-alt is #182-owned, `Numbered`'s distinct late-evaluation error path is #181-owned, and operation-generated Collection projections remain deliberately fail-closed as a non-portable JVM boundary rather than a production completion target. #197 is complete as an implementation owner; exact HTML/CSS styling is not a Typst/PDF closure requirement; public WASM/embedder
 exposure remains deferred under #191,
 while #190 is complete. For #154, `.match` is #198-owned,
 `.keybinding`/`.loremipsum` are explicitly within #184, and
