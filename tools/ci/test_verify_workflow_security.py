@@ -173,6 +173,28 @@ class WorkflowSecurityTests(unittest.TestCase):
             name="upstream-quarkdown.yml",
         )
 
+
+    def test_failure_classifier_job_may_write_pull_requests(self) -> None:
+        valid = (ROOT / ".github/workflows/failure-classification.yml").read_text(
+            encoding="utf-8"
+        )
+        self.verify(valid, name="failure-classification.yml")
+
+    def test_failure_classifier_may_not_gain_extra_write_permission(self) -> None:
+        valid = (ROOT / ".github/workflows/failure-classification.yml").read_text(
+            encoding="utf-8"
+        )
+        bad = valid.replace(
+            "      pull-requests: write # Upsert the single sticky classification report on the PR conversation.\n",
+            "      pull-requests: write # Upsert the single sticky classification report on the PR conversation.\n      issues: write\n",
+            1,
+        )
+        self.reject(
+            bad,
+            "unapproved job classify write permission",
+            name="failure-classification.yml",
+        )
+
     def test_missing_timeout_is_rejected(self) -> None:
         self.reject(BASE.replace("    timeout-minutes: 5\n", ""), "timeout-minutes")
 
