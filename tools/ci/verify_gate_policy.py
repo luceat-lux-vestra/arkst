@@ -31,6 +31,7 @@ class Trigger:
     event: str
     path_filtered: bool = False
     types_restricted: bool = False
+    types: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -138,6 +139,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
             remainder = (event_match.group(2) or "").strip()
             path_filtered = False
             types_restricted = False
+            trigger_types: tuple[str, ...] | None = None
             if not remainder:
                 sub = idx + 1
                 while sub < len(lines):
@@ -151,7 +153,7 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                         break
                     if sub_ind == 4:
                         key_match = re.match(
-                            r"^\s{4}([A-Za-z0-9_-]+):", _strip_comment(sub_raw)
+                            r"^\s{4}([A-Za-z0-9_-]+):(?:\s*(.*))?$", _strip_comment(sub_raw)
                         )
                         if key_match:
                             key = key_match.group(1)
@@ -159,8 +161,35 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                                 path_filtered = True
                             elif key == "types":
                                 types_restricted = True
+                                raw_types = (key_match.group(2) or "").strip()
+                                parsed_types = _inline_list(raw_types)
+                                if parsed_types is not None:
+                                    trigger_types = tuple(parsed_types)
+                                elif raw_types:
+                                    raise PolicyError(
+                                        f"{rel}: required PR event types must use a simple scalar list"
+                                    )
+                                else:
+                                    block_types: list[str] = []
+                                    item = sub + 1
+                                    while item < len(lines):
+                                        item_raw = lines[item]
+                                        item_stripped = _strip_comment(item_raw).strip()
+                                        if not item_stripped:
+                                            item += 1
+                                            continue
+                                        item_ind = _indent(item_raw)
+                                        if item_ind <= 4:
+                                            break
+                                        if item_ind != 6 or not item_stripped.startswith("- "):
+                                            raise PolicyError(
+                                                f"{rel}: required PR event types must use a simple scalar list"
+                                            )
+                                        block_types.append(_scalar(item_stripped[2:].strip()))
+                                        item += 1
+                                    trigger_types = tuple(block_types)
                     sub += 1
-            triggers[event] = Trigger(event, path_filtered, types_restricted)
+            triggers[event] = Trigger(event, path_filtered, types_restricted, trigger_types)
             idx += 1
 
     jobs_index = None
@@ -349,10 +378,23 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                     f"required producer {key[0]}#{key[1]} has top-level "
                     f"{expected_trigger} paths/paths-ignore filtering"
                 )
-            if trigger.types_restricted and key != (
+            declaration_key = (
                 ".github/workflows/failure-declaration.yml",
                 "failure-triage",
-            ):
+            )
+            canonical_types = {"opened", "reopened", "synchronize", "edited"}
+            if key == declaration_key:
+                if (
+                    not trigger.types_restricted
+                    or trigger.types is None
+                    or len(trigger.types) != len(canonical_types)
+                    or set(trigger.types) != canonical_types
+                ):
+                    raise PolicyError(
+                        "failure declaration must run on exactly "
+                        "opened/reopened/synchronize/edited"
+                    )
+            elif trigger.types_restricted:
                 raise PolicyError(
                     f"required producer {key[0]}#{key[1]} restricts {expected_trigger} types"
                 )
