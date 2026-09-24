@@ -511,6 +511,167 @@ fn top_level_inline_explicit_error_preserves_evidenced_sibling_content() {
     assert_eq!(paragraph_text(after), "after");
 }
 
+fn inline_text(inlines: &[IrInline]) -> String {
+    inlines
+        .iter()
+        .filter_map(|inline| match inline {
+            IrInline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn assert_inline_error_owner(content: &[IrInline], before: &str, message: &str, after: &str) {
+    let [before_inline, error_inline, after_inline] = content else {
+        panic!("expected text/error/text, got {content:?}");
+    };
+    assert_eq!(inline_text(std::slice::from_ref(before_inline)), before);
+    let IrInline::ExplicitError { component } = error_inline else {
+        panic!("expected inline explicit error, got {error_inline:?}");
+    };
+    assert_eq!(component.message, message);
+    assert_eq!(inline_text(std::slice::from_ref(after_inline)), after);
+}
+
+#[test]
+fn explicit_error_inside_evidenced_inline_owners_preserves_siblings() {
+    let (heading, diagnostics) = evaluate_plain(
+        "# heading-before .error {heading-error} heading-after",
+        SourceId(2101),
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [IrNode::Heading { content, .. }] = heading.nodes.as_slice() else {
+        panic!("expected heading, got {:?}", heading.nodes);
+    };
+    assert_inline_error_owner(content, "heading-before", "heading-error", "heading-after");
+
+    let (table, diagnostics) = evaluate_plain(
+        "| value |\n| --- |\n| cell-before .error {table-error} cell-after |",
+        SourceId(2102),
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [IrNode::Table { rows, .. }] = table.nodes.as_slice() else {
+        panic!("expected table, got {:?}", table.nodes);
+    };
+    assert_inline_error_owner(
+        &rows[0].cells[0].content,
+        "cell-before",
+        "table-error",
+        "cell-after",
+    );
+
+    let cases = [
+        (
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after",
+            "emphasis-error",
+            "em-before",
+            "em-after",
+            "emphasis",
+        ),
+        (
+            "outer-before **strong-before .error {strong-error} strong-after** outer-after",
+            "strong-error",
+            "strong-before",
+            "strong-after",
+            "strong",
+        ),
+        (
+            "outer-before ~~strike-before .error {strike-error} strike-after~~ outer-after",
+            "strike-error",
+            "strike-before",
+            "strike-after",
+            "strike",
+        ),
+        (
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after",
+            "link-error",
+            "link-before",
+            "link-after",
+            "link",
+        ),
+    ];
+
+    for (source, message, before, after, owner) in cases {
+        let (document, diagnostics) = evaluate_plain(source, SourceId(2103));
+        assert_eq!(diagnostics.len(), 1, "{owner}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E3011", "{owner}: {diagnostics:?}");
+        let [IrNode::Paragraph { content, .. }] = document.nodes.as_slice() else {
+            panic!("{owner}: expected paragraph, got {:?}", document.nodes);
+        };
+        assert_eq!(inline_text(&content[..1]), "outer-before", "{owner}");
+
+        let owner_content = match &content[1] {
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. } => content,
+            other => panic!("{owner}: unexpected inline owner {other:?}"),
+        };
+        assert_inline_error_owner(owner_content, before, message, after);
+        assert_eq!(inline_text(&content[2..]), "outer-after", "{owner}");
+    }
+}
+
+#[test]
+fn evidenced_structural_nesting_keeps_new_inline_owner_support() {
+    let source = "- list-before *em-before .error {nested-error} em-after* list-after";
+    let (document, diagnostics) = evaluate_plain(source, SourceId(2104));
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [IrNode::UnorderedList { items, .. }] = document.nodes.as_slice() else {
+        panic!("expected unordered list, got {:?}", document.nodes);
+    };
+    let [IrNode::Paragraph { content, .. }] = items[0].nodes.as_slice() else {
+        panic!("expected list paragraph, got {:?}", items[0].nodes);
+    };
+    assert_eq!(inline_text(&content[..1]), "list-before");
+    let IrInline::Emphasis {
+        content: emphasized,
+        ..
+    } = &content[1]
+    else {
+        panic!("expected emphasis, got {:?}", content[1]);
+    };
+    assert_inline_error_owner(emphasized, "em-before", "nested-error", "em-after");
+    assert_eq!(inline_text(&content[2..]), "list-after");
+}
+
+#[test]
+fn evidenced_inline_owner_composition_recurses_through_owner_classes() {
+    let source =
+        "outer-before *em-before [link-before .error {nested-owner-error} link-after](https://example.com) em-after* outer-after";
+    let (document, diagnostics) = evaluate_plain(source, SourceId(2107));
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011");
+    let [IrNode::Paragraph { content, .. }] = document.nodes.as_slice() else {
+        panic!("expected paragraph, got {:?}", document.nodes);
+    };
+    assert_eq!(inline_text(&content[..1]), "outer-before");
+    let IrInline::Emphasis {
+        content: emphasized,
+        ..
+    } = &content[1]
+    else {
+        panic!("expected emphasis, got {:?}", content[1]);
+    };
+    assert_eq!(inline_text(&emphasized[..1]), "em-before");
+    let IrInline::Link {
+        content: linked, ..
+    } = &emphasized[1]
+    else {
+        panic!("expected nested link, got {:?}", emphasized[1]);
+    };
+    assert_inline_error_owner(linked, "link-before", "nested-owner-error", "link-after");
+    assert_eq!(inline_text(&emphasized[2..]), "em-after");
+    assert_eq!(inline_text(&content[2..]), "outer-after");
+}
+
 #[test]
 fn inline_explicit_error_stays_fail_closed_in_selected_conditional_body() {
     let source_id = SourceId(1999);
@@ -715,6 +876,70 @@ fn explicit_error_inside_evidenced_center_row_composition_preserves_siblings() {
     assert_eq!(error.message, "deep-error");
     assert_eq!(paragraph_text(deep_after), "deep-after");
     assert_eq!(paragraph_text(center_after), "center-after");
+}
+
+#[test]
+fn explicit_error_recurses_across_supported_output_owners_without_depth_cap() {
+    let source = ".container\n    container-before\n    .row\n        row-before\n        .landscape\n            landscape-before\n            .column\n                deep-before\n                .error {recursive-error}\n                deep-after\n            landscape-after\n        row-after\n    container-after";
+    let (result, diagnostics) = evaluate_plain(source, SourceId(2003));
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3011", "{diagnostics:?}");
+
+    let [IrNode::Component {
+        component: arkst_ir::IrComponent::Container(container),
+    }] = result.nodes.as_slice()
+    else {
+        panic!("expected one container, got {:?}", result.nodes);
+    };
+    let [container_before, row, container_after] = container.children.as_slice() else {
+        panic!("unexpected container children: {:?}", container.children);
+    };
+    assert_eq!(paragraph_text(container_before), "container-before");
+    assert_eq!(paragraph_text(container_after), "container-after");
+
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::Stacked(row),
+    } = row
+    else {
+        panic!("expected nested row, got {row:?}");
+    };
+    let [row_before, landscape, row_after] = row.children.as_slice() else {
+        panic!("unexpected row children: {:?}", row.children);
+    };
+    assert_eq!(paragraph_text(row_before), "row-before");
+    assert_eq!(paragraph_text(row_after), "row-after");
+
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::Landscape(landscape),
+    } = landscape
+    else {
+        panic!("expected nested landscape, got {landscape:?}");
+    };
+    let [landscape_before, column, landscape_after] = landscape.children.as_slice() else {
+        panic!("unexpected landscape children: {:?}", landscape.children);
+    };
+    assert_eq!(paragraph_text(landscape_before), "landscape-before");
+    assert_eq!(paragraph_text(landscape_after), "landscape-after");
+
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::Stacked(column),
+    } = column
+    else {
+        panic!("expected nested column, got {column:?}");
+    };
+    let [deep_before, error, deep_after] = column.children.as_slice() else {
+        panic!("unexpected column children: {:?}", column.children);
+    };
+    assert_eq!(paragraph_text(deep_before), "deep-before");
+    let IrNode::Component {
+        component: arkst_ir::IrComponent::ExplicitError(error),
+    } = error
+    else {
+        panic!("expected explicit error, got {error:?}");
+    };
+    assert_eq!(error.message, "recursive-error");
+    assert_eq!(paragraph_text(deep_after), "deep-after");
 }
 
 #[test]

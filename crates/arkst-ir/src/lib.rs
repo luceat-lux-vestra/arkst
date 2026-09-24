@@ -275,6 +275,7 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
             | IrInline::RawHtml { .. }
+            | IrInline::ExplicitError { .. }
             | IrInline::TargetSpecificContent { .. } => {}
         }
     }
@@ -1017,6 +1018,9 @@ enum WireInline {
         title: Option<String>,
         span: SourceSpan,
     },
+    ExplicitError {
+        component: IrExplicitErrorComponent,
+    },
     Code {
         content: String,
         span: SourceSpan,
@@ -1451,6 +1455,9 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             destination: destination.clone(),
             title: title.clone(),
             span: *span,
+        },
+        IrInline::ExplicitError { component } => WireInline::ExplicitError {
+            component: component.clone(),
         },
         IrInline::Code { content, span } => WireInline::Code {
             content: content.clone(),
@@ -1911,6 +1918,7 @@ fn wire_inline_to_ir(
             title,
             span,
         },
+        WireInline::ExplicitError { component } => IrInline::ExplicitError { component },
         WireInline::Code { content, span } => IrInline::Code { content, span },
         WireInline::SoftBreak { span } => IrInline::SoftBreak { span },
         WireInline::HardBreak { span } => IrInline::HardBreak { span },
@@ -2310,6 +2318,9 @@ pub enum IrInline {
         title: Option<String>,
         span: SourceSpan,
     },
+    /// An independently evidenced inline explicit-error output owned by a
+    /// bounded Markdown inline/container context.
+    ExplicitError { component: IrExplicitErrorComponent },
     /// An inline code span (`monospace`).
     ///
     /// The content is opaque literal text and is never evaluated or recursed

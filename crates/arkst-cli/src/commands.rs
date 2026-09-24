@@ -1,5 +1,5 @@
 use anyhow::Context;
-use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrNode};
+use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrNode};
 use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
 use std::cell::RefCell;
@@ -492,6 +492,106 @@ struct ExplicitErrorComponentCollection<'a> {
     unevidenced: Vec<&'a IrExplicitErrorComponent>,
 }
 
+fn collect_unevidenced_explicit_errors_from_inline<'a>(
+    inline: &'a IrInline,
+    components: &mut Vec<&'a IrExplicitErrorComponent>,
+) {
+    match inline {
+        IrInline::ExplicitError { component } => components.push(component),
+        IrInline::Emphasis { content, .. }
+        | IrInline::Strong { content, .. }
+        | IrInline::Strikethrough { content, .. }
+        | IrInline::Link { content, .. }
+        | IrInline::Image { content, .. } => {
+            for child in content {
+                collect_unevidenced_explicit_errors_from_inline(child, components);
+            }
+        }
+        IrInline::DirectiveCall {
+            body: Some(content),
+            ..
+        }
+        | IrInline::ChainedDirectiveCall {
+            body: Some(content),
+            ..
+        } => {
+            for child in content {
+                collect_unevidenced_explicit_errors_from_inline(child, components);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_evidenced_inline_explicit_errors<'a>(
+    inlines: &'a [IrInline],
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) {
+    for inline in inlines {
+        match inline {
+            IrInline::ExplicitError { component } => collection.recoverable.push(component),
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. } => {
+                // #433 independently establishes composability across the
+                // already evidenced inline owner classes. Image/directive
+                // bodies and unrelated inline contexts stay fail-closed.
+                collect_evidenced_inline_explicit_errors(content, collection);
+            }
+            other => {
+                collect_unevidenced_explicit_errors_from_inline(other, &mut collection.unevidenced)
+            }
+        }
+    }
+}
+
+fn collect_evidenced_paragraph_inline_errors<'a>(
+    inlines: &'a [IrInline],
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) {
+    for inline in inlines {
+        match inline {
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. } => {
+                collect_evidenced_inline_explicit_errors(content, collection);
+            }
+            other => {
+                collect_unevidenced_explicit_errors_from_inline(other, &mut collection.unevidenced)
+            }
+        }
+    }
+}
+
+fn collect_evidenced_inline_errors_from_node<'a>(
+    node: &'a IrNode,
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) -> bool {
+    match node {
+        IrNode::Paragraph { content, .. } => {
+            collect_evidenced_paragraph_inline_errors(content, collection);
+            true
+        }
+        IrNode::Heading { content, .. } => {
+            collect_evidenced_inline_explicit_errors(content, collection);
+            true
+        }
+        IrNode::Table { header, rows, .. } => {
+            for cell in header
+                .cells
+                .iter()
+                .chain(rows.iter().flat_map(|row| row.cells.iter()))
+            {
+                collect_evidenced_inline_explicit_errors(&cell.content, collection);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn collect_unevidenced_explicit_errors_from_node<'a>(
     node: &'a IrNode,
     components: &mut Vec<&'a IrExplicitErrorComponent>,
@@ -517,6 +617,22 @@ fn collect_unevidenced_explicit_errors_from_node<'a>(
                 collect_unevidenced_explicit_errors(&item.nodes, components);
             }
         }
+        IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {
+            for inline in content {
+                collect_unevidenced_explicit_errors_from_inline(inline, components);
+            }
+        }
+        IrNode::Table { header, rows, .. } => {
+            for cell in header
+                .cells
+                .iter()
+                .chain(rows.iter().flat_map(|row| row.cells.iter()))
+            {
+                for inline in &cell.content {
+                    collect_unevidenced_explicit_errors_from_inline(inline, components);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -533,7 +649,6 @@ fn collect_unevidenced_explicit_errors<'a>(
 fn collect_evidenced_nested_explicit_errors<'a>(
     nodes: &'a [IrNode],
     collection: &mut ExplicitErrorComponentCollection<'a>,
-    allow_nested_stacked: bool,
 ) {
     for node in nodes {
         match node {
@@ -541,14 +656,23 @@ fn collect_evidenced_nested_explicit_errors<'a>(
                 component: IrComponent::ExplicitError(error),
             } => collection.recoverable.push(error),
             IrNode::Component {
+                component: IrComponent::Container(component),
+            } => collect_evidenced_nested_explicit_errors(&component.children, collection),
+            IrNode::Component {
                 component: IrComponent::Stacked(component),
-            } if allow_nested_stacked => {
-                // #401 pins one additional evidenced composition:
-                // Container-family -> Stacked -> direct explicit error.
-                // Do not recurse again; deeper structural compositions remain
-                // fail-closed.
-                collect_evidenced_nested_explicit_errors(&component.children, collection, false);
+            } => collect_evidenced_nested_explicit_errors(&component.children, collection),
+            IrNode::Component {
+                component: IrComponent::Landscape(component),
+            } => collect_evidenced_nested_explicit_errors(&component.children, collection),
+            IrNode::Blockquote { content, .. } => {
+                collect_evidenced_nested_explicit_errors(content, collection);
             }
+            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                for item in items {
+                    collect_evidenced_nested_explicit_errors(&item.nodes, collection);
+                }
+            }
+            other if collect_evidenced_inline_errors_from_node(other, collection) => {}
             other => {
                 collect_unevidenced_explicit_errors_from_node(other, &mut collection.unevidenced);
             }
@@ -560,45 +684,7 @@ fn collect_explicit_error_components<'a>(
     nodes: &'a [IrNode],
 ) -> ExplicitErrorComponentCollection<'a> {
     let mut collection = ExplicitErrorComponentCollection::default();
-
-    for node in nodes {
-        match node {
-            IrNode::Component {
-                component: IrComponent::ExplicitError(error),
-            } => collection.recoverable.push(error),
-            IrNode::Component {
-                component: IrComponent::Container(component),
-            } => {
-                collect_evidenced_nested_explicit_errors(&component.children, &mut collection, true)
-            }
-            IrNode::Component {
-                component: IrComponent::Stacked(component),
-            } => collect_evidenced_nested_explicit_errors(
-                &component.children,
-                &mut collection,
-                false,
-            ),
-            IrNode::Component {
-                component: IrComponent::Landscape(component),
-            } => collect_evidenced_nested_explicit_errors(
-                &component.children,
-                &mut collection,
-                false,
-            ),
-            IrNode::Blockquote { content, .. } => {
-                collect_evidenced_nested_explicit_errors(content, &mut collection, false);
-            }
-            IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
-                for item in items {
-                    collect_evidenced_nested_explicit_errors(&item.nodes, &mut collection, false);
-                }
-            }
-            other => {
-                collect_unevidenced_explicit_errors_from_node(other, &mut collection.unevidenced);
-            }
-        }
-    }
-
+    collect_evidenced_nested_explicit_errors(nodes, &mut collection);
     collection
 }
 
@@ -1539,7 +1625,7 @@ mod tests {
     }
 
     #[test]
-    fn build_error_classifier_bounds_nested_recovery_to_evidenced_contexts() {
+    fn build_error_classifier_recurses_supported_output_owners_without_depth_cap() {
         let span = arkst_core::source::SourceSpan::new(arkst_core::source::SourceId(197), 0, 13);
         let diagnostic = arkst_core::Diagnostic {
             code: "E3011".to_string(),
@@ -1627,8 +1713,8 @@ mod tests {
         };
         let document = &nested_composition;
         let classification = classify_build_errors(std::slice::from_ref(&diagnostic), document);
-        assert!(classification.explicit_messages.is_empty());
-        assert_eq!(classification.fatal_errors, 1);
+        assert_eq!(classification.explicit_messages, vec!["explicit"]);
+        assert_eq!(classification.fatal_errors, 0);
 
         let orphan = classify_build_errors(&[], document);
         assert!(orphan.explicit_messages.is_empty());
