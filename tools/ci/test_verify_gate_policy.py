@@ -140,6 +140,30 @@ class GatePolicyNegativeTests(unittest.TestCase):
         with self.assertRaisesRegex(mod.PolicyError, "paths/paths-ignore"):
             mod.verify_repository(root, policy)
 
+    def test_required_producer_ready_for_review_event_set_passes(self):
+        workflow = BASE_CI.replace(
+            "  pull_request:\n    branches: [main]",
+            "  pull_request:\n    branches: [main]\n"
+            "    types: [opened, reopened, synchronize, ready_for_review]",
+        )
+        tmp, root, policy = self.make_repo(workflow)
+        self.addCleanup(tmp.cleanup)
+        mod.verify_repository(root, policy, ruleset(["fmt"]))
+
+    def test_required_producer_noncanonical_event_restriction_fails(self):
+        workflow = BASE_CI.replace(
+            "  pull_request:\n    branches: [main]",
+            "  pull_request:\n    branches: [main]\n"
+            "    types: [opened, reopened, synchronize]",
+        )
+        tmp, root, policy = self.make_repo(workflow)
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaisesRegex(
+            mod.PolicyError,
+            "must use exactly opened/reopened/synchronize/ready_for_review",
+        ):
+            mod.verify_repository(root, policy)
+
     def test_required_producer_job_condition_fails(self):
         workflow = BASE_CI.replace(
             "    name: fmt\n", "    name: fmt\n    if: github.actor != 'nobody'\n"

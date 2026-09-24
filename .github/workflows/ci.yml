@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
 
 env:
@@ -24,47 +25,63 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           toolchain: 1.98.0
           components: rustfmt
       - run: cargo fmt --all --check
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
       - name: Verify fail-closed distribution policy
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_verify_distribution_policy.py
           python3 tools/ci/verify_distribution_policy.py
       - name: Verify supported workflow YAML shape
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_verify_workflow_shape.py
           python3 tools/ci/verify_workflow_shape.py
       - name: Verify lockfile-fail-closed Cargo policy
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_verify_locked_cargo_policy.py
           python3 tools/ci/verify_locked_cargo_policy.py
       - name: Verify research Cargo containment
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_verify_cargo_graph_ownership.py
           python3 tools/ci/verify_cargo_graph_ownership.py
       - name: Test merge-gate policy verifier
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: python3 tools/ci/test_verify_gate_policy.py
       - name: Test upstream metadata-ingestion guards
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: python3 tools/ci/test_upstream_quarkdown_ingestion.py
       - name: Verify generated/reference-data provenance contract
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_reference_provenance.py
           python3 tools/verify_reference_provenance.py
       - name: Test deterministic workflow-security policy
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_verify_workflow_security.py
           python3 tools/ci/verify_workflow_security.py
       - name: Test recurring hardening drift audit
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: |
           python3 tools/ci/test_hardening_drift_audit.py
           python3 tools/ci/test_hardening_drift_live.py
       - name: Install pinned actionlint
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         env:
           ACTIONLINT_VERSION: 1.7.12
           ACTIONLINT_ARCHIVE_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
@@ -79,6 +96,7 @@ jobs:
           "$RUNNER_TEMP/actionlint/actionlint" -version
           "$RUNNER_TEMP/actionlint/actionlint" -color
       - name: Run pinned zizmor
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           inputs: .github/workflows
@@ -88,6 +106,7 @@ jobs:
           online-audits: false
           annotations: false
       - name: Verify merge-gate policy and live ruleset
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -107,15 +126,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           toolchain: 1.98.0
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
 
   test:
     name: test (${{ matrix.os }})
@@ -126,29 +152,39 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
       - name: Install Typst 0.15.1 (pinned)
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         uses: typst-community/setup-typst@9107b8dd77d7a7fd6c5faebbb507cac28069042e # v5
         with:
           typst-version: 0.15.1
       - name: Test default CLI feature boundary
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: cargo test --locked -p arkst-cli --no-default-features
       - name: Test (Typst required)
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: cargo test --locked --workspace --all-targets --all-features
         env:
           ARKST_REQUIRE_TYPST: "1"
       - name: Test Typst backend parity
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         run: cargo test --locked -p arkst-typst-inprocess --test backend_parity --all-features -- --nocapture
         env:
           ARKST_REQUIRE_TYPST: "1"
       - name: Verify CLI dependency feature boundary
-        if: matrix.os == 'ubuntu-latest'
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (matrix.os == 'ubuntu-latest') }}
         shell: bash
         run: |
           default_tree="$(mktemp)"
@@ -163,7 +199,7 @@ jobs:
           grep -Eq 'arkst-typst-inprocess' "$feature_tree"
           grep -Eq '(^|[[:space:]])typst v|typst-(assets|pdf|layout) v' "$feature_tree"
       - name: Smoke-test public examples
-        if: matrix.os == 'ubuntu-latest'
+        if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (matrix.os == 'ubuntu-latest') }}
         shell: bash
         run: |
           cargo build --locked -p arkst-cli
@@ -185,35 +221,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           toolchain: 1.98.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
       - run: cargo check --locked -p arkst-core -p arkst-typst --target wasm32-unknown-unknown --all-features
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
 
   doc:
     name: docs
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         with:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
       - run: cargo doc --locked --workspace --all-features --no-deps
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
 
   deny:
     name: license
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Draft final-gate placeholder
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: echo "full required-context validation is deferred until the pull request is ready for review"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

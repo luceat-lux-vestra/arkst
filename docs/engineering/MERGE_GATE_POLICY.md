@@ -20,7 +20,7 @@ The accepted required set remains:
 - `msrv`
 - `dependency-review`
 
-The live ruleset must remain strict and contain exactly this set. Required contexts must be produced on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers.
+The live ruleset must remain strict and contain exactly this set. Required contexts must be produced on every pull request; top-level path filters and job-level `if` conditions are rejected for required producers. A required workflow may leave `pull_request` types implicit, or it may declare exactly `opened`, `reopened`, `synchronize`, and `ready_for_review` so a Draft-to-Ready transition re-runs the complete final gate on the same candidate HEAD. Draft PRs may keep an always-present required context lightweight by deferring expensive internal steps, but Ready PRs must execute the complete authoritative steps. The required `license`/cargo-deny authority remains unconditional even during Draft development.
 
 ## Complementary required supply-chain controls
 
