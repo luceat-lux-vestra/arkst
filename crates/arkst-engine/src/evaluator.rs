@@ -2915,7 +2915,7 @@ impl Evaluator {
                 ..
             } = inline
             else {
-                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                pending.extend(self.evaluate_evidenced_inline_owner(inline, diagnostics, context));
                 continue;
             };
 
@@ -2938,7 +2938,7 @@ impl Evaluator {
                 );
 
             if !native_error_owns_call {
-                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                pending.extend(self.evaluate_evidenced_inline_owner(inline, diagnostics, context));
                 continue;
             }
 
@@ -3005,6 +3005,205 @@ impl Evaluator {
         nodes
     }
 
+    /// Evaluates the #431/#433-evidenced inline owner family while preserving
+    /// the existing structural nesting support around it.
+    ///
+    /// #431 establishes direct heading/table-cell and
+    /// emphasis/strong/strikethrough/link ownership. #433 independently
+    /// establishes composition across the inline owner classes and through
+    /// representative list/blockquote/table structural owners. Recursion is
+    /// intentionally depth-unbounded inside this closed inline owner family:
+    /// Quarkdown's own AST/error path has no owner-depth counter. Image,
+    /// value, callable, and directive-body contexts remain separate semantic
+    /// boundaries and retain their ordinary fail-closed paths.
+    fn evaluate_evidenced_inline_owner(
+        &self,
+        inline: &IrInline,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrInline> {
+        match inline {
+            IrInline::Emphasis { content, span } => vec![IrInline::Emphasis {
+                content: self.evaluate_evidenced_inline_error_owner_content(
+                    content,
+                    diagnostics,
+                    context,
+                ),
+                span: *span,
+            }],
+            IrInline::Strong { content, span } => vec![IrInline::Strong {
+                content: self.evaluate_evidenced_inline_error_owner_content(
+                    content,
+                    diagnostics,
+                    context,
+                ),
+                span: *span,
+            }],
+            IrInline::Strikethrough { content, span } => vec![IrInline::Strikethrough {
+                content: self.evaluate_evidenced_inline_error_owner_content(
+                    content,
+                    diagnostics,
+                    context,
+                ),
+                span: *span,
+            }],
+            IrInline::Link {
+                content,
+                destination,
+                title,
+                span,
+            } => {
+                if let Some(reference) = markdown_subdocument_link_reference(destination) {
+                    if let Some(provider) = context.resources {
+                        let provenance_source_id = span.source_id;
+                        let Some(source_mode) = context.source_mode(provenance_source_id) else {
+                            diagnostics.push(resource_diagnostic(
+                                "E9001",
+                                format!(
+                                    "Markdown subdocument link has no parser-mode provenance for source identity {provenance_source_id:?}"
+                                ),
+                                *span,
+                                "Resource-backed evaluation must register the actual parser mode for every source identity before consuming source-backed links.",
+                            ));
+                            return Vec::new();
+                        };
+                        if source_mode == Mode::Quarkdown {
+                            let Some(resource_base_source_id) = context.current_source else {
+                                diagnostics.push(resource_diagnostic(
+                                    "E9001",
+                                    "Markdown subdocument link has no active resource-base source identity",
+                                    *span,
+                                    "Resource-backed Quarkdown link validation requires an active logical source base; diagnostic provenance may use a distinct source identity.",
+                                ));
+                                return Vec::new();
+                            };
+                            if reject_host_filesystem_reference_for_subject(
+                                "Markdown subdocument link",
+                                reference,
+                                *span,
+                                diagnostics,
+                            ) {
+                                return Vec::new();
+                            }
+                            if let Err(error) =
+                                provider.read_source(resource_base_source_id, reference)
+                            {
+                                diagnostics.push(resource_access_diagnostic_for_subject(
+                                    "Markdown subdocument link",
+                                    error,
+                                    *span,
+                                ));
+                                return Vec::new();
+                            }
+                        }
+                    }
+                }
+                vec![IrInline::Link {
+                    content: self.evaluate_evidenced_inline_error_owner_content(
+                        content,
+                        diagnostics,
+                        context,
+                    ),
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    span: *span,
+                }]
+            }
+            _ => self.evaluate_inline(inline, diagnostics, context),
+        }
+    }
+
+    fn evaluate_evidenced_inline_error_owner_content(
+        &self,
+        inlines: &[IrInline],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrInline> {
+        let mut out = Vec::new();
+        for inline in inlines {
+            let IrInline::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                ordered_args,
+                body,
+                span,
+                ..
+            } = inline
+            else {
+                out.extend(self.evaluate_evidenced_inline_owner(inline, diagnostics, context));
+                continue;
+            };
+
+            let call_body = body.as_deref().map(CallBody::Inline);
+            let direct_native_error = name == "error"
+                && context.get_function(name).is_none()
+                && !is_variable_reference_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                )
+                && !is_variable_reassignment_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                );
+
+            if !direct_native_error {
+                out.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            }
+
+            let before = diagnostics.len();
+            let outcome = self.evaluate_call_value_with_ordered(
+                name,
+                ordered_args.as_deref(),
+                positional_args,
+                named_args,
+                call_body,
+                None,
+                None,
+                span,
+                diagnostics,
+                context,
+            );
+            match outcome {
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(component)))
+                    if diagnostics.len() > before
+                        && diagnostics[before..]
+                            .iter()
+                            .all(is_explicit_error_diagnostic) =>
+                {
+                    out.push(IrInline::ExplicitError { component });
+                }
+                CallOutcome::Value(value) => {
+                    out.extend(self.materialize_inline_value(Some(value), span, diagnostics));
+                }
+                CallOutcome::NoValue | CallOutcome::Failed => {}
+                CallOutcome::Unresolved => {
+                    out.extend(
+                        self.preserve_inline_call(
+                            name,
+                            ordered_args.as_deref(),
+                            positional_args,
+                            named_args,
+                            body.as_deref(),
+                            span,
+                            diagnostics,
+                            context,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+        out
+    }
+
     /// Evaluates children of the clean-room-evidenced Markdown structural
     /// output contexts. Only direct paragraph-level native `.error` calls
     /// receive the block-materialization adapter above; all other nodes retain
@@ -3026,6 +3225,57 @@ impl Evaluator {
                         context,
                     ))
                 }
+                IrNode::Heading {
+                    level,
+                    content,
+                    span,
+                } => out.push(IrNode::Heading {
+                    level: *level,
+                    content: self.evaluate_evidenced_inline_error_owner_content(
+                        content,
+                        diagnostics,
+                        context,
+                    ),
+                    span: *span,
+                }),
+                IrNode::Table { header, rows, span } => out.push(IrNode::Table {
+                    header: arkst_ir::IrTableRow {
+                        cells: header
+                            .cells
+                            .iter()
+                            .map(|cell| arkst_ir::IrTableCell {
+                                content: self.evaluate_evidenced_inline_error_owner_content(
+                                    &cell.content,
+                                    diagnostics,
+                                    context,
+                                ),
+                                alignment: cell.alignment,
+                                span: cell.span,
+                            })
+                            .collect(),
+                        span: header.span,
+                    },
+                    rows: rows
+                        .iter()
+                        .map(|row| arkst_ir::IrTableRow {
+                            cells: row
+                                .cells
+                                .iter()
+                                .map(|cell| arkst_ir::IrTableCell {
+                                    content: self.evaluate_evidenced_inline_error_owner_content(
+                                        &cell.content,
+                                        diagnostics,
+                                        context,
+                                    ),
+                                    alignment: cell.alignment,
+                                    span: cell.span,
+                                })
+                                .collect(),
+                            span: row.span,
+                        })
+                        .collect(),
+                    span: *span,
+                }),
                 other => out.extend(self.evaluate_node(other, diagnostics, context)),
             }
         }
@@ -4994,7 +5244,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, true) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5056,7 +5306,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5293,7 +5543,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5433,7 +5683,7 @@ impl Evaluator {
 
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -5719,7 +5969,7 @@ impl Evaluator {
         }
         let children = match body {
             Some(CallBody::Block(nodes)) => {
-                match self.evaluate_evidenced_output_body(nodes, diagnostics, context, false) {
+                match self.evaluate_evidenced_output_body(nodes, diagnostics, context) {
                     CallOutcome::Value(IrValue::Content(nodes)) => nodes,
                     outcome => return outcome,
                 }
@@ -12477,83 +12727,148 @@ impl Evaluator {
         }
     }
 
-    /// Evaluates the block body of the clean-room-evidenced Container family.
+    /// Collects explicit-error carriers only through output-owner shapes whose
+    /// child relationship is part of the supported document-output tree.
     ///
-    /// Unlike source-defined functions and selected conditionals, Quarkdown
-    /// preserves content before and after a direct native `.error` inside
-    /// `.container`, `.center`, and `.align`. Other diagnostics and
-    /// indirect/unevidenced explicit-error producers remain fail-closed.
+    /// This deliberately excludes image alt text and directive/value bodies:
+    /// upstream treats those as distinct semantic boundaries, and #431 already
+    /// observes image-alt behavior that differs from ordinary rendered owners.
+    fn collect_evidenced_inline_error_components<'a>(
+        inlines: &'a [IrInline],
+        components: &mut Vec<&'a IrExplicitErrorComponent>,
+    ) {
+        for inline in inlines {
+            match inline {
+                IrInline::ExplicitError { component } => components.push(component),
+                IrInline::Emphasis { content, .. }
+                | IrInline::Strong { content, .. }
+                | IrInline::Strikethrough { content, .. }
+                | IrInline::Link { content, .. } => {
+                    Self::collect_evidenced_inline_error_components(content, components);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_evidenced_output_error_components<'a>(
+        nodes: &'a [IrNode],
+        components: &mut Vec<&'a IrExplicitErrorComponent>,
+    ) {
+        for node in nodes {
+            match node {
+                IrNode::Component {
+                    component: IrComponent::ExplicitError(component),
+                } => components.push(component),
+                IrNode::Component {
+                    component: IrComponent::Container(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
+                IrNode::Component {
+                    component: IrComponent::Stacked(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
+                IrNode::Component {
+                    component: IrComponent::Landscape(component),
+                } => {
+                    Self::collect_evidenced_output_error_components(&component.children, components)
+                }
+                IrNode::Blockquote { content, .. } => {
+                    Self::collect_evidenced_output_error_components(content, components);
+                }
+                IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
+                    for item in items {
+                        Self::collect_evidenced_output_error_components(&item.nodes, components);
+                    }
+                }
+                IrNode::Paragraph { content, .. } | IrNode::Heading { content, .. } => {
+                    Self::collect_evidenced_inline_error_components(content, components);
+                }
+                IrNode::Table { header, rows, .. } => {
+                    for cell in header
+                        .cells
+                        .iter()
+                        .chain(rows.iter().flat_map(|row| row.cells.iter()))
+                    {
+                        Self::collect_evidenced_inline_error_components(&cell.content, components);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Requires exact 1:1 pairing before an enclosing output owner preserves a
+    /// child that emitted explicit-error diagnostics. This keeps recursive
+    /// composition fail-closed without imposing an arbitrary nesting depth.
+    fn evidenced_output_pairs_explicit_error_diagnostics(
+        nodes: &[IrNode],
+        diagnostics: &[Diagnostic],
+    ) -> bool {
+        if diagnostics.is_empty() || !diagnostics.iter().all(is_explicit_error_diagnostic) {
+            return false;
+        }
+
+        let mut components = Vec::new();
+        Self::collect_evidenced_output_error_components(nodes, &mut components);
+        if components.len() != diagnostics.len() {
+            return false;
+        }
+
+        for diagnostic in diagnostics {
+            let Some(index) = components.iter().position(|component| {
+                diagnostic.primary == Some(component.span)
+                    && diagnostic.message
+                        == format!(
+                            "Cannot call function error(String message) with arguments ({}): {}",
+                            component.message, component.message
+                        )
+            }) else {
+                return false;
+            };
+            components.remove(index);
+        }
+
+        components.is_empty()
+    }
+
+    /// Evaluates a rendered output-owner body with recursive composition.
+    ///
+    /// Exact Quarkdown v2.5.1/v2.6.0 source inspection shows the same contract
+    /// in both releases: FunctionCallNode is ErrorCapableNode, an expansion
+    /// failure is rendered by replacing that node with Box.error, and
+    /// NestableNode renderers recursively visit children without a depth
+    /// counter. Therefore nesting depth among already-supported rendered output
+    /// owners is not itself a compatibility boundary.
+    ///
+    /// We still fail closed at semantic boundaries that are not ordinary
+    /// rendered children (image alt, value/callable/directive-body contexts)
+    /// and require exact local diagnostic/carrier pairing before preserving an
+    /// enclosing owner.
     fn evaluate_evidenced_output_body(
         &self,
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-        allow_nested_row: bool,
     ) -> CallOutcome {
         let mut output = Vec::new();
 
         for node in nodes {
-            let direct_native_error = match node {
-                IrNode::FunctionCall {
-                    name,
-                    positional_args,
-                    named_args,
-                    body,
-                    ..
-                } if name == "error" && context.get_function(name).is_none() => {
-                    !is_variable_reference_call(
-                        name,
-                        positional_args,
-                        named_args,
-                        body.as_deref().map(CallBody::Block),
-                        context,
-                    ) && !is_variable_reassignment_call(
-                        name,
-                        positional_args,
-                        named_args,
-                        body.as_deref().map(CallBody::Block),
-                        context,
-                    )
-                }
-                _ => false,
-            };
-            let evidenced_nested_row = allow_nested_row
-                && matches!(
-                    node,
-                    IrNode::FunctionCall { name, .. }
-                        if name == "row" && context.get_function(name).is_none()
-                );
-
             let before = diagnostics.len();
-            let evaluated = self.evaluate_node(node, diagnostics, context);
+            let evaluated = self.evaluate_evidenced_structural_nodes(
+                std::slice::from_ref(node),
+                diagnostics,
+                context,
+            );
 
-            if diagnostics.len() != before {
-                let new_diagnostics = &diagnostics[before..];
-                let only_explicit = new_diagnostics.iter().all(is_explicit_error_diagnostic);
-                if direct_native_error
-                    && only_explicit
-                    && matches!(
-                        evaluated.as_slice(),
-                        [IrNode::Component {
-                            component: IrComponent::ExplicitError(_)
-                        }]
-                    )
-                {
-                    output.extend(evaluated);
-                    continue;
-                }
-                if evidenced_nested_row
-                    && only_explicit
-                    && matches!(
-                        evaluated.as_slice(),
-                        [IrNode::Component {
-                            component: IrComponent::Stacked(_)
-                        }]
-                    )
-                {
-                    output.extend(evaluated);
-                    continue;
-                }
+            if diagnostics.len() != before
+                && !Self::evidenced_output_pairs_explicit_error_diagnostics(
+                    &evaluated,
+                    &diagnostics[before..],
+                )
+            {
                 return CallOutcome::Failed;
             }
 
@@ -14713,6 +15028,9 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::ChainedDirectiveCall { span, .. }
         | IrInline::Link { span, .. }
         | IrInline::Image { span, .. }
+        | IrInline::ExplicitError {
+            component: IrExplicitErrorComponent { span, .. },
+        }
         | IrInline::Code { span, .. }
         | IrInline::SoftBreak { span }
         | IrInline::HardBreak { span }
@@ -14900,6 +15218,7 @@ fn append_code_inline_text(inline: &IrInline, output: &mut String) -> Option<()>
         }
         IrInline::Whitespace { .. } => output.push(' '),
         IrInline::TargetSpecificContent { content } => output.push_str(&content.content),
+        IrInline::ExplicitError { .. } => return None,
         _ => return None,
     }
     Some(())
@@ -14934,6 +15253,7 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::ChainedDirectiveCall { .. }
         | IrInline::Link { .. }
         | IrInline::Image { .. }
+        | IrInline::ExplicitError { .. }
         | IrInline::Code { .. }
         | IrInline::Whitespace { .. }
         | IrInline::TargetSpecificContent { .. } => return None,
@@ -19029,6 +19349,9 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             IrInline::Link { content, span, .. } | IrInline::Image { content, span, .. } => {
                 *span = source_span;
                 rebase_dynamic_inlines(content, source_span);
+            }
+            IrInline::ExplicitError { component } => {
+                component.span = source_span;
             }
             IrInline::TargetSpecificContent { content } => content.span = source_span,
         }

@@ -152,6 +152,88 @@ fn integration_explicit_error_lowering_escapes_typst_text_and_compiles_pdf() {
 }
 
 #[test]
+fn integration_evidenced_inline_error_owners_lower_to_valid_typst_and_pdf() {
+    let cases = [
+        (
+            "inline-error-heading",
+            "# heading-before .error {heading-error} heading-after\n",
+        ),
+        (
+            "inline-error-table",
+            "| value |\n| --- |\n| cell-before .error {table-error} cell-after |\n",
+        ),
+        (
+            "inline-error-emphasis",
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after\n",
+        ),
+        (
+            "inline-error-strong",
+            "outer-before **strong-before .error {strong-error} strong-after** outer-after\n",
+        ),
+        (
+            "inline-error-strike",
+            "outer-before ~~strike-before .error {strike-error} strike-after~~ outer-after\n",
+        ),
+        (
+            "inline-error-link",
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after\n",
+        ),
+        (
+            "inline-error-list-emphasis",
+            "- list-before *em-before .error {list-emphasis-error} em-after* list-after\n",
+        ),
+    ];
+
+    for (name, source) in cases {
+        let entry = format!("{name}.qd");
+        let project = VirtualProjectBuilder::new()
+            .entry(&entry)
+            .expect("valid entry path")
+            .add_source(&entry, source)
+            .expect("valid source path")
+            .build()
+            .expect("valid project");
+        let result = compile(&project, &CompileOptions::default());
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E3011"),
+            "{name}: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "E3011"),
+            "{name}: unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let typst_code = lower_to_typst_code(&result.ir);
+        assert!(
+            typst_code.contains("Error: error Cannot call function error"),
+            "{name}: {typst_code}"
+        );
+
+        with_typst(name, |backend| {
+            let output = backend
+                .compile(&TypstInput {
+                    source: typst_code,
+                    entry_path: entry,
+                })
+                .expect("evidenced inline explicit-error Typst must compile");
+            assert!(output
+                .pdf
+                .expect("PDF output must be present")
+                .starts_with(b"%PDF-"));
+        });
+    }
+}
+
+#[test]
 fn integration_stacked_layouts_lower_to_valid_typst_and_pdf() {
     let source = ".row alignment:{spacebetween} cross:{stretch} gap:{10px}\n    A\n\n    B\n\n.column alignment:{spacearound} cross:{start} gap:{25%}\n    C\n\n    D\n\n.grid columns:{2} alignment:{spaceevenly} cross:{end} gap:{1cm} vgap:{2cm} hgap:{3cm}\n    E\n\n    F\n\n    G\n";
     let project = VirtualProjectBuilder::new()

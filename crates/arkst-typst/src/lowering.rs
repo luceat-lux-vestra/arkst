@@ -391,6 +391,18 @@ impl LoweringContext {
     }
 
     fn lower_explicit_error(&mut self, component: &IrExplicitErrorComponent) {
+        self.lower_explicit_error_with_terminator(component, true);
+    }
+
+    fn lower_inline_explicit_error(&mut self, component: &IrExplicitErrorComponent) {
+        self.lower_explicit_error_with_terminator(component, false);
+    }
+
+    fn lower_explicit_error_with_terminator(
+        &mut self,
+        component: &IrExplicitErrorComponent,
+        trailing_newline: bool,
+    ) {
         let before = self.output.len();
         self.push_str("#block[");
         self.push_str("Error: error Cannot call function error (String message) with arguments (");
@@ -402,7 +414,10 @@ impl LoweringContext {
             self.push_str(&escape_typst_string(source_echo));
             self.push_str("\", block: true)");
         }
-        self.push_str("]\n");
+        self.push(']');
+        if trailing_newline {
+            self.push('\n');
+        }
         if component.span.source_id != SourceId(0) {
             self.record_span(component.span, self.output.len() - before);
         }
@@ -797,6 +812,9 @@ impl LoweringContext {
                 if span.source_id != SourceId(0) {
                     self.record_span(*span, self.output.len() - before);
                 }
+            }
+            IrInline::ExplicitError { component } => {
+                self.lower_inline_explicit_error(component);
             }
             IrInline::RawHtml { .. } | IrInline::TargetSpecificContent { .. } => {
                 // Target-specific HTML and parser-owned raw HTML never become

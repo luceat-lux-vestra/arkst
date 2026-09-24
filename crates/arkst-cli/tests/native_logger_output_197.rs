@@ -429,9 +429,79 @@ fn strict_build_promotes_evidenced_structural_nested_errors_to_exit_66() {
             "deep-error",
         ),
         (
+            "recursive-container-row-landscape-column",
+            "outer-before\n.container\n    container-before\n    .row\n        row-before\n        .landscape\n            landscape-before\n            .column\n                deep-before\n                .error {recursive-deep-error}\n                deep-after\n            landscape-after\n        row-after\n    container-after\nouter-after\n",
+            "recursive-deep-error",
+        ),
+        (
+            "recursive-align-row",
+            "outer-before\n.align {center}\n    align-before\n    .row\n        row-before\n        .error {align-row-error}\n        row-after\n    align-after\nouter-after\n",
+            "align-row-error",
+        ),
+        (
             "top-inline",
             "outer-before\ninline-before .error {top-inline-error} inline-after\nouter-after\n",
             "top-inline-error",
+        ),
+        (
+            "heading-inline",
+            "# heading-before .error {heading-error} heading-after\n",
+            "heading-error",
+        ),
+        (
+            "table-inline",
+            "| value |\n| --- |\n| cell-before .error {table-error} cell-after |\n",
+            "table-error",
+        ),
+        (
+            "emphasis-inline",
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after\n",
+            "emphasis-error",
+        ),
+        (
+            "strong-inline",
+            "outer-before **strong-before .error {strong-error} strong-after** outer-after\n",
+            "strong-error",
+        ),
+        (
+            "strike-inline",
+            "outer-before ~~strike-before .error {strike-error} strike-after~~ outer-after\n",
+            "strike-error",
+        ),
+        (
+            "link-inline",
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after\n",
+            "link-error",
+        ),
+        (
+            "list-emphasis-inline",
+            "- list-before *em-before .error {list-emphasis-error} em-after* list-after\n",
+            "list-emphasis-error",
+        ),
+        (
+            "ordered-link-inline",
+            "1. item-before [link-before .error {ordered-link-error} link-after](https://example.com) item-after\n",
+            "ordered-link-error",
+        ),
+        (
+            "blockquote-strong-inline",
+            "> quote-before **strong-before .error {blockquote-strong-error} strong-after** quote-after\n",
+            "blockquote-strong-error",
+        ),
+        (
+            "emphasis-link-inline",
+            "outer-before *em-before [link-before .error {emphasis-link-error} link-after](https://example.com) em-after* outer-after\n",
+            "emphasis-link-error",
+        ),
+        (
+            "link-strong-inline",
+            "outer-before [link-before **strong-before .error {link-strong-error} strong-after** link-after](https://example.com) outer-after\n",
+            "link-strong-error",
+        ),
+        (
+            "table-strong-inline",
+            "| value |\n| --- |\n| cell-before **strong-before .error {table-strong-error} strong-after** cell-after |\n",
+            "table-strong-error",
         ),
     ];
 
@@ -599,11 +669,109 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
             "deep-after",
         ),
         (
+            "recursive-container-row-landscape-column",
+            "outer-before\n.container\n    container-before\n    .row\n        row-before\n        .landscape\n            landscape-before\n            .column\n                deep-before\n                .error {recursive-deep-error}\n                deep-after\n            landscape-after\n        row-after\n    container-after\nouter-after\n",
+            "recursive-deep-error",
+            "deep-before",
+            "deep-after",
+        ),
+        (
+            "recursive-align-row",
+            "outer-before\n.align {center}\n    align-before\n    .row\n        row-before\n        .error {align-row-error}\n        row-after\n    align-after\nouter-after\n",
+            "align-row-error",
+            "row-before",
+            "row-after",
+        ),
+        (
             "top-inline",
             "outer-before\ninline-before .error {top-inline-error} inline-after\nouter-after\n",
             "top-inline-error",
             "inline-before",
             "inline-after",
+        ),
+        (
+            "heading-inline",
+            "outer-before\n# heading-before .error {heading-error} heading-after\nouter-after\n",
+            "heading-error",
+            "heading-before",
+            "heading-after",
+        ),
+        (
+            "table-inline",
+            "outer-before\n\n| value |\n| --- |\n| cell-before .error {table-error} cell-after |\n\nouter-after\n",
+            "table-error",
+            "cell-before",
+            "cell-after",
+        ),
+        (
+            "emphasis-inline",
+            "outer-before\nem-before *inner-before .error {emphasis-error} inner-after* em-after\nouter-after\n",
+            "emphasis-error",
+            "inner-before",
+            "inner-after",
+        ),
+        (
+            "strong-inline",
+            "outer-before\nstrong-before **inner-before .error {strong-error} inner-after** strong-after\nouter-after\n",
+            "strong-error",
+            "inner-before",
+            "inner-after",
+        ),
+        (
+            "strike-inline",
+            "outer-before\nstrike-before ~~inner-before .error {strike-error} inner-after~~ strike-after\nouter-after\n",
+            "strike-error",
+            "inner-before",
+            "inner-after",
+        ),
+        (
+            "link-inline",
+            "outer-before\nlink-before [inner-before .error {link-error} inner-after](https://example.com) link-after\nouter-after\n",
+            "link-error",
+            "inner-before",
+            "inner-after",
+        ),
+        (
+            "list-emphasis-inline",
+            "outer-before\n\n- list-before *em-before .error {list-emphasis-error} em-after* list-after\n\nouter-after\n",
+            "list-emphasis-error",
+            "em-before",
+            "em-after",
+        ),
+        (
+            "ordered-link-inline",
+            "outer-before\n\n1. item-before [link-before .error {ordered-link-error} link-after](https://example.com) item-after\n\nouter-after\n",
+            "ordered-link-error",
+            "link-before",
+            "link-after",
+        ),
+        (
+            "blockquote-strong-inline",
+            "outer-before\n\n> quote-before **strong-before .error {blockquote-strong-error} strong-after** quote-after\n\nouter-after\n",
+            "blockquote-strong-error",
+            "strong-before",
+            "strong-after",
+        ),
+        (
+            "emphasis-link-inline",
+            "outer-before\n*em-before [link-before .error {emphasis-link-error} link-after](https://example.com) em-after*\nouter-after\n",
+            "emphasis-link-error",
+            "link-before",
+            "link-after",
+        ),
+        (
+            "link-strong-inline",
+            "outer-before\n[link-before **strong-before .error {link-strong-error} strong-after** link-after](https://example.com)\nouter-after\n",
+            "link-strong-error",
+            "strong-before",
+            "strong-after",
+        ),
+        (
+            "table-strong-inline",
+            "outer-before\n\n| value |\n| --- |\n| cell-before **strong-before .error {table-strong-error} strong-after** cell-after |\n\nouter-after\n",
+            "table-strong-error",
+            "strong-before",
+            "strong-after",
         ),
     ];
 
@@ -648,21 +816,21 @@ fn default_build_recovers_evidenced_structural_nested_errors_and_preserves_sibli
 }
 
 #[test]
-fn unevidenced_structural_compositions_remain_build_fatal() {
+fn supported_structural_compositions_have_no_artificial_depth_cap() {
     let cases = [
         (
-            "too-deep",
-            ".center\n    .row\n        .landscape\n            .error {too-deep-error}\n",
-            "too-deep-error",
+            "deep-mixed",
+            "outer-before\n.container\n    .row\n        .landscape\n            .column\n                .error {deep-mixed-error}\nouter-after\n",
+            "deep-mixed-error",
         ),
         (
             "align-row",
-            ".align {center}\n    .row\n        .error {align-row-error}\n",
+            "outer-before\n.align {center}\n    .row\n        .error {align-row-error}\nouter-after\n",
             "align-row-error",
         ),
         (
             "container-row",
-            ".container\n    .row\n        .error {container-row-error}\n",
+            "outer-before\n.container\n    .row\n        .error {container-row-error}\nouter-after\n",
             "container-row-error",
         ),
     ];
@@ -674,14 +842,24 @@ fn unevidenced_structural_compositions_remain_build_fatal() {
 
         let output = run_build(&input);
 
-        assert!(!output.status.success(), "{name}: {output:?}");
-        assert_ne!(output.status.code(), Some(66), "{name}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains(message), "{name}: {stderr}");
-        assert!(stderr.contains("found 1 error(s)"), "{name}: {stderr}");
         assert!(
-            !dir.path().join(format!("{name}.typ")).exists(),
-            "{name}: unevidenced output must not publish an artifact"
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "Cannot call function error(String message) with arguments ({message}): {message}"
+            )),
+            "{name}: {stderr}"
+        );
+        let typst = fs::read_to_string(dir.path().join(format!("{name}.typ"))).unwrap();
+        assert!(typst.contains("outer-before"), "{name}: {typst}");
+        assert!(typst.contains("outer-after"), "{name}: {typst}");
+        assert!(
+            typst.contains(&format!("#raw(\".error {{{message}}}\", block: true)")),
+            "{name}: {typst}"
         );
     }
 }
