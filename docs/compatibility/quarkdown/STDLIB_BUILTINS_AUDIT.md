@@ -449,10 +449,10 @@ emits the evidenced stderr line; native `arkst build --strict` performs the same
 are emitted synchronously in evaluation order with source provenance,
 malformed calls emit no events, and source-defined functions retain normal
 precedence over these native names. The three rows are
-`PARTIAL`, not `SUPPORTED_SEMANTICS`, because genuinely distinct semantic-owner boundaries (including the #182-dependent image-alt path), operation-generated Collection projections, and #191 public WASM exposure are not claimed. Arbitrary deeper permutations of already-supported rendered owners are not a separate residual. Arkst-specific `check`/`inspect` are explicitly bounded as
+`PARTIAL`, not `SUPPORTED_SEMANTICS`, because cross-owned boundaries remain outside this row-level claim: #182 image/image-alt, #181 `Numbered`'s distinct late-evaluation path, #191 public WASM exposure, and the intentionally non-portable operation-generated Collection projections. Arbitrary deeper permutations of already-supported rendered owners are not a separate residual. Arkst-specific `check`/`inspect` are explicitly bounded as
 sinkless/fail-closed analysis commands rather than Quarkdown runtime-output
 parity surfaces. The bounded Unit value/result semantics are
-covered by #368/PR #371. #197 remains open pending explicit reconciliation of any genuinely distinct semantic-owner residuals outside the recursively composable rendered-owner tree; arbitrary depth permutations are not among them. No #151 row remains `UNSUPPORTED`.
+covered by #368/PR #371. #197 is complete as the logger/diagnostic implementation owner after exact upstream error-owner review; the canonical rows remain `PARTIAL` only for the cross-owned or intentionally non-portable boundaries above. No #151 row remains `UNSUPPORTED`.
 
 ### Bounded #196 localization contract
 
@@ -619,7 +619,7 @@ implementations under #195 but cannot claim full stdlib visibility parity while
 Arkst intentionally filters out upstream names it cannot call. The three
 logger/diagnostic rows are bounded #197 implementations: evaluator semantics and
 native `arkst build` `Log` stdout plus the clean-room-evidenced default/non-strict
-`.error` stderr/rendered continuation contract and bounded strict host-finalization contract are implemented; #392/#393 establish the initial nested structural contexts, merged #398 covers bounded source echo, #401 covers top-level inline, ordered-list, Stacked row/column/grid, Landscape, and a representative `.center` → `.row` composition, and #431/#433 establish the supported heading/table and compositional inline-owner family. Exact v2.5.1/v2.6.0 source review supports recursive composition of the already-supported rendered-owner tree without a depth cap; genuinely distinct semantic boundaries remain partial, including the #182-dependent image-alt path. Operation-generated Collection projections remain deliberately fail-closed as a non-portable JVM boundary rather than an unresolved implementation slice; exact HTML/CSS styling is not a Typst/PDF closure requirement. Arkst-specific `check`/`inspect` policy is
+`.error` stderr/rendered continuation contract and bounded strict host-finalization contract are implemented; #392/#393 establish the initial nested structural contexts, merged #398 covers bounded source echo, #401 covers top-level inline, ordered-list, Stacked row/column/grid, Landscape, and a representative `.center` → `.row` composition, and #431/#433 establish the supported heading/table and compositional inline-owner family. Exact v2.5.1/v2.6.0 source review supports recursive composition of the already-supported rendered-owner tree without a depth cap. Closure review finds no additional #197-owned public mismatch: image-alt is #182-owned, upstream `Numbered`'s distinct late-evaluation path is #181-owned, and public WASM/embedder exposure is #191-owned. Operation-generated Collection projections remain deliberately fail-closed as a non-portable JVM boundary rather than an unresolved implementation slice; exact HTML/CSS styling is not a Typst/PDF closure requirement. Arkst-specific `check`/`inspect` policy is
 bounded separately as sinkless/fail-closed analysis behavior. No #151-owned row
 remains `UNSUPPORTED`. Localization and localize remain the two
 `SUPPORTED_SEMANTICS` rows owned by #196. The one NOT_APPLICABLE inventory
@@ -678,10 +678,10 @@ Reconciliation links:
 Issue #172 closes the cohesive Unicode string-semantics gap. No #151-owned row
 remains `UNSUPPORTED`. Library inspection under
 [#195](https://github.com/luceat-lux-vestra/arkst/issues/195) and
-logger/diagnostic behavior under
-[#197](https://github.com/luceat-lux-vestra/arkst/issues/197) now have bounded
-evaluator contracts and remain `PARTIAL` for their explicitly documented
-parity gaps. Implementation order follows the dependency bands in #156; #196
+logger/diagnostic behavior completed under
+[#197](https://github.com/luceat-lux-vestra/arkst/issues/197) has bounded
+evaluator contracts; the rows remain `PARTIAL` for explicitly documented
+cross-owned or intentionally non-portable boundaries. Implementation order follows the dependency bands in #156; #196
 is the completed bounded localization slice.
 Existing issues are reused:
 
@@ -699,9 +699,7 @@ semantic implementation. Library inspection now has a bounded #195 evaluator
 implementation; its residual PARTIAL status is caused by the wider unimplemented
 stdlib callable surface rather than missing provider/host inspection. The #197
 logger evaluator slice is also bounded; #368/PR #371 models the independently
-evidenced Unit value-context results, while residual PARTIAL status covers genuinely distinct semantic-owner boundaries rather than arbitrary depth permutations of already-supported rendered owners; image-alt remains #182-dependent, operation-generated Collection projections are deliberately fail-closed/non-portable rather than a residual implementation target, and public embedder exposure remains #191-owned. Native strict `.error` host finalization is bounded by closed/unmerged #386 evidence, and Arkst-specific `check`/`inspect` are bounded as sinkless/fail-closed analysis commands. #197 remains open pending reconciliation of the remaining owned semantic boundaries
-rather than being treated
-as completed merely because evaluator dispatch now exists. Localization ownership remains explicit under #196. This audit does not
+evidenced Unit value-context results, while residual PARTIAL status is now cross-owned rather than #197 production work: image-alt remains #182-owned, upstream `Numbered`'s distinct late-evaluation error path is #181-owned, operation-generated Collection projections are deliberately fail-closed/non-portable rather than a residual implementation target, and public embedder exposure remains #191-owned. Native strict `.error` host finalization is bounded by closed/unmerged #386 evidence, and Arkst-specific `check`/`inspect` are bounded as sinkless/fail-closed analysis commands. #197 is complete as the logger/diagnostic implementation owner after exact upstream error-owner review. Localization ownership remains explicit under #196. This audit does not
 select the next implementation or alter the #157–#169 order.
 
 For #156, the usable reconciliation input is:
