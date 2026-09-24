@@ -1295,7 +1295,6 @@ fn repeated_unit_statements_collapse_to_empty_content_value() {
     );
 }
 
-
 fn collect_inline_explicit_error_messages(inlines: &[IrInline], messages: &mut Vec<String>) {
     for inline in inlines {
         match inline {
@@ -1333,7 +1332,8 @@ fn document_inline_explicit_error_messages(document: &IrDocument) -> Vec<String>
 }
 
 #[test]
-fn evidenced_root_inline_owners_materialize_explicit_error_without_widening_generic_inline_values() {
+fn evidenced_root_inline_owners_materialize_explicit_error_without_widening_generic_inline_values()
+{
     let cases = [
         (
             "# heading-before .error {heading-error} heading-after",
@@ -1372,7 +1372,9 @@ fn evidenced_root_inline_owners_materialize_explicit_error_without_widening_gene
             "{source}: {diagnostics:?}"
         );
         assert!(
-            diagnostics.iter().all(|diagnostic| diagnostic.code == "E3011"),
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "E3011"),
             "{source}: {diagnostics:?}"
         );
         assert_eq!(
@@ -1412,9 +1414,10 @@ fn evidenced_root_image_alt_executes_log_but_consumes_direct_explicit_error_sile
     });
     let image_content = image_content.expect("image must remain present");
     assert!(
-        image_content
-            .iter()
-            .all(|inline| !matches!(inline, IrInline::DirectiveCall { .. } | IrInline::ExplicitError(_))),
+        image_content.iter().all(|inline| !matches!(
+            inline,
+            IrInline::DirectiveCall { .. } | IrInline::ExplicitError(_)
+        )),
         "{image_content:?}"
     );
     let text = image_content

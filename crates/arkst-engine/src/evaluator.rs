@@ -508,9 +508,7 @@ fn node_contains_explicit_error(node: &IrNode) -> bool {
         IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => body
             .as_deref()
             .is_some_and(|body| body.iter().any(node_contains_explicit_error)),
-        IrNode::FunctionDeclaration { body, .. } => {
-            body.iter().any(node_contains_explicit_error)
-        }
+        IrNode::FunctionDeclaration { body, .. } => body.iter().any(node_contains_explicit_error),
         _ => false,
     }
 }
@@ -3232,9 +3230,11 @@ impl Evaluator {
             } = inline
             else {
                 if root_inline_owners {
-                    pending.extend(
-                        self.evaluate_evidenced_root_inline_owner(inline, diagnostics, context),
-                    );
+                    pending.extend(self.evaluate_evidenced_root_inline_owner(
+                        inline,
+                        diagnostics,
+                        context,
+                    ));
                 } else {
                     pending.extend(self.evaluate_inline(inline, diagnostics, context));
                 }
@@ -3261,9 +3261,11 @@ impl Evaluator {
 
             if !native_error_owns_call {
                 if root_inline_owners {
-                    pending.extend(
-                        self.evaluate_evidenced_root_inline_owner(inline, diagnostics, context),
-                    );
+                    pending.extend(self.evaluate_evidenced_root_inline_owner(
+                        inline,
+                        diagnostics,
+                        context,
+                    ));
                 } else {
                     pending.extend(self.evaluate_inline(inline, diagnostics, context));
                 }
@@ -3362,11 +3364,7 @@ impl Evaluator {
                     span,
                 } if root_inline_owners => out.push(IrNode::Heading {
                     level: *level,
-                    content: self.evaluate_evidenced_inline_sequence(
-                        content,
-                        diagnostics,
-                        context,
-                    ),
+                    content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
                     span: *span,
                 }),
                 IrNode::Table { header, rows, span } if root_inline_owners => {
@@ -15090,6 +15088,7 @@ fn inline_source_span(inline: &IrInline) -> SourceSpan {
         | IrInline::SoftBreak { span }
         | IrInline::HardBreak { span }
         | IrInline::RawHtml { span, .. } => *span,
+        IrInline::ExplicitError(error) => error.span,
         IrInline::TargetSpecificContent { content } => content.span,
     }
 }
@@ -15309,7 +15308,8 @@ fn append_opaque_html_inline(inline: &IrInline, output: &mut String) -> Option<(
         | IrInline::Image { .. }
         | IrInline::Code { .. }
         | IrInline::Whitespace { .. }
-        | IrInline::TargetSpecificContent { .. } => return None,
+        | IrInline::TargetSpecificContent { .. }
+        | IrInline::ExplicitError(_) => return None,
     }
     Some(())
 }
@@ -19360,6 +19360,7 @@ fn rebase_dynamic_inlines(inlines: &mut [IrInline], source_span: SourceSpan) {
             | IrInline::SoftBreak { span }
             | IrInline::HardBreak { span }
             | IrInline::RawHtml { span, .. } => *span = source_span,
+            IrInline::ExplicitError(error) => error.span = source_span,
             IrInline::Emphasis { content, span }
             | IrInline::Strong { content, span }
             | IrInline::Strikethrough { content, span } => {

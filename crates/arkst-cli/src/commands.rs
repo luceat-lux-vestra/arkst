@@ -578,10 +578,9 @@ fn collect_evidenced_direct_inline_explicit_errors<'a>(
     for inline in inlines {
         match inline {
             IrInline::ExplicitError(error) => collection.recoverable.push(error),
-            other => collect_unevidenced_explicit_errors_from_inline(
-                other,
-                &mut collection.unevidenced,
-            ),
+            other => {
+                collect_unevidenced_explicit_errors_from_inline(other, &mut collection.unevidenced)
+            }
         }
     }
 }
@@ -598,10 +597,9 @@ fn collect_evidenced_root_paragraph_inline_explicit_errors<'a>(
             | IrInline::Link { content, .. } => {
                 collect_evidenced_direct_inline_explicit_errors(content, collection);
             }
-            other => collect_unevidenced_explicit_errors_from_inline(
-                other,
-                &mut collection.unevidenced,
-            ),
+            other => {
+                collect_unevidenced_explicit_errors_from_inline(other, &mut collection.unevidenced)
+            }
         }
     }
 }

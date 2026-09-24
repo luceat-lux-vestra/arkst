@@ -701,7 +701,6 @@ fn non_explicit_error_diagnostics_still_abort_build_without_artifact() {
     );
 }
 
-
 #[test]
 fn build_recovers_evidenced_root_inline_owner_errors_and_strict_suppresses_artifacts() {
     let cases = [
@@ -768,8 +767,7 @@ fn build_recovers_evidenced_root_inline_owner_errors_and_strict_suppresses_artif
             "{name}: {stderr}"
         );
 
-        let typst =
-            fs::read_to_string(default_dir.path().join(format!("{name}.typ"))).unwrap();
+        let typst = fs::read_to_string(default_dir.path().join(format!("{name}.typ"))).unwrap();
         let before = typst.find(before_text).expect("owner prefix");
         let error = typst.find(message).expect("explicit error message");
         let after = typst.rfind(after_text).expect("owner suffix");
@@ -809,11 +807,7 @@ fn build_recovers_evidenced_root_inline_owner_errors_and_strict_suppresses_artif
 fn nested_unprobed_inline_owner_composition_remains_on_ordinary_fatal_path() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("nested-inline-owner.qd");
-    fs::write(
-        &input,
-        "- *before .error {nested-inline-error} after*\n",
-    )
-    .unwrap();
+    fs::write(&input, "- *before .error {nested-inline-error} after*\n").unwrap();
 
     let output = run_build(&input);
     assert!(!output.status.success(), "{output:?}");
