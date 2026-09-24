@@ -28,6 +28,7 @@ ALLOWED_JOB_WRITE_PERMISSIONS = {
     (".github/workflows/security.yml", "report-failure"): {"issues"},
     (".github/workflows/issue-labeler.yml", "classify"): {"issues"},
     (".github/workflows/pr-labeler.yml", "label"): {"issues", "pull-requests"},
+    (".github/workflows/failure-classification.yml", "classify"): {"pull-requests"},
     (".github/workflows/upstream-quarkdown.yml", "watch"): {"issues"},
 }
 

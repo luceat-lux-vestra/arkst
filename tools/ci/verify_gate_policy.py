@@ -269,13 +269,9 @@ def load_policy(path: Path) -> dict:
             raise PolicyError(
                 f"{path}: {key[0]}#{key[1]} has unsupported required trigger {declared_trigger!r}"
             )
-        if (
-            declared_trigger == "pull_request_target"
-            and key != (".github/workflows/failure-triage.yml", "failure-triage")
-        ):
+        if declared_trigger == "pull_request_target":
             raise PolicyError(
-                f"{path}: pull_request_target is allowed only for the audited "
-                "failure-triage producer"
+                f"{path}: {key[0]}#{key[1]} must not use pull_request_target"
             )
     return policy
 
@@ -353,7 +349,10 @@ def verify_repository(root: Path, policy: dict, ruleset: dict | None = None) -> 
                     f"required producer {key[0]}#{key[1]} has top-level "
                     f"{expected_trigger} paths/paths-ignore filtering"
                 )
-            if trigger.types_restricted and expected_trigger != "pull_request_target":
+            if trigger.types_restricted and key != (
+                ".github/workflows/failure-declaration.yml",
+                "failure-triage",
+            ):
                 raise PolicyError(
                     f"required producer {key[0]}#{key[1]} restricts {expected_trigger} types"
                 )
