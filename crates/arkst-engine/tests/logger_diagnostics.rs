@@ -189,6 +189,56 @@ fn direct_markdown_list_logger_conversion_is_bounded_to_evidenced_source_origin(
 }
 
 #[test]
+fn direct_markdown_list_logger_conversion_preserves_evidenced_source_spelling() {
+    let source_id = SourceId(2001);
+    let cases = [
+        (
+            ".var {values}\n    * alpha\n    * beta\n.log {.values}",
+            "* alpha\n* beta",
+        ),
+        (
+            ".var {values}\n    + alpha\n    + beta\n.log {.values}",
+            "+ alpha\n+ beta",
+        ),
+        (
+            ".var {values}\n    -   alpha\n    -    beta\n.log {.values}",
+            "-   alpha\n-    beta",
+        ),
+        (
+            ".var {values}\n    1. alpha\n    2. beta\n.log {.values}",
+            "1. alpha\n2. beta",
+        ),
+        (
+            ".var {values}\n    - **alpha**\n    - beta *em*\n.log {.values}",
+            "- **alpha**\n- beta *em*",
+        ),
+        (
+            ".var {values}\n    - alpha\n        - nested-a\n        - nested-b\n    - beta\n.log {.values}",
+            "- alpha\n    - nested-a\n    - nested-b\n- beta",
+        ),
+        (
+            ".var {values}\n    - [x] alpha\n    - [ ] beta\n.log {.values}",
+            "- [x] alpha\n- [ ] beta",
+        ),
+        (
+            ".var {values}\n    - alpha\n      continuation\n    - beta\n.log {.values}",
+            "- alpha\n  continuation\n- beta",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let sink = CollectingSink::default();
+        let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+        assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
+        assert!(result.nodes.is_empty(), "{source}: {:?}", result.nodes);
+        let events = sink.events.borrow();
+        assert_eq!(events.len(), 1, "{source}: {events:?}");
+        assert_eq!(events[0].level, LogLevel::Log, "{source}");
+        assert_eq!(events[0].message, expected, "{source}");
+    }
+}
+
+#[test]
 fn operation_generated_collections_remain_fail_closed_at_logger_string_boundary() {
     let source_id = SourceId(1999);
     let cases = [
@@ -220,6 +270,11 @@ fn direct_markdown_list_provenance_does_not_escape_evidenced_variable_boundary()
         ".var {values}\n    - alpha\n    - beta\n.var {alias} {.values}\n.debug {.alias}",
         ".function {make}\n    - alpha\n    - beta\n.var {generated} {.make}\n.debug {.generated}",
         ".var {values}\n    - alpha\n    - beta\n.var {values} {.range {1} {3}::reversed}\n.debug {.values}",
+        ".var {values}\n    - alpha\n    - beta\n.function {show}\n    .debug {.values}\n.show",
+        ".var {suffix} {beta}\n.var {values}\n    - alpha\n    - .suffix\n.debug {.values}",
+        ".var {values}\n    - alpha  \n      hard-break-tail\n.debug {.values}",
+        ".var {values}\n    1. **alpha**\n    2. beta\n.debug {.values}",
+        ".var {values}\n    - alpha\n        - **nested-rich**\n    - beta\n.debug {.values}",
     ];
 
     for source in cases {

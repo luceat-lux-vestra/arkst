@@ -66,6 +66,61 @@ fn build_emits_evidenced_direct_markdown_list_logger_message() {
 }
 
 #[test]
+fn build_preserves_direct_markdown_list_source_spelling_for_log_and_error() {
+    let source = ".var {values}\n    *   alpha\n    * beta *em*\n.log {.values}\n.error {.values}\nvisible\n";
+    let expected = "*   alpha\n* beta *em*";
+
+    let default_dir = tempdir().unwrap();
+    let default_input = default_dir.path().join("default-source-spelling.qd");
+    fs::write(&default_input, source).unwrap();
+    let default = run_build(&default_input);
+    assert!(
+        default.status.success(),
+        "{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(default.stdout).expect("stdout must be UTF-8"),
+        format!("{expected}\n")
+    );
+    let default_stderr = String::from_utf8(default.stderr).expect("stderr must be UTF-8");
+    assert!(
+        default_stderr.contains(&format!(
+            "Cannot call function error(String message) with arguments ({expected}): {expected}"
+        )),
+        "{default_stderr}"
+    );
+    let typst = fs::read_to_string(default_dir.path().join("default-source-spelling.typ")).unwrap();
+    assert!(
+        typst.contains("#raw(\".error {.values}\", block: true)"),
+        "{typst}"
+    );
+    assert!(typst.contains("visible"), "{typst}");
+
+    let strict_dir = tempdir().unwrap();
+    let strict_input = strict_dir.path().join("strict-source-spelling.qd");
+    fs::write(&strict_input, source).unwrap();
+    let strict = run_build_with_args(&strict_input, &["--strict"]);
+    assert_eq!(strict.status.code(), Some(66));
+    assert_eq!(
+        String::from_utf8(strict.stdout).expect("stdout must be UTF-8"),
+        format!("{expected}\n")
+    );
+    assert_eq!(
+        String::from_utf8(strict.stderr).expect("stderr must be UTF-8"),
+        format!(
+            "An error occurred while in strict mode (error code 66)\n\
+             Originated from function: error\n\
+             java.lang.Exception: {expected}\n"
+        )
+    );
+    assert!(!strict_dir
+        .path()
+        .join("strict-source-spelling.typ")
+        .exists());
+}
+
+#[test]
 fn build_recovers_direct_markdown_list_error_and_strict_finalizes() {
     let source = ".var {values}\n    - alpha\n    - beta\n.error {.values}\nvisible\n";
 

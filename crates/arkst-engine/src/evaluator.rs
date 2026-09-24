@@ -83,13 +83,18 @@ use std::rc::{Rc, Weak};
 enum VariableValue {
     Scalar(IrValue),
     Content(Vec<IrNode>),
-    /// A direct source-authored unordered Markdown list retained as content.
+    /// A direct source-authored Markdown list retained as semantic content
+    /// plus its independently evidenced source-spelling String projection.
     ///
-    /// This evaluator-local marker exists only to preserve the independently
-    /// evidenced logger String boundary from clean-room #403. It is not part
-    /// of durable IR, and collection-producing operations deliberately do not
-    /// inherit it.
-    DirectMarkdownList(Vec<IrNode>),
+    /// Clean-room #405 proves marker choice, spacing, ordered numbering,
+    /// emphasis spelling, task markers, nesting, and multiline indentation are
+    /// observable at the logger String boundary. This evaluator-local metadata
+    /// is intentionally absent from durable IR and is never propagated through
+    /// aliases, callable captures, or collection-producing operations.
+    DirectMarkdownList {
+        nodes: Vec<IrNode>,
+        source_text: String,
+    },
 }
 
 impl VariableValue {
@@ -106,25 +111,25 @@ impl VariableValue {
     fn to_value(&self) -> IrValue {
         match self {
             VariableValue::Scalar(value) => value.clone(),
-            VariableValue::Content(nodes) | VariableValue::DirectMarkdownList(nodes) => {
+            VariableValue::Content(nodes) | VariableValue::DirectMarkdownList { nodes, .. } => {
                 IrValue::Content(nodes.clone())
             }
         }
     }
 
-    fn is_direct_markdown_list(&self) -> bool {
-        matches!(self, Self::DirectMarkdownList(_))
+    fn direct_markdown_list_text(&self) -> Option<&str> {
+        match self {
+            Self::DirectMarkdownList { source_text, .. } => Some(source_text),
+            _ => None,
+        }
     }
 
-    fn mark_direct_markdown_list(&mut self) -> bool {
+    fn mark_direct_markdown_list(&mut self, source_text: String) -> bool {
         let Self::Content(nodes) = self else {
             return false;
         };
-        let [IrNode::UnorderedList { .. }] = nodes.as_slice() else {
-            return false;
-        };
         let nodes = std::mem::take(nodes);
-        *self = Self::DirectMarkdownList(nodes);
+        *self = Self::DirectMarkdownList { nodes, source_text };
         true
     }
 }
@@ -1903,26 +1908,22 @@ impl<'a> EvaluationContext<'a> {
         self.assigned_variables.clone()
     }
 
-    /// Marks the actual variable owner as the exact direct Markdown-list
-    /// provenance evidenced for logger String conversion.
+    /// Marks only a variable owner in this exact scope with the evidenced
+    /// direct Markdown-list source spelling.
     ///
-    /// The ordinary assignment above has already recorded the pre-write value
-    /// in the current savepoint, so this metadata refinement participates in
-    /// the same rollback entry rather than creating a second transaction path.
-    fn mark_direct_markdown_list_owner(&mut self, name: &str) -> bool {
-        if let Some(parent) = self.parent.as_mut() {
-            if parent.mark_direct_markdown_list_owner(name) {
-                return true;
-            }
+    /// #404/#405 deliberately do not authorize provenance to cross a parent
+    /// scope boundary. The ordinary assignment above has already recorded the
+    /// pre-write value in the current savepoint, so this metadata refinement
+    /// participates in the same rollback entry rather than creating a second
+    /// transaction path.
+    fn mark_direct_markdown_list_owner(&mut self, name: &str, source_text: String) -> bool {
+        if !self.variable_owners.contains(name) {
+            return false;
         }
-        if self.variable_owners.contains(name) {
-            self.record_variable_before(name);
-            return self
-                .variables
-                .get_mut(name)
-                .is_some_and(VariableValue::mark_direct_markdown_list);
-        }
-        false
+        self.record_variable_before(name);
+        self.variables
+            .get_mut(name)
+            .is_some_and(|value| value.mark_direct_markdown_list(source_text))
     }
 
     /// Publishes a successful nested callable assignment into an actual
@@ -4179,6 +4180,7 @@ impl Evaluator {
                 positional_args,
                 named_args,
                 body,
+                raw_body,
                 span,
                 diagnostics,
                 context,
@@ -6286,10 +6288,12 @@ impl Evaluator {
         else {
             return CallOutcome::Failed;
         };
-        let direct_markdown_list = implicit_argument.is_none()
-            && named_args.is_empty()
-            && positional_args.len() == 1
-            && direct_markdown_list_variable_reference(&positional_args[0], context);
+        let direct_markdown_list =
+            if implicit_argument.is_none() && named_args.is_empty() && positional_args.len() == 1 {
+                direct_markdown_list_variable_text(&positional_args[0], context)
+            } else {
+                None
+            };
         let message = match builtins::logger_string_conversion(&argument, direct_markdown_list) {
             Ok(message) => message,
             Err(error) => {
@@ -18380,18 +18384,18 @@ fn call_result_origin(name: &str, context: &EvaluationContext<'_>) -> ValueOrigi
     }
 }
 
-/// Returns whether this exact raw argument is a direct variable reference whose
-/// stored value came from one source-authored unordered Markdown list block.
+/// Returns the evidenced source-spelling String only when this exact raw
+/// argument is a direct reference to a direct-list variable owned by the same
+/// evaluation scope.
 ///
-/// The gate intentionally does not follow aliases, chains, callable results,
-/// conditionals, or collection transforms. Those shapes were not promoted by
-/// clean-room #403 and remain fail-closed.
-fn direct_markdown_list_variable_reference(
+/// The gate intentionally does not follow parent scopes, aliases, chains,
+/// callable captures/results, conditionals, or collection transforms.
+fn direct_markdown_list_variable_text<'a>(
     value: &IrValue,
-    context: &EvaluationContext<'_>,
-) -> bool {
+    context: &'a EvaluationContext<'_>,
+) -> Option<&'a str> {
     let IrValue::Content(nodes) = value else {
-        return false;
+        return None;
     };
     let [IrNode::FunctionCall {
         name,
@@ -18401,7 +18405,7 @@ fn direct_markdown_list_variable_reference(
         ..
     }] = nodes.as_slice()
     else {
-        return false;
+        return None;
     };
     if !is_variable_reference_call(
         name,
@@ -18410,11 +18414,98 @@ fn direct_markdown_list_variable_reference(
         body.as_deref().map(CallBody::Block),
         context,
     ) {
-        return false;
+        return None;
     }
     context
+        .variables
         .get(name)
-        .is_some_and(VariableValue::is_direct_markdown_list)
+        .and_then(VariableValue::direct_markdown_list_text)
+}
+
+fn direct_markdown_list_source_text(
+    body: CallBody<'_>,
+    raw_body: Option<&IrRawBody>,
+) -> Option<String> {
+    let CallBody::Block(nodes) = body else {
+        return None;
+    };
+    if !source_stable_markdown_list_body(nodes) {
+        return None;
+    }
+    raw_body.and_then(value_conversion::raw_body_dynamic_text)
+}
+
+/// #405's promoted matrix is deliberately narrower than arbitrary Markdown.
+///
+/// Accepted source shapes are exactly the independently evidenced families:
+/// - unordered lists with plain text, source-preserved strong/emphasis, one
+///   soft multiline continuation, or task markers;
+/// - one plain nested unordered-list level under an unordered item;
+/// - plain ordered-list items.
+///
+/// Hard breaks, multiple paragraphs per item, rich ordered items, nested rich
+/// items, directives, and other unreviewed combinations remain fail-closed.
+fn source_stable_markdown_list_body(nodes: &[IrNode]) -> bool {
+    match nodes {
+        [IrNode::UnorderedList { items, .. }] => source_stable_unordered_list_items(items),
+        [IrNode::OrderedList { items, .. }] => source_stable_ordered_list_items(items),
+        _ => false,
+    }
+}
+
+fn source_stable_unordered_list_items(items: &[IrListItem]) -> bool {
+    items.iter().all(|item| match item.nodes.as_slice() {
+        [IrNode::Paragraph { content, .. }] if item.task.is_some() => {
+            content.iter().all(source_stable_plain_list_inline)
+        }
+        [IrNode::Paragraph { content, .. }] => {
+            content.iter().all(source_stable_unordered_list_inline)
+        }
+        [IrNode::Paragraph { content, .. }, IrNode::UnorderedList {
+            items: nested_items,
+            ..
+        }] if item.task.is_none() => {
+            content.iter().all(source_stable_plain_list_inline)
+                && source_stable_nested_unordered_list_items(nested_items)
+        }
+        _ => false,
+    })
+}
+
+fn source_stable_nested_unordered_list_items(items: &[IrListItem]) -> bool {
+    items.iter().all(|item| {
+        item.task.is_none()
+            && matches!(
+                item.nodes.as_slice(),
+                [IrNode::Paragraph { content, .. }]
+                    if content.iter().all(source_stable_plain_list_inline)
+            )
+    })
+}
+
+fn source_stable_ordered_list_items(items: &[IrListItem]) -> bool {
+    items.iter().all(|item| {
+        item.task.is_none()
+            && matches!(
+                item.nodes.as_slice(),
+                [IrNode::Paragraph { content, .. }]
+                    if content.iter().all(source_stable_plain_list_inline)
+            )
+    })
+}
+
+fn source_stable_plain_list_inline(inline: &IrInline) -> bool {
+    matches!(inline, IrInline::Text { .. })
+}
+
+fn source_stable_unordered_list_inline(inline: &IrInline) -> bool {
+    match inline {
+        IrInline::Text { .. } | IrInline::SoftBreak { .. } => true,
+        IrInline::Emphasis { content, .. } | IrInline::Strong { content, .. } => {
+            content.iter().all(source_stable_plain_list_inline)
+        }
+        _ => false,
+    }
 }
 
 /// Decides whether a conditional's content is taken.
@@ -18646,6 +18737,7 @@ impl Evaluator {
         positional_args: &[IrValue],
         named_args: &[IrNamedArg],
         body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
         span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
@@ -18687,6 +18779,7 @@ impl Evaluator {
         }
 
         if let Some(body) = body {
+            let direct_markdown_list_text = direct_markdown_list_source_text(body, raw_body);
             let outcome =
                 match body {
                     CallBody::Block(nodes) => value_context_outcome(
@@ -18701,19 +18794,19 @@ impl Evaluator {
                 };
             match outcome {
                 CallOutcome::Value(value) => {
-                    let direct_markdown_list = matches!(
-                        body,
-                        CallBody::Block(nodes)
-                            if matches!(nodes, [IrNode::UnorderedList { .. }])
-                    ) && matches!(
+                    let evaluated_list = matches!(
                         &value,
                         IrValue::Content(nodes)
-                            if matches!(nodes.as_slice(), [IrNode::UnorderedList { .. }])
+                            if matches!(
+                                nodes.as_slice(),
+                                [IrNode::UnorderedList { .. } | IrNode::OrderedList { .. }]
+                            )
                     );
                     context.assign_value(var_name.clone(), value);
-                    if direct_markdown_list {
-                        let marked = context.mark_direct_markdown_list_owner(&var_name);
-                        debug_assert!(marked, "new .var owner must retain direct-list provenance");
+                    if evaluated_list {
+                        if let Some(source_text) = direct_markdown_list_text {
+                            let _ = context.mark_direct_markdown_list_owner(&var_name, source_text);
+                        }
                     }
                     return CallOutcome::NoValue;
                 }
