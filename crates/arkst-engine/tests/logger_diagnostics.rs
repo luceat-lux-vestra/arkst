@@ -1387,53 +1387,6 @@ fn evidenced_root_inline_owners_materialize_explicit_error_without_widening_gene
 }
 
 #[test]
-fn evidenced_root_image_alt_executes_log_but_consumes_direct_explicit_error_silently() {
-    let source_id = SourceId(2110);
-    let sink = CollectingSink::default();
-    let source =
-        "outer-before ![img-before .log {img-log} .error {img-error} img-after](image.png) outer-after";
-    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
-
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let events = sink.events.borrow();
-    assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0].level, LogLevel::Log);
-    assert_eq!(events[0].message, "img-log");
-    drop(events);
-
-    let image_content = result.nodes.iter().find_map(|node| {
-        let IrNode::Paragraph { content, .. } = node else {
-            return None;
-        };
-        content.iter().find_map(|inline| {
-            let IrInline::Image { content, .. } = inline else {
-                return None;
-            };
-            Some(content)
-        })
-    });
-    let image_content = image_content.expect("image must remain present");
-    assert!(
-        image_content.iter().all(|inline| !matches!(
-            inline,
-            IrInline::DirectiveCall { .. } | IrInline::ExplicitError(_)
-        )),
-        "{image_content:?}"
-    );
-    let text = image_content
-        .iter()
-        .filter_map(|inline| match inline {
-            IrInline::Text { content, .. } => Some(content.as_str()),
-            _ => None,
-        })
-        .collect::<String>();
-    assert!(text.contains("img-before"), "{text:?}");
-    assert!(text.contains("img-after"), "{text:?}");
-    assert!(!text.contains("img-log"), "{text:?}");
-    assert!(!text.contains("img-error"), "{text:?}");
-}
-
-#[test]
 fn evidenced_nested_inline_owner_compositions_materialize_explicit_error() {
     let cases = [
         (

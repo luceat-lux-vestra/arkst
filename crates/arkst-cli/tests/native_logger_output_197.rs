@@ -878,3 +878,71 @@ fn build_preserves_evidenced_nested_inline_owner_compositions() {
         );
     }
 }
+
+
+#[test]
+fn build_matches_evidenced_root_image_alt_logger_and_error_semantics() {
+    let source =
+        "outer-before ![img-before .log {img-log} .error {img-error} img-after](image.png) outer-after\n";
+
+    let default_dir = tempdir().unwrap();
+    let default_input = default_dir.path().join("image-alt.qd");
+    fs::write(&default_input, source).unwrap();
+    fs::write(
+        default_dir.path().join("image.png"),
+        [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
+            0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00,
+            0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+            0x44, 0xae, 0x42, 0x60, 0x82,
+        ],
+    )
+    .unwrap();
+
+    let default = run_build(&default_input);
+    assert!(
+        default.status.success(),
+        "{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(default.stdout).expect("stdout must be UTF-8"),
+        "img-log\n"
+    );
+    assert!(
+        String::from_utf8(default.stderr)
+            .expect("stderr must be UTF-8")
+            .is_empty()
+    );
+    let typst = fs::read_to_string(default_dir.path().join("image-alt.typ")).unwrap();
+    assert!(typst.contains("#image(\"image.png\")"), "{typst}");
+    assert!(!typst.contains("img-error"), "{typst}");
+    assert!(!typst.contains("Error: error"), "{typst}");
+
+    let strict_dir = tempdir().unwrap();
+    let strict_input = strict_dir.path().join("image-alt.qd");
+    fs::write(&strict_input, source).unwrap();
+    fs::copy(
+        default_dir.path().join("image.png"),
+        strict_dir.path().join("image.png"),
+    )
+    .unwrap();
+    let strict = run_build_with_args(&strict_input, &["--strict"]);
+    assert!(
+        strict.status.success(),
+        "{}",
+        String::from_utf8_lossy(&strict.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(strict.stdout).expect("stdout must be UTF-8"),
+        "img-log\n"
+    );
+    assert!(
+        String::from_utf8(strict.stderr)
+            .expect("stderr must be UTF-8")
+            .is_empty()
+    );
+    assert!(strict_dir.path().join("image-alt.typ").exists());
+}
