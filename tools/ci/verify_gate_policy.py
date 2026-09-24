@@ -161,12 +161,33 @@ def parse_workflow(path: Path, root: Path) -> Workflow:
                                 path_filtered = True
                             elif key == "types":
                                 types_restricted = True
-                                parsed_types = _inline_list((key_match.group(2) or "").strip())
-                                if parsed_types is None:
+                                raw_types = (key_match.group(2) or "").strip()
+                                parsed_types = _inline_list(raw_types)
+                                if parsed_types is not None:
+                                    trigger_types = tuple(parsed_types)
+                                elif raw_types:
                                     raise PolicyError(
-                                        f"{rel}: required PR event types must use inline-list syntax"
+                                        f"{rel}: required PR event types must use a simple scalar list"
                                     )
-                                trigger_types = tuple(parsed_types)
+                                else:
+                                    block_types: list[str] = []
+                                    item = sub + 1
+                                    while item < len(lines):
+                                        item_raw = lines[item]
+                                        item_stripped = _strip_comment(item_raw).strip()
+                                        if not item_stripped:
+                                            item += 1
+                                            continue
+                                        item_ind = _indent(item_raw)
+                                        if item_ind <= 4:
+                                            break
+                                        if item_ind != 6 or not item_stripped.startswith("- "):
+                                            raise PolicyError(
+                                                f"{rel}: required PR event types must use a simple scalar list"
+                                            )
+                                        block_types.append(_scalar(item_stripped[2:].strip()))
+                                        item += 1
+                                    trigger_types = tuple(block_types)
                     sub += 1
             triggers[event] = Trigger(event, path_filtered, types_restricted, trigger_types)
             idx += 1
