@@ -281,6 +281,43 @@ rationale = "unprivileged exact-PR declaration fixture"
         policy = mod.load_policy(root / ".github" / "gate-policy.toml")
         mod.verify_repository(root, policy, ruleset(["fmt", "failure-triage"]))
 
+    def test_failure_declaration_requires_canonical_event_types(self):
+        declaration_workflow = """
+name: Failure triage
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, edited]
+permissions: {}
+jobs:
+  failure-triage:
+    name: failure-triage
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+"""
+        declaration_policy = POLICY + """
+[[producer]]
+workflow = ".github/workflows/failure-declaration.yml"
+job = "failure-triage"
+trigger = "pull_request"
+classification = "required"
+contexts = ["failure-triage"]
+always_present = true
+rationale = "unprivileged exact-PR declaration fixture"
+"""
+        tmp, root, _ = self.make_repo(policy=declaration_policy)
+        self.addCleanup(tmp.cleanup)
+        (root / ".github" / "workflows" / "failure-declaration.yml").write_text(
+            textwrap.dedent(declaration_workflow).lstrip(), encoding="utf-8"
+        )
+        policy = mod.load_policy(root / ".github" / "gate-policy.toml")
+        with self.assertRaisesRegex(
+            mod.PolicyError,
+            "failure declaration must run on exactly opened/reopened/synchronize/edited",
+        ):
+            mod.verify_repository(root, policy, ruleset(["fmt", "failure-triage"]))
+
     def test_failure_declaration_pull_request_target_regression_fails_closed(self):
         bad_policy = POLICY + """
 [[producer]]
