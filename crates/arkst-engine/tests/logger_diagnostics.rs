@@ -1433,7 +1433,6 @@ fn evidenced_root_image_alt_executes_log_but_consumes_direct_explicit_error_sile
     assert!(!text.contains("img-error"), "{text:?}");
 }
 
-
 #[test]
 fn evidenced_nested_inline_owner_compositions_materialize_explicit_error() {
     let cases = [

@@ -689,12 +689,7 @@ fn collect_explicit_error_components<'a>(
                 false,
             ),
             IrNode::Blockquote { content, .. } => {
-                collect_evidenced_nested_explicit_errors(
-                    content,
-                    &mut collection,
-                    false,
-                    true,
-                );
+                collect_evidenced_nested_explicit_errors(content, &mut collection, false, true);
             }
             IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => {
                 for item in items {
