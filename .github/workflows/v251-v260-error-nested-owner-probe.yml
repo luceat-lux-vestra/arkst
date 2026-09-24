@@ -1,0 +1,98 @@
+name: Quarkdown nested explicit-error owner probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v2.5.1
+            sha256: 5751ab608fcb4daa2ec857a3368c029beed5429554ae0bdd95c660b2706269e9
+          - version: v2.6.0
+            sha256: 5b015e47c820d06ff6774eb700e60d77bc575819d4a0140cc7f1a115e7ce6dc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch exact official distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ matrix.version }}'
+          archive="/tmp/quarkdown-${version}.zip"
+          dist="/tmp/quarkdown-${version}"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20             -o "$archive"             "https://github.com/iamgio/quarkdown/releases/download/${version}/quarkdown-linux-x64.zip"
+          printf '%s  %s\n' '${{ matrix.sha256 }}' "$archive" | sha256sum -c -
+          mkdir -p "$dist"
+          unzip -q "$archive" -d "$dist"
+          qd="$(find "$dist" -type f -name quarkdown -perm -111 -print -quit)"
+          test -n "$qd"
+          printf 'QD=%s\n' "$qd" >> "$GITHUB_ENV"
+          "$qd" --version
+      - name: Probe nested owner compositions
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="/tmp/error-nested-owner-${{ matrix.version }}"
+          rm -rf "$root"
+          mkdir -p "$root"
+
+          cat > "$root/list-emphasis.qd" <<'QD'
+          - item-before *em-before .error {QD197_NEST_LIST_EM} em-after* item-after
+          QD
+          cat > "$root/ordered-link.qd" <<'QD'
+          1. item-before [link-before .error {QD197_NEST_ORDERED_LINK} link-after](https://example.com) item-after
+          QD
+          cat > "$root/blockquote-strong.qd" <<'QD'
+          > quote-before **strong-before .error {QD197_NEST_QUOTE_STRONG} strong-after** quote-after
+          QD
+          cat > "$root/emphasis-link.qd" <<'QD'
+          outer-before *em-before [link-before .error {QD197_NEST_EM_LINK} link-after](https://example.com) em-after* outer-after
+          QD
+          cat > "$root/link-strong.qd" <<'QD'
+          outer-before [link-before **strong-before .error {QD197_NEST_LINK_STRONG} strong-after** link-after](https://example.com) outer-after
+          QD
+          cat > "$root/table-strong.qd" <<'QD'
+          | value |
+          | --- |
+          | cell-before **strong-before .error {QD197_NEST_TABLE_STRONG} strong-after** cell-after |
+          QD
+
+          run_case() {
+            fixture="$1"
+            marker="$2"
+            mode="$3"
+            out="$root/out-$fixture-$mode"
+            args=(compile "$root/$fixture.qd" --clean --out "$out" --out-name probe)
+            if [ "$mode" = strict ]; then
+              args+=(--strict)
+            fi
+            set +e
+            "$QD" "${args[@]}" >"$root/$fixture-$mode.stdout" 2>"$root/$fixture-$mode.stderr"
+            rc=$?
+            set -e
+            html="$(find "$out" -type f -name '*.html' -print -quit 2>/dev/null || true)"
+            printf 'QD197-NEST version=%s fixture=%s mode=%s rc=%s html=%s stderr_marker=%s\n'               '${{ matrix.version }}' "$fixture" "$mode" "$rc"               "$([ -n "$html" ] && echo yes || echo no)"               "$(grep -Fq "$marker" "$root/$fixture-$mode.stderr" && echo yes || echo no)"
+            if [ -n "$html" ]; then
+              printf 'QD197-NEST-HTML fixture=%s mode=%s marker_count=%s source_echo_count=%s\n'                 "$fixture" "$mode"                 "$(grep -oF "$marker" "$html" | wc -l | tr -d ' ')"                 "$(grep -oF ".error {$marker}" "$html" | wc -l | tr -d ' ')"
+            fi
+          }
+
+          for mode in default strict; do
+            run_case list-emphasis QD197_NEST_LIST_EM "$mode"
+            run_case ordered-link QD197_NEST_ORDERED_LINK "$mode"
+            run_case blockquote-strong QD197_NEST_QUOTE_STRONG "$mode"
+            run_case emphasis-link QD197_NEST_EM_LINK "$mode"
+            run_case link-strong QD197_NEST_LINK_STRONG "$mode"
+            run_case table-strong QD197_NEST_TABLE_STRONG "$mode"
+          done
