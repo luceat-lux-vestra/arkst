@@ -1522,22 +1522,21 @@ pub(crate) fn scalar_string_conversion(
 /// observed by clean-room #395 across left/right/balanced nesting through
 /// depth 4 (including Range/None members), and the observed flat ordered
 /// Dictionary shape with string keys and scalar entry text/number values.
-/// Clean-room #403 further proves that only a Collection originating directly
-/// from a Markdown list uses Markdown-list text; operation-generated
-/// Collections use distinct JVM object projections. The evaluator therefore
-/// supplies an explicit provenance gate, and this adapter accepts only the
-/// exact retained unordered-list content shape behind that gate.
+/// Clean-room #403 proves that only a Collection originating directly from a
+/// Markdown list uses Markdown-list text, while #405 proves that projection is
+/// source-spelling-sensitive. The evaluator therefore supplies the exact
+/// source-backed String only for the independently evidenced direct-variable
+/// provenance boundary; operation-generated Collections remain fail-closed.
 pub(crate) fn logger_string_conversion(
     value: &InvocationValue,
-    direct_markdown_list: bool,
+    direct_markdown_list: Option<&str>,
 ) -> Result<String, value_conversion::ConversionError> {
     match scalar_string_conversion(value) {
         Ok(value) => Ok(value),
         Err(error) => logger_structured_string_value(&value.value)
-            .or_else(|| {
-                direct_markdown_list
-                    .then(|| logger_direct_markdown_list_string(&value.value))
-                    .flatten()
+            .or_else(|| match (&value.value, direct_markdown_list) {
+                (IrValue::Content(_), Some(source_text)) => Some(source_text.to_string()),
+                _ => None,
             })
             .ok_or(error),
     }
@@ -1595,36 +1594,6 @@ fn logger_structured_string_value(value: &IrValue) -> Option<String> {
         | IrValue::Color(_)
         | IrValue::Enum(_) => None,
     }
-}
-
-fn logger_direct_markdown_list_string(value: &IrValue) -> Option<String> {
-    let IrValue::Content(nodes) = value else {
-        return None;
-    };
-    let [IrNode::UnorderedList { items, .. }] = nodes.as_slice() else {
-        return None;
-    };
-
-    let mut rendered = String::new();
-    for (index, item) in items.iter().enumerate() {
-        if item.task.is_some() {
-            return None;
-        }
-        let [IrNode::Paragraph { content, .. }] = item.nodes.as_slice() else {
-            return None;
-        };
-        if index > 0 {
-            rendered.push('\n');
-        }
-        rendered.push_str("- ");
-        for inline in content {
-            let IrInline::Text { content, .. } = inline else {
-                return None;
-            };
-            rendered.push_str(content);
-        }
-    }
-    Some(rendered)
 }
 
 fn logger_pair_member_string(value: &IrValue) -> Option<String> {

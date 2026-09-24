@@ -402,9 +402,12 @@ unmerged clean-room PR #390 extends identical v2.5.1/v2.6.0 evidence to all
 Range endpoint shapes, initial nested Pair compositions, and the flat ordered
 Dictionary scalar-entry JVM-style projection. Closed/unmerged clean-room #395
 then confirms recursive Pair projection across left/right/balanced nesting
-through depth 4 with Range/None members. Closed/unmerged #403 refines Collection conversion:
-the evaluator-retained direct unordered Markdown-list origin is now supported as Markdown list
-text, while operation-generated Collections remain intentionally fail-closed because they use
+through depth 4 with Range/None members. Closed/unmerged #403 refines Collection conversion,
+and closed/unmerged #405 fixes the direct-list source-spelling contract: Arkst retains the
+source-backed `trimIndent().trimEnd()` body as evaluator-local metadata for the bounded same-scope
+direct variable-reference path, preserving the evidenced unordered marker/spacing, ordered
+numbering, strong/emphasis spelling, one nested unordered-list level, task markers, and multiline
+continuation. Operation-generated Collections remain intentionally fail-closed because they use
 different JVM object projections and may contain unstable runtime context identities. The generic
 scalar String adapter remains unchanged.
 Native `arkst build` supplies an explicit host-owned logger sink and writes
@@ -429,8 +432,7 @@ standalone document output, `.debug` is silent in the distributed CLI, and
 capturing either result in value context yields `kotlin.Unit` rather than
 Quarkdown `none`. Clean-room PR #378 fixes the initial logger-only dynamic String subset; closed
 unmerged #390 extends the bounded production claim to all Range endpoint shapes,
-initial nested Pair compositions, and the flat ordered Dictionary scalar-entry projection; closed/unmerged #395 confirms recursive Pair composition through depth 4 across left/right/balanced shapes with Range/None members, without widening unrelated generic String consumers. The #403-evidenced direct unordered Markdown-list origin is inside this bounded
-claim; operation-generated Collections remain outside it.
+initial nested Pair compositions, and the flat ordered Dictionary scalar-entry projection; closed/unmerged #395 confirms recursive Pair composition through depth 4 across left/right/balanced shapes with Range/None members, without widening unrelated generic String consumers. The #403/#405-evidenced direct Markdown-list origin is inside this bounded claim through evaluator-local raw-body source spelling and a same-scope direct variable reference; aliases, callable captures/results, directive-bearing list bodies, and operation-generated Collections remain outside it.
 `.error` is a failed call that renders an error component while caller/top-level
 content continues in non-strict mode. Clean-room PR #385 additionally pins that
 selected conditional/function body content around the error is replaced by the
