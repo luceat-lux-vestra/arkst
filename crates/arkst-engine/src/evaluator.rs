@@ -473,14 +473,44 @@ fn component_contains_explicit_error(component: &IrComponent) -> bool {
     }
 }
 
+fn inline_contains_explicit_error(inline: &IrInline) -> bool {
+    match inline {
+        IrInline::ExplicitError(_) => true,
+        IrInline::Emphasis { content, .. }
+        | IrInline::Strong { content, .. }
+        | IrInline::Strikethrough { content, .. }
+        | IrInline::Link { content, .. }
+        | IrInline::Image { content, .. } => content.iter().any(inline_contains_explicit_error),
+        IrInline::DirectiveCall { body, .. } | IrInline::ChainedDirectiveCall { body, .. } => body
+            .as_deref()
+            .is_some_and(|body| body.iter().any(inline_contains_explicit_error)),
+        _ => false,
+    }
+}
+
 fn node_contains_explicit_error(node: &IrNode) -> bool {
     match node {
+        IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
+            content.iter().any(inline_contains_explicit_error)
+        }
         IrNode::Component { component } => component_contains_explicit_error(component),
         IrNode::Blockquote { content, .. } => content.iter().any(node_contains_explicit_error),
         IrNode::UnorderedList { items, .. } | IrNode::OrderedList { items, .. } => items
             .iter()
             .flat_map(|item| &item.nodes)
             .any(node_contains_explicit_error),
+        IrNode::Table { header, rows, .. } => header
+            .cells
+            .iter()
+            .chain(rows.iter().flat_map(|row| &row.cells))
+            .flat_map(|cell| &cell.content)
+            .any(inline_contains_explicit_error),
+        IrNode::FunctionCall { body, .. } | IrNode::ChainedFunctionCall { body, .. } => body
+            .as_deref()
+            .is_some_and(|body| body.iter().any(node_contains_explicit_error)),
+        IrNode::FunctionDeclaration { body, .. } => {
+            body.iter().any(node_contains_explicit_error)
+        }
         _ => false,
     }
 }
@@ -2859,7 +2889,8 @@ impl Evaluator {
         // Top-level paragraphs are an independently evidenced output owner for inline `.error`.
         // Keep this opt-in at the document boundary rather than widening generic paragraph
         // evaluation used by callable, conditional, include, and value/content paths.
-        let nodes = self.evaluate_evidenced_structural_nodes(&document.nodes, diagnostics, context);
+        let nodes =
+            self.evaluate_evidenced_structural_nodes(&document.nodes, diagnostics, context, true);
         (
             IrDocument {
                 nodes,
@@ -2894,15 +2925,13 @@ impl Evaluator {
     /// materializing the error itself as block output. Ordinary inline
     /// component materialization remains fail-closed elsewhere; callers must
     /// opt into this adapter only at an evidenced output boundary.
-    fn evaluate_evidenced_structural_paragraph(
+    fn evaluate_evidenced_inline_sequence(
         &self,
         content: &[IrInline],
-        paragraph_span: &SourceSpan,
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
-    ) -> Vec<IrNode> {
-        let mut nodes = Vec::new();
-        let mut pending = Vec::new();
+    ) -> Vec<IrInline> {
+        let mut out = Vec::new();
 
         for inline in content {
             let IrInline::DirectiveCall {
@@ -2915,7 +2944,7 @@ impl Evaluator {
                 ..
             } = inline
             else {
-                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                out.extend(self.evaluate_inline(inline, diagnostics, context));
                 continue;
             };
 
@@ -2938,7 +2967,306 @@ impl Evaluator {
                 );
 
             if !native_error_owns_call {
-                pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                out.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            }
+
+            let before = diagnostics.len();
+            let outcome = self.evaluate_call_value_with_ordered(
+                name,
+                ordered_args.as_deref(),
+                positional_args,
+                named_args,
+                call_body,
+                None,
+                None,
+                span,
+                diagnostics,
+                context,
+            );
+
+            match outcome {
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(error)))
+                    if diagnostics.len() > before
+                        && diagnostics[before..]
+                            .iter()
+                            .all(is_explicit_error_diagnostic) =>
+                {
+                    out.push(IrInline::ExplicitError(error));
+                }
+                CallOutcome::Value(value) => {
+                    out.extend(self.materialize_inline_value(Some(value), span, diagnostics));
+                }
+                CallOutcome::NoValue | CallOutcome::Failed => {}
+                CallOutcome::Unresolved => {
+                    out.extend(
+                        self.preserve_inline_call(
+                            name,
+                            ordered_args.as_deref(),
+                            positional_args,
+                            named_args,
+                            body.as_deref(),
+                            span,
+                            diagnostics,
+                            context,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+
+        out
+    }
+
+    fn evaluate_evidenced_image_alt(
+        &self,
+        content: &[IrInline],
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrInline> {
+        let mut out = Vec::new();
+
+        for inline in content {
+            let IrInline::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                ordered_args,
+                body,
+                span,
+                ..
+            } = inline
+            else {
+                out.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            };
+
+            let call_body = body.as_deref().map(CallBody::Inline);
+            let native_error_owns_call = name == "error"
+                && context.get_function(name).is_none()
+                && !is_variable_reference_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                )
+                && !is_variable_reassignment_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                );
+
+            if !native_error_owns_call {
+                out.extend(self.evaluate_inline(inline, diagnostics, context));
+                continue;
+            }
+
+            let before = diagnostics.len();
+            let outcome = self.evaluate_call_value_with_ordered(
+                name,
+                ordered_args.as_deref(),
+                positional_args,
+                named_args,
+                call_body,
+                None,
+                None,
+                span,
+                diagnostics,
+                context,
+            );
+
+            if matches!(
+                outcome,
+                CallOutcome::Value(IrValue::Component(IrComponent::ExplicitError(_)))
+            ) && diagnostics.len() > before
+                && diagnostics[before..]
+                    .iter()
+                    .all(is_explicit_error_diagnostic)
+            {
+                diagnostics.truncate(before);
+                continue;
+            }
+
+            match outcome {
+                CallOutcome::Value(value) => {
+                    out.extend(self.materialize_inline_value(Some(value), span, diagnostics));
+                }
+                CallOutcome::NoValue | CallOutcome::Failed => {}
+                CallOutcome::Unresolved => {
+                    out.extend(
+                        self.preserve_inline_call(
+                            name,
+                            ordered_args.as_deref(),
+                            positional_args,
+                            named_args,
+                            body.as_deref(),
+                            span,
+                            diagnostics,
+                            context,
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+
+        out
+    }
+
+    fn evaluate_evidenced_root_inline_owner(
+        &self,
+        inline: &IrInline,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+    ) -> Vec<IrInline> {
+        match inline {
+            IrInline::Emphasis { content, span } => vec![IrInline::Emphasis {
+                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                span: *span,
+            }],
+            IrInline::Strong { content, span } => vec![IrInline::Strong {
+                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                span: *span,
+            }],
+            IrInline::Strikethrough { content, span } => vec![IrInline::Strikethrough {
+                content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                span: *span,
+            }],
+            IrInline::Link {
+                content,
+                destination,
+                title,
+                span,
+            } => {
+                if let Some(reference) = markdown_subdocument_link_reference(destination) {
+                    if let Some(provider) = context.resources {
+                        let provenance_source_id = span.source_id;
+                        let Some(source_mode) = context.source_mode(provenance_source_id) else {
+                            diagnostics.push(resource_diagnostic(
+                                "E9001",
+                                format!(
+                                    "Markdown subdocument link has no parser-mode provenance for source identity {provenance_source_id:?}"
+                                ),
+                                *span,
+                                "Resource-backed evaluation must register the actual parser mode for every source identity before consuming source-backed links.",
+                            ));
+                            return Vec::new();
+                        };
+                        if source_mode == Mode::Quarkdown {
+                            let Some(resource_base_source_id) = context.current_source else {
+                                diagnostics.push(resource_diagnostic(
+                                    "E9001",
+                                    "Markdown subdocument link has no active resource-base source identity",
+                                    *span,
+                                    "Resource-backed Quarkdown link validation requires an active logical source base; diagnostic provenance may use a distinct source identity.",
+                                ));
+                                return Vec::new();
+                            };
+                            if reject_host_filesystem_reference_for_subject(
+                                "Markdown subdocument link",
+                                reference,
+                                *span,
+                                diagnostics,
+                            ) {
+                                return Vec::new();
+                            }
+                            if let Err(error) =
+                                provider.read_source(resource_base_source_id, reference)
+                            {
+                                diagnostics.push(resource_access_diagnostic_for_subject(
+                                    "Markdown subdocument link",
+                                    error,
+                                    *span,
+                                ));
+                                return Vec::new();
+                            }
+                        }
+                    }
+                }
+                vec![IrInline::Link {
+                    content: self.evaluate_evidenced_inline_sequence(content, diagnostics, context),
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    span: *span,
+                }]
+            }
+            IrInline::Image {
+                content,
+                destination,
+                title,
+                span,
+            } => vec![IrInline::Image {
+                content: self.evaluate_evidenced_image_alt(content, diagnostics, context),
+                destination: destination.clone(),
+                title: title.clone(),
+                span: *span,
+            }],
+            other => self.evaluate_inline(other, diagnostics, context),
+        }
+    }
+
+    fn evaluate_evidenced_structural_paragraph(
+        &self,
+        content: &[IrInline],
+        paragraph_span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        root_inline_owners: bool,
+    ) -> Vec<IrNode> {
+        let mut nodes = Vec::new();
+        let mut pending = Vec::new();
+
+        for inline in content {
+            let IrInline::DirectiveCall {
+                name,
+                positional_args,
+                named_args,
+                ordered_args,
+                body,
+                span,
+                ..
+            } = inline
+            else {
+                if root_inline_owners {
+                    pending.extend(
+                        self.evaluate_evidenced_root_inline_owner(inline, diagnostics, context),
+                    );
+                } else {
+                    pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                }
+                continue;
+            };
+
+            let call_body = body.as_deref().map(CallBody::Inline);
+            let native_error_owns_call = name == "error"
+                && context.get_function(name).is_none()
+                && !is_variable_reference_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                )
+                && !is_variable_reassignment_call(
+                    name,
+                    positional_args,
+                    named_args,
+                    call_body,
+                    context,
+                );
+
+            if !native_error_owns_call {
+                if root_inline_owners {
+                    pending.extend(
+                        self.evaluate_evidenced_root_inline_owner(inline, diagnostics, context),
+                    );
+                } else {
+                    pending.extend(self.evaluate_inline(inline, diagnostics, context));
+                }
                 continue;
             }
 
@@ -3014,6 +3342,7 @@ impl Evaluator {
         nodes: &[IrNode],
         diagnostics: &mut Vec<Diagnostic>,
         context: &mut EvaluationContext<'_>,
+        root_inline_owners: bool,
     ) -> Vec<IrNode> {
         let mut out = Vec::new();
         for node in nodes {
@@ -3024,7 +3353,44 @@ impl Evaluator {
                         span,
                         diagnostics,
                         context,
+                        root_inline_owners,
                     ))
+                }
+                IrNode::Heading {
+                    level,
+                    content,
+                    span,
+                } if root_inline_owners => out.push(IrNode::Heading {
+                    level: *level,
+                    content: self.evaluate_evidenced_inline_sequence(
+                        content,
+                        diagnostics,
+                        context,
+                    ),
+                    span: *span,
+                }),
+                IrNode::Table { header, rows, span } if root_inline_owners => {
+                    let mut evaluate_row = |row: &arkst_ir::IrTableRow| arkst_ir::IrTableRow {
+                        cells: row
+                            .cells
+                            .iter()
+                            .map(|cell| arkst_ir::IrTableCell {
+                                content: self.evaluate_evidenced_inline_sequence(
+                                    &cell.content,
+                                    diagnostics,
+                                    context,
+                                ),
+                                alignment: cell.alignment,
+                                span: cell.span,
+                            })
+                            .collect(),
+                        span: row.span,
+                    };
+                    out.push(IrNode::Table {
+                        header: evaluate_row(header),
+                        rows: rows.iter().map(&mut evaluate_row).collect(),
+                        span: *span,
+                    });
                 }
                 other => out.extend(self.evaluate_node(other, diagnostics, context)),
             }
@@ -3115,7 +3481,12 @@ impl Evaluator {
                 span: *span,
             }],
             IrNode::Blockquote { content, span } => vec![IrNode::Blockquote {
-                content: self.evaluate_evidenced_structural_nodes(content, diagnostics, context),
+                content: self.evaluate_evidenced_structural_nodes(
+                    content,
+                    diagnostics,
+                    context,
+                    false,
+                ),
                 span: *span,
             }],
             IrNode::UnorderedList { items, span } => {
@@ -3126,6 +3497,7 @@ impl Evaluator {
                             &item.nodes,
                             diagnostics,
                             context,
+                            false,
                         ),
                         task: item.task,
                         span: item.span,
@@ -3141,6 +3513,7 @@ impl Evaluator {
                             &item.nodes,
                             diagnostics,
                             context,
+                            false,
                         ),
                         task: item.task,
                         span: item.span,

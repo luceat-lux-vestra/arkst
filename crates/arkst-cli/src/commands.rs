@@ -1,5 +1,5 @@
 use anyhow::Context;
-use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrNode};
+use arkst_core::ir::{IrComponent, IrDocument, IrExplicitErrorComponent, IrInline, IrNode};
 use arkst_core::{LogEvent, LogLevel, LogSink};
 use clap::ValueEnum;
 use std::cell::RefCell;
@@ -492,11 +492,45 @@ struct ExplicitErrorComponentCollection<'a> {
     unevidenced: Vec<&'a IrExplicitErrorComponent>,
 }
 
+fn collect_unevidenced_explicit_errors_from_inline<'a>(
+    inline: &'a IrInline,
+    components: &mut Vec<&'a IrExplicitErrorComponent>,
+) {
+    match inline {
+        IrInline::ExplicitError(error) => components.push(error),
+        IrInline::Emphasis { content, .. }
+        | IrInline::Strong { content, .. }
+        | IrInline::Strikethrough { content, .. }
+        | IrInline::Link { content, .. }
+        | IrInline::Image { content, .. } => {
+            collect_unevidenced_explicit_errors_from_inlines(content, components);
+        }
+        IrInline::DirectiveCall { body, .. } | IrInline::ChainedDirectiveCall { body, .. } => {
+            if let Some(body) = body {
+                collect_unevidenced_explicit_errors_from_inlines(body, components);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_unevidenced_explicit_errors_from_inlines<'a>(
+    inlines: &'a [IrInline],
+    components: &mut Vec<&'a IrExplicitErrorComponent>,
+) {
+    for inline in inlines {
+        collect_unevidenced_explicit_errors_from_inline(inline, components);
+    }
+}
+
 fn collect_unevidenced_explicit_errors_from_node<'a>(
     node: &'a IrNode,
     components: &mut Vec<&'a IrExplicitErrorComponent>,
 ) {
     match node {
+        IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
+            collect_unevidenced_explicit_errors_from_inlines(content, components);
+        }
         IrNode::Component {
             component: IrComponent::ExplicitError(error),
         } => components.push(error),
@@ -517,6 +551,13 @@ fn collect_unevidenced_explicit_errors_from_node<'a>(
                 collect_unevidenced_explicit_errors(&item.nodes, components);
             }
         }
+        IrNode::Table { header, rows, .. } => {
+            for row in std::iter::once(header).chain(rows) {
+                for cell in &row.cells {
+                    collect_unevidenced_explicit_errors_from_inlines(&cell.content, components);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -527,6 +568,41 @@ fn collect_unevidenced_explicit_errors<'a>(
 ) {
     for node in nodes {
         collect_unevidenced_explicit_errors_from_node(node, components);
+    }
+}
+
+fn collect_evidenced_direct_inline_explicit_errors<'a>(
+    inlines: &'a [IrInline],
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) {
+    for inline in inlines {
+        match inline {
+            IrInline::ExplicitError(error) => collection.recoverable.push(error),
+            other => collect_unevidenced_explicit_errors_from_inline(
+                other,
+                &mut collection.unevidenced,
+            ),
+        }
+    }
+}
+
+fn collect_evidenced_root_paragraph_inline_explicit_errors<'a>(
+    inlines: &'a [IrInline],
+    collection: &mut ExplicitErrorComponentCollection<'a>,
+) {
+    for inline in inlines {
+        match inline {
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. } => {
+                collect_evidenced_direct_inline_explicit_errors(content, collection);
+            }
+            other => collect_unevidenced_explicit_errors_from_inline(
+                other,
+                &mut collection.unevidenced,
+            ),
+        }
     }
 }
 
@@ -563,6 +639,22 @@ fn collect_explicit_error_components<'a>(
 
     for node in nodes {
         match node {
+            IrNode::Heading { content, .. } => {
+                collect_evidenced_direct_inline_explicit_errors(content, &mut collection);
+            }
+            IrNode::Paragraph { content, .. } => {
+                collect_evidenced_root_paragraph_inline_explicit_errors(content, &mut collection);
+            }
+            IrNode::Table { header, rows, .. } => {
+                for row in std::iter::once(header).chain(rows) {
+                    for cell in &row.cells {
+                        collect_evidenced_direct_inline_explicit_errors(
+                            &cell.content,
+                            &mut collection,
+                        );
+                    }
+                }
+            }
             IrNode::Component {
                 component: IrComponent::ExplicitError(error),
             } => collection.recoverable.push(error),

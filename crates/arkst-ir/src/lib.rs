@@ -275,7 +275,8 @@ fn collect_inline_sources(inlines: &[IrInline], sources: &mut SourceTable) -> Re
             | IrInline::SoftBreak { .. }
             | IrInline::HardBreak { .. }
             | IrInline::RawHtml { .. }
-            | IrInline::TargetSpecificContent { .. } => {}
+            | IrInline::TargetSpecificContent { .. }
+            | IrInline::ExplicitError(_) => {}
         }
     }
     Ok(())
@@ -1017,6 +1018,7 @@ enum WireInline {
         title: Option<String>,
         span: SourceSpan,
     },
+    ExplicitError(IrExplicitErrorComponent),
     Code {
         content: String,
         span: SourceSpan,
@@ -1452,6 +1454,7 @@ fn inline_to_wire(inline: &IrInline, sources: &SourceTable) -> Result<WireInline
             title: title.clone(),
             span: *span,
         },
+        IrInline::ExplicitError(error) => WireInline::ExplicitError(error.clone()),
         IrInline::Code { content, span } => WireInline::Code {
             content: content.clone(),
             span: *span,
@@ -1911,6 +1914,7 @@ fn wire_inline_to_ir(
             title,
             span,
         },
+        WireInline::ExplicitError(error) => IrInline::ExplicitError(error),
         WireInline::Code { content, span } => IrInline::Code { content, span },
         WireInline::SoftBreak { span } => IrInline::SoftBreak { span },
         WireInline::HardBreak { span } => IrInline::HardBreak { span },
@@ -2310,6 +2314,11 @@ pub enum IrInline {
         title: Option<String>,
         span: SourceSpan,
     },
+    /// A clean-room-evidenced explicit error retained inside an inline owner.
+    ///
+    /// This is deliberately narrower than a generic inline component: only
+    /// explicit-error output contexts with independent evidence may construct it.
+    ExplicitError(IrExplicitErrorComponent),
     /// An inline code span (`monospace`).
     ///
     /// The content is opaque literal text and is never evaluated or recursed
@@ -3199,6 +3208,27 @@ mod tests {
             serde_json::from_str::<IrValue>(&encoded).expect("explicit error deserializes");
 
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn inline_explicit_error_document_serde_roundtrip_preserves_source_echo() {
+        let span = SourceSpan::new(SourceId(197), 4, 17);
+        let document = IrDocument {
+            nodes: vec![IrNode::Heading {
+                level: 1,
+                content: vec![IrInline::ExplicitError(IrExplicitErrorComponent {
+                    message: "boom".to_string(),
+                    source_echo: Some(".error {boom}".to_string()),
+                    span,
+                })],
+                span,
+            }],
+            metadata: Default::default(),
+        };
+
+        let encoded = serde_json::to_string(&document).expect("document serializes");
+        let decoded = serde_json::from_str::<IrDocument>(&encoded).expect("document deserializes");
+        assert_eq!(decoded, document);
     }
 
     #[test]

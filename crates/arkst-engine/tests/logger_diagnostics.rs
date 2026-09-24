@@ -1294,3 +1294,138 @@ fn repeated_unit_statements_collapse_to_empty_content_value() {
         vec!["false", "false", "false", "true", ""]
     );
 }
+
+
+fn collect_inline_explicit_error_messages(inlines: &[IrInline], messages: &mut Vec<String>) {
+    for inline in inlines {
+        match inline {
+            IrInline::ExplicitError(error) => messages.push(error.message.clone()),
+            IrInline::Emphasis { content, .. }
+            | IrInline::Strong { content, .. }
+            | IrInline::Strikethrough { content, .. }
+            | IrInline::Link { content, .. }
+            | IrInline::Image { content, .. } => {
+                collect_inline_explicit_error_messages(content, messages);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn document_inline_explicit_error_messages(document: &IrDocument) -> Vec<String> {
+    let mut messages = Vec::new();
+    for node in &document.nodes {
+        match node {
+            IrNode::Heading { content, .. } | IrNode::Paragraph { content, .. } => {
+                collect_inline_explicit_error_messages(content, &mut messages);
+            }
+            IrNode::Table { header, rows, .. } => {
+                for row in std::iter::once(header).chain(rows) {
+                    for cell in &row.cells {
+                        collect_inline_explicit_error_messages(&cell.content, &mut messages);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    messages
+}
+
+#[test]
+fn evidenced_root_inline_owners_materialize_explicit_error_without_widening_generic_inline_values() {
+    let cases = [
+        (
+            "# heading-before .error {heading-error} heading-after",
+            "heading-error",
+        ),
+        (
+            "| value |\n| --- |\n| cell-before .error {table-error} cell-after |",
+            "table-error",
+        ),
+        (
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after",
+            "emphasis-error",
+        ),
+        (
+            "outer-before **strong-before .error {strong-error} strong-after** outer-after",
+            "strong-error",
+        ),
+        (
+            "outer-before ~~strike-before .error {strike-error} strike-after~~ outer-after",
+            "strike-error",
+        ),
+        (
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after",
+            "link-error",
+        ),
+    ];
+
+    for (index, (source, message)) in cases.into_iter().enumerate() {
+        let (result, diagnostics) = evaluate_plain(source, SourceId(2100 + index as u32));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "E3011")
+                .count(),
+            1,
+            "{source}: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.code == "E3011"),
+            "{source}: {diagnostics:?}"
+        );
+        assert_eq!(
+            document_inline_explicit_error_messages(&result),
+            vec![message.to_string()],
+            "{source}: {:?}",
+            result.nodes
+        );
+    }
+}
+
+#[test]
+fn evidenced_root_image_alt_executes_log_but_consumes_direct_explicit_error_silently() {
+    let source_id = SourceId(2110);
+    let sink = CollectingSink::default();
+    let source =
+        "outer-before ![img-before .log {img-log} .error {img-error} img-after](image.png) outer-after";
+    let (result, diagnostics) = evaluate_with_sink(source, source_id, &sink);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let events = sink.events.borrow();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].level, LogLevel::Log);
+    assert_eq!(events[0].message, "img-log");
+    drop(events);
+
+    let image_content = result.nodes.iter().find_map(|node| {
+        let IrNode::Paragraph { content, .. } = node else {
+            return None;
+        };
+        content.iter().find_map(|inline| {
+            let IrInline::Image { content, .. } = inline else {
+                return None;
+            };
+            Some(content)
+        })
+    });
+    let image_content = image_content.expect("image must remain present");
+    assert!(
+        image_content
+            .iter()
+            .all(|inline| !matches!(inline, IrInline::DirectiveCall { .. } | IrInline::ExplicitError(_))),
+        "{image_content:?}"
+    );
+    let text = image_content
+        .iter()
+        .filter_map(|inline| match inline {
+            IrInline::Text { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert!(text.contains("img-before"), "{text:?}");
+    assert!(text.contains("img-after"), "{text:?}");
+    assert!(!text.contains("img-log"), "{text:?}");
+    assert!(!text.contains("img-error"), "{text:?}");
+}

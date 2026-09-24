@@ -1089,7 +1089,8 @@ fn append_inline_plain_text(inline: &IrInline, output: &mut String) -> Option<()
         IrInline::DirectiveCall { .. }
         | IrInline::ChainedDirectiveCall { .. }
         | IrInline::RawHtml { .. }
-        | IrInline::TargetSpecificContent { .. } => return None,
+        | IrInline::TargetSpecificContent { .. }
+        | IrInline::ExplicitError(_) => return None,
         IrInline::Image { .. } => return None,
     }
     Some(())
@@ -1146,7 +1147,8 @@ fn plain_text_from_inlines(inlines: &[IrInline], output: &mut String) -> Option<
             IrInline::DirectiveCall { .. }
             | IrInline::ChainedDirectiveCall { .. }
             | IrInline::RawHtml { .. }
-            | IrInline::TargetSpecificContent { .. } => {
+            | IrInline::TargetSpecificContent { .. }
+            | IrInline::ExplicitError(_) => {
                 return None;
             }
         }

@@ -700,3 +700,128 @@ fn non_explicit_error_diagnostics_still_abort_build_without_artifact() {
         "ordinary diagnostics must remain build-fatal"
     );
 }
+
+
+#[test]
+fn build_recovers_evidenced_root_inline_owner_errors_and_strict_suppresses_artifacts() {
+    let cases = [
+        (
+            "heading",
+            "# heading-before .error {heading-error} heading-after\n",
+            "heading-error",
+            "heading-before",
+            "heading-after",
+        ),
+        (
+            "table",
+            "| value |\n| --- |\n| cell-before .error {table-error} cell-after |\n",
+            "table-error",
+            "cell-before",
+            "cell-after",
+        ),
+        (
+            "emphasis",
+            "outer-before *em-before .error {emphasis-error} em-after* outer-after\n",
+            "emphasis-error",
+            "em-before",
+            "em-after",
+        ),
+        (
+            "strong",
+            "outer-before **strong-before .error {strong-error} strong-after** outer-after\n",
+            "strong-error",
+            "strong-before",
+            "strong-after",
+        ),
+        (
+            "strike",
+            "outer-before ~~strike-before .error {strike-error} strike-after~~ outer-after\n",
+            "strike-error",
+            "strike-before",
+            "strike-after",
+        ),
+        (
+            "link",
+            "outer-before [link-before .error {link-error} link-after](https://example.com) outer-after\n",
+            "link-error",
+            "link-before",
+            "link-after",
+        ),
+    ];
+
+    for (name, source, message, before_text, after_text) in cases {
+        let default_dir = tempdir().unwrap();
+        let default_input = default_dir.path().join(format!("{name}.qd"));
+        fs::write(&default_input, source).unwrap();
+
+        let default = run_build(&default_input);
+        assert!(
+            default.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&default.stderr)
+        );
+        let stderr = String::from_utf8(default.stderr).expect("stderr must be UTF-8");
+        assert!(
+            stderr.contains(&format!(
+                "Cannot call function error(String message) with arguments ({message}): {message}"
+            )),
+            "{name}: {stderr}"
+        );
+
+        let typst =
+            fs::read_to_string(default_dir.path().join(format!("{name}.typ"))).unwrap();
+        let before = typst.find(before_text).expect("owner prefix");
+        let error = typst.find(message).expect("explicit error message");
+        let after = typst.rfind(after_text).expect("owner suffix");
+        assert!(before < error && error < after, "{name}: {typst}");
+        assert!(
+            typst.contains(&format!("#raw(\".error {{{message}}}\")")),
+            "{name}: {typst}"
+        );
+
+        let strict_dir = tempdir().unwrap();
+        let strict_input = strict_dir.path().join(format!("{name}.qd"));
+        fs::write(&strict_input, source).unwrap();
+        let strict = run_build_with_args(&strict_input, &["--strict"]);
+        assert_eq!(
+            strict.status.code(),
+            Some(66),
+            "{name}: {}",
+            String::from_utf8_lossy(&strict.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(strict.stderr).unwrap(),
+            format!(
+                "An error occurred while in strict mode (error code 66)\n\
+                 Originated from function: error\n\
+                 java.lang.Exception: {message}\n"
+            ),
+            "{name}"
+        );
+        assert!(
+            !strict_dir.path().join(format!("{name}.typ")).exists(),
+            "{name}: strict mode must publish no artifact"
+        );
+    }
+}
+
+#[test]
+fn nested_unprobed_inline_owner_composition_remains_on_ordinary_fatal_path() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("nested-inline-owner.qd");
+    fs::write(
+        &input,
+        "- *before .error {nested-inline-error} after*\n",
+    )
+    .unwrap();
+
+    let output = run_build(&input);
+    assert!(!output.status.success(), "{output:?}");
+    assert_ne!(output.status.code(), Some(66));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nested-inline-error"), "{stderr}");
+    assert!(
+        !dir.path().join("nested-inline-owner.typ").exists(),
+        "unevidenced nested inline-owner composition must publish no artifact"
+    );
+}

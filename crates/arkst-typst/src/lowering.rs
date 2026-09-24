@@ -408,6 +408,24 @@ impl LoweringContext {
         }
     }
 
+    fn lower_inline_explicit_error(&mut self, component: &IrExplicitErrorComponent) {
+        let before = self.output.len();
+        self.push_str("#box[");
+        self.push_str("Error: error Cannot call function error (String message) with arguments (");
+        self.push_str(&escape_typst_text(&component.message));
+        self.push_str("): ");
+        self.push_str(&escape_typst_text(&component.message));
+        if let Some(source_echo) = &component.source_echo {
+            self.push_str(" #raw(\"");
+            self.push_str(&escape_typst_string(source_echo));
+            self.push_str("\")");
+        }
+        self.push(']');
+        if component.span.source_id != SourceId(0) {
+            self.record_span(component.span, self.output.len() - before);
+        }
+    }
+
     fn lower_landscape(&mut self, component: &IrLandscapeComponent) {
         let before = self.output.len();
         self.push_str("#rotate(-90deg, reflow: true)[\n");
@@ -798,6 +816,7 @@ impl LoweringContext {
                     self.record_span(*span, self.output.len() - before);
                 }
             }
+            IrInline::ExplicitError(error) => self.lower_inline_explicit_error(error),
             IrInline::RawHtml { .. } | IrInline::TargetSpecificContent { .. } => {
                 // Target-specific HTML and parser-owned raw HTML never become
                 // Typst source or visible placeholder text.
