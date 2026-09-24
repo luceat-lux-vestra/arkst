@@ -254,7 +254,11 @@ name: Failure triage
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, edited]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
 permissions: {}
 jobs:
   failure-triage:
