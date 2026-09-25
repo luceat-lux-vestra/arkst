@@ -6663,7 +6663,7 @@ impl Evaluator {
                     }
                 }
                 "columns" => {
-                    columns = Some(if matches!(value.value, IrValue::None) {
+                    columns = Some(if matches!(&value.value, IrValue::None) {
                         None
                     } else {
                         let value = match value_conversion::convert_integer_with_origin(&value) {
