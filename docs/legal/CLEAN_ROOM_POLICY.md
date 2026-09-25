@@ -10,6 +10,21 @@ independence is an implementation constraint; it does not turn public language
 features into permanent exclusions. Current claims still require evidence in
 the compatibility matrix.
 
+## Historical Record
+
+The policy itself has been in force since repository bootstrap, but historical
+v2.5.1 compatibility work did not fully comply with it: upstream Quarkdown
+implementation and test sources were inspected and used as compatibility
+evidence. This is recorded rather than erased. Historical source inspection is
+a clean-room provenance failure; it is not, by itself, a conclusion that
+copyright-protected expression was copied or that GPL obligations were
+violated.
+
+Issue #444 and `docs/legal/LICENSE_PROVENANCE_AUDIT.md` define the bounded
+remediation and release-clearance process. Existing historical citations may
+remain in designated compatibility/audit documentation as an honest record,
+but they are not permitted as new implementation evidence.
+
 ## Permitted Sources
 
 Implementation may derive requirements only from:
@@ -82,10 +97,26 @@ Each compatibility feature must record:
 
 ## Audit
 
-Before any release, a provenance audit must confirm:
+Before any release, the machine-readable license/provenance audit must confirm:
 
-1. No prohibited source material exists in the repository
-2. All compatibility features have provenance records
-3. All compatibility test fixtures have independently authored inputs
-4. Known divergences are documented and justified
-5. The NOTICE and third-party license files are current
+1. No direct Quarkdown implementation material or dependency/vendor ingestion
+   exists in protected production, test, fixture, or example surfaces.
+2. Every historically source-exposed production slice has a recorded
+   classification and the audit coverage is complete.
+3. No slice remains classified `POSSIBLE_TRANSLATION` or `LITERAL_COPY`.
+4. No conformance fixture remains `REVIEW_REQUIRED`; independently re-authored
+   or re-certified fixtures are recorded as `INDEPENDENT` or `REMEDIATED`.
+5. Canonical provenance documents the historical source-inspection period
+   accurately, and NOTICE/third-party license records are current.
+
+The required PR-time `license` context prevents new provenance regressions
+while permitting explicitly tracked historical audit debt. The stricter release
+check is:
+
+```text
+python3 tools/ci/verify_license_provenance.py --release
+```
+
+This policy is an engineering control, not a substitute for legal advice when
+a `LITERAL_COPY`, unresolved `POSSIBLE_TRANSLATION`, or other concrete
+copyright concern is identified.

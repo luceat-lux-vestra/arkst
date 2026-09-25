@@ -117,6 +117,14 @@ def canonical_static_checks(
             "upstream-ingestion-guards",
             [sys.executable, "tools/ci/test_upstream_quarkdown_ingestion.py"],
         ),
+        (
+            "license-provenance-tests",
+            [sys.executable, "tools/ci/test_verify_license_provenance.py"],
+        ),
+        (
+            "license-provenance",
+            [sys.executable, "tools/ci/verify_license_provenance.py"],
+        ),
     ]
     findings: list[Finding] = []
     for control, argv in checks:

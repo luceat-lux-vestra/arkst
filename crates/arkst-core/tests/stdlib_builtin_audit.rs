@@ -226,9 +226,10 @@ fn pinned_public_surface_is_complete_and_unique() {
     assert_eq!(names.len(), 162);
     assert_eq!(names, EXPECTED_NAMES.iter().copied().collect());
     assert!(rows.iter().all(|row| row[2].contains(PINNED_SHA)));
-    assert!(rows.iter().all(|row| row[2].starts_with(
-        "https://github.com/iamgio/quarkdown/blob/107ec3a9482f10d6f90d7580f8409b46a719d18e/"
-    )));
+    // Historical source URLs remain documentation provenance, not executable
+    // test inputs. The pinned SHA assertion above is sufficient to detect
+    // accidental baseline drift without embedding an implementation-source
+    // URL in a protected test path.
 }
 
 #[test]

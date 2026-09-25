@@ -1,0 +1,157 @@
+schema = 1
+issue = 444
+audited_at = "2026-09-25"
+base_sha = "978c836d38514895e4459e3c7b193274df12bf69"
+
+[source_exposure]
+# Production PRs for which the implementation PR itself or its immediate
+# compatibility evidence records upstream implementation/test-source review.
+# Historical docs/audit-only PRs are intentionally excluded from this list.
+production_prs = [
+  83, 85, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105,
+  129, 130, 136, 140, 142, 144, 146, 206, 208, 219, 221, 434,
+]
+reviewed_prs = [206, 208, 219, 221, 434]
+pending_prs = [
+  83, 85, 87, 88, 89, 91, 92, 93, 94, 103, 104, 105,
+  129, 130, 136, 140, 142, 144, 146,
+]
+
+[release_clearance]
+# PR CI intentionally permits tracked historical debt while preventing new
+# ingestion/regression. --release fails until this is COMPLETE and all pending
+# entries/fixtures are resolved.
+coverage = "INCOMPLETE"
+
+[[implementation]]
+pr = 206
+issue = 157
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Pinned grammar behavior influenced the compatibility contract, but the sampled Rust scanner/parser diff is independently structured; no literal or source-to-source translation was identified."
+
+[[implementation]]
+pr = 208
+issue = 165
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "The shared binder derives requirements from the historical value/binding audit, while the sampled implementation uses Arkst-specific BindingPlan, BodyPolicy, source-span diagnostics, and two-phase planning rather than an identified Kotlin translation."
+
+[[implementation]]
+pr = 219
+issue = 166
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "Historical DynamicValue/ValueFactory semantics influenced the target-conversion contract; sampled production code is organized around Arkst IR/RawMarkdownTarget boundaries and no literal Quarkdown implementation copy was identified."
+
+[[implementation]]
+pr = 221
+issue = 169
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "FunctionExtension/Flow source review influenced observable extension semantics, while the sampled Rust implementation uses Arkst-specific Rc/Weak ownership, extension overlays, stable IDs, and transaction journaling rather than an identified source-to-source translation."
+
+[[implementation]]
+pr = 434
+issue = 197
+classification = "SOURCE_INFLUENCED_INDEPENDENT"
+basis = "The PR explicitly used exact upstream source review to generalize recursive owner behavior, but the sampled implementation uses Arkst-specific explicit-error IR carriers and diagnostic/carrier pairing; literal or structural translation was not identified. Black-box re-certification remains the preferred evidence basis."
+
+# Until each historical v2.5.1 fixture has been rechecked against its creation
+# history, the ledger does not repeat the old blanket 'independently authored'
+# claim. REVIEW_REQUIRED is finite audit work, not an infringement finding.
+[[fixture]]
+id = "br-line-break-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "call-dot-prefixed-basic"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "call-indented-body-basic"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "call-positional-basic"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "captionposition-document-state"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "dictionary-get-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "docauthor-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "docauthors-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "dockeywords-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "doclang-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "doclang-locale-closure"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "dynamic-value-scalar-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "localization-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "numeric-arithmetic-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "numeric-decimal-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "numeric-transcendental-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "optionality-callback-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "plaintext-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "string-scalar-family"
+status = "REVIEW_REQUIRED"
+issue = 444
+
+[[fixture]]
+id = "theme-document-state"
+status = "REVIEW_REQUIRED"
+issue = 444
