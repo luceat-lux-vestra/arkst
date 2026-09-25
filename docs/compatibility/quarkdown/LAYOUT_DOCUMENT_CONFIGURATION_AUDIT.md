@@ -75,22 +75,23 @@ For the 20 #153-owned rows:
 |---|---:|
 | `SUPPORTED_END_TO_END` | 0 |
 | `SUPPORTED_SEMANTICS` | 0 |
-| `PARSED_ONLY` | 19 |
-| `PARTIAL` | 1 |
+| `PARSED_ONLY` | 17 |
+| `PARTIAL` | 3 |
 | `UNSUPPORTED` | 0 |
 | `DEFERRED` | 0 |
 | `BLOCKED` | 0 |
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
-`PARSED_ONLY` is used deliberately. Arkst's generic frontend/IR path
-recognizes and source-preservingly retains unresolved calls, but no semantic
-implementation exists for those 19 names. A preserved `IrNode::FunctionCall`
-or inline directive is not a successful setter, typed node, state mutation,
-or renderer claim. `.captionposition` is `PARTIAL` because its evaluator and
-immutable IR semantics are implemented and independently evidenced, while
-caption output remains outside the current boundary. #166 now covers the
-source-backed raw-body fallback for the bounded `.captionposition` setter.
+`PARSED_ONLY` is used deliberately for the 17 rows that still have only
+generic frontend/IR retention. A preserved `IrNode::FunctionCall` or inline
+directive is not a successful setter, typed node, state mutation, or renderer
+claim. `.captionposition`, `.numbering`, and `.nonumbering` are `PARTIAL`:
+their bounded evaluator/IR state semantics are implemented and independently
+tested, while their downstream rendered consumers remain outside the completed
+boundary. #166 covers the source-backed raw-body fallback for the bounded
+`.captionposition` setter; #175 remains open for the residual layout and
+numbering-output work.
 
 ## 4. Pinned upstream semantic contracts
 
@@ -133,8 +134,15 @@ There is no getter and no document content output. The mutation is
 document-scoped and must be atomic: map conversion and all format parsing must
 finish before `DocumentInfo.numbering` is replaced. Heading, figure, table,
 math, code, footnote, and custom-numbered output consumers are separate
-renderer/AST boundaries. Arkst has no binder, typed numbering model in
-`IrDocumentState`, or numbering-aware backend path; status is `PARSED_ONLY`.
+renderer/AST boundaries. Arkst now has bounded binding/evaluator semantics,
+typed serializable `IrDocumentNumbering` state, merge/replace and
+`.nonumbering` reset behavior, the pinned token grammar, duplicate builtin
+storage in `extra`, and failure-atomic publication. Effective document-type
+defaults are retained as an explicit inherited layer rather than copied into
+core; concrete default formats and all numbering-aware backend/output consumers
+remain open. A trailing backslash, whose exact behavior is not established by
+this audit, fails closed rather than inventing compatibility. Status is
+therefore `PARTIAL`, not end-to-end.
 
 #### `.font`
 
