@@ -237,12 +237,16 @@ domains. Plain and slides documents have documented renderer limitations, and
 page-format data is not itself a getter or output node.
 
 The state is genuinely document-scoped and must remain backend-neutral.
-Arkst now has a bounded `.pageformat` slice for explicit width+height geometry
-and document alignment, including current Typst/PDF consumers and row/column
-alignment inheritance. It does not yet implement selector/range, standard
-size/orientation, margins, border/background, columns, or complete layer
-precedence, and must not place Typst page objects in evaluator/IR state.
-Status is conservatively `PARTIAL` under #175.
+Arkst now has bounded `.pageformat` slices for explicit width+height geometry,
+document alignment, and a global positive column count. Geometry/alignment
+retain their current Typst/PDF consumers and row/column alignment inheritance;
+the column count is backend-neutral state only. Non-positive or semantic-None
+column inputs are discarded without replacing an earlier positive global
+value, matching the nullable upstream layer field at this bounded effective
+state boundary. Selector/range, standard size/orientation, margins,
+border/background, selector-aware column/layer precedence, and complete
+layer merging remain open, and Typst page objects must not enter evaluator/IR
+state. Status is conservatively `PARTIAL` under #175.
 
 ### Caption state
 
