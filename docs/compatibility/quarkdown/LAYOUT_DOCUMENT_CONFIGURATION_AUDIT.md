@@ -558,9 +558,9 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-seven conservative `PARTIAL` rows (`captionposition`,
-`numbering`/`nonumbering`, bounded `pageformat`,
-`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 13
+eight conservative `PARTIAL` rows (`captionposition`,
+`numbering`/`nonumbering`, `paragraphstyle`, bounded `pageformat`,
+`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 12
 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.
