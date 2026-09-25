@@ -1,3 +1,6 @@
+//! Independent regression coverage for the bounded #175 `.paragraphstyle` evaluator/IR state slice.
+//! Renderer defaults, locale-specific layout, and output lowering remain outside this test boundary.
+
 use arkst_core::ir::{IrInline, IrNode};
 use arkst_core::{compile, CompileOptions, VirtualProjectBuilder};
 
