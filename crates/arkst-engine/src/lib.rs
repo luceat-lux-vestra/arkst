@@ -13,6 +13,7 @@ pub mod evaluator;
 pub(crate) mod invocation_binder;
 pub(crate) mod library_inspection;
 pub(crate) mod locale;
+pub(crate) mod numbering;
 pub(crate) mod unicode_case;
 pub(crate) mod value_conversion;
 pub(crate) mod word_break;

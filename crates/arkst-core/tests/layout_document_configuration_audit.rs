@@ -128,10 +128,10 @@ fn manifest_is_complete_and_machine_checkable() {
     assert_eq!(rows.len(), 47);
     assert_eq!(rows.iter().filter(|row| row[4] == "#153").count(), 20);
     assert_eq!(rows.iter().filter(|row| row[4] == "#154").count(), 27);
-    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 1);
+    assert_eq!(rows.iter().filter(|row| row[5] == "PARTIAL").count(), 7);
     assert_eq!(
         rows.iter().filter(|row| row[5] == "PARSED_ONLY").count(),
-        19
+        13
     );
     assert!(MANIFEST.contains(BASE_SHA));
     assert!(MANIFEST.contains("captionposition\tcaptionPosition\tcode"));
@@ -141,10 +141,9 @@ fn manifest_is_complete_and_machine_checkable() {
 fn audit_records_pipeline_boundary_and_state_rendering_separation() {
     assert!(AUDIT.contains("No additional #153-owned public callable was found"));
     assert!(AUDIT.contains("A preserved `IrNode::FunctionCall`"));
-    assert!(AUDIT.contains("or inline directive is not a successful setter"));
-    assert!(AUDIT.contains("No #153-owned row has current Typst/PDF/HTML"));
-    assert!(AUDIT.contains("Production semantic/state"));
-    assert!(AUDIT.contains("changes: **none**"));
+    assert!(AUDIT.contains("is not a successful setter, typed node, state mutation"));
+    assert!(AUDIT.contains("No #153-owned row has complete v2.5.1 output equivalence"));
+    assert!(AUDIT.contains("seven conservative `PARTIAL` rows"));
 }
 
 #[test]
@@ -163,8 +162,15 @@ fn audit_records_numbering_extra_and_pageformat_border_contracts() {
         .iter()
         .find(|row| row[1] == "numbering")
         .expect("numbering row");
-    assert!(numbering[10].contains("every input key"));
+    assert!(numbering[10].contains("all input keys retained in extra"));
     assert!(numbering[11].contains("all-input-keys-in-extra"));
+    assert_eq!(numbering[5], "PARTIAL");
+    assert!(numbering[9].contains("numbering_state.rs"));
+    let nonumbering = rows
+        .iter()
+        .find(|row| row[1] == "nonumbering")
+        .expect("nonumbering row");
+    assert_eq!(nonumbering[5], "PARTIAL");
 
     let pageformat = rows
         .iter()

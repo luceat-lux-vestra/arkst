@@ -456,6 +456,11 @@ pub struct IrDocumentState {
     /// positions from explicit values.
     #[serde(default)]
     pub caption_position: IrCaptionPositionInfo,
+    /// Ordered document-numbering mutations produced by `.numbering` and
+    /// `.nonumbering`. The evaluator preserves source order and merge intent;
+    /// document-type defaults and renderer consumers remain downstream-owned.
+    #[serde(default, skip_serializing_if = "IrNumberingState::is_empty")]
+    pub numbering: IrNumberingState,
     /// Explicit global heading depth selected by `.autopagebreak` or
     /// `.noautopagebreak`. `None` preserves the document-type-specific
     /// implicit default for the output backend to resolve.
@@ -474,6 +479,67 @@ pub struct IrDocumentState {
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
+}
+
+/// One parsed token in Quarkdown's document numbering-format grammar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrNumberingToken {
+    Decimal,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+    Literal(String),
+}
+
+/// Backend-neutral parsed numbering format. An empty token vector is the
+/// explicit non-counting `none` format, not an omitted field.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrNumberingFormat {
+    #[serde(default)]
+    pub tokens: Vec<IrNumberingToken>,
+}
+
+/// One atomic document numbering mutation in source order.
+///
+/// Built-in keys are retained both in their typed field and in `extra`,
+/// matching the canonical v2.5.1 audit. Unknown/custom keys live only in
+/// `extra` and remain available to future numbered-content consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrNumberingLayer {
+    pub merge: bool,
+    /// Document type in effect when this mutation committed. This freezes the
+    /// default-numbering basis for merge semantics even if .doctype changes later.
+    #[serde(default)]
+    pub document_type: IrDocumentType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headings: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figures: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tables: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equations: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footnotes: Option<IrNumberingFormat>,
+    #[serde(default)]
+    pub extra: Vec<(String, IrNumberingFormat)>,
+}
+
+/// Ordered numbering mutation state. This deliberately does not fabricate
+/// unresolved document-type defaults at the evaluator/IR boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrNumberingState {
+    #[serde(default)]
+    pub layers: Vec<IrNumberingLayer>,
+}
+
+impl IrNumberingState {
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
 }
 
 /// Backend-neutral complete page geometry.
@@ -2570,7 +2636,8 @@ mod tests {
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrInline,
-        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode, IrPair, IrRange,
+        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
+        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair, IrRange,
         IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
         SourceTable, TargetSpecificContent,
     };
@@ -3360,6 +3427,37 @@ mod tests {
     }
 
     #[test]
+    fn document_numbering_state_roundtrips_nonempty_layers() {
+        let heading = IrNumberingFormat {
+            tokens: vec![
+                IrNumberingToken::Decimal,
+                IrNumberingToken::Literal(".".to_string()),
+            ],
+        };
+        let state = IrDocumentState {
+            document_type: IrDocumentType::Paged,
+            numbering: IrNumberingState {
+                layers: vec![IrNumberingLayer {
+                    merge: true,
+                    document_type: IrDocumentType::Paged,
+                    headings: Some(heading.clone()),
+                    extra: vec![("headings".to_string(), heading)],
+                    ..IrNumberingLayer::default()
+                }],
+            },
+            ..IrDocumentState::default()
+        };
+
+        let encoded = serde_json::to_value(&state).expect("numbering state serializes");
+        assert!(encoded.get("numbering").is_some());
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(encoded)
+                .expect("numbering state deserializes"),
+            state
+        );
+    }
+
+    #[test]
     fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
         assert!(IrDocumentState::default().keywords.is_empty());
         assert!(IrDocumentState::default().theme.is_none());
@@ -3401,6 +3499,7 @@ mod tests {
                     tables: None,
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
+                numbering: IrNumberingState::default(),
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
                 page_geometry: None,
@@ -3530,6 +3629,7 @@ mod tests {
                 tables: Some(IrCaptionPosition::Bottom),
                 code_blocks: None,
             },
+            numbering: IrNumberingState::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,

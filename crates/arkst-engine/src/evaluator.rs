@@ -61,9 +61,9 @@ use arkst_ir::{
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
     IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrPageGeometry, IrPair, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
-    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
-    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
+    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrPair, IrParameter, IrRange,
+    IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent, IrStackedLayout,
+    IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -570,6 +570,7 @@ struct DocumentState {
     theme: Option<IrDocumentTheme>,
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
+    numbering: IrNumberingState,
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
     page_geometry: Option<IrPageGeometry>,
@@ -588,6 +589,7 @@ impl Default for DocumentState {
             theme: None,
             locale: None,
             caption_position: Default::default(),
+            numbering: Default::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,
@@ -608,6 +610,7 @@ impl DocumentState {
             theme: snapshot.theme.clone(),
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
+            numbering: snapshot.numbering.clone(),
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
             page_geometry: snapshot.page_geometry.clone(),
@@ -626,6 +629,7 @@ impl DocumentState {
             theme: self.theme.clone(),
             locale: self.locale.clone(),
             caption_position: self.caption_position,
+            numbering: self.numbering.clone(),
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
             page_geometry: self.page_geometry.clone(),
@@ -1024,6 +1028,7 @@ enum DocumentStateField {
     Theme,
     Locale,
     CaptionPosition,
+    Numbering,
     AutoPageBreakMaxDepth,
     PageAlignment,
     PageGeometry,
@@ -1040,6 +1045,7 @@ enum DocumentStateUndo {
     Theme(Option<IrDocumentTheme>),
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
+    Numbering(IrNumberingState),
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
     PageGeometry(Option<IrPageGeometry>),
@@ -2256,6 +2262,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::Theme(previous) => state.theme = previous,
             DocumentStateUndo::Locale(previous) => state.locale = previous,
             DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
+            DocumentStateUndo::Numbering(previous) => state.numbering = previous,
             DocumentStateUndo::AutoPageBreakMaxDepth(previous) => {
                 state.auto_page_break_max_depth = previous
             }
@@ -2307,6 +2314,19 @@ impl<'a> EvaluationContext<'a> {
             )
         });
         self.document_state.borrow_mut().document_type = value;
+    }
+
+    fn publish_numbering_layer(&self, layer: IrNumberingLayer) {
+        self.record_document_state_undo(DocumentStateField::Numbering, || {
+            let previous = self.document_state.borrow().numbering.clone();
+            let copied_units = previous.layers.len();
+            (DocumentStateUndo::Numbering(previous), copied_units)
+        });
+        let mut state = self.document_state.borrow_mut();
+        if !layer.merge {
+            state.numbering.layers.clear();
+        }
+        state.numbering.layers.push(layer);
     }
 
     fn set_auto_page_break_max_depth(&self, value: Option<u32>) {
@@ -3827,6 +3847,8 @@ impl Evaluator {
         let state_shadowed = matches!(
             name,
             "captionposition"
+                | "numbering"
+                | "nonumbering"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -4232,6 +4254,8 @@ impl Evaluator {
         let source_defined_shadowable_document_state = matches!(
             name,
             "captionposition"
+                | "numbering"
+                | "nonumbering"
                 | "docauthor"
                 | "docauthors"
                 | "dockeywords"
@@ -6007,6 +6031,179 @@ impl Evaluator {
         )))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_numbering_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        body: Option<CallBody<'_>>,
+        raw_body: Option<&IrRawBody>,
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let body_candidate = if body.is_some() {
+            match source_backed_body_candidate(
+                body.as_ref()
+                    .map(|body| call_body_source_span(*body, *span)),
+                raw_body,
+                ".numbering",
+                diagnostics,
+            ) {
+                Ok(candidate) => candidate,
+                Err(outcome) => return outcome,
+            }
+        } else {
+            None
+        };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            body_candidate.as_ref(),
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+        let parameters = bound.parameters;
+        let mut slots = bound.slots.into_iter().enumerate();
+        let merge = match slots.next() {
+            Some((
+                index,
+                BoundSlot::Explicit {
+                    value,
+                    span: argument_span,
+                },
+            )) => {
+                match value_conversion::convert_scalar_with_origin(&value, ScalarTarget::Boolean) {
+                    Ok(ScalarValue::Boolean(value)) => value,
+                    Ok(_) => unreachable!("Boolean conversion returned a non-Boolean value"),
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some("merge"),
+                                parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some(".numbering"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                }
+            }
+            Some((_, BoundSlot::Omitted | BoundSlot::Defaulted)) | None => true,
+        };
+        let Some((
+            formats_index,
+            BoundSlot::Explicit {
+                value: formats,
+                span: formats_span,
+            },
+        )) = slots.next()
+        else {
+            return CallOutcome::Failed;
+        };
+        let dictionary = match value_conversion::convert_target_with_origin(
+            &formats,
+            value_conversion::ConversionTarget::Dictionary,
+            formats_span,
+        ) {
+            Ok(value_conversion::TargetValue::Value(IrValue::Dictionary(dictionary))) => dictionary,
+            Ok(value_conversion::TargetValue::RawMarkdown { text, .. }) => {
+                let nodes = match self.parse_dynamic_markdown_content(
+                    &text,
+                    formats_span,
+                    value_conversion::RawMarkdownTarget::Dictionary,
+                    diagnostics,
+                ) {
+                    Ok(nodes) => nodes,
+                    Err(outcome) => return outcome,
+                };
+                let entries = match self.evaluate_dictionary_entries(
+                    &nodes,
+                    formats_span,
+                    diagnostics,
+                    context,
+                    ".numbering",
+                ) {
+                    Ok(entries) => entries,
+                    Err(outcome) => return outcome,
+                };
+                IrDictionary {
+                    entries,
+                    span: formats_span,
+                }
+            }
+            Ok(value_conversion::TargetValue::Value(_)) => {
+                diagnostics.push(document_state_conversion_error(
+                    ".numbering formats must be a typed Dictionary".to_string(),
+                    formats_span,
+                ));
+                return CallOutcome::Failed;
+            }
+            Err(error) => {
+                diagnostics.push(conversion_failure_diagnostic(
+                    value_conversion::ConversionFailure::new(
+                        error,
+                        Some(formats_span),
+                        Some("formats"),
+                        parameters
+                            .get(formats_index)
+                            .and_then(|parameter| parameter.name_span),
+                        *span,
+                    ),
+                    Some(".numbering"),
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        let document_type = context.document_state.borrow().document_type;
+        let layer = match crate::numbering::layer_from_dictionary(&dictionary, merge, document_type)
+        {
+            Ok(layer) => layer,
+            Err(message) => {
+                diagnostics.push(document_state_conversion_error(
+                    format!(".numbering: {message}"),
+                    formats_span,
+                ));
+                return CallOutcome::Failed;
+            }
+        };
+        context.publish_numbering_layer(layer);
+        CallOutcome::NoValue
+    }
     /// Implements the localization builtins after shared argument evaluation
     /// and binding, publishing only a completely validated candidate.
     #[allow(clippy::too_many_arguments)]
@@ -6741,6 +6938,30 @@ impl Evaluator {
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if name == "numbering" {
+            return self.evaluate_numbering_builtin(
+                positional_args,
+                named_args,
+                body,
+                raw_body,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+                first_origin,
+            );
+        }
+
+        if name == "nonumbering" {
+            let document_type = context.document_state.borrow().document_type;
+            context.publish_numbering_layer(IrNumberingLayer {
+                merge: false,
+                document_type,
+                ..IrNumberingLayer::default()
+            });
+            return CallOutcome::NoValue;
+        }
+
         if name == "docauthors" {
             return self.evaluate_document_authors_builtin(
                 positional_args,
@@ -14050,6 +14271,8 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "docname",
     "docdescription",
     "doctype",
+    "numbering",
+    "nonumbering",
     "autopagebreak",
     "noautopagebreak",
     "docauthor",
@@ -15361,6 +15584,14 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
     const CALLBACK_ALIASES: &[&str] = &["by"];
 
     let signature = match name {
+        "numbering" => (
+            vec![
+                ParameterMetadata::defaulted("merge"),
+                ParameterMetadata::required("formats"),
+            ],
+            BodyPolicy::BindFinal,
+        ),
+        "nonumbering" => (Vec::new(), BodyPolicy::Reject),
         "autopagebreak" => (
             vec![ParameterMetadata::required("maxdepth")],
             BodyPolicy::BindFinal,
