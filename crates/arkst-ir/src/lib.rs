@@ -461,6 +461,10 @@ pub struct IrDocumentState {
     /// document-type defaults and renderer consumers remain downstream-owned.
     #[serde(default, skip_serializing_if = "IrNumberingState::is_empty")]
     pub numbering: IrNumberingState,
+    /// Global paragraph-style overrides selected by `.paragraphstyle`.
+    /// Missing fields preserve renderer defaults or earlier explicit values.
+    #[serde(default, skip_serializing_if = "IrParagraphStyleInfo::is_empty")]
+    pub paragraph_style: IrParagraphStyleInfo,
     /// Explicit global heading depth selected by `.autopagebreak` or
     /// `.noautopagebreak`. `None` preserves the document-type-specific
     /// implicit default for the output backend to resolve.
@@ -539,6 +543,32 @@ pub struct IrNumberingState {
 impl IrNumberingState {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+}
+
+/// Backend-neutral document paragraph-style state.
+///
+/// Values are relative numeric multipliers. `None` means no explicit
+/// document override has been committed for that field; renderer and locale
+/// defaults remain downstream-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrParagraphStyleInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spacing: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indent: Option<f64>,
+}
+
+impl IrParagraphStyleInfo {
+    pub fn is_empty(&self) -> bool {
+        self.line_height.is_none()
+            && self.letter_spacing.is_none()
+            && self.spacing.is_none()
+            && self.indent.is_none()
     }
 }
 
@@ -2637,9 +2667,9 @@ mod tests {
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrInline,
         IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair, IrRange,
-        IrRawBody, IrSize, IrSizeUnit, IrStackedComponent, IrStackedLayout, IrValue, NativeTarget,
-        SourceTable, TargetSpecificContent,
+        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
+        IrParagraphStyleInfo, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
+        IrStackedLayout, IrValue, NativeTarget, SourceTable, TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -3458,6 +3488,38 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_style_state_roundtrips_and_omits_empty_default() {
+        let empty = serde_json::to_value(IrDocumentState::default())
+            .expect("default document state serializes");
+        assert!(empty.get("paragraph_style").is_none());
+
+        let state = IrDocumentState {
+            paragraph_style: IrParagraphStyleInfo {
+                line_height: Some(1.4),
+                letter_spacing: Some(0.02),
+                spacing: None,
+                indent: Some(2.0),
+            },
+            ..IrDocumentState::default()
+        };
+        let encoded = serde_json::to_value(&state).expect("paragraph style serializes");
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(encoded)
+                .expect("paragraph style deserializes"),
+            state
+        );
+
+        let legacy = serde_json::json!({
+            "name": "legacy",
+            "description": ""
+        });
+        assert!(serde_json::from_value::<IrDocumentState>(legacy)
+            .expect("paragraph-style-less state remains readable")
+            .paragraph_style
+            .is_empty());
+    }
+
+    #[test]
     fn document_state_roundtrips_deterministically_and_defaults_for_old_ir() {
         assert!(IrDocumentState::default().keywords.is_empty());
         assert!(IrDocumentState::default().theme.is_none());
@@ -3466,6 +3528,7 @@ mod tests {
             IrDocumentState::default().caption_position,
             IrCaptionPositionInfo::default()
         );
+        assert!(IrDocumentState::default().paragraph_style.is_empty());
         let metadata = IrMetadata {
             document_state: IrDocumentState {
                 name: "Document".to_string(),
@@ -3500,6 +3563,7 @@ mod tests {
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
                 numbering: IrNumberingState::default(),
+                paragraph_style: IrParagraphStyleInfo::default(),
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
                 page_geometry: None,
@@ -3630,6 +3694,7 @@ mod tests {
                 code_blocks: None,
             },
             numbering: IrNumberingState::default(),
+            paragraph_style: IrParagraphStyleInfo::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
             page_geometry: None,

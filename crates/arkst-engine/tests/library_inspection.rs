@@ -122,7 +122,7 @@ fn initial_registry_is_stdlib_only_and_unknowns_fail_closed() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(
         paragraph_texts(&result),
-        vec!["stdlib", "true", "false", "true", "false"]
+        vec!["stdlib", "true", "false", "true", "true"]
     );
 }
 
@@ -172,6 +172,7 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
         "include",
         "code",
         "extend",
+        "paragraphstyle",
         "pageformat",
     ] {
         assert!(
@@ -179,7 +180,6 @@ fn stdlib_enumeration_is_oracle_ordered_but_support_filtered() {
             "missing {supported}: {names:?}"
         );
     }
-    assert!(!names.iter().any(|name| name == "paragraphstyle"));
     assert!(!names.iter().any(|name| name == "llmstxt"));
 
     let position = |needle: &str| {
