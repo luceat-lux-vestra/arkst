@@ -2667,10 +2667,9 @@ mod tests {
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
         IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrInline,
         IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken,
-        IrParagraphStyleInfo, IrPair, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
-        IrStackedLayout, IrValue, NativeTarget,
-        SourceTable, TargetSpecificContent,
+        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
+        IrParagraphStyleInfo, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
+        IrStackedLayout, IrValue, NativeTarget, SourceTable, TargetSpecificContent,
     };
     use arkst_source::{ByteSpan, SourceId, SourceSpan, SourceText};
     use std::num::NonZeroU32;
@@ -3514,12 +3513,10 @@ mod tests {
             "name": "legacy",
             "description": ""
         });
-        assert!(
-            serde_json::from_value::<IrDocumentState>(legacy)
-                .expect("paragraph-style-less state remains readable")
-                .paragraph_style
-                .is_empty()
-        );
+        assert!(serde_json::from_value::<IrDocumentState>(legacy)
+            .expect("paragraph-style-less state remains readable")
+            .paragraph_style
+            .is_empty());
     }
 
     #[test]
