@@ -60,11 +60,11 @@ use arkst_ir::{
     IrCaptionPositionInfo, IrCapturedFunction, IrCapturedVariable, IrCodeCallout, IrComponent,
     IrContainerAlignment, IrContainerComponent, IrCrossAxisAlignment, IrDictionary, IrDocument,
     IrDocumentAlignment, IrDocumentAuthor, IrDocumentTheme, IrEnumValue, IrExplicitErrorComponent,
-    IrInline, IrInlineBody, IrLandscapeComponent, IrListItem, IrMainAxisAlignment, IrNamedArg,
-    IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry, IrPair, IrParagraphStyleInfo,
-    IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit, IrSlidesConfiguration, IrStackedComponent,
-    IrStackedLayout, IrTableAlignment, IrTableCell, IrTableRow, IrValue, NativeTarget,
-    TargetSpecificContent,
+    IrFontLayer, IrFontState, IrInline, IrInlineBody, IrLandscapeComponent, IrListItem,
+    IrMainAxisAlignment, IrNamedArg, IrNode, IrNumberingLayer, IrNumberingState, IrPageGeometry,
+    IrPair, IrParagraphStyleInfo, IrParameter, IrRange, IrRawBody, IrSize, IrSizeUnit,
+    IrSlidesConfiguration, IrStackedComponent, IrStackedLayout, IrTableAlignment, IrTableCell,
+    IrTableRow, IrValue, NativeTarget, TargetSpecificContent,
 };
 use arkst_markdown::Mode;
 use arkst_quarkdown::is_valid_normal_call_name;
@@ -572,6 +572,7 @@ struct DocumentState {
     locale: Option<arkst_ir::IrDocumentLocale>,
     caption_position: IrCaptionPositionInfo,
     numbering: IrNumberingState,
+    font: IrFontState,
     paragraph_style: IrParagraphStyleInfo,
     auto_page_break_max_depth: Option<u32>,
     page_alignment: Option<IrDocumentAlignment>,
@@ -592,6 +593,7 @@ impl Default for DocumentState {
             locale: None,
             caption_position: Default::default(),
             numbering: Default::default(),
+            font: Default::default(),
             paragraph_style: Default::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
@@ -614,6 +616,7 @@ impl DocumentState {
             locale: snapshot.locale.clone(),
             caption_position: snapshot.caption_position,
             numbering: snapshot.numbering.clone(),
+            font: snapshot.font.clone(),
             paragraph_style: snapshot.paragraph_style,
             auto_page_break_max_depth: snapshot.auto_page_break_max_depth,
             page_alignment: snapshot.page_alignment,
@@ -634,6 +637,7 @@ impl DocumentState {
             locale: self.locale.clone(),
             caption_position: self.caption_position,
             numbering: self.numbering.clone(),
+            font: self.font.clone(),
             paragraph_style: self.paragraph_style,
             auto_page_break_max_depth: self.auto_page_break_max_depth,
             page_alignment: self.page_alignment,
@@ -1034,6 +1038,7 @@ enum DocumentStateField {
     Locale,
     CaptionPosition,
     Numbering,
+    Font,
     ParagraphStyle,
     AutoPageBreakMaxDepth,
     PageAlignment,
@@ -1052,6 +1057,7 @@ enum DocumentStateUndo {
     Locale(Option<arkst_ir::IrDocumentLocale>),
     CaptionPosition(IrCaptionPositionInfo),
     Numbering(IrNumberingState),
+    Font(IrFontState),
     ParagraphStyle(IrParagraphStyleInfo),
     AutoPageBreakMaxDepth(Option<u32>),
     PageAlignment(Option<IrDocumentAlignment>),
@@ -2270,6 +2276,7 @@ impl<'a> EvaluationContext<'a> {
             DocumentStateUndo::Locale(previous) => state.locale = previous,
             DocumentStateUndo::CaptionPosition(previous) => state.caption_position = previous,
             DocumentStateUndo::Numbering(previous) => state.numbering = previous,
+            DocumentStateUndo::Font(previous) => state.font = previous,
             DocumentStateUndo::ParagraphStyle(previous) => state.paragraph_style = previous,
             DocumentStateUndo::AutoPageBreakMaxDepth(previous) => {
                 state.auto_page_break_max_depth = previous
@@ -2335,6 +2342,15 @@ impl<'a> EvaluationContext<'a> {
             state.numbering.layers.clear();
         }
         state.numbering.layers.push(layer);
+    }
+
+    fn publish_font_layer(&self, layer: IrFontLayer) {
+        self.record_document_state_undo(DocumentStateField::Font, || {
+            let previous = self.document_state.borrow().font.clone();
+            let copied_units = previous.layers.len();
+            (DocumentStateUndo::Font(previous), copied_units)
+        });
+        self.document_state.borrow_mut().font.layers.push(layer);
     }
 
     fn merge_paragraph_style(&self, partial: IrParagraphStyleInfo) {
@@ -3879,6 +3895,7 @@ impl Evaluator {
             "captionposition"
                 | "numbering"
                 | "nonumbering"
+                | "font"
                 | "paragraphstyle"
                 | "docauthor"
                 | "docauthors"
@@ -4287,6 +4304,7 @@ impl Evaluator {
             "captionposition"
                 | "numbering"
                 | "nonumbering"
+                | "font"
                 | "paragraphstyle"
                 | "docauthor"
                 | "docauthors"
@@ -6957,6 +6975,125 @@ impl Evaluator {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn evaluate_font_builtin(
+        &self,
+        positional_args: &[IrValue],
+        named_args: &[IrNamedArg],
+        span: &SourceSpan,
+        diagnostics: &mut Vec<Diagnostic>,
+        context: &mut EvaluationContext<'_>,
+        binding_plan: Option<&BindingPlan>,
+        first_origin: Option<ValueOrigin>,
+    ) -> CallOutcome {
+        let Some(binding_plan) = binding_plan else {
+            return CallOutcome::Failed;
+        };
+        let evaluated_positional = match self.evaluate_invocation_values(
+            positional_args,
+            span,
+            diagnostics,
+            context,
+            first_origin,
+        ) {
+            Ok(values) => values,
+            Err(outcome) => return outcome,
+        };
+        let evaluated_named =
+            match self.evaluate_invocation_named(named_args, span, diagnostics, context) {
+                Ok(values) => values,
+                Err(outcome) => return outcome,
+            };
+        let bound = match bind_evaluated_arguments(
+            binding_plan,
+            evaluated_positional
+                .into_iter()
+                .zip(positional_args.iter())
+                .map(|(value, source)| (value, value_source_span(source, span)))
+                .collect(),
+            evaluated_named,
+            None,
+            *span,
+        ) {
+            Ok(bound) => bound,
+            Err(error) => {
+                diagnostics.push(binding_diagnostic_with_code(error, "E3003"));
+                return CallOutcome::Failed;
+            }
+        };
+
+        let parameters = bound.parameters;
+        let field_names = ["main", "heading", "code", "size"];
+        let mut size = None;
+        for (index, slot) in bound.slots.into_iter().enumerate() {
+            let BoundSlot::Explicit {
+                value,
+                span: argument_span,
+            } = slot
+            else {
+                continue;
+            };
+            if matches!(value.value, IrValue::None) {
+                continue;
+            }
+
+            if index < 3 {
+                diagnostics.push(document_state_conversion_error(
+                    format!(
+                        ".font parameter {} requires font-family resource/media resolution; the bounded #175 state slice supports only typed size",
+                        field_names[index]
+                    ),
+                    argument_span,
+                ));
+                return CallOutcome::Failed;
+            }
+
+            size = Some(
+                match value_conversion::convert_domain_with_origin(
+                    &value,
+                    value_conversion::DomainTarget::Size,
+                ) {
+                    Ok(value_conversion::DomainValue::Size(value)) => value,
+                    Ok(_) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                value_conversion::ConversionError::UnsupportedValue {
+                                    target: value_conversion::ConversionTarget::Size,
+                                },
+                                Some(argument_span),
+                                Some(field_names[index]),
+                                parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some(".font"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                    Err(error) => {
+                        diagnostics.push(conversion_failure_diagnostic(
+                            value_conversion::ConversionFailure::new(
+                                error,
+                                Some(argument_span),
+                                Some(field_names[index]),
+                                parameters
+                                    .get(index)
+                                    .and_then(|parameter| parameter.name_span),
+                                *span,
+                            ),
+                            Some(".font"),
+                        ));
+                        return CallOutcome::Failed;
+                    }
+                },
+            );
+        }
+
+        context.publish_font_layer(IrFontLayer { size });
+        CallOutcome::NoValue
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_paragraph_style_builtin(
         &self,
         positional_args: &[IrValue],
@@ -7063,6 +7200,18 @@ impl Evaluator {
         binding_plan: Option<&BindingPlan>,
         first_origin: Option<ValueOrigin>,
     ) -> CallOutcome {
+        if name == "font" {
+            return self.evaluate_font_builtin(
+                positional_args,
+                named_args,
+                span,
+                diagnostics,
+                context,
+                binding_plan,
+                first_origin,
+            );
+        }
+
         if name == "paragraphstyle" {
             return self.evaluate_paragraph_style_builtin(
                 positional_args,
@@ -14410,6 +14559,7 @@ const DOCUMENT_STATE_NATIVE_NAMES: &[&str] = &[
     "doctype",
     "numbering",
     "nonumbering",
+    "font",
     "paragraphstyle",
     "autopagebreak",
     "noautopagebreak",
@@ -15844,6 +15994,15 @@ fn native_binding_parameters(name: &str) -> Option<(Vec<ParameterMetadata<'stati
                 ParameterMetadata::defaulted("hgap"),
             ],
             BodyPolicy::AllowSeparate,
+        ),
+        "font" => (
+            vec![
+                ParameterMetadata::optional("main"),
+                ParameterMetadata::optional("heading"),
+                ParameterMetadata::optional("code"),
+                ParameterMetadata::optional("size"),
+            ],
+            BodyPolicy::Reject,
         ),
         "paragraphstyle" => (
             vec![

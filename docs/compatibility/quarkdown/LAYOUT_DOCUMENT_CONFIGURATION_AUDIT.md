@@ -75,21 +75,21 @@ For the 20 #153-owned rows:
 |---|---:|
 | `SUPPORTED_END_TO_END` | 0 |
 | `SUPPORTED_SEMANTICS` | 0 |
-| `PARSED_ONLY` | 12 |
-| `PARTIAL` | 8 |
+| `PARSED_ONLY` | 11 |
+| `PARTIAL` | 9 |
 | `UNSUPPORTED` | 0 |
 | `DEFERRED` | 0 |
 | `BLOCKED` | 0 |
 | `NOT_APPLICABLE` | 0 |
 | `UNKNOWN` | 0 |
 
-`PARSED_ONLY` is used deliberately for the 12 rows that still have only
+`PARSED_ONLY` is used deliberately for the 11 rows that still have only
 recognition/source-retention evidence. A preserved `IrNode::FunctionCall` or
 inline directive is not a successful setter, typed node, state mutation, or
-renderer claim. Eight rows are conservatively `PARTIAL`: `.captionposition`,
-`.numbering`, `.nonumbering`, `.paragraphstyle`, the bounded `.pageformat`
-alignment/geometry slice, `.autopagebreak`, `.noautopagebreak`, and the
-bounded `.slides` configuration/PDF slice. `PARTIAL` does not claim complete v2.5.1 output
+renderer claim. Nine rows are conservatively `PARTIAL`: `.captionposition`,
+`.numbering`, `.nonumbering`, the bounded size-only `.font`, `.paragraphstyle`,
+the bounded `.pageformat` alignment/geometry slice, `.autopagebreak`,
+`.noautopagebreak`, and the bounded `.slides` configuration/PDF slice. `PARTIAL` does not claim complete v2.5.1 output
 equivalence; each row retains the residual contract recorded below.
 
 ## 4. Pinned upstream semantic contracts
@@ -160,8 +160,18 @@ resource/media boundary. There is no getter, no reset function, and no
 document content output. A later implementation must validate all family and
 size candidates before one state publication, preserve source-defined
 precedence, keep resource access in the host/project boundary, and avoid JVM or
-filesystem assumptions in WASM-capable core crates. Arkst currently has no
-font state, font resource model, or backend lowering; status is `PARSED_ONLY`.
+filesystem assumptions in WASM-capable core crates.
+
+Arkst now implements a bounded **size-only** evaluator/IR state slice. Calls
+whose family fields are omitted or semantic `None` append ordered
+`IrFontLayer` entries carrying an optional typed `Size`; explicit non-None
+`main`/`heading`/`code` values fail closed instead of being stored as
+unclassified strings before the resource/media boundary exists. Size
+conversion completes before publication, nested failures roll back, callable
+scopes share the state, source-defined `.font` retains dispatch precedence,
+and the state is serde/backward compatible. System/file/URL/Google-family
+classification and registration, fallback resolution, renderer defaults, and
+Typst/HTML lowering remain open. Status is conservatively `PARTIAL`.
 
 #### `.paragraphstyle`
 
@@ -558,9 +568,9 @@ follows the dependency-aware order in [#156 reconciliation](RECONCILIATION.md).
 ## 8. Audit conclusion
 
 The canonical #153 result remains a 20-row owned inventory. Current status is
-eight conservative `PARTIAL` rows (`captionposition`,
-`numbering`/`nonumbering`, `paragraphstyle`, bounded `pageformat`,
-`autopagebreak`/`noautopagebreak`, and bounded `slides`) plus 12
-`PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
+nine conservative `PARTIAL` rows (`captionposition`,
+`numbering`/`nonumbering`, bounded size-only `font`, `paragraphstyle`,
+bounded `pageformat`, `autopagebreak`/`noautopagebreak`, and bounded
+`slides`) plus 11 `PARSED_ONLY` rows. This does not establish complete v2.5.1 output equivalence
 or justify a generalized document-wide style system. Residual ownership remains
 #175–#178 and the applicable #154 content/output consumers.

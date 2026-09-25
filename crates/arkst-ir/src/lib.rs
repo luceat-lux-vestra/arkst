@@ -461,6 +461,12 @@ pub struct IrDocumentState {
     /// document-type defaults and renderer consumers remain downstream-owned.
     #[serde(default, skip_serializing_if = "IrNumberingState::is_empty")]
     pub numbering: IrNumberingState,
+    /// Ordered bounded document-font layers selected by `.font`.
+    ///
+    /// This first slice carries only typed size state. Font-family
+    /// classification and resource registration remain downstream-owned.
+    #[serde(default, skip_serializing_if = "IrFontState::is_empty")]
+    pub font: IrFontState,
     /// Global paragraph-style overrides selected by `.paragraphstyle`.
     /// Missing fields preserve renderer defaults or earlier explicit values.
     #[serde(default, skip_serializing_if = "IrParagraphStyleInfo::is_empty")]
@@ -541,6 +547,37 @@ pub struct IrNumberingState {
 }
 
 impl IrNumberingState {
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+}
+
+/// One bounded backend-neutral document-font mutation.
+///
+/// The v2.5.1 public setter also accepts main/heading/code font-family
+/// references. Those references require explicit family classification and
+/// resource/media registration, so this first state slice deliberately
+/// retains only the independently typed Size field. Unsupported family
+/// inputs fail closed in the evaluator rather than being stored as ambiguous
+/// strings.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrFontLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<IrSize>,
+}
+
+/// Ordered document-font state.
+///
+/// Source order is semantically relevant because later font layers have
+/// higher priority and the last specified size wins at the downstream
+/// renderer boundary.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrFontState {
+    #[serde(default)]
+    pub layers: Vec<IrFontLayer>,
+}
+
+impl IrFontState {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
@@ -2665,9 +2702,9 @@ mod tests {
         IrCallable, IrCallableCapture, IrCallableResourceContext, IrCaptionPosition,
         IrCaptionPositionInfo, IrComponent, IrContainerAlignment, IrContainerComponent,
         IrCrossAxisAlignment, IrDictionary, IrDocument, IrDocumentAuthor, IrDocumentLocale,
-        IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrInline,
-        IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg, IrNode,
-        IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
+        IrDocumentState, IrDocumentTheme, IrDocumentType, IrExplicitErrorComponent, IrFontLayer,
+        IrFontState, IrInline, IrLandscapeComponent, IrMainAxisAlignment, IrMetadata, IrNamedArg,
+        IrNode, IrNumberingFormat, IrNumberingLayer, IrNumberingState, IrNumberingToken, IrPair,
         IrParagraphStyleInfo, IrRange, IrRawBody, IrSize, IrSizeUnit, IrStackedComponent,
         IrStackedLayout, IrValue, NativeTarget, SourceTable, TargetSpecificContent,
     };
@@ -3488,6 +3525,42 @@ mod tests {
     }
 
     #[test]
+    fn font_state_roundtrips_and_omits_empty_default() {
+        let empty = serde_json::to_value(IrDocumentState::default())
+            .expect("default document state serializes");
+        assert!(empty.get("font").is_none());
+
+        let state = IrDocumentState {
+            font: IrFontState {
+                layers: vec![
+                    IrFontLayer {
+                        size: Some(IrSize {
+                            value: 10.0,
+                            unit: IrSizeUnit::Pt,
+                        }),
+                    },
+                    IrFontLayer { size: None },
+                ],
+            },
+            ..IrDocumentState::default()
+        };
+        let encoded = serde_json::to_value(&state).expect("font state serializes");
+        assert_eq!(
+            serde_json::from_value::<IrDocumentState>(encoded).expect("font state deserializes"),
+            state
+        );
+
+        let legacy = serde_json::json!({
+            "name": "legacy",
+            "description": ""
+        });
+        assert!(serde_json::from_value::<IrDocumentState>(legacy)
+            .expect("font-state-less document remains readable")
+            .font
+            .is_empty());
+    }
+
+    #[test]
     fn paragraph_style_state_roundtrips_and_omits_empty_default() {
         let empty = serde_json::to_value(IrDocumentState::default())
             .expect("default document state serializes");
@@ -3563,6 +3636,7 @@ mod tests {
                     code_blocks: Some(IrCaptionPosition::Top),
                 },
                 numbering: IrNumberingState::default(),
+                font: IrFontState::default(),
                 paragraph_style: IrParagraphStyleInfo::default(),
                 auto_page_break_max_depth: Some(2),
                 page_alignment: None,
@@ -3694,6 +3768,7 @@ mod tests {
                 code_blocks: None,
             },
             numbering: IrNumberingState::default(),
+            font: IrFontState::default(),
             paragraph_style: IrParagraphStyleInfo::default(),
             auto_page_break_max_depth: None,
             page_alignment: None,
