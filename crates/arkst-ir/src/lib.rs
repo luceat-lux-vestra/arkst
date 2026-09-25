@@ -474,6 +474,15 @@ pub struct IrDocumentState {
     /// Slides-specific document configuration. `None` means no `.slides` setter committed state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slides: Option<IrSlidesConfiguration>,
+    /// Explicit numbering configuration selected by `.numbering` or
+    /// `.nonumbering`. `None` means no numbering setter has committed
+    /// state and consumers must use the document-type defaults.
+    ///
+    /// When present, `inherits_document_defaults` distinguishes a merged
+    /// override from a complete replacement without copying renderer-owned
+    /// default formats into the platform-neutral IR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbering: Option<IrDocumentNumbering>,
 }
 
 /// Backend-neutral complete page geometry.
@@ -494,6 +503,58 @@ pub struct IrPageGeometry {
 pub struct IrSlidesConfiguration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<bool>,
+}
+
+/// Backend-neutral document numbering state.
+///
+/// The typed builtin fields intentionally coexist with `extra`: Quarkdown
+/// reparses every supplied key into the extra map, including builtin keys.
+/// `inherits_document_defaults` keeps the document-type default layer
+/// explicit without duplicating those backend-owned defaults in core IR.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrDocumentNumbering {
+    #[serde(default)]
+    pub inherits_document_defaults: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headings: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figures: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tables: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equations: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footnotes: Option<IrNumberingFormat>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<IrNumberingEntry>,
+}
+
+/// One entry from the source-supplied numbering formats map.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IrNumberingEntry {
+    pub name: String,
+    pub format: IrNumberingFormat,
+}
+
+/// Parsed numbering format. An empty token list is the explicit non-counting
+/// format produced by the Quarkdown `none` value.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrNumberingFormat {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tokens: Vec<IrNumberingToken>,
+}
+
+/// Backend-neutral numbering-format token family.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IrNumberingToken {
+    Decimal,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+    Literal(String),
 }
 
 /// Backend-neutral document-global horizontal alignment.
